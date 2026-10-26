@@ -233,3 +233,15 @@ def test_board_storage_roundtrip_and_replace(eco):
     eco.set_leaderboard(10, 3, 4)                    # 同じサーバーは上書き（1つだけ）
     assert eco.get_leaderboard(10) == {"guild_id": 10, "channel_id": 3, "message_id": 4}
     assert len(eco.list_leaderboards()) == 1
+
+
+def test_ranking_shows_the_title_after_the_name(eco):
+    """称号は名前の後ろ（ニックネームの「名前【称号】」と同じ順）。"""
+    from core import shop
+    play_in_guild(eco, 1)
+    it = shop.BY_ID["title_zawa"]
+    eco.credit(1, 20_000, "テスト")
+    assert eco.purchase(1, it.id, shop.label(it), it.price, True).ok
+    eco.equip(1, "title", it.id)
+    e = ranking.build_embed(eco, eco.guild_user_ids(10), "🏆 テスト")
+    assert "<@1>『ざわ…ざわ…』" in e.description and "『ざわ…ざわ…』<@1>" not in e.description

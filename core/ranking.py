@@ -26,7 +26,8 @@ def build_embed(eco, guild_ids: Optional[set], title: str, viewer_id: Optional[i
             item = shop.BY_ID.get((profiles.get(uid) or {}).get("title"))
             return f"『{item.name}』" if item else ""
 
-        lines = [f"{MEDALS.get(r, f'`{r:>2}`')} {title_of(uid)}<@{uid}>　**{ui.pelica(bal)}**" for r, uid, bal in top]
+        # 名前のあとに称号を付ける（ニックネームの「名前【称号】」と同じ順）
+        lines = [f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>{title_of(uid)}　**{ui.pelica(bal)}**" for r, uid, bal in top]
         me = eco.rank_of(viewer_id, guild_ids) if viewer_id else None
         if me and me[0] > TOP_N:
             lines.append(f"…\n`{me[0]:>2}` <@{viewer_id}>　**{ui.pelica(me[1])}**")
