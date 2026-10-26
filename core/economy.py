@@ -95,6 +95,11 @@ class Economy:
                     user_id  INTEGER NOT NULL,
                     PRIMARY KEY (guild_id, user_id)
                 );
+                CREATE TABLE IF NOT EXISTS leaderboards (
+                    guild_id   INTEGER PRIMARY KEY,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS inventory (
                     user_id INTEGER NOT NULL,
                     item_id TEXT    NOT NULL,
@@ -365,6 +370,29 @@ class Economy:
             self._ensure_profile(user_id)
             self._conn.execute(f"UPDATE profile SET {effect} = {effect} + 1 WHERE user_id=?", (user_id,))
             return True
+
+    # ------------------------------------------------------------------ #
+    # ランキング掲示板（自動で更新されるメッセージ。1サーバーに1つ）       #
+    # ------------------------------------------------------------------ #
+    def set_leaderboard(self, guild_id: int, channel_id: int, message_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO leaderboards (guild_id, channel_id, message_id) VALUES (?, ?, ?) "
+                "ON CONFLICT(guild_id) DO UPDATE SET channel_id=excluded.channel_id, message_id=excluded.message_id",
+                (guild_id, channel_id, message_id))
+
+    def get_leaderboard(self, guild_id: int) -> Optional[dict]:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM leaderboards WHERE guild_id=?", (guild_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_leaderboards(self) -> list:
+        with self._lock:
+            return [dict(r) for r in self._conn.execute("SELECT * FROM leaderboards")]
+
+    def delete_leaderboard(self, guild_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM leaderboards WHERE guild_id=?", (guild_id,))
 
     def set_nick_pref(self, guild_id: int, user_id: int, enabled: bool) -> None:
         """称号をそのサーバーでのニックネームに付けるか（付けると選んだ人だけ）。"""

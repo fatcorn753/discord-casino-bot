@@ -2,18 +2,20 @@
 
 import datetime
 import math
+from typing import Optional
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
-from core import shop, ui
+from core import ranking, shop, ui
 from core.confirm import confirm_action
 from core.economy import Economy
 
 TRANSFER_FEE_RATE = 0.10        # 送る側が、送金額の10%を手数料として払う
 TRANSFER_DAILY_LIMIT = 20_000   # 1日に送れる合計（手数料を含む）
 TRANSFER_CONFIRM_FROM = 5_000   # この額以上は確認ボタンを挟む
+BOARD_INTERVAL_MINUTES = 30      # ランキング掲示板を更新する間隔
 TRANSFER_MIN_GAMES = 3          # 送金できるのは、ゲームで3回以上遊んだ人（複数アカウントで稼ぐのを防ぐ）
 
 
@@ -80,24 +82,101 @@ class EconomyCog(commands.Cog):
     async def ranking(self, interaction: discord.Interaction, scope: app_commands.Choice[str] = None):
         only_guild = (scope is None) or scope.value == "guild"
         ids = self.eco.guild_user_ids(interaction.guild.id) if only_guild else None
-        top = self.eco.top(10, ids)
         title = "🏆 このサーバーのランキング" if only_guild else "🏆 全サーバーのランキング"
-        if not top:
-            return await interaction.response.send_message(embed=ui.embed(title, "まだ誰も遊んでいません。`/ペリカ デイリー` から始めましょう。", ui.INFO))
-        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-        profiles = self.eco.profiles_of([uid for _, uid, _ in top])
-
-        def title_of(uid):
-            item = shop.BY_ID.get((profiles.get(uid) or {}).get("title"))
-            return f"『{item.name}』" if item else ""
-
-        lines = [f"{medals.get(r, f'`{r:>2}`')} {title_of(uid)}<@{uid}>　**{ui.pelica(bal)}**" for r, uid, bal in top]
-        me = self.eco.rank_of(interaction.user.id, ids)
-        if me and me[0] > 10:
-            lines.append(f"…\n`{me[0]:>2}` <@{interaction.user.id}>　**{ui.pelica(me[1])}**")
-        e = ui.embed(title, "\n".join(lines), ui.GOLD)
-        e.set_footer(text="※ Bot が見たことのある人だけが対象です（遊んだ・コマンドを使った人）")
+        e = ranking.build_embed(self.eco, ids, title, interaction.user.id,
+                                footer="※ Bot が見たことのある人だけが対象です（遊んだ・コマンドを使った人）")
         await interaction.response.send_message(embed=e, allowed_mentions=discord.AllowedMentions.none())
+
+    # ------------------- 自動で更新されるランキング掲示板 ------------------- #
+    def _board_embed(self, guild_id: int) -> discord.Embed:
+        ts = int(datetime.datetime.now().timestamp())
+        return ranking.build_embed(
+            self.eco, self.eco.guild_user_ids(guild_id), "🏆 ペリカランキング",
+            header=f"最終更新: <t:{ts}:R>\n\n",
+            footer=f"{BOARD_INTERVAL_MINUTES}分ごとに自動で更新されます")
+
+    async def _refresh_board(self, board: dict) -> None:
+        """掲示板のメッセージを最新の順位に書き換える。消されていたら投稿し直す。"""
+        guild = self.bot.get_guild(board["guild_id"])
+        if guild is None:
+            return                      # 一時的に見えないだけかもしれないので、記録は残す
+        channel = guild.get_channel(board["channel_id"])
+        if channel is None:
+            self.eco.delete_leaderboard(guild.id)       # チャンネルが消えた
+            return
+        embed = self._board_embed(guild.id)
+        try:
+            message = await channel.fetch_message(board["message_id"])
+            await message.edit(embed=embed)
+        except discord.NotFound:
+            try:       # メッセージが消された: 投稿し直して、新しいIDを記録する
+                new = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+                self.eco.set_leaderboard(guild.id, channel.id, new.id)
+            except discord.HTTPException as exc:
+                print(f"ランキング掲示板を投稿し直せません: guild={guild.id}: {exc!r}")
+        except discord.HTTPException as exc:
+            print(f"ランキング掲示板を更新できません: guild={guild.id}: {exc!r}")      # 権限不足など。次の周期で再試行
+
+    async def cog_load(self):
+        self.refresh_boards.start()
+
+    def cog_unload(self):
+        self.refresh_boards.cancel()
+
+    @tasks.loop(minutes=BOARD_INTERVAL_MINUTES)
+    async def refresh_boards(self):
+        for board in self.eco.list_leaderboards():
+            try:
+                await self._refresh_board(board)
+            except Exception as exc:       # 1つのサーバーの失敗で、他のサーバーの更新を止めない
+                print(f"ランキング掲示板の更新に失敗: {board}: {exc!r}")
+
+    @refresh_boards.before_loop
+    async def _before_refresh(self):
+        await self.bot.wait_until_ready()
+
+    @commands.Cog.listener()
+    async def on_guild_remove(self, guild: discord.Guild):
+        self.eco.delete_leaderboard(guild.id)
+
+    async def _delete_board_message(self, guild: discord.Guild, board: Optional[dict]) -> None:
+        if not board:
+            return
+        channel = guild.get_channel(board["channel_id"])
+        if channel is not None:
+            try:
+                await (await channel.fetch_message(board["message_id"])).delete()
+            except discord.HTTPException:
+                pass
+
+    @group.command(name="ランキング掲示", description="ランキングを1つ投稿し、自動で更新し続ける（サーバー管理）")
+    @app_commands.rename(channel="チャンネル")
+    @app_commands.describe(channel=f"ランキングを置くチャンネル（{BOARD_INTERVAL_MINUTES}分ごとに自動で更新。1サーバーに1つ）")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def board_set(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        perms = channel.permissions_for(interaction.guild.me)
+        if not (perms.view_channel and perms.send_messages and perms.embed_links):
+            return await interaction.response.send_message(embed=ui.error_embed(
+                "掲示できません", f"Bot が {channel.mention} に埋め込みを投稿できません。チャンネルの権限を確認してください。"), ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        old = self.eco.get_leaderboard(interaction.guild.id)
+        message = await channel.send(embed=self._board_embed(interaction.guild.id), allowed_mentions=discord.AllowedMentions.none())
+        self.eco.set_leaderboard(interaction.guild.id, channel.id, message.id)
+        await self._delete_board_message(interaction.guild, old)        # 前の掲示板があれば、新しいものと入れ替える
+        await interaction.followup.send(embed=ui.ok_embed(
+            "ランキングを掲示しました",
+            f"{message.jump_url}\n{BOARD_INTERVAL_MINUTES}分ごとに、この投稿を自動で書き換えます。止めるときは `/ペリカ ランキング掲示解除` を使ってください。"), ephemeral=True)
+
+    @group.command(name="ランキング掲示解除", description="ランキングの掲示を止めて、投稿を削除する（サーバー管理）")
+    @app_commands.checks.has_permissions(manage_guild=True)
+    async def board_unset(self, interaction: discord.Interaction):
+        board = self.eco.get_leaderboard(interaction.guild.id)
+        if board is None:
+            return await interaction.response.send_message(embed=ui.warn_embed("掲示していません", "このサーバーには、ランキングの掲示がありません。"), ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        await self._delete_board_message(interaction.guild, board)
+        self.eco.delete_leaderboard(interaction.guild.id)
+        await interaction.followup.send(embed=ui.ok_embed("掲示を止めました", "自動の更新をやめて、ランキングの投稿を削除しました。"), ephemeral=True)
 
     @group.command(name="送金", description="ほかの人にペリカを送る（手数料10%・1日の上限あり・3回遊んでから）")
     @app_commands.rename(member="相手", amount="金額")
