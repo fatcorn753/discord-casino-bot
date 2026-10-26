@@ -95,6 +95,14 @@ class Economy:
                     user_id  INTEGER NOT NULL,
                     PRIMARY KEY (guild_id, user_id)
                 );
+                CREATE TABLE IF NOT EXISTS guild_status (
+                    guild_id    INTEGER PRIMARY KEY,
+                    status      TEXT NOT NULL,       -- pending / approved / denied
+                    name        TEXT,
+                    decided_by  INTEGER,
+                    updated_at  REAL NOT NULL,
+                    notified_at REAL
+                );
                 CREATE TABLE IF NOT EXISTS leaderboards (
                     guild_id   INTEGER PRIMARY KEY,
                     channel_id INTEGER NOT NULL,
@@ -370,6 +378,30 @@ class Economy:
             self._ensure_profile(user_id)
             self._conn.execute(f"UPDATE profile SET {effect} = {effect} + 1 WHERE user_id=?", (user_id,))
             return True
+
+    # ------------------------------------------------------------------ #
+    # 利用できるサーバーの承認                                            #
+    # ------------------------------------------------------------------ #
+    def set_guild_status(self, guild_id: int, status: str, name: Optional[str] = None, by: Optional[int] = None) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO guild_status (guild_id, status, name, decided_by, updated_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id) DO UPDATE SET status=excluded.status, "
+                "name=COALESCE(excluded.name, guild_status.name), decided_by=excluded.decided_by, updated_at=excluded.updated_at",
+                (guild_id, status, name, by, time.time()))
+
+    def get_guild_status(self, guild_id: int) -> Optional[dict]:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM guild_status WHERE guild_id=?", (guild_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_guild_status(self) -> list:
+        with self._lock:
+            return [dict(r) for r in self._conn.execute("SELECT * FROM guild_status ORDER BY updated_at DESC")]
+
+    def mark_guild_notified(self, guild_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE guild_status SET notified_at=? WHERE guild_id=?", (time.time(), guild_id))
 
     # ------------------------------------------------------------------ #
     # ランキング掲示板（自動で更新されるメッセージ。1サーバーに1つ）       #

@@ -15,7 +15,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import ui
+from core import approval, ui
 from core.economy import Economy
 from core.session import Sessions
 
@@ -57,10 +57,7 @@ class BotTree(app_commands.CommandTree):
             await interaction.response.send_message(
                 embed=ui.error_embed("利用できません", "このコマンドはサーバー内でのみ使えます。"), ephemeral=True)
             return False
-        allowed = set(interaction.client.config.get("allowed_guild_ids") or [])
-        if allowed and interaction.guild_id not in allowed:
-            await interaction.response.send_message(
-                embed=ui.error_embed("このサーバーでは使えません", "この Bot は、許可されたサーバーでだけ遊べます。"), ephemeral=True)
+        if not await approval.guard(interaction):          # 許可リスト・持ち主の承認
             return False
         interaction.client.economy.touch_guild_user(interaction.guild.id, interaction.user.id)   # サーバー別ランキング用
         return True
