@@ -3,6 +3,9 @@
 
 標準ライブラリの sqlite3 だけを使う。Bot 全体で 1 つの Economy を共有する。
 
+残高・成績・デイリー・持ち物・履歴は **サーバーごと** に別々。呼び出し側は `economy.for_guild(サーバーID)` で
+そのサーバー専用の見え方を取り、そこから各メソッドを呼ぶ（別のサーバーの記録とは混ざらない）。
+
 設計の要点:
 - 残高の増減は必ず 1 回のトランザクションで行い、台帳（ledger）に残す。連打や同時操作で残高が狂わない
 - 賭け金は開始時に「預かり金（escrow）」として残高から引く。ゲームが終わったら払い戻し額を精算する。
@@ -10,6 +13,7 @@
 - 残高はマイナスにならない（負けても 0 まで）
 """
 
+import copy
 import datetime
 import math
 import os
@@ -18,6 +22,9 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
+
+from core import market as market_mod
+from core import missions as missions_mod
 
 INITIAL_BALANCE = 3000
 INSURANCE_CAP = 1_000     # 保険券で戻る額の上限（core/shop.py の説明と同じ値）
@@ -43,6 +50,17 @@ class PurchaseResult:
 
 
 @dataclass(frozen=True)
+class CryptoResult:
+    ok: bool
+    reason: str = ""
+    units: int = 0       # 売買した口数
+    money: int = 0       # 買い: 支払った総額 / 売り: 受け取った額（どちらも手数料込み）
+    fee: int = 0
+    balance: int = 0
+    profit: int = 0      # 売り: 買った額に対する損益
+
+
+@dataclass(frozen=True)
 class TransferResult:
     ok: bool
     reason: str = ""
@@ -56,40 +74,152 @@ class Economy:
     DAILY_STREAK_BONUS = 100     # 連続1日ごとの加算
     DAILY_STREAK_CAP = 9         # 加算は9日分まで（最大 +900）
 
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, legacy_guild_id: Optional[int] = None, strict: bool = False):
+        """legacy_guild_id: サーバー別になる前の古い記録を引き継ぐサーバー。古い記録があるのに未指定ならエラー。
+        strict: True なら、for_guild を通さずに使うとエラーにする（Bot 本体で、指定漏れを防ぐ）。
+        """
         db_dir = os.path.dirname(db_path)
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
+        self._db_path = db_path
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self.guild_id = 0
+        self._strict = strict
+        self._migrate_to_guild_scope(legacy_guild_id)
         self._init_schema()
+
+    # ------------------------------------------------------------------ #
+    # サーバー単位の見え方                                                #
+    # ------------------------------------------------------------------ #
+    def for_guild(self, guild_id: int) -> "Economy":
+        """そのサーバー専用の見え方を返す（接続とロックは共有する）。"""
+        gid = int(guild_id)
+        if gid <= 0:
+            raise ValueError(f"サーバーIDが不正です: {guild_id!r}")
+        view = copy.copy(self)
+        view.guild_id = gid
+        view._strict = False
+        return view
+
+    def _g(self) -> int:
+        if self._strict and self.guild_id == 0:
+            raise RuntimeError("サーバーが指定されていません。economy.for_guild(サーバーID) を通して使ってください。")
+        return self.guild_id
+
+    # ------------------------------------------------------------------ #
+    # 記録の形（スキーマ）と、サーバー別になる前の記録の移行                #
+    # ------------------------------------------------------------------ #
+    def _migrate_to_guild_scope(self, legacy_guild_id: Optional[int]) -> None:
+        """サーバー別になる前の記録（users に guild_id が無い）を、指定したサーバーのものとして引き継ぐ。"""
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(users)")}
+        if not cols or "guild_id" in cols:
+            return                           # 新規、または移行済み
+        if legacy_guild_id is None:
+            raise RuntimeError(
+                "古い形式の記録があります。引き継ぎ先のサーバーIDを、config.json の legacy_guild_id に設定してください。")
+        gid = int(legacy_guild_id)
+        if gid <= 0:
+            raise ValueError(f"legacy_guild_id が不正です: {legacy_guild_id!r}")
+        backup = self._db_path + ".before-guild-scope"
+        if not os.path.exists(backup):       # 万一に備えて、移行の前に記録を丸ごと退避する
+            tmp = backup + ".tmp"            # 途中で落ちた不完全なファイルを、退避済みと誤認しないよう最後に改名する
+            dst = sqlite3.connect(tmp)
+            self._conn.backup(dst)
+            dst.close()
+            os.replace(tmp, backup)
+        c = self._conn
+        have = {r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            c.execute("ALTER TABLE users RENAME TO users_old")
+            c.execute(self._USERS_DDL)
+            c.execute("INSERT INTO users (guild_id, user_id, balance, daily_streak, last_daily, games_played, total_wagered, "
+                      "total_won, biggest_win, created_at) SELECT ?, user_id, balance, daily_streak, last_daily, games_played, "
+                      "total_wagered, total_won, biggest_win, created_at FROM users_old", (gid,))
+            c.execute("DROP TABLE users_old")
+            c.execute("DROP INDEX IF EXISTS ledger_user")
+            for t in ("ledger", "escrow"):   # 無い表は、あとの _init_schema が新しい形で作る
+                if t in have:
+                    c.execute(f"ALTER TABLE {t} ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 0")
+                    c.execute(f"UPDATE {t} SET guild_id=?", (gid,))
+            if "inventory" in have:
+                c.execute("ALTER TABLE inventory RENAME TO inventory_old")
+                c.execute(self._INVENTORY_DDL)
+                c.execute("INSERT INTO inventory (guild_id, user_id, item_id, qty) SELECT ?, user_id, item_id, qty FROM inventory_old", (gid,))
+                c.execute("DROP TABLE inventory_old")
+            if "profile" in have:
+                c.execute("ALTER TABLE profile RENAME TO profile_old")
+                c.execute(self._PROFILE_DDL)
+                c.execute("INSERT INTO profile (guild_id, user_id, title, card_color, card_icon, daily_boost, insurance) "
+                          "SELECT ?, user_id, title, card_color, card_icon, daily_boost, insurance FROM profile_old", (gid,))
+                c.execute("DROP TABLE profile_old")
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+
+    _USERS_DDL = """
+        CREATE TABLE IF NOT EXISTS users (
+            guild_id     INTEGER NOT NULL,
+            user_id      INTEGER NOT NULL,
+            balance      INTEGER NOT NULL,
+            daily_streak INTEGER NOT NULL DEFAULT 0,
+            last_daily   TEXT,
+            games_played INTEGER NOT NULL DEFAULT 0,
+            total_wagered INTEGER NOT NULL DEFAULT 0,
+            total_won    INTEGER NOT NULL DEFAULT 0,
+            biggest_win  INTEGER NOT NULL DEFAULT 0,
+            created_at   REAL NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        )"""
+    _INVENTORY_DDL = """
+        CREATE TABLE IF NOT EXISTS inventory (
+            guild_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            item_id  TEXT    NOT NULL,
+            qty      INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, user_id, item_id)
+        )"""
+    _PROFILE_DDL = """
+        CREATE TABLE IF NOT EXISTS profile (
+            guild_id    INTEGER NOT NULL,
+            user_id     INTEGER NOT NULL,
+            title       TEXT,
+            card_color  TEXT,
+            card_icon   TEXT,
+            daily_boost INTEGER NOT NULL DEFAULT 0,
+            insurance   INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id)
+        )"""
 
     def _init_schema(self):
         with self._lock, self._conn:
+            self._conn.execute(self._USERS_DDL)
+            self._conn.execute(self._INVENTORY_DDL)
+            self._conn.execute(self._PROFILE_DDL)
             self._conn.executescript(
                 """
-                CREATE TABLE IF NOT EXISTS users (
-                    user_id      INTEGER PRIMARY KEY,
-                    balance      INTEGER NOT NULL,
-                    daily_streak INTEGER NOT NULL DEFAULT 0,
-                    last_daily   TEXT,
-                    games_played INTEGER NOT NULL DEFAULT 0,
-                    total_wagered INTEGER NOT NULL DEFAULT 0,
-                    total_won    INTEGER NOT NULL DEFAULT 0,
-                    biggest_win  INTEGER NOT NULL DEFAULT 0,
-                    created_at   REAL NOT NULL
-                );
                 CREATE TABLE IF NOT EXISTS ledger (
                     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id      INTEGER NOT NULL DEFAULT 0,
                     user_id       INTEGER NOT NULL,
                     delta         INTEGER NOT NULL,
                     balance_after INTEGER NOT NULL,
                     reason        TEXT NOT NULL,
                     ts            REAL NOT NULL
                 );
-                CREATE INDEX IF NOT EXISTS ledger_user ON ledger (user_id, id);
+                CREATE INDEX IF NOT EXISTS ledger_user ON ledger (guild_id, user_id, id);
+                CREATE TABLE IF NOT EXISTS escrow (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id   INTEGER NOT NULL DEFAULT 0,
+                    user_id    INTEGER NOT NULL,
+                    amount     INTEGER NOT NULL,
+                    game       TEXT NOT NULL,
+                    created_at REAL NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS guild_users (
                     guild_id INTEGER NOT NULL,
                     user_id  INTEGER NOT NULL,
@@ -108,11 +238,40 @@ class Economy:
                     channel_id INTEGER NOT NULL,
                     message_id INTEGER NOT NULL
                 );
-                CREATE TABLE IF NOT EXISTS inventory (
-                    user_id INTEGER NOT NULL,
-                    item_id TEXT    NOT NULL,
-                    qty     INTEGER NOT NULL,
-                    PRIMARY KEY (user_id, item_id)
+                CREATE TABLE IF NOT EXISTS play_state (
+                    guild_id   INTEGER NOT NULL,
+                    user_id    INTEGER NOT NULL,
+                    win_streak INTEGER NOT NULL DEFAULT 0,
+                    best_streak INTEGER NOT NULL DEFAULT 0,
+                    day_streak INTEGER NOT NULL DEFAULT 0,      -- ミッション用: その日の、賭け金が最低額以上の連勝
+                    streak_day TEXT,
+                    PRIMARY KEY (guild_id, user_id)
+                );
+                CREATE TABLE IF NOT EXISTS missions (
+                    guild_id   INTEGER NOT NULL,
+                    user_id    INTEGER NOT NULL,
+                    day        TEXT    NOT NULL,
+                    mission_id TEXT    NOT NULL,
+                    progress   INTEGER NOT NULL DEFAULT 0,
+                    done       INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (guild_id, user_id, day, mission_id)
+                );
+                CREATE TABLE IF NOT EXISTS market_prices (     -- CSトークンの価格。全サーバー共通
+                    ts    REAL PRIMARY KEY,
+                    price INTEGER NOT NULL,
+                    event INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS crypto (
+                    guild_id INTEGER NOT NULL,
+                    user_id  INTEGER NOT NULL,
+                    units    INTEGER NOT NULL,        -- 保有する口数（1000口 = 1枚）
+                    cost     INTEGER NOT NULL,        -- 買うのにかかった総額（損益の表示用）
+                    PRIMARY KEY (guild_id, user_id)
+                );
+                CREATE TABLE IF NOT EXISTS chart_boards (
+                    guild_id   INTEGER PRIMARY KEY,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS nick_prefs (
                     guild_id INTEGER NOT NULL,
@@ -121,24 +280,13 @@ class Economy:
                     applied_nick  TEXT,          -- Bot が設定したニックネーム（NULL は未適用）
                     PRIMARY KEY (guild_id, user_id)
                 );
-                CREATE TABLE IF NOT EXISTS profile (
-                    user_id     INTEGER PRIMARY KEY,
-                    title       TEXT,
-                    card_color  TEXT,
-                    card_icon   TEXT,
-                    daily_boost INTEGER NOT NULL DEFAULT 0,
-                    insurance   INTEGER NOT NULL DEFAULT 0
-                );
-                CREATE TABLE IF NOT EXISTS escrow (
-                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id    INTEGER NOT NULL,
-                    amount     INTEGER NOT NULL,
-                    game       TEXT NOT NULL,
-                    created_at REAL NOT NULL
-                );
                 """
             )
             # 作成済みの古い表に、列を足す（初回の版には元のニックネームの記録がなかった）
+            ps = {r["name"] for r in self._conn.execute("PRAGMA table_info(play_state)")}
+            for col, ddl in (("day_streak", "INTEGER NOT NULL DEFAULT 0"), ("streak_day", "TEXT")):
+                if col not in ps:
+                    self._conn.execute(f"ALTER TABLE play_state ADD COLUMN {col} {ddl}")
             cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(nick_prefs)")}
             for col in ("original_nick", "applied_nick"):
                 if col not in cols:
@@ -150,26 +298,26 @@ class Economy:
     def _ensure(self, user_id: int) -> None:
         """未登録なら初期残高つきで作る（呼び出し側のトランザクション内で使う）。"""
         cur = self._conn.execute(
-            "INSERT OR IGNORE INTO users (user_id, balance, created_at) VALUES (?, ?, ?)",
-            (user_id, INITIAL_BALANCE, time.time()),
+            "INSERT OR IGNORE INTO users (guild_id, user_id, balance, created_at) VALUES (?, ?, ?, ?)",
+            (self._g(), user_id, INITIAL_BALANCE, time.time()),
         )
         if cur.rowcount:
             self._ledger(user_id, INITIAL_BALANCE, INITIAL_BALANCE, "初期支給")
 
     def _ledger(self, user_id: int, delta: int, balance_after: int, reason: str) -> None:
         self._conn.execute(
-            "INSERT INTO ledger (user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?)",
-            (user_id, delta, balance_after, reason, time.time()),
+            "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
+            (self._g(), user_id, delta, balance_after, reason, time.time()),
         )
 
     def _balance(self, user_id: int) -> int:
-        return self._conn.execute("SELECT balance FROM users WHERE user_id=?", (user_id,)).fetchone()["balance"]
+        return self._conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()["balance"]
 
     def _apply(self, user_id: int, delta: int, reason: str) -> int:
         """残高に delta を足す（0 未満にはならない）。実際に変化した量を返す。"""
         before = self._balance(user_id)
         after = max(0, before + delta)
-        self._conn.execute("UPDATE users SET balance=? WHERE user_id=?", (after, user_id))
+        self._conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, self._g(), user_id))
         if after != before:
             self._ledger(user_id, after - before, after, reason)
         return after - before
@@ -212,26 +360,28 @@ class Economy:
                 return None
             self._apply(user_id, -amount, f"賭け:{game}")
             cur = self._conn.execute(
-                "INSERT INTO escrow (user_id, amount, game, created_at) VALUES (?, ?, ?, ?)",
-                (user_id, amount, game, time.time()),
+                "INSERT INTO escrow (guild_id, user_id, amount, game, created_at) VALUES (?, ?, ?, ?, ?)",
+                (self._g(), user_id, amount, game, time.time()),
             )
-            self._conn.execute("UPDATE users SET total_wagered = total_wagered + ? WHERE user_id=?", (amount, user_id))
+            self._conn.execute("UPDATE users SET total_wagered = total_wagered + ? WHERE guild_id=? AND user_id=?",
+                               (amount, self._g(), user_id))
             return cur.lastrowid
 
     def add_to_escrow(self, escrow_id: int, extra: int) -> bool:
         """預かり金を増やす（ブラックジャックのダブルダウン）。残高不足なら False。"""
         with self._lock, self._conn:
-            row = self._conn.execute("SELECT user_id, game FROM escrow WHERE id=?", (escrow_id,)).fetchone()
+            row = self._conn.execute("SELECT user_id, game FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g())).fetchone()
             if row is None or extra <= 0 or self._balance(row["user_id"]) < extra:
                 return False
             self._apply(row["user_id"], -extra, f"追加の賭け:{row['game']}")
-            self._conn.execute("UPDATE escrow SET amount = amount + ? WHERE id=?", (extra, escrow_id))
-            self._conn.execute("UPDATE users SET total_wagered = total_wagered + ? WHERE user_id=?", (extra, row["user_id"]))
+            self._conn.execute("UPDATE escrow SET amount = amount + ? WHERE id=? AND guild_id=?", (extra, escrow_id, self._g()))
+            self._conn.execute("UPDATE users SET total_wagered = total_wagered + ? WHERE guild_id=? AND user_id=?",
+                               (extra, self._g(), row["user_id"]))
             return True
 
     def escrow_amount(self, escrow_id: int) -> int:
         with self._lock:
-            row = self._conn.execute("SELECT amount FROM escrow WHERE id=?", (escrow_id,)).fetchone()
+            row = self._conn.execute("SELECT amount FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g())).fetchone()
             return row["amount"] if row else 0
 
     def settle(self, escrow_id: int, payout: int, game: str) -> Optional[int]:
@@ -250,48 +400,210 @@ class Economy:
         すでに精算済みなら何もせず None（二重に精算も追加の支払いもしない）。
         """
         with self._lock, self._conn:
-            row = self._conn.execute("SELECT user_id, amount FROM escrow WHERE id=?", (escrow_id,)).fetchone()
+            row = self._conn.execute("SELECT user_id, amount FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g())).fetchone()
             if row is None:
                 return None
             user_id, amount = row["user_id"], row["amount"]
             payout = max(0, int(payout))
             insured = 0
             if payout == 0:
-                prof = self._conn.execute("SELECT insurance FROM profile WHERE user_id=?", (user_id,)).fetchone()
+                prof = self._conn.execute("SELECT insurance FROM profile WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()
                 if prof and prof["insurance"] > 0:
                     insured = min(amount // 2, INSURANCE_CAP)
-                    self._conn.execute("UPDATE profile SET insurance = insurance - 1 WHERE user_id=?", (user_id,))
+                    self._conn.execute("UPDATE profile SET insurance = insurance - 1 WHERE guild_id=? AND user_id=?", (self._g(), user_id))
             total = payout + insured
             if total:
                 self._apply(user_id, total, f"払い戻し:{game}" if payout else f"保険券で半額返金:{game}")
-            self._conn.execute("DELETE FROM escrow WHERE id=?", (escrow_id,))
+            self._conn.execute("DELETE FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g()))
             taken = -self._apply(user_id, -penalty, f"追加の支払い:{game}") if penalty > 0 else 0
             net = total - amount - taken
             self._conn.execute(
                 "UPDATE users SET games_played = games_played + 1, total_won = total_won + ?, "
-                "biggest_win = MAX(biggest_win, ?) WHERE user_id=?",
-                (total, net, user_id),
+                "biggest_win = MAX(biggest_win, ?) WHERE guild_id=? AND user_id=?",
+                (total, net, self._g(), user_id),
             )
             return net, taken, insured
 
     def refund(self, escrow_id: int) -> bool:
         """エラー時の返金。賭け金（追加分を含む）を全額返す。成績（遊んだ回数・勝ち額）には数えない。"""
         with self._lock, self._conn:
-            row = self._conn.execute("SELECT user_id, amount, game FROM escrow WHERE id=?", (escrow_id,)).fetchone()
+            row = self._conn.execute("SELECT user_id, amount, game FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g())).fetchone()
             if row is None:
                 return False
             self._apply(row["user_id"], row["amount"], f"返金:{row['game']}")
-            self._conn.execute("DELETE FROM escrow WHERE id=?", (escrow_id,))
+            self._conn.execute("DELETE FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g()))
             return True
 
     def refund_all_escrows(self) -> int:
         """起動時に呼ぶ。Bot が落ちて残った預かり金を、すべて持ち主に返す。返した件数を返す。"""
         with self._lock, self._conn:
-            rows = self._conn.execute("SELECT id, user_id, amount, game FROM escrow").fetchall()
-            for r in rows:
-                self._apply(r["user_id"], r["amount"], f"返金（中断したゲーム）:{r['game']}")
+            rows = self._conn.execute("SELECT id, guild_id, user_id, amount, game FROM escrow").fetchall()
+            for r in rows:      # 全サーバー分。それぞれ、預かったサーバーの口座へ返す
+                try:
+                    view = self.for_guild(r["guild_id"])
+                except ValueError:           # 出どころ不明の預かり金で、起動全体を止めない
+                    self._conn.execute("DELETE FROM escrow WHERE id=?", (r["id"],))
+                    continue
+                view._ensure(r["user_id"])
+                view._apply(r["user_id"], r["amount"], f"返金（中断したゲーム）:{r['game']}")
                 self._conn.execute("DELETE FROM escrow WHERE id=?", (r["id"],))
             return len(rows)
+
+    # ------------------------------------------------------------------ #
+    # 連勝とデイリーミッション                                            #
+    # ------------------------------------------------------------------ #
+    def record_play(self, user_id: int, game: str, bet: int, net: int, day: datetime.date) -> dict:
+        """1回遊んだ結果を記録する。連勝を更新し、デイリーミッションを進めて、達成した分の報酬を渡す。
+
+        {"streak", "new_best", "completed": [(ミッション, 報酬)], "bonus"} を返す。引き分け（損益0）は連勝を変えない。
+        """
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            g, d = self._g(), day.isoformat()
+            row = self._conn.execute("SELECT win_streak, best_streak, day_streak, streak_day FROM play_state WHERE guild_id=? AND user_id=?", (g, user_id)).fetchone()
+            streak, best = (row["win_streak"], row["best_streak"]) if row else (0, 0)
+            day_streak = row["day_streak"] if row and row["streak_day"] == d else 0      # ミッション用の連勝は、日をまたいで持ち越さない
+            if net > 0:
+                streak += 1
+            elif net < 0:
+                streak = 0
+            counts = bet >= missions_mod.MIN_BET            # 小さい賭けの量産でミッションを埋められないようにする
+            if counts:
+                day_streak = day_streak + 1 if net > 0 else (0 if net < 0 else day_streak)
+            new_best = streak > best
+            best = max(best, streak)
+            self._conn.execute("INSERT INTO play_state (guild_id, user_id, win_streak, best_streak, day_streak, streak_day) VALUES (?, ?, ?, ?, ?, ?) "
+                               "ON CONFLICT(guild_id, user_id) DO UPDATE SET win_streak=excluded.win_streak, best_streak=excluded.best_streak, "
+                               "day_streak=excluded.day_streak, streak_day=excluded.streak_day",
+                               (g, user_id, streak, best, day_streak, d if counts else (row["streak_day"] if row else None)))
+            completed, bonus = [], 0
+            missions = missions_mod.today_missions(day) if counts else []
+            for m in missions:
+                r = self._conn.execute("SELECT progress, done FROM missions WHERE guild_id=? AND user_id=? AND day=? AND mission_id=?",
+                                       (g, user_id, d, m.id)).fetchone()
+                if r and r["done"]:
+                    continue
+                progress = missions_mod.progress_after(m, r["progress"] if r else 0, game, bet, net, day_streak)
+                done = progress >= m.target
+                self._conn.execute("INSERT INTO missions (guild_id, user_id, day, mission_id, progress, done) VALUES (?, ?, ?, ?, ?, ?) "
+                                   "ON CONFLICT(guild_id, user_id, day, mission_id) DO UPDATE SET progress=excluded.progress, done=excluded.done",
+                                   (g, user_id, d, m.id, min(progress, m.target), int(done)))
+                if done:
+                    self._apply(user_id, m.reward, f"ミッション報酬:{m.name}")
+                    completed.append((m, m.reward))
+            if completed:
+                n = self._conn.execute("SELECT COUNT(*) FROM missions WHERE guild_id=? AND user_id=? AND day=? AND done=1", (g, user_id, d)).fetchone()[0]
+                if n >= missions_mod.PER_DAY:
+                    bonus = missions_mod.COMPLETE_BONUS
+                    self._apply(user_id, bonus, "ミッション全達成ボーナス")
+            return {"streak": streak, "new_best": new_best, "completed": completed, "bonus": bonus}
+
+    def mission_status(self, user_id: int, day: datetime.date) -> list:
+        """今日のミッションごとの (ミッション, 進み具合, 達成済みか)。口座は作らない。"""
+        with self._lock:
+            out = []
+            for m in missions_mod.today_missions(day):
+                r = self._conn.execute("SELECT progress, done FROM missions WHERE guild_id=? AND user_id=? AND day=? AND mission_id=?",
+                                       (self._g(), user_id, day.isoformat(), m.id)).fetchone()
+                out.append((m, r["progress"] if r else 0, bool(r and r["done"])))
+            return out
+
+    def win_streak(self, user_id: int) -> tuple:
+        """(いまの連勝, 自己ベスト)。"""
+        with self._lock:
+            r = self._conn.execute("SELECT win_streak, best_streak FROM play_state WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()
+            return (r["win_streak"], r["best_streak"]) if r else (0, 0)
+
+    # ------------------------------------------------------------------ #
+    # CSトークン                                                          #
+    # ------------------------------------------------------------------ #
+    def market_latest(self) -> Optional[tuple]:
+        """いまの価格 (時刻, 価格, 出来事)。まだ無ければ None。時計が戻っても、最後に記録した行を最新とする。"""
+        with self._lock:
+            r = self._conn.execute("SELECT ts, price, event FROM market_prices ORDER BY rowid DESC LIMIT 1").fetchone()
+            return (r["ts"], r["price"], r["event"]) if r else None
+
+    def market_set(self, ts: float, price: float, event: int = 0) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO market_prices (ts, price, event) VALUES (?, ?, ?)", (ts, price, event))
+
+    def market_history(self, since: float) -> list:
+        """since（UNIX時間）以降の価格の列 [(時刻, 価格, 出来事), ...]。古い順。"""
+        with self._lock:
+            return [(r["ts"], r["price"], r["event"]) for r in self._conn.execute(
+                "SELECT ts, price, event FROM market_prices WHERE ts>=? ORDER BY ts", (since,))]
+
+    def market_prune(self, before: float) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM market_prices WHERE ts<?", (before,))
+
+    def crypto_holding(self, user_id: int) -> tuple:
+        """(保有口数, 買うのにかかった総額)。読み取り専用。"""
+        with self._lock:
+            r = self._conn.execute("SELECT units, cost FROM crypto WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()
+            return (r["units"], r["cost"]) if r else (0, 0)
+
+    def crypto_holders(self, limit: int = 10) -> list:
+        """このサーバーの保有者 [(user_id, 口数, 買った総額), ...]。買った額の大きい順。"""
+        with self._lock:
+            return [(r["user_id"], r["units"], r["cost"]) for r in self._conn.execute(
+                "SELECT user_id, units, cost FROM crypto WHERE guild_id=? AND units>0 ORDER BY cost DESC, user_id LIMIT ?", (self._g(), limit))]
+
+    def crypto_buy(self, user_id: int, amount: int, price: float) -> "CryptoResult":
+        """amount ペリカの範囲で、price の価格で買えるだけ買う（手数料込み）。"""
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            if amount <= 0 or price <= 0:
+                return CryptoResult(False, "金額が正しくありません。")
+            if self._balance(user_id) < amount:
+                return CryptoResult(False, f"ペリカが足りません（残高 {self._balance(user_id):,}ペリカ）。", balance=self._balance(user_id))
+            units, total, fee = market_mod.buy_quote(amount, price)
+            if units < 1:
+                return CryptoResult(False, "その金額では 0.001枚も買えません。金額を増やしてください。", balance=self._balance(user_id))
+            self._apply(user_id, -total, f"{market_mod.NAME}購入:{market_mod.lots(units)}@{market_mod.fmt(price)}")
+            self._conn.execute(
+                "INSERT INTO crypto (guild_id, user_id, units, cost) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units, cost=cost+excluded.cost",
+                (self._g(), user_id, units, total))
+            return CryptoResult(True, units=units, money=total, fee=fee, balance=self._balance(user_id))
+
+    def crypto_sell(self, user_id: int, units: Optional[int], price: float) -> "CryptoResult":
+        """units 口を売る（None なら全部）。受け取る額は手数料を引いたもの。"""
+        with self._lock, self._conn:
+            have, cost = self.crypto_holding(user_id)
+            if have <= 0:
+                return CryptoResult(False, f"{market_mod.NAME}を持っていません。")
+            units = have if units is None else units
+            if units < 1 or units > have:
+                return CryptoResult(False, f"売れるのは 0.001〜{market_mod.lots(have)} です（持っている分）。")
+            proceeds, fee = market_mod.sell_quote(units, price)
+            if proceeds < 1 and units != have:
+                return CryptoResult(False, "その数量では受け取れる額が 1ペリカ未満です。もう少し多く売ってください。")
+            removed = cost if units == have else round(cost * units / have)       # 端数の按分は四捨五入（切り捨てだと取得額が少しずつ残る）
+            self._ensure(user_id)
+            self._apply(user_id, proceeds, f"{market_mod.NAME}売却:{market_mod.lots(units)}@{market_mod.fmt(price)}")
+            if units == have:
+                self._conn.execute("DELETE FROM crypto WHERE guild_id=? AND user_id=?", (self._g(), user_id))
+            else:
+                self._conn.execute("UPDATE crypto SET units=units-?, cost=cost-? WHERE guild_id=? AND user_id=?", (units, removed, self._g(), user_id))
+            return CryptoResult(True, units=units, money=proceeds, fee=fee, balance=self._balance(user_id), profit=proceeds - removed)
+
+    def set_chart_board(self, guild_id: int, channel_id: int, message_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("INSERT OR REPLACE INTO chart_boards (guild_id, channel_id, message_id) VALUES (?, ?, ?)", (guild_id, channel_id, message_id))
+
+    def get_chart_board(self, guild_id: int) -> Optional[dict]:
+        with self._lock:
+            r = self._conn.execute("SELECT * FROM chart_boards WHERE guild_id=?", (guild_id,)).fetchone()
+            return dict(r) if r else None
+
+    def list_chart_boards(self) -> list:
+        with self._lock:
+            return [dict(r) for r in self._conn.execute("SELECT * FROM chart_boards")]
+
+    def delete_chart_board(self, guild_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM chart_boards WHERE guild_id=?", (guild_id,))
 
     # ------------------------------------------------------------------ #
     # デイリー                                                            #
@@ -300,20 +612,20 @@ class Economy:
         """1日1回のボーナス。昨日も受け取っていれば連続日数が伸び、金額が増える。"""
         with self._lock, self._conn:
             self._ensure(user_id)
-            row = self._conn.execute("SELECT daily_streak, last_daily FROM users WHERE user_id=?", (user_id,)).fetchone()
+            row = self._conn.execute("SELECT daily_streak, last_daily FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()
             last = datetime.date.fromisoformat(row["last_daily"]) if row["last_daily"] else None
             if last is not None and last >= today:     # 時差設定や時計が戻っても二重に受け取れない
                 return DailyResult(False, streak=row["daily_streak"], balance=self._balance(user_id))
             streak = row["daily_streak"] + 1 if last == today - datetime.timedelta(days=1) else 1
             amount = self.DAILY_BASE + self.DAILY_STREAK_BONUS * min(streak - 1, self.DAILY_STREAK_CAP)
-            prof = self._conn.execute("SELECT daily_boost FROM profile WHERE user_id=?", (user_id,)).fetchone()
+            prof = self._conn.execute("SELECT daily_boost FROM profile WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()
             boosted = bool(prof and prof["daily_boost"] > 0)
             if boosted:
                 amount *= 2
-                self._conn.execute("UPDATE profile SET daily_boost = daily_boost - 1 WHERE user_id=?", (user_id,))
+                self._conn.execute("UPDATE profile SET daily_boost = daily_boost - 1 WHERE guild_id=? AND user_id=?", (self._g(), user_id))
             self._apply(user_id, amount, f"デイリー（{streak}日連続{'・2倍券' if boosted else ''}）")
-            self._conn.execute("UPDATE users SET daily_streak=?, last_daily=? WHERE user_id=?",
-                               (streak, today.isoformat(), user_id))
+            self._conn.execute("UPDATE users SET daily_streak=?, last_daily=? WHERE guild_id=? AND user_id=?",
+                               (streak, today.isoformat(), self._g(), user_id))
             return DailyResult(True, amount, streak, self._balance(user_id), boosted)
 
     # ------------------------------------------------------------------ #
@@ -322,7 +634,7 @@ class Economy:
     SLOTS = ("title", "card_color", "card_icon")
 
     def _ensure_profile(self, user_id: int) -> None:
-        self._conn.execute("INSERT OR IGNORE INTO profile (user_id) VALUES (?)", (user_id,))
+        self._conn.execute("INSERT OR IGNORE INTO profile (guild_id, user_id) VALUES (?, ?)", (self._g(), user_id))
 
     def purchase(self, user_id: int, item_id: str, label: str, price: int, unique: bool, qty: int = 1) -> PurchaseResult:
         """購入。支払い・持ち物の追加を1回の処理で行う。持っているもの（消耗品以外）は買えない。"""
@@ -331,26 +643,26 @@ class Economy:
         total = price * qty
         with self._lock, self._conn:
             self._ensure(user_id)
-            have = self._conn.execute("SELECT qty FROM inventory WHERE user_id=? AND item_id=?", (user_id, item_id)).fetchone()
+            have = self._conn.execute("SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=?", (self._g(), user_id, item_id)).fetchone()
             if unique and have:
                 return PurchaseResult(False, "すでに持っています。", self._balance(user_id))
             if self._balance(user_id) < total:
                 return PurchaseResult(False, f"ペリカが足りません（{total:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。", self._balance(user_id))
             self._apply(user_id, -total, f"購入:{label}" + (f"×{qty}" if qty > 1 else ""))
             self._conn.execute(
-                "INSERT INTO inventory (user_id, item_id, qty) VALUES (?, ?, ?) "
-                "ON CONFLICT(user_id, item_id) DO UPDATE SET qty = qty + excluded.qty", (user_id, item_id, qty))
+                "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty", (self._g(), user_id, item_id, qty))
             return PurchaseResult(True, balance=self._balance(user_id))
 
     def inventory(self, user_id: int) -> dict:
         with self._lock:
             return {r["item_id"]: r["qty"] for r in self._conn.execute(
-                "SELECT item_id, qty FROM inventory WHERE user_id=? AND qty>0", (user_id,))}
+                "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0", (self._g(), user_id))}
 
     def get_profile(self, user_id: int) -> dict:
         """装備中の称号・カード、消耗品の効果。読み取り専用（口座は作らない）。"""
         with self._lock:
-            row = self._conn.execute("SELECT * FROM profile WHERE user_id=?", (user_id,)).fetchone()
+            row = self._conn.execute("SELECT * FROM profile WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()
         return dict(row) if row else {"user_id": user_id, "title": None, "card_color": None, "card_icon": None,
                                       "daily_boost": 0, "insurance": 0}
 
@@ -360,10 +672,10 @@ class Economy:
             raise ValueError(slot)
         with self._lock, self._conn:
             if item_id is not None and not self._conn.execute(
-                    "SELECT 1 FROM inventory WHERE user_id=? AND item_id=? AND qty>0", (user_id, item_id)).fetchone():
+                    "SELECT 1 FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0", (self._g(), user_id, item_id)).fetchone():
                 return False
             self._ensure_profile(user_id)
-            self._conn.execute(f"UPDATE profile SET {slot}=? WHERE user_id=?", (item_id, user_id))
+            self._conn.execute(f"UPDATE profile SET {slot}=? WHERE guild_id=? AND user_id=?", (item_id, self._g(), user_id))
             return True
 
     def arm(self, user_id: int, item_id: str) -> bool:
@@ -372,11 +684,11 @@ class Economy:
         if effect is None:
             return False
         with self._lock, self._conn:
-            cur = self._conn.execute("UPDATE inventory SET qty = qty - 1 WHERE user_id=? AND item_id=? AND qty>0", (user_id, item_id))
+            cur = self._conn.execute("UPDATE inventory SET qty = qty - 1 WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0", (self._g(), user_id, item_id))
             if not cur.rowcount:
                 return False
             self._ensure_profile(user_id)
-            self._conn.execute(f"UPDATE profile SET {effect} = {effect} + 1 WHERE user_id=?", (user_id,))
+            self._conn.execute(f"UPDATE profile SET {effect} = {effect} + 1 WHERE guild_id=? AND user_id=?", (self._g(), user_id))
             return True
 
     # ------------------------------------------------------------------ #
@@ -468,7 +780,8 @@ class Economy:
             return {}
         with self._lock:
             marks = ",".join("?" * len(ids))
-            return {r["user_id"]: dict(r) for r in self._conn.execute(f"SELECT * FROM profile WHERE user_id IN ({marks})", ids)}
+            return {r["user_id"]: dict(r) for r in self._conn.execute(
+                f"SELECT * FROM profile WHERE guild_id=? AND user_id IN ({marks})", [self._g(), *ids])}
 
     # ------------------------------------------------------------------ #
     # サーバー別ランキング用: どのサーバーで遊んだか                      #
@@ -485,16 +798,18 @@ class Economy:
     # ランキング・統計・履歴                                              #
     # ------------------------------------------------------------------ #
     def top(self, limit: int = 10, user_ids: Optional[set] = None) -> list:
-        """[(順位, ユーザーID, 残高), ...]。user_ids を渡すと、その人たちの中での順位（サーバー別ランキング用）。"""
+        """[(順位, ユーザーID, 残高), ...]。このサーバーの口座だけで並べる。user_ids を渡すと、さらにその人たちに絞る。"""
         with self._lock:
-            rows = self._conn.execute("SELECT user_id, balance FROM users ORDER BY balance DESC, user_id").fetchall()
+            rows = self._conn.execute("SELECT user_id, balance FROM users WHERE guild_id=? ORDER BY balance DESC, user_id",
+                                      (self._g(),)).fetchall()
         ranked = [(r["user_id"], r["balance"]) for r in rows if user_ids is None or r["user_id"] in user_ids]
         return [(i + 1, uid, bal) for i, (uid, bal) in enumerate(ranked[:limit])]
 
     def rank_of(self, user_id: int, user_ids: Optional[set] = None) -> Optional[tuple]:
         """(順位, 残高, 対象人数)。登録がなければ None。"""
         with self._lock:
-            rows = self._conn.execute("SELECT user_id, balance FROM users ORDER BY balance DESC, user_id").fetchall()
+            rows = self._conn.execute("SELECT user_id, balance FROM users WHERE guild_id=? ORDER BY balance DESC, user_id",
+                                      (self._g(),)).fetchall()
         ranked = [(r["user_id"], r["balance"]) for r in rows if user_ids is None or r["user_id"] in user_ids]
         for i, (uid, bal) in enumerate(ranked):
             if uid == user_id:
@@ -504,19 +819,19 @@ class Economy:
     def peek_stats(self, user_id: int) -> Optional[dict]:
         """読み取り専用。未登録の人を作らずに、成績を返す（未登録なら None）。"""
         with self._lock:
-            row = self._conn.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
+            row = self._conn.execute("SELECT * FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()
             return dict(row) if row else None
 
     def stats(self, user_id: int) -> dict:
         with self._lock, self._conn:
             self._ensure(user_id)
-            return dict(self._conn.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone())
+            return dict(self._conn.execute("SELECT * FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone())
 
     def history(self, user_id: int, limit: int = 10) -> list:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT delta, balance_after, reason, ts FROM ledger WHERE user_id=? ORDER BY id DESC LIMIT ?",
-                (user_id, limit),
+                "SELECT delta, balance_after, reason, ts FROM ledger WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT ?",
+                (self._g(), user_id, limit),
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -535,9 +850,9 @@ class Economy:
             self._ensure(sender)
             self._ensure(receiver)
             sent_today = -(self._conn.execute(
-                "SELECT COALESCE(SUM(delta), 0) AS s FROM ledger WHERE user_id=? AND reason LIKE '送金（送）%' AND ts>=?",
-                (sender, day_start_ts)).fetchone()["s"])
-            if self._conn.execute("SELECT games_played FROM users WHERE user_id=?", (sender,)).fetchone()["games_played"] < min_games:
+                "SELECT COALESCE(SUM(delta), 0) AS s FROM ledger WHERE guild_id=? AND user_id=? AND reason LIKE '送金（送）%' AND ts>=?",
+                (self._g(), sender, day_start_ts)).fetchone()["s"])
+            if self._conn.execute("SELECT games_played FROM users WHERE guild_id=? AND user_id=?", (self._g(), sender)).fetchone()["games_played"] < min_games:
                 return TransferResult(False, f"送金は、{min_games}回以上ゲームで遊んでからできます（複数アカウントでの稼ぎ対策です）。")
             if sent_today + amount + fee > daily_limit:
                 return TransferResult(False, f"1日の送金は合計 {daily_limit:,} ペリカまでです（今日は {sent_today:,} ペリカ送金済み）。")

@@ -119,29 +119,35 @@ class ShopCog(commands.Cog):
     def _role_lock(self, guild_id: int) -> asyncio.Lock:
         return self._role_locks.setdefault(guild_id, asyncio.Lock())
 
+    def g(self, interaction: discord.Interaction):
+        """このサーバーのペリカの記録（ペリカはサーバーごとに別々）。"""
+        return self.bot.economy.for_guild(interaction.guild.id)
+
     @property
     def eco(self):
         return self.bot.economy
 
     group = app_commands.Group(name="ショップ", description="🛍️ ペリカで称号・色・消耗品を交換（景品はゲーム内のものだけ）")
 
-    def _equipped_title(self, user_id: int):
-        item = shop.BY_ID.get(self.eco.get_profile(user_id)["title"])
+    def _equipped_title(self, guild_id: int, user_id: int):
+        """そのサーバーで装備している称号（景品はサーバーごとに別々）。"""
+        item = shop.BY_ID.get(self.bot.economy.for_guild(guild_id).get_profile(user_id)["title"])
         return item.name if item else None
 
     async def _sync_title_nick(self, user_id: int, here: discord.Guild = None, member: discord.Member = None) -> tuple:
         """称号の変更を、ニックネーム表示をONにしているサーバーへ反映する。
 
+        称号はサーバーごとに別なので、here を渡したときはそのサーバーだけ反映する（here なしは全サーバー）。
         (ここ（here）のサーバーでの失敗理由, 他のサーバーで反映できなかった件数) を返す。
         利用者ごとの鍵で順番に処理するので、連打しても古い名前を元に計算しない。
         """
         async with self._nick_locks.setdefault(user_id, asyncio.Lock()):
-            title = self._equipped_title(user_id)      # 鍵の中で最新の装備を読む
             problem, others_failed = "", 0
             for gid in self.eco.nick_pref_guilds(user_id):
                 guild = self.bot.get_guild(gid)
-                if guild is None:
+                if guild is None or (here is not None and gid != here.id):
                     continue
+                title = self._equipped_title(gid, user_id)      # そのサーバーで、鍵の中で最新の装備を読む
                 is_here = here is not None and gid == here.id
                 try:
                     m = member if is_here else (guild.get_member(user_id) or await guild.fetch_member(user_id))
@@ -174,8 +180,8 @@ class ShopCog(commands.Cog):
 
     async def _owned_autocomplete(self, interaction: discord.Interaction, current: str):
         cur = current.lower()
-        inv = self.eco.inventory(interaction.user.id)
-        prof = self.eco.get_profile(interaction.user.id)
+        inv = self.g(interaction).inventory(interaction.user.id)
+        prof = self.g(interaction).get_profile(interaction.user.id)
         equipped = {prof["title"], prof["card_color"], prof["card_icon"]}
         out = []
         for item_id, qty in inv.items():
@@ -192,7 +198,7 @@ class ShopCog(commands.Cog):
     @app_commands.describe(kind="見たい種類（省略時: すべて）")
     @app_commands.choices(kind=[app_commands.Choice(name=kind_name(k), value=k) for k in shop.KIND_LABEL])
     async def list_items(self, interaction: discord.Interaction, kind: app_commands.Choice[str] = None):
-        inv = self.eco.inventory(interaction.user.id)
+        inv = self.g(interaction).inventory(interaction.user.id)
         kinds = [kind.value] if kind else list(shop.KIND_LABEL)
         e = ui.embed("🛍️ ペリカショップ", "景品はすべて、ゲーム内・サーバー内で完結するものです（現実の価値はありません）。\n"
                      "`/ショップ 購入` で買い、`/ショップ 使う` で身につけます。", ui.GOLD)
@@ -205,7 +211,7 @@ class ShopCog(commands.Cog):
                 value = "\n".join(f"{'✅ ' if i.id in inv and i.unique else ''}{i.value if k == shop.CARD_ICON else ''}{i.name} — {ui.pelica(i.price)}"
                                   + (f"\n　└ {i.desc}" if i.desc else "") for i in items)
             e.add_field(name=shop.KIND_LABEL[k], value=value[:1024], inline=False)
-        me = self.eco.peek_stats(interaction.user.id)
+        me = self.g(interaction).peek_stats(interaction.user.id)
         e.set_footer(text=f"あなたの残高: {ui.pelica(me['balance'] if me else 0)}")
         await interaction.response.send_message(embed=e, ephemeral=True)
 
@@ -228,8 +234,8 @@ class ShopCog(commands.Cog):
                 qty = 1
             total = it.price * qty
             # 確認ボタンを出す前に、買えるかを先に調べる（足りないのに確認だけさせない）
-            balance = self.eco.balance(uid)         # 自分の口座なので、初めてなら初期支給つきで作ってよい
-            if it.unique and self.eco.inventory(uid).get(it.id, 0) > 0:
+            balance = self.g(interaction).balance(uid)         # 自分の口座なので、初めてなら初期支給つきで作ってよい
+            if it.unique and self.g(interaction).inventory(uid).get(it.id, 0) > 0:
                 return await interaction.response.send_message(embed=ui.error_embed("買えませんでした", "すでに持っています。`/ショップ 使う` で身につけられます。"), ephemeral=True)
             if balance < total:
                 return await interaction.response.send_message(embed=ui.error_embed(
@@ -241,7 +247,7 @@ class ShopCog(commands.Cog):
                 reply = interaction.followup.send
             else:
                 reply = interaction.response.send_message
-            res = self.eco.purchase(uid, it.id, shop.label(it), it.price, it.unique, qty)
+            res = self.g(interaction).purchase(uid, it.id, shop.label(it), it.price, it.unique, qty)
             if not res.ok:
                 return await reply(embed=ui.error_embed("買えませんでした", res.reason), ephemeral=True)
             hint = "`/ショップ 使う` で身につけましょう。" if it.unique else "`/ショップ 使う` で使えます。"
@@ -252,8 +258,8 @@ class ShopCog(commands.Cog):
     # ------------------------------ 持ち物 ------------------------------ #
     @group.command(name="持ち物", description="持っている景品と、装備中のものを表示")
     async def inventory(self, interaction: discord.Interaction):
-        inv = self.eco.inventory(interaction.user.id)
-        prof = self.eco.get_profile(interaction.user.id)
+        inv = self.g(interaction).inventory(interaction.user.id)
+        prof = self.g(interaction).get_profile(interaction.user.id)
         if not inv and not prof["daily_boost"] and not prof["insurance"]:
             return await interaction.response.send_message(embed=ui.embed("🎒 持ち物", "まだ何も持っていません。`/ショップ 一覧` を見てみましょう。", ui.INFO), ephemeral=True)
         equipped = {prof["title"], prof["card_color"], prof["card_icon"]}
@@ -282,7 +288,7 @@ class ShopCog(commands.Cog):
     @app_commands.autocomplete(item=_owned_autocomplete)
     async def use(self, interaction: discord.Interaction, item: str):
         uid = interaction.user.id
-        inv = self.eco.inventory(uid)
+        inv = self.g(interaction).inventory(uid)
         # 「赤」のように同じ名前が複数ある場合は、持っているものを優先して選ぶ
         owned = [i for i in shop.find_all(item) if inv.get(i.id, 0) > 0]
         it = owned[0] if owned else shop.find(item)
@@ -292,9 +298,9 @@ class ShopCog(commands.Cog):
             if self.bot.sessions.is_active(uid):
                 # ゲームの結果を見てから保険券を使う、などを防ぐ
                 return await interaction.response.send_message(embed=ui.error_embed("使えません", "ゲームの途中は、消耗品を使えません。終わってからにしてください。"), ephemeral=True)
-            if not self.eco.arm(uid, it.id):
+            if not self.g(interaction).arm(uid, it.id):
                 return await interaction.response.send_message(embed=ui.error_embed("使えません", "持っていません。"), ephemeral=True)
-            active = self.eco.get_profile(uid)[EFFECT_OF_ITEM[it.id]]
+            active = self.g(interaction).get_profile(uid)[EFFECT_OF_ITEM[it.id]]
             return await interaction.response.send_message(embed=ui.ok_embed("使いました", f"**{it.name}**: {it.desc}\n有効な枚数: **{active}枚**"), ephemeral=True)
         if it.kind == shop.COLOR_ROLE:
             await interaction.response.defer(ephemeral=True)
@@ -304,7 +310,7 @@ class ShopCog(commands.Cog):
             except ShopError as exc:
                 return await interaction.followup.send(embed=ui.error_embed("名前の色を変えられません", str(exc)), ephemeral=True)
             return await interaction.followup.send(embed=ui.ok_embed("名前の色を変えました", f"**{it.name}** になりました。\n他の色つきロールがこれより上にあると、そちらの色が優先されます。"), ephemeral=True)
-        self.eco.equip(uid, SLOT_OF_KIND[it.kind], it.id)
+        self.g(interaction).equip(uid, SLOT_OF_KIND[it.kind], it.id)
         note = ""
         if it.kind == shop.TITLE:
             await interaction.response.defer(ephemeral=True)
@@ -334,7 +340,7 @@ class ShopCog(commands.Cog):
             except ShopError as exc:
                 return await interaction.followup.send(embed=ui.error_embed("外せません", str(exc)), ephemeral=True)
             return await interaction.followup.send(embed=ui.ok_embed("外しました", "名前の色を元に戻しました。"), ephemeral=True)
-        self.eco.equip(interaction.user.id, what.value, None)
+        self.g(interaction).equip(interaction.user.id, what.value, None)
         if what.value == "title":
             await interaction.response.defer(ephemeral=True)
             problem, others = await self._sync_title_nick(interaction.user.id, interaction.guild, interaction.user)
@@ -360,7 +366,7 @@ class ShopCog(commands.Cog):
             self.eco.set_nick_pref(guild.id, uid, True)
             await interaction.response.defer(ephemeral=True)
             problem, others = await self._sync_title_nick(uid, guild, interaction.user)
-            title = self._equipped_title(uid)
+            title = self._equipped_title(guild.id, uid)
             if problem:
                 if not was_on:          # もともとONだった人の設定は、失敗しても消さない
                     self.eco.set_nick_pref(guild.id, uid, False)

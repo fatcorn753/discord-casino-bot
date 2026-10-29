@@ -10,7 +10,7 @@ import discord
 
 from core import ui
 from games import pachinko
-from play.common import result_lines, signed, start_game
+from play.common import ReplayView, result_lines, signed, start_game
 
 RNG = random.SystemRandom()
 TITLE = "🎰 地下パチンコ"
@@ -41,7 +41,9 @@ async def play_pachinko(interaction: discord.Interaction, bot, bet: int):
                 await asyncio.sleep(STEP)
                 await interaction.edit_original_response(embed=ui.embed(TITLE, head + frame, ui.DARK))
             await asyncio.sleep(STEP)
-            await interaction.edit_original_response(embed=ui.embed(f"{TITLE} — {signed(net)}ペリカ", body, color))
+            view = ReplayView(bot, ctx.user_id, bet, lambda it, b: play_pachinko(it, bot, b))
+            view.origin = interaction
+            await interaction.edit_original_response(embed=ui.embed(f"{TITLE} — {signed(net)}ペリカ", body, color), view=view)
         except discord.HTTPException:
             pass      # 表示に失敗しても、精算は済んでいる
     except Exception:

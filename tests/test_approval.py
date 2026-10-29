@@ -291,3 +291,30 @@ def test_guild_status_roundtrip_keeps_name(eco):
     eco.set_guild_status(5, approval.APPROVED, None, OWNER)               # 名前を渡さなくても、前の名前は残る
     row = eco.get_guild_status(5)
     assert row["name"] == "名前" and row["status"] == approval.APPROVED and row["decided_by"] == OWNER
+
+
+def test_concurrent_commands_send_only_one_request_dm():
+    """未承認サーバーから同時にコマンドが来ても、承認依頼の DM は1通だけ。"""
+    import asyncio
+    from types import SimpleNamespace
+    from core.economy import Economy
+    import tempfile, os
+    from cogs.approval_cog import ApprovalCog
+
+    eco = Economy(os.path.join(tempfile.mkdtemp(), "t.db"), strict=True)
+    sent = []
+
+    class User:
+        async def send(self, **kw):
+            await asyncio.sleep(0.01)
+            sent.append(kw)
+
+    bot = SimpleNamespace(economy=eco, config={"require_approval": True, "owner_ids": [7]},
+                          get_user=lambda uid: User(), fetch_user=None)
+    cog = ApprovalCog(bot)
+    guild = SimpleNamespace(id=55, name="g", owner_id=1, member_count=3, icon=None)
+
+    async def go():
+        await asyncio.gather(*(cog.ensure_requested(guild) for _ in range(5)))
+    asyncio.run(go())
+    assert len(sent) == 1

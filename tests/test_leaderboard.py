@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 import discord
+from discord import app_commands
 import pytest
 
 from cogs.economy_cog import BOARD_INTERVAL_MINUTES, EconomyCog
@@ -51,9 +52,22 @@ class FakeChannel:
         return self._perms
 
     async def fetch_message(self, mid):
-        if mid not in self.messages:
-            raise http_error(404)
-        return self.messages[mid]
+        raise http_error(403)       # 「メッセージ履歴を読む」権限がない状態。掲示板の更新はこれに頼らない
+
+    def get_partial_message(self, mid):
+        channel = self
+
+        class Partial:
+            async def edit(self, **kw):
+                if mid not in channel.messages:
+                    raise http_error(404)
+                await channel.messages[mid].edit(**kw)
+
+            async def delete(self):
+                if mid not in channel.messages:
+                    raise http_error(404)
+                await channel.messages[mid].delete()
+        return Partial()
 
     async def send(self, **kw):
         self.next_id += 1
@@ -91,7 +105,7 @@ def play_in_guild(eco, uid, guild_id=10):
 
 # ----------------------------- 表示 ----------------------------- #
 def test_interval_is_30_minutes():
-    assert BOARD_INTERVAL_MINUTES == 30
+    assert BOARD_INTERVAL_MINUTES == 1
 
 
 def test_build_embed_ranks_only_the_servers_members(eco):
@@ -100,9 +114,9 @@ def test_build_embed_ranks_only_the_servers_members(eco):
     eco.credit(3, 99_999, "テスト")                     # 別サーバーの人。このサーバーの掲示板には載らない
     play_in_guild(eco, 1)
     play_in_guild(eco, 2)
-    e = ranking.build_embed(eco, eco.guild_user_ids(10), "🏆 ペリカランキング", header="最終更新: x\n\n", footer="30分ごと")
+    e = ranking.build_embed(eco, eco.guild_user_ids(10), "🏆 ペリカランキング", header="最終更新: x\n\n", footer="1分ごと")
     assert e.description.index("<@1>") < e.description.index("<@2>") and "<@3>" not in e.description
-    assert e.description.startswith("最終更新: x") and e.footer.text == "30分ごと"
+    assert e.description.startswith("最終更新: x") and e.footer.text == "1分ごと"
 
 
 def test_build_embed_with_nobody_playing(eco):
@@ -118,7 +132,7 @@ def test_set_posts_one_message_and_remembers_it(eco):
     run(EconomyCog.board_set.callback(cog, it, ch))
     board = eco.get_leaderboard(10)
     assert board["channel_id"] == ch.id and board["message_id"] in ch.messages
-    assert "ランキングを掲示しました" in it.sent[-1]["embed"].title and "30分" in it.sent[-1]["embed"].description
+    assert "ランキングを掲示しました" in it.sent[-1]["embed"].title and "1分" in it.sent[-1]["embed"].description
 
 
 def test_setting_again_replaces_the_old_board_so_there_is_only_one(eco):
@@ -148,14 +162,6 @@ def test_unset_stops_and_removes_the_message(eco):
     it = FakeInteraction(guild)
     run(EconomyCog.board_unset.callback(cog, it))                               # 掲示がないときは案内する
     assert "掲示していません" in it.sent[-1]["embed"].title
-
-
-def test_set_and_unset_require_manage_guild(eco):
-    """コマンドに「サーバー管理」権限の検査がついている。"""
-    from discord import app_commands
-    for cmd in (EconomyCog.board_set, EconomyCog.board_unset):
-        assert any("has_permissions" in repr(c) for c in cmd.checks), cmd.name
-    assert app_commands  # noqa
 
 
 # ----------------------------- 更新 ----------------------------- #
@@ -245,3 +251,28 @@ def test_ranking_shows_the_title_after_the_name(eco):
     eco.equip(1, "title", it.id)
     e = ranking.build_embed(eco, eco.guild_user_ids(10), "🏆 テスト")
     assert "<@1>『ざわ…ざわ…』" in e.description and "『ざわ…ざわ…』<@1>" not in e.description
+
+
+# ----------------------------- 掲示の権限 ----------------------------- #
+def _check(command, user_id, manage_guild, owners):
+    it = SimpleNamespace(user=SimpleNamespace(id=user_id), permissions=SimpleNamespace(manage_guild=manage_guild),
+                         client=SimpleNamespace(config={"owner_ids": owners}))
+    return command.checks[0](it)
+
+
+@pytest.mark.parametrize("command", [EconomyCog.board_set, EconomyCog.board_unset])
+def test_board_commands_allow_server_managers_and_bot_owners_only(command):
+    assert _check(command, 5, True, [])                 # サーバー管理権限がある
+    assert _check(command, 7, False, [7])               # 権限がなくても、Bot の持ち主はどのサーバーでも使える
+    with pytest.raises(app_commands.MissingPermissions):
+        _check(command, 5, False, [7])                  # どちらでもない
+
+
+def test_failure_log_is_throttled(capsys):
+    from core import logthrottle
+    logthrottle._last.clear()
+    for _ in range(5):
+        logthrottle.warn(("k", 1), "失敗しました")
+    logthrottle.warn(("k", 2), "別のサーバーの失敗")
+    out = capsys.readouterr().out
+    assert out.count("失敗しました") == 1 and "別のサーバーの失敗" in out

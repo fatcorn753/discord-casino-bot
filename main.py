@@ -59,12 +59,15 @@ class BotTree(app_commands.CommandTree):
             return False
         if not await approval.guard(interaction):          # 許可リスト・持ち主の承認
             return False
-        interaction.client.economy.touch_guild_user(interaction.guild.id, interaction.user.id)   # サーバー別ランキング用
         return True
 
     async def on_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         cause = getattr(error, "original", error)
-        if isinstance(cause, discord.Forbidden):
+        if isinstance(error, app_commands.MissingPermissions):
+            text = "このコマンドを使うには、サーバーの「サーバー管理」権限が必要です。"
+        elif isinstance(error, app_commands.CheckFailure):
+            text = "このコマンドは、いまは使えません。"
+        elif isinstance(cause, discord.Forbidden):
             text = "Bot の権限が足りないため実行できませんでした。チャンネルの権限を確認してください。"
         elif isinstance(cause, discord.HTTPException):
             text = f"Discord 側のエラーで失敗しました（コード {cause.status}）。時間をおいてもう一度お試しください。"
@@ -97,7 +100,9 @@ bot.config = config
 if config.get("debug_http"):
     # 原因調査用: Discord への通信（応答の送信など）を1件ずつ記録する
     logging.getLogger("discord.http").setLevel(logging.DEBUG)
-bot.economy = Economy(DB_PATH)
+# ペリカはサーバーごとに別々。古い形式の記録は legacy_guild_id（無ければ許可リストの先頭）のサーバーが引き継ぐ
+_legacy = config.get("legacy_guild_id") or next(iter(config.get("allowed_guild_ids") or []), None)
+bot.economy = Economy(DB_PATH, legacy_guild_id=_legacy, strict=True)
 bot.sessions = Sessions()
 
 

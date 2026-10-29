@@ -73,6 +73,7 @@ class ApprovalCog(commands.Cog):
     # --------------------------- 依頼の送信 --------------------------- #
     async def request_approval(self, guild: discord.Guild) -> int:
         """持ち主に承認を依頼する DM を送る。届いた人数を返す（DM を受け取れない人には届かない）。"""
+        self.eco.mark_guild_notified(guild.id)        # 送信（await）の前に記録する。同時に来た別のコマンドが、重ねて依頼しないように
         embed = ui.embed("🆕 新しいサーバーに追加されました", color=ui.GOLD)
         embed.add_field(name="サーバー", value=f"{guild.name}\n`{guild.id}`", inline=True)
         embed.add_field(name="持ち主", value=f"<@{guild.owner_id}>", inline=True)
@@ -91,7 +92,6 @@ class ApprovalCog(commands.Cog):
                 delivered += 1
             except discord.HTTPException as exc:
                 print(f"承認の依頼を DM で送れません: owner={uid}: {exc!r}")
-        self.eco.mark_guild_notified(guild.id)
         return delivered
 
     async def ensure_requested(self, guild: discord.Guild, reset_denied: bool = False) -> None:

@@ -30,6 +30,7 @@ def bot(tmp_path):
 class FakeInteraction:
     def __init__(self, uid=1, fail_edit_after=None, fail_with=None):
         self.user = SimpleNamespace(id=uid, display_name="テスト")
+        self.guild_id = 10
         self.sent, self.edits = [], []
         self.fail_edit_after = fail_edit_after
         self.fail_with = fail_with or RuntimeError("編集に失敗")
@@ -328,7 +329,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
     asyncio.run(load())
     payloads = [c.to_dict(cmd_bot.tree) for c in cmd_bot.tree.get_commands()]
     names = [n for p in payloads for n in _names(p)]
-    assert {p["name"] for p in payloads} == {"ペリカ", "カジノ", "ショップ", "ヘルプ"}
+    assert {p["name"] for p in payloads} == {"ペリカ", "カジノ", "ショップ", "ヘルプ", "暗号"}
     assert [n for n in names if re.search(r"[A-Z]", n) or not 1 <= len(n) <= 32] == []
 
     missing = []
@@ -378,11 +379,25 @@ def test_chinchiro_timeout_and_button_race_settles_once(bot):
     assert balance == INITIAL_BALANCE - 500 * 5
 
 
-def test_chinchiro_deleting_message_after_seeing_dealer_roll_forfeits_bet(bot, monkeypatch):
-    monkeypatch.setattr(play_ch, "RNG", random.Random(4))
+def test_chinchiro_deleting_message_after_seeing_dealer_roll_settles_as_menashi(bot, monkeypatch):
+    """画面を消しても、目なしで振ったものとして精算される（強い親を見てから消して損を減らせない）。"""
+    from games import chinchiro as rules
+    strong = [((1, 1, 1), rules.Hand(rules.PINZORO))]
+    monkeypatch.setattr(rules, "play_hand", lambda rng: strong)
     it = FakeInteraction(fail_edit_after=0, fail_with=http_error(404))      # 親の出目を見せる編集で、メッセージが消えていた
     run(play_ch.play_chinchiro(it, bot, 300))
-    assert bot.economy.balance(1) == INITIAL_BALANCE - 300                  # 没収（返金されない）
+    assert bot.economy.balance(1) == INITIAL_BALANCE - 300 * 5              # 賭け金＋ピンゾロの5倍払い（4倍分）を引かれる
+    assert_clean(bot)
+
+
+def test_chinchiro_deleting_message_while_rolling_also_settles(bot, monkeypatch):
+    from games import chinchiro as rules
+    strong = [((1, 1, 1), rules.Hand(rules.PINZORO))]
+    monkeypatch.setattr(rules, "play_hand", lambda rng: strong)
+    ctx, view = make_chinchiro_view(bot, 300, (1, 1, 1), [(1, 2, 4), (1, 2, 4), (1, 2, 4)])
+    it = FakeInteraction(fail_edit_after=0, fail_with=http_error(404))
+    run(view.roll.callback(it))
+    assert bot.economy.balance(1) == INITIAL_BALANCE - 300 * 5              # 返金されない
     assert_clean(bot)
 
 
@@ -481,12 +496,114 @@ def test_grant_is_for_owners_only(bot):
     cog = EconomyCog(bot)
     target = SimpleNamespace(id=2, mention="@b")
     it = FakeInteraction(uid=1)
+    it.guild = SimpleNamespace(id=10)
     run(EconomyCog.grant.callback(cog, it, target, 5000))
     assert "付与しました" in it.sent[-1]["embed"].title and bot.economy.balance(2) == INITIAL_BALANCE + 5000
     stranger = FakeInteraction(uid=3)
+    stranger.guild = SimpleNamespace(id=10)
     run(EconomyCog.grant.callback(cog, stranger, target, 5000))
     assert "権限" in stranger.sent[-1]["embed"].title and bot.economy.balance(2) == INITIAL_BALANCE + 5000     # 他人は付与できない
     bot.config = {}                                                                                              # 未設定なら誰もできない
     nobody = FakeInteraction(uid=1)
+    nobody.guild = SimpleNamespace(id=10)
     run(EconomyCog.grant.callback(cog, nobody, target, 5000))
     assert "権限" in nobody.sent[-1]["embed"].title
+
+
+def test_win_result_shows_streak_and_mission_celebration(bot, monkeypatch):
+    from core import missions
+    monkeypatch.setattr(missions, "today_missions", lambda day: [missions.BY_ID["streak2"], missions.BY_ID["play5"], missions.BY_ID["win3"]])
+
+    class Heads:
+        def choice(self, seq):
+            return "表"
+    monkeypatch.setattr(simple, "RNG", Heads())
+    texts = []
+    for _ in range(2):
+        it = FakeInteraction()
+        run(simple.play_coin(it, bot, 1000, "表"))
+        e = (it.edits[-1] if it.edits else it.sent[-1])["embed"]
+        texts.append(e.description)
+    assert "連勝" not in texts[0] and "2連勝中" in texts[1]
+    assert "ミッション達成" in texts[1] and "2連勝する" in texts[1]
+    assert ledger_matches_balance(bot)
+
+
+def test_result_title_shows_profit_and_order_puts_dice_before_mission_notice(bot, monkeypatch):
+    from core import missions
+    monkeypatch.setattr(missions, "today_missions", lambda day: [missions.BY_ID["play5"], missions.BY_ID["win3"], missions.BY_ID["wager5k"]])
+
+    class Heads:
+        def choice(self, seq):
+            return "表"
+    monkeypatch.setattr(simple, "RNG", Heads())
+    for _ in range(5):
+        it = FakeInteraction()
+        run(simple.play_coin(it, bot, 1000, "表"))
+    e = (it.edits[-1] if it.edits else it.sent[-1])["embed"]
+    assert "ペリカ" in e.title and "+950" in e.title                       # タイトルに損益
+    d = e.description
+    assert d.index("あなたの予想") < d.index("賭け金") < d.index("ミッション達成")      # 出目 → 数字 → ミッション通知
+
+
+def test_chinchiro_balance_error_shows_the_max_bet(bot):
+    it = FakeInteraction()
+    run(play_ch.play_chinchiro(it, bot, 1000))                               # 残高3000は賭け金1000の5倍に足りない
+    text = it.sent[-1]["embed"].description
+    assert "まで賭けられます" in text and "600" in text
+
+
+def test_help_has_steps_payouts_and_admin_section():
+    import asyncio
+    from cogs.help_cog import Help
+    it = type("I", (), {})()
+    sent = []
+
+    async def send(**kw):
+        sent.append(kw)
+    it.response = type("R", (), {"send_message": staticmethod(send)})()
+    asyncio.run(Help.help.callback(Help(None), it))
+    e = sent[0]["embed"]
+    names = [f.name for f in e.fields]
+    assert "はじめの3ステップ" in e.description and any("管理者向け" in n for n in names)
+    text = e.description + "\n".join(f.value for f in e.fields)
+    assert "7️⃣500倍" in text and "還元率" not in text and "期待値" not in text
+    start = next(f.value for f in e.fields if "まずはここから" in f.name)
+    assert "サーバー許可" not in start and "ランキング掲示" not in start      # 初心者向けの欄に管理者コマンドを混ぜない
+    assert all(len(f.value) <= 1024 for f in e.fields) and len(e) <= 6000      # Discord の埋め込みの上限
+
+
+def _last_view(it):
+    return next(e["view"] for e in reversed(it.edits) if e.get("view") is not None)
+
+
+@pytest.mark.parametrize("game", ["coin", "slot", "roulette", "pachinko"])
+def test_replay_button_plays_again_with_same_and_double_bet(bot, monkeypatch, game):
+    from play import pachinko as play_pa
+    monkeypatch.setattr(simple, "STEP", 0)
+    monkeypatch.setattr(play_pa, "STEP", 0)
+    start = {"coin": lambda it: simple.play_coin(it, bot, 100, "表"), "slot": lambda it: simple.play_slot(it, bot, 100),
+             "roulette": lambda it: simple.play_roulette(it, bot, 100, "red"), "pachinko": lambda it: play_pa.play_pachinko(it, bot, 100)}[game]
+    it = FakeInteraction()
+    run(start(it))
+    view = _last_view(it)
+    assert "同じ額" in view.again.label and "200" in view.double.label
+    again = FakeInteraction()
+    run(view.again.callback(again))                                             # 同じ額でもう一度
+    assert any("embed" in k for k in again.sent + again.edits) and again.edits and "ペリカ" in title_of(again)
+    assert bot.economy.stats(1)["games_played"] == 2
+    dbl = FakeInteraction()
+    run(view.double.callback(dbl))
+    assert bot.economy.stats(1)["games_played"] == 3 and ledger_matches_balance(bot) and assert_clean(bot) is None
+
+
+def test_replay_button_only_for_the_player_and_double_hidden_at_max_bet(bot, monkeypatch):
+    monkeypatch.setattr(simple, "STEP", 0)
+    it = FakeInteraction()
+    run(simple.play_coin(it, bot, 100, "表"))
+    view = _last_view(it)
+    other = FakeInteraction(uid=2)
+    assert run(view.interaction_check(other)) is False and "他の人" in other.sent[-1]["content"]
+    from play.common import MAX_BET, ReplayView
+    assert not any("倍にして" in (c.label or "") for c in ReplayView(bot, 1, MAX_BET, None).children)
+    assert any("倍にして" in (c.label or "") for c in view.children)

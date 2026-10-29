@@ -8,14 +8,15 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from core import approval, ranking, shop, ui
+from core import approval, logthrottle, ranking, shop, ui
+from core import missions as missions_mod
 from core.confirm import confirm_action
 from core.economy import Economy
 
 TRANSFER_FEE_RATE = 0.10        # 送る側が、送金額の10%を手数料として払う
 TRANSFER_DAILY_LIMIT = 20_000   # 1日に送れる合計（手数料を含む）
 TRANSFER_CONFIRM_FROM = 5_000   # この額以上は確認ボタンを挟む
-BOARD_INTERVAL_MINUTES = 30      # ランキング掲示板を更新する間隔
+BOARD_INTERVAL_MINUTES = 1       # ランキング掲示板を更新する間隔
 TRANSFER_MIN_GAMES = 3          # 送金できるのは、ゲームで3回以上遊んだ人（複数アカウントで稼ぐのを防ぐ）
 
 
@@ -24,9 +25,31 @@ def local_now(bot) -> datetime.datetime:
     return datetime.datetime.now(tz)
 
 
+def _valid_guild_id(text: str) -> bool:
+    """サーバーIDとして正しい文字列（半角数字で、SQLite の整数に収まる正の値）。"""
+    t = text.strip()
+    return t.isascii() and t.isdigit() and 1 <= int(t) < 2 ** 63
+
+
+def manage_guild_or_owner():
+    """サーバー管理権限を持つ人、または Bot の持ち主（owner_ids）だけが使える。"""
+    def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.user.id in approval.owner_ids(interaction.client.config):
+            return True
+        perms = interaction.permissions
+        if perms.manage_guild:
+            return True
+        raise app_commands.MissingPermissions(["manage_guild"])
+    return app_commands.check(predicate)
+
+
 class EconomyCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+
+    def g(self, interaction: discord.Interaction):
+        """このサーバーのペリカの記録（ペリカはサーバーごとに別々）。"""
+        return self.bot.economy.for_guild(interaction.guild.id)
 
     @property
     def eco(self) -> Economy:
@@ -40,20 +63,20 @@ class EconomyCog(commands.Cog):
     async def balance(self, interaction: discord.Interaction, member: discord.Member = None):
         member = member or interaction.user
         # 他の人を見るだけで、その人の口座（初期支給つき）が作られないよう、読み取り専用で調べる
-        s = self.eco.stats(member.id) if member.id == interaction.user.id else self.eco.peek_stats(member.id)
+        s = self.g(interaction).stats(member.id) if member.id == interaction.user.id else self.g(interaction).peek_stats(member.id)
         if s is None:
             return await interaction.response.send_message(embed=ui.embed(
                 f"💴 {member.display_name} の残高", "まだ遊んでいません（口座がありません）。", ui.INFO))
-        rank = self.eco.rank_of(member.id)
+        rank = self.g(interaction).rank_of(member.id)
         # ショップで買ったカードの色・アイコン・称号を反映する
-        prof = self.eco.get_profile(member.id)
+        prof = self.g(interaction).get_profile(member.id)
         color_item, icon_item, title_item = (shop.BY_ID.get(prof[k]) for k in ("card_color", "card_icon", "title"))
         icon = icon_item.value if icon_item else "💴"
         title_line = f"🏷️ **{title_item.name}**\n" if title_item else ""
         e = ui.embed(f"{icon} {member.display_name} の残高", f"{title_line}# {ui.pelica(s['balance'])}", color_item.value if color_item else ui.GOLD)
         e.set_thumbnail(url=member.display_avatar.url)
         if rank:
-            e.add_field(name="全体の順位", value=f"{rank[0]}位 / {rank[2]}人", inline=True)
+            e.add_field(name="このサーバーでの順位", value=f"{rank[0]}位 / {rank[2]}人", inline=True)
         e.add_field(name="遊んだ回数", value=f"{s['games_played']:,}回", inline=True)
         e.add_field(name="最大の勝ち", value=ui.pelica(s["biggest_win"]), inline=True)
         e.add_field(name="連続ログイン", value=f"{s['daily_streak']}日", inline=True)
@@ -62,7 +85,7 @@ class EconomyCog(commands.Cog):
     @group.command(name="デイリー", description="1日1回の無料ボーナスを受け取る（連続で増える）")
     async def daily(self, interaction: discord.Interaction):
         now = local_now(self.bot)
-        result = self.eco.claim_daily(interaction.user.id, now.date())
+        result = self.g(interaction).claim_daily(interaction.user.id, now.date())
         if not result.ok:
             tomorrow = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time(), tzinfo=now.tzinfo)
             return await interaction.response.send_message(embed=ui.warn_embed(
@@ -74,24 +97,35 @@ class EconomyCog(commands.Cog):
             "デイリーボーナス",
             f"{boost}**+{ui.pelica(result.amount)}**\n連続ログイン: **{result.streak}日**（明日は {ui.pelica(next_bonus)}）\n残高: **{ui.pelica(result.balance)}**"))
 
-    @group.command(name="ランキング", description="ペリカの多い順に並べる")
-    @app_commands.rename(scope="範囲")
-    @app_commands.describe(scope="どの範囲で並べるか（省略時: このサーバー）")
-    @app_commands.choices(scope=[app_commands.Choice(name="このサーバー", value="guild"),
-                                 app_commands.Choice(name="全サーバー", value="all")])
-    async def ranking(self, interaction: discord.Interaction, scope: app_commands.Choice[str] = None):
-        only_guild = (scope is None) or scope.value == "guild"
-        ids = self.eco.guild_user_ids(interaction.guild.id) if only_guild else None
-        title = "🏆 このサーバーのランキング" if only_guild else "🏆 全サーバーのランキング"
-        e = ranking.build_embed(self.eco, ids, title, interaction.user.id,
-                                footer="※ Bot が見たことのある人だけが対象です（遊んだ・コマンドを使った人）")
+    @group.command(name="ミッション", description="今日のミッションと進み具合を見る（達成すると自動でペリカがもらえる）")
+    async def missions(self, interaction: discord.Interaction):
+        now = local_now(self.bot)
+        status = self.g(interaction).mission_status(interaction.user.id, now.date())
+        lines = []
+        for m, progress, done in status:
+            bar = "🟩" * (10 * min(progress, m.target) // m.target) + "⬜" * (10 - 10 * min(progress, m.target) // m.target)
+            mark = "✅" if done else "🔸"
+            shown = m.target if done else progress
+            lines.append(f"{mark} **{m.name}**　報酬 {ui.pelica(m.reward)}\n{bar} {shown:,} / {m.target:,}")
+        tomorrow = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time(), tzinfo=now.tzinfo)
+        streak, best = self.g(interaction).win_streak(interaction.user.id)
+        lines.append(f"\n※ 賭け金 {ui.pelica(missions_mod.MIN_BET)} 以上のゲームだけが数えられます。連勝はその日の分だけです。")
+        lines.append(f"🎁 3つ全部で、さらに **+{ui.pelica(missions_mod.COMPLETE_BONUS)}**")
+        lines.append(f"🔥 いまの連勝: **{streak}** ／ 自己ベスト: **{best}**")
+        lines.append(f"🕛 次の更新: <t:{int(tomorrow.timestamp())}:R>（日本時間 0:00）")
+        await interaction.response.send_message(embed=ui.embed("📜 今日のミッション", "\n".join(lines), ui.GOLD), ephemeral=True)
+
+    @group.command(name="ランキング", description="このサーバーで、ペリカの多い順に並べる")
+    async def ranking(self, interaction: discord.Interaction):
+        e = ranking.build_embed(self.g(interaction), None, "🏆 このサーバーのランキング", interaction.user.id,
+                                footer="※ ペリカはサーバーごとに別々です。このサーバーで遊んだ人だけが載ります")
         await interaction.response.send_message(embed=e, allowed_mentions=discord.AllowedMentions.none())
 
     # ------------------- 自動で更新されるランキング掲示板 ------------------- #
     def _board_embed(self, guild_id: int) -> discord.Embed:
         ts = int(datetime.datetime.now().timestamp())
         return ranking.build_embed(
-            self.eco, self.eco.guild_user_ids(guild_id), "🏆 ペリカランキング",
+            self.bot.economy.for_guild(guild_id), None, "🏆 ペリカランキング",
             header=f"最終更新: <t:{ts}:R>\n\n",
             footer=f"{BOARD_INTERVAL_MINUTES}分ごとに自動で更新されます")
 
@@ -106,16 +140,16 @@ class EconomyCog(commands.Cog):
             return
         embed = self._board_embed(guild.id)
         try:
-            message = await channel.fetch_message(board["message_id"])
-            await message.edit(embed=embed)
+            # fetch_message は「メッセージ履歴を読む」権限が要る。自分の投稿の書き換えには要らないので、読まずに直接書き換える
+            await channel.get_partial_message(board["message_id"]).edit(embed=embed)
         except discord.NotFound:
             try:       # メッセージが消された: 投稿し直して、新しいIDを記録する
                 new = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
                 self.eco.set_leaderboard(guild.id, channel.id, new.id)
             except discord.HTTPException as exc:
-                print(f"ランキング掲示板を投稿し直せません: guild={guild.id}: {exc!r}")
+                logthrottle.warn(("board-repost", guild.id), f"ランキング掲示板を投稿し直せません: guild={guild.id}: {exc!r}")
         except discord.HTTPException as exc:
-            print(f"ランキング掲示板を更新できません: guild={guild.id}: {exc!r}")      # 権限不足など。次の周期で再試行
+            logthrottle.warn(("board", guild.id), f"ランキング掲示板を更新できません: guild={guild.id}: {exc!r}")      # 権限不足など。次の周期で再試行（ログは30分に1回）
 
     async def cog_load(self):
         self.refresh_boards.start()
@@ -145,14 +179,14 @@ class EconomyCog(commands.Cog):
         channel = guild.get_channel(board["channel_id"])
         if channel is not None:
             try:
-                await (await channel.fetch_message(board["message_id"])).delete()
+                await channel.get_partial_message(board["message_id"]).delete()
             except discord.HTTPException:
                 pass
 
     @group.command(name="ランキング掲示", description="ランキングを1つ投稿し、自動で更新し続ける（サーバー管理）")
     @app_commands.rename(channel="チャンネル")
     @app_commands.describe(channel=f"ランキングを置くチャンネル（{BOARD_INTERVAL_MINUTES}分ごとに自動で更新。1サーバーに1つ）")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @manage_guild_or_owner()
     async def board_set(self, interaction: discord.Interaction, channel: discord.TextChannel):
         perms = channel.permissions_for(interaction.guild.me)
         if not (perms.view_channel and perms.send_messages and perms.embed_links):
@@ -168,7 +202,7 @@ class EconomyCog(commands.Cog):
             f"{message.jump_url}\n{BOARD_INTERVAL_MINUTES}分ごとに、この投稿を自動で書き換えます。止めるときは `/ペリカ ランキング掲示解除` を使ってください。"), ephemeral=True)
 
     @group.command(name="ランキング掲示解除", description="ランキングの掲示を止めて、投稿を削除する（サーバー管理）")
-    @app_commands.checks.has_permissions(manage_guild=True)
+    @manage_guild_or_owner()
     async def board_unset(self, interaction: discord.Interaction):
         board = self.eco.get_leaderboard(interaction.guild.id)
         if board is None:
@@ -192,7 +226,7 @@ class EconomyCog(commands.Cog):
         try:
             fee = math.ceil(round(amount * TRANSFER_FEE_RATE, 6))
             # 確認ボタンを出す前に、残高を先に調べる（足りないのに確認だけさせない）
-            if self.eco.balance(uid) < amount + fee:
+            if self.g(interaction).balance(uid) < amount + fee:
                 return await interaction.response.send_message(embed=ui.error_embed(
                     "送金できません", f"残高が足りません（送金額 {amount:,} + 手数料 {fee:,} が必要です）。"), ephemeral=True)
             if amount >= TRANSFER_CONFIRM_FROM:
@@ -205,7 +239,7 @@ class EconomyCog(commands.Cog):
                 reply = interaction.response.send_message
             now = local_now(self.bot)
             day_start = datetime.datetime.combine(now.date(), datetime.time(), tzinfo=now.tzinfo).timestamp()
-            res = self.eco.transfer(uid, member.id, amount, TRANSFER_FEE_RATE, TRANSFER_DAILY_LIMIT, day_start, TRANSFER_MIN_GAMES)
+            res = self.g(interaction).transfer(uid, member.id, amount, TRANSFER_FEE_RATE, TRANSFER_DAILY_LIMIT, day_start, TRANSFER_MIN_GAMES)
             if not res.ok:
                 return await reply(embed=ui.error_embed("送金できません", res.reason), ephemeral=True)
             await reply(embed=ui.ok_embed("送金しました", f"{member.mention} に **{ui.pelica(res.received)}** を送りました。\n"
@@ -216,7 +250,7 @@ class EconomyCog(commands.Cog):
 
     @group.command(name="履歴", description="最近の増減を表示（自分だけに見えます）")
     async def history(self, interaction: discord.Interaction):
-        rows = self.eco.history(interaction.user.id, 12)
+        rows = self.g(interaction).history(interaction.user.id, 12)
         lines = [f"<t:{int(r['ts'])}:t> `{r['delta']:+,}` → {r['balance_after']:,}　{r['reason']}" for r in rows]
         await interaction.response.send_message(embed=ui.embed("🧾 最近の増減", "\n".join(lines) or "まだ記録がありません。", ui.INFO), ephemeral=True)
 
@@ -257,7 +291,7 @@ class EconomyCog(commands.Cog):
     async def server_allow(self, interaction: discord.Interaction, guild_id: str):
         if not await self._owner_only(interaction):
             return
-        if not guild_id.strip().isascii() or not guild_id.strip().isdigit():
+        if not _valid_guild_id(guild_id):
             return await interaction.response.send_message(embed=ui.error_embed("入力エラー", "サーバーidは数字だけで入力してください。"), ephemeral=True)
         gid = int(guild_id)
         guild = self.bot.get_guild(gid)
@@ -274,7 +308,7 @@ class EconomyCog(commands.Cog):
     async def server_revoke(self, interaction: discord.Interaction, guild_id: str):
         if not await self._owner_only(interaction):
             return
-        if not guild_id.strip().isascii() or not guild_id.strip().isdigit():
+        if not _valid_guild_id(guild_id):
             return await interaction.response.send_message(embed=ui.error_embed("入力エラー", "サーバーidは数字だけで入力してください。"), ephemeral=True)
         gid = int(guild_id)
         if gid in approval.preapproved(self.bot.config):
@@ -296,7 +330,7 @@ class EconomyCog(commands.Cog):
     async def grant(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 10_000_000]):
         if interaction.user.id not in set(self.bot.config.get("owner_ids") or []):
             return await interaction.response.send_message(embed=ui.error_embed("権限がありません", "このコマンドは Bot の持ち主だけが使えます。"), ephemeral=True)
-        balance = self.eco.credit(member.id, amount, f"付与（{interaction.user.id}）")
+        balance = self.g(interaction).credit(member.id, amount, f"付与（{interaction.user.id}）")
         await interaction.response.send_message(embed=ui.ok_embed("付与しました", f"{member.mention} に {ui.pelica(amount)} を付与しました（残高 {ui.pelica(balance)}）。"),
                                                 allowed_mentions=discord.AllowedMentions.none())
 

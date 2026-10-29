@@ -63,6 +63,8 @@ class BlackjackView(OwnerView):
         payout = rules.payout(res, bet)
         net = self.ctx.settle(payout)
         text, color = RESULT_TEXT[res]
+        if res == "win" and rules.value(g.dealer) > 21:
+            text = "ディーラーがバースト！ 勝ち🎉"
         body = "\n".join([
             f"**ディーラー**  {rules.hand_text(g.dealer)}（**{rules.value(g.dealer)}**）",
             f"**あなた**  {rules.hand_text(g.player)}（**{rules.value(g.player)}**）" + ("　ダブルダウン" if g.doubled else ""),
@@ -105,6 +107,9 @@ class BlackjackView(OwnerView):
     async def double_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if await self._guard(interaction):
             return
+        if len(self.game.player) != 2 or self.game.doubled:      # 最初の2枚のときだけ。無効化の表示は古い画面には届かないので、ここでも断る
+            return await interaction.response.send_message(
+                embed=ui.error_embed("ダブルできません", "ダブルは、最初の2枚のときだけ選べます。"), ephemeral=True)
         if not self.ctx.economy.add_to_escrow(self.ctx.escrow_id, self.ctx.bet):
             return await interaction.response.send_message(
                 embed=ui.error_embed("ダブルできません", "倍にするためのペリカが足りません。"), ephemeral=True)

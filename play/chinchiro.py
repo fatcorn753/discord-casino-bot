@@ -71,8 +71,9 @@ async def play_chinchiro(interaction: discord.Interaction, bot, bet: int):
         await asyncio.sleep(STEP)
         await interaction.edit_original_response(embed=view.embed(), view=view)
     except discord.NotFound:
-        # 親の出目が見えたあとにメッセージを消して、賭けを無かったことにするのを防ぐ（放棄として没収）
-        ctx.settle(0)
+        # 親の出目が見えたあとにメッセージを消して、賭けや倍払いを無かったことにするのを防ぐ（目なしで振ったものとして精算）
+        payout, extra = rules.payout(bet, rules.compare(rules.Hand(rules.MENASHI), dealer_rolls[-1][1]))
+        ctx.settle(payout, penalty=extra)
     except Exception:
         ctx.abort()
         raise
@@ -139,20 +140,27 @@ class ChinchiroView(OwnerView):
             return await interaction.response.send_message("処理中です。少し待ってください。", ephemeral=True)
         self._busy = True
         try:
-            dice = rules.roll_dice(RNG)
-            hand = rules.classify(dice)
-            await interaction.response.edit_message(embed=self.embed(rolling=True), view=None)
-            await asyncio.sleep(STEP)
-            if self.ctx.done:        # 振っている間に時間切れで精算された
-                return await interaction.edit_original_response(embed=self.final_embed(), view=None)
-            self.player_rolls.append((dice, hand))
-            if hand.kind == rules.MENASHI and len(self.player_rolls) < rules.MAX_ROLLS:
-                await interaction.edit_original_response(embed=self.embed(), view=self)
-            else:
-                self.stop()
-                await interaction.edit_original_response(embed=self.final_embed(), view=None)
+            await self._roll(interaction)
+        except discord.NotFound:
+            # 振っている途中でメッセージを消されても、いまの出目で精算する（消して返金を受ける抜けを防ぐ）
+            self.stop()
+            self.final_embed()
         finally:
             self._busy = False
+
+    async def _roll(self, interaction: discord.Interaction):
+        dice = rules.roll_dice(RNG)
+        hand = rules.classify(dice)
+        await interaction.response.edit_message(embed=self.embed(rolling=True), view=None)
+        await asyncio.sleep(STEP)
+        if self.ctx.done:        # 振っている間に時間切れで精算された
+            return await interaction.edit_original_response(embed=self.final_embed(), view=None)
+        self.player_rolls.append((dice, hand))
+        if hand.kind == rules.MENASHI and len(self.player_rolls) < rules.MAX_ROLLS:
+            await interaction.edit_original_response(embed=self.embed(), view=self)
+        else:
+            self.stop()
+            await interaction.edit_original_response(embed=self.final_embed(), view=None)
 
     async def on_timeout(self) -> None:
         """振らずに放置したら、目なし扱いで精算する（賭け金を預かったままにしない）。"""

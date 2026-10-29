@@ -259,7 +259,7 @@ def test_turning_off_restores_the_nickname_and_the_setting(setup):
     assert m.nick == "あだ名" and not eco.nick_pref(10, 1)
 
 
-def test_title_change_is_applied_to_every_server_where_enabled(setup):
+def test_title_change_is_applied_only_to_the_server_where_it_was_made(setup):
     eco, cog = setup
     buy_title(eco, "title_regular")
     eco.set_nick_pref(10, 1, True)
@@ -274,7 +274,7 @@ def test_title_change_is_applied_to_every_server_where_enabled(setup):
         return g
     cog.bot.get_guild = get_guild
     run(shop_cog.ShopCog.use.callback(cog, FakeInteraction(m1, g1), "title_regular"))
-    assert m1.nick == "たつ【常連】" and m2.nick == "たつ【常連】"
+    assert m1.nick == "たつ【常連】" and m2.nick != "たつ【常連】"      # 称号はサーバーごとに別。他のサーバーには触れない
 
 
 def test_nick_prefs_are_stored_per_server(setup):
@@ -345,7 +345,7 @@ def test_failures_in_other_servers_are_counted_not_swallowed(setup):
     m1, m2 = Member(), Member()
     g1.get_member, g2.get_member = (lambda uid: m1), (lambda uid: m2)
     cog.bot.get_guild = lambda gid: {10: g1, 20: g2}[gid]
-    problem, others = run(cog._sync_title_nick(1, g1, m1))
+    problem, others = run(cog._sync_title_nick(1))      # サーバーを指定しない（全サーバー）
     assert problem == "" and others == 1 and m1.nick == "たつ【常連】"
 
 
