@@ -11,7 +11,7 @@ import discord
 
 from core import ui
 from games import roulette, slot
-from play.common import ReplayView, result_color, result_lines, signed, start_game
+from play.common import ReplayView, game_title, result_color, result_lines, signed, start_game
 
 RNG = random.SystemRandom()      # OS の乱数。結果を予測・再現できない
 COIN_MULT = 1.95                 # 当たりで 1.95 倍（還元率 97.5%）。端数は切り捨て
@@ -47,11 +47,11 @@ async def play_coin(interaction: discord.Interaction, bot, bet: int, side: str):
         payout = int(bet * COIN_MULT) if won else 0
         net = ctx.settle(payout, keep_session=True)
         head = f"あなたの予想: **{side}**\n"
-        final = ui.embed((f"🪙 {result}！ 当たり🎉" if won else f"🪙 {result}… ハズレ") + f" — {signed(net)}ペリカ",
+        final = ui.embed((f"🪙 {result}！ 当たり🎉" if won else f"🪙 {result}… ハズレ") + f"（{ctx.name}）" * bool(ctx.name) + f" — {signed(net)}ペリカ",
                          result_lines(ctx, payout, net, head.rstrip()), result_color(bet, net, ui.OK if won else ui.ERROR))
         await show(interaction,
-                   ui.embed("🪙 コインを投げた…", head + "くるくる回っている…", ui.GOLD),
-                   [ui.embed("🪙 コインを投げた…", head + "まだ回っている…", ui.GOLD)], final,
+                   ui.embed(game_title("🪙 コインを投げた…", ctx), head + "くるくる回っている…", ui.GOLD),
+                   [ui.embed(game_title("🪙 コインを投げた…", ctx), head + "まだ回っている…", ui.GOLD)], final,
                    ReplayView(bot, ctx.user_id, bet, lambda it, b: play_coin(it, bot, b, side)))
     except Exception:
         ctx.abort()          # 精算前の失敗だけ返金（精算後なら何もしない）
@@ -69,7 +69,7 @@ async def play_slot(interaction: discord.Interaction, bot, bet: int):
         reels = slot.spin(RNG)
         payout = int(bet * slot.multiplier(reels))        # 端数は切り捨て
         net = ctx.settle(payout, keep_session=True)
-        spin, title = "🌀", "🎰 スロット"
+        spin, title = "🌀", game_title("🎰 スロット", ctx)
         line = f"┃ {reels[0]} ┃ {reels[1]} ┃ {reels[2]} ┃\n**{slot.label(reels)}**"
         final = ui.embed(f"{title} — {signed(net)}ペリカ", result_lines(ctx, payout, net, line),
                          result_color(bet, net, ui.OK if net > 0 else (ui.INFO if net == 0 else ui.ERROR)))
@@ -100,7 +100,7 @@ async def play_roulette(interaction: discord.Interaction, bot, bet: int, kind: s
         result = roulette.spin(RNG)
         payout = roulette.payout(kind, bet, result, number)
         net = ctx.settle(payout, keep_session=True)
-        title, head = "🎡 ルーレット", f"あなたの賭け: **{name}**\n"
+        title, head = game_title("🎡 ルーレット", ctx), f"あなたの賭け: **{name}**\n"
         verdict = "当たり🎉" if payout else "ハズレ"
         final = ui.embed(f"{title} — {roulette.color_emoji(result)} **{result}**（{roulette.color_of(result)}） {verdict}　{signed(net)}ペリカ",
                          result_lines(ctx, payout, net, head.rstrip()), result_color(bet, net, ui.OK if payout else ui.ERROR))

@@ -223,12 +223,11 @@ def test_commands_and_games_use_the_servers_own_account(tmp_path):
         eco_cog, shop_cog = EconomyCog(bot), ShopCog(bot)
         it = It(B)
         run(EconomyCog.daily.callback(eco_cog, it))                                    # Bでデイリー
-        assert eco.for_guild(B).balance(U1) == INITIAL_BALANCE + 1_000 and eco.for_guild(A).balance(U1) == after_a
+        assert eco.for_guild(B).balance(U1) == INITIAL_BALANCE + Economy.DAILY_BASE and eco.for_guild(A).balance(U1) == after_a
         it = It(A)
         run(ShopCog.buy.callback(shop_cog, it, "title_rookie", 1))                     # Aで称号を買う
         assert eco.for_guild(A).inventory(U1) == {"title_rookie": 1} and eco.for_guild(B).inventory(U1) == {}
-        it = It(B)
-        run(EconomyCog.grant.callback(eco_cog, it, SimpleNamespace(id=U2, mention="@x"), 777))      # Bで付与 → Bの口座だけ
+        eco.for_guild(B).credit(U2, 777, "テスト")                                       # Bに付与 → Bの口座だけ
         assert eco.for_guild(B).balance(U2) == INITIAL_BALANCE + 777 and eco.for_guild(A).peek_stats(U2) is None
         run(EconomyCog.ranking.callback(eco_cog, It(B)))                                # 指定漏れがあれば strict でここで落ちる
 

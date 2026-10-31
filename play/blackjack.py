@@ -6,7 +6,7 @@ import discord
 
 from core import ui
 from games import blackjack as rules
-from play.common import GameContext, OwnerView, result_lines, signed, start_game
+from play.common import GameContext, OwnerView, ReplayView, game_title, result_lines, signed, start_game
 
 RNG = random.SystemRandom()
 TITLE = "🃏 ブラックジャック"
@@ -20,6 +20,17 @@ RESULT_TEXT = {
 }
 
 
+def flair(res: str, g) -> str:
+    """ブラックジャックの勝ち方に応じた一言（大勝ちの演出は倍率で決まるので、ここでは勝ち方を祝う）。"""
+    if res == "blackjack":
+        return "🃏✨ **ナチュラルブラックジャック！** 最初の2枚で21！"
+    if res == "win" and g.doubled:
+        return "💥 **ダブルダウン成功！** 倍賭けが当たった！"
+    if res == "win" and rules.value(g.player) == 21 and len(g.player) >= 3:
+        return "🎯 **21ぴったり！**"
+    return ""
+
+
 async def play_blackjack(interaction: discord.Interaction, bot, bet: int):
     ctx = await start_game(interaction, bot, bet, "ブラックジャック")
     if ctx is None:
@@ -28,7 +39,7 @@ async def play_blackjack(interaction: discord.Interaction, bot, bet: int):
         game = rules.Game(RNG)
         view = BlackjackView(ctx, interaction, game)
         if game.finished:        # 最初の2枚で決着（ナチュラルブラックジャック）
-            await interaction.response.send_message(embed=view.final_embed())
+            await interaction.response.send_message(embed=view.final_embed(), view=view.replay_view())
         else:
             await interaction.response.send_message(embed=view.embed(), view=view)
     except Exception:
@@ -40,6 +51,7 @@ class BlackjackView(OwnerView):
     def __init__(self, ctx: GameContext, origin: discord.Interaction, game: rules.Game):
         super().__init__(ctx, timeout=90)
         self.origin = origin
+        self.base_bet = ctx.bet
         self.game = game
         self._final = None      # 精算した結果の表示。精算は一度きりなので、2回目以降はこれを返す
 
@@ -51,7 +63,13 @@ class BlackjackView(OwnerView):
             f"\n**ディーラー**  {hole}",
             f"**あなた**  {rules.hand_text(g.player)}（**{rules.value(g.player)}**）",
         ])
-        return ui.embed(TITLE, body, ui.INFO)
+        return ui.embed(game_title(TITLE, self.ctx), body, ui.INFO)
+
+    def replay_view(self) -> ReplayView:
+        """結果の下に付ける「もう一度」ボタン（ダブルで増えた賭け金ではなく、最初の賭け金）。"""
+        view = ReplayView(self.ctx.bot, self.ctx.user_id, self.base_bet, lambda it, b: play_blackjack(it, self.ctx.bot, b))
+        view.origin = self.origin
+        return view
 
     def final_embed(self) -> discord.Embed:
         if self._final is not None:
@@ -61,7 +79,13 @@ class BlackjackView(OwnerView):
         bet = self.ctx.economy.escrow_amount(self.ctx.escrow_id) or self.ctx.bet
         self.ctx.bet = bet
         payout = rules.payout(res, bet)
-        net = self.ctx.settle(payout)
+        won = res in ("win", "blackjack")
+        tags = set()
+        if won and g.doubled:
+            tags.add("double_win")
+        if res == "blackjack":
+            tags.add("natural")
+        net = self.ctx.settle(payout, tags=tags)
         text, color = RESULT_TEXT[res]
         if res == "win" and rules.value(g.dealer) > 21:
             text = "ディーラーがバースト！ 勝ち🎉"
@@ -69,9 +93,11 @@ class BlackjackView(OwnerView):
             f"**ディーラー**  {rules.hand_text(g.dealer)}（**{rules.value(g.dealer)}**）",
             f"**あなた**  {rules.hand_text(g.player)}（**{rules.value(g.player)}**）" + ("　ダブルダウン" if g.doubled else ""),
             f"\n**{text}**",
-            result_lines(self.ctx, payout, net),
+            result_lines(self.ctx, payout, net, flair(res, g)),
         ])
-        self._final = ui.embed(f"{TITLE} — {signed(net)}ペリカ", body, color)
+        if won and g.doubled:
+            color = ui.GOLD
+        self._final = ui.embed(f"{game_title(TITLE, self.ctx)} — {signed(net)}ペリカ", body, color)
         return self._final
 
     async def _guard(self, interaction: discord.Interaction) -> bool:
@@ -84,7 +110,7 @@ class BlackjackView(OwnerView):
     async def _after(self, interaction: discord.Interaction) -> None:
         if self.game.finished:
             self.stop()
-            await interaction.response.edit_message(embed=self.final_embed(), view=None)
+            await interaction.response.edit_message(embed=self.final_embed(), view=self.replay_view())
         else:
             self.double_button.disabled = True      # ダブルは最初の判断のときだけ
             await interaction.response.edit_message(embed=self.embed(), view=self)
@@ -123,6 +149,6 @@ class BlackjackView(OwnerView):
             return
         self.game.stand()
         try:
-            await self.origin.edit_original_response(embed=self.final_embed(), view=None)
+            await self.origin.edit_original_response(embed=self.final_embed(), view=self.replay_view())
         except discord.HTTPException:
             pass

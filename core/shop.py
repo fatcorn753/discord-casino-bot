@@ -16,6 +16,7 @@ KIND_LABEL = {
 # 名前の色ロールの名前の接頭辞。この接頭辞のロールだけを Bot が作って付け外しする
 ROLE_PREFIX = "ペリカ・"
 
+WEEKLY_KING = "title_weekly_king"
 DAILY_DOUBLE = "daily_double"
 INSURANCE = "insurance"
 # 保険券で戻る額の上限。券の値段（2,000）より小さくして、買って使うほど増える（期待値がプラスになる）ことがないようにする
@@ -30,6 +31,7 @@ class Item:
     price: int
     value: object = None        # 色(16進)・絵文字など
     desc: str = ""
+    limited: bool = False       # 買えない限定品（ランキングなどで贈られる）。販売の一覧・購入の候補には出ない
 
     @property
     def unique(self) -> bool:
@@ -50,6 +52,8 @@ CATALOG = [
     Item("title_underground", "地下の住人", TITLE, 12_000),
     Item("title_lucky", "強運の持ち主", TITLE, 20_000),
     Item("title_emperor", "地下の帝王", TITLE, 100_000),
+    # 限定称号（買えない）。週間ランキング1位に、次の発表まで贈られる
+    Item(WEEKLY_KING, "👑週間王者", TITLE, 0, desc="先週のゲームの稼ぎ1位に贈られる。次の発表まで持てる", limited=True),
     # 残高カードの色・アイコン
     *_colors("cardcolor", CARD_COLOR, 3_000, [
         ("red", "赤", 0xE74C3C), ("blue", "青", 0x3498DB), ("green", "緑", 0x2ECC71),
@@ -95,5 +99,6 @@ def label(item: Item) -> str:
     return f"{KIND_LABEL[item.kind].split(' ', 1)[1]}：{icon}{item.name}"
 
 
-def of_kind(kind: str) -> list:
-    return [i for i in CATALOG if i.kind == kind]
+def of_kind(kind: str, include_limited: bool = False) -> list:
+    """その種類の商品。限定品は、販売の一覧には出さない（持ち物や称号の判定では include_limited=True）。"""
+    return [i for i in CATALOG if i.kind == kind and (include_limited or not i.limited)]

@@ -36,6 +36,17 @@ def is_allowed(eco, config: dict, guild_id: int, user_id: int) -> bool:
     return not preapproved(config)          # 承認制でなければ、リストが空のときだけ全サーバー可
 
 
+DM_GROUP = "運営"         # Bot とのDMでだけ使える、持ち主向けのコマンドの名前
+
+
+def is_owner_dm_command(interaction: discord.Interaction) -> bool:
+    """Bot の持ち主が、DM で「運営」のコマンド（サーバーの許可の管理）を使うとき。サーバーの外で使える、ただ1つの場合。"""
+    cmd = interaction.command
+    root = (cmd.root_parent or cmd) if cmd is not None else None
+    return (interaction.guild is None and getattr(root, "name", None) == DM_GROUP
+            and interaction.user.id in owner_ids(interaction.client.config))
+
+
 async def guard(interaction: discord.Interaction) -> bool:
     """コマンドの入口の検査。使えないサーバーには理由を返して False を返す。"""
     bot = interaction.client

@@ -95,7 +95,7 @@ async def apply_title_nick(guild: discord.Guild, member: discord.Member, title: 
     reason = nick_blocker(guild, member)
     if reason:
         raise ShopError(reason)
-    titles = [i.name for i in shop.of_kind(shop.TITLE)]
+    titles = [i.name for i in shop.of_kind(shop.TITLE, include_limited=True)]
     stored = eco.get_nick_state(guild.id, member.id)
     state = nick.NickState(*stored) if stored else None
     new, new_state = nick.plan(member.nick, state, member.global_name or member.name, titles, title)
@@ -104,8 +104,8 @@ async def apply_title_nick(guild: discord.Guild, member: discord.Member, title: 
             await member.edit(nick=new, reason="ペリカショップ: 称号の表示")
         except discord.Forbidden:
             raise ShopError("ニックネームを変えられませんでした。Bot の権限と、Bot のロールの位置を確認してください。")
-        except discord.HTTPException as exc:
-            raise ShopError(f"Discord 側のエラーで、ニックネームを変えられませんでした（コード {exc.status}）。時間をおいて、もう一度お試しください。")
+        except discord.HTTPException:
+            raise ShopError("Discord 側のエラーで、ニックネームを変えられませんでした。時間をおいて、もう一度お試しください。")
     if eco.nick_pref(guild.id, member.id):
         eco.set_nick_state(guild.id, member.id, new_state.original if new_state else None, new_state.applied if new_state else None)
 
@@ -162,7 +162,7 @@ class ShopCog(commands.Cog):
                 except discord.HTTPException as exc:
                     print(f"称号のニックネーム反映に失敗: guild={gid} user={user_id}: {exc!r}")
                     if is_here:
-                        problem = f"Discord 側のエラーで失敗しました（コード {exc.status}）。"
+                        problem = "Discord 側のエラーで失敗しました。"
                     else:
                         others_failed += 1
             return problem, others_failed
@@ -175,7 +175,7 @@ class ShopCog(commands.Cog):
     async def _catalog_autocomplete(self, interaction: discord.Interaction, current: str):
         cur = current.lower()
         out = [app_commands.Choice(name=f"{shop.label(i)}（{i.price:,}ペリカ）"[:100], value=i.id)
-               for i in shop.CATALOG if not cur or cur in shop.label(i).lower() or cur in i.id]
+               for i in shop.CATALOG if not i.limited and (not cur or cur in shop.label(i).lower() or cur in i.id)]
         return out[:25]
 
     async def _owned_autocomplete(self, interaction: discord.Interaction, current: str):
@@ -224,6 +224,8 @@ class ShopCog(commands.Cog):
         it = shop.find(item)
         if it is None:
             return await interaction.response.send_message(embed=ui.error_embed("景品が見つかりません", "候補から選ぶか、`/ショップ 一覧` で確認してください。"), ephemeral=True)
+        if it.limited:
+            return await interaction.response.send_message(embed=ui.error_embed("買えません", f"**{it.name}** は買えない限定称号です。毎週月曜0時の週間ランキングで、1位の人に贈られます。"), ephemeral=True)
         # 買い物の間は「プレイ中」にする。ゲーム中に残高を減らして倍払いを避ける／確認待ちの間にゲームを始める、を防ぐ
         uid = interaction.user.id
         reason = self.bot.sessions.try_start(uid)
@@ -239,7 +241,7 @@ class ShopCog(commands.Cog):
                 return await interaction.response.send_message(embed=ui.error_embed("買えませんでした", "すでに持っています。`/ショップ 使う` で身につけられます。"), ephemeral=True)
             if balance < total:
                 return await interaction.response.send_message(embed=ui.error_embed(
-                    "買えませんでした", f"ペリカが足りません（{total:,}ペリカ必要・残高 {balance:,}ペリカ）。\n`/ペリカ デイリー` で毎日もらえます。"), ephemeral=True)
+                    "買えませんでした", f"ペリカが足りません（{total:,}ペリカ必要・残高 {balance:,}ペリカ）。\n`/ペリカ デイリー` で6時間ごとにもらえます。"), ephemeral=True)
             if total >= CONFIRM_FROM:
                 ok = await confirm_action(interaction, "購入しますか？", f"**{shop.label(it)}**" + (f" ×{qty}" if qty > 1 else "") + f"\n{ui.pelica(total)} かかります。", "買う")
                 if ok is not True:
@@ -266,7 +268,7 @@ class ShopCog(commands.Cog):
         e = ui.embed("🎒 持ち物", color=ui.INFO)
         for k in shop.KIND_LABEL:
             lines = []
-            for it in shop.of_kind(k):
+            for it in shop.of_kind(k, include_limited=True):
                 if it.id in inv:
                     mark = " 【装備中】" if it.id in equipped else ""
                     lines.append(f"{it.value if k == shop.CARD_ICON else ''}{it.name}" + (f" ×{inv[it.id]}" if not it.unique else "") + mark)

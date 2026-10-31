@@ -329,7 +329,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
     asyncio.run(load())
     payloads = [c.to_dict(cmd_bot.tree) for c in cmd_bot.tree.get_commands()]
     names = [n for p in payloads for n in _names(p)]
-    assert {p["name"] for p in payloads} == {"ペリカ", "カジノ", "ショップ", "ヘルプ", "暗号"}
+    assert {p["name"] for p in payloads} == {"ペリカ", "カジノ", "ショップ", "ヘルプ", "暗号", "運営"}
     assert [n for n in names if re.search(r"[A-Z]", n) or not 1 <= len(n) <= 32] == []
 
     missing = []
@@ -489,26 +489,6 @@ def test_second_instance_is_refused_by_the_lock(tmp_path, monkeypatch):
     assert importlib and sys
 
 
-# ----------------------------- /ペリカ 付与 ----------------------------- #
-def test_grant_is_for_owners_only(bot):
-    from cogs.economy_cog import EconomyCog
-    bot.config = {"owner_ids": [1]}
-    cog = EconomyCog(bot)
-    target = SimpleNamespace(id=2, mention="@b")
-    it = FakeInteraction(uid=1)
-    it.guild = SimpleNamespace(id=10)
-    run(EconomyCog.grant.callback(cog, it, target, 5000))
-    assert "付与しました" in it.sent[-1]["embed"].title and bot.economy.balance(2) == INITIAL_BALANCE + 5000
-    stranger = FakeInteraction(uid=3)
-    stranger.guild = SimpleNamespace(id=10)
-    run(EconomyCog.grant.callback(cog, stranger, target, 5000))
-    assert "権限" in stranger.sent[-1]["embed"].title and bot.economy.balance(2) == INITIAL_BALANCE + 5000     # 他人は付与できない
-    bot.config = {}                                                                                              # 未設定なら誰もできない
-    nobody = FakeInteraction(uid=1)
-    nobody.guild = SimpleNamespace(id=10)
-    run(EconomyCog.grant.callback(cog, nobody, target, 5000))
-    assert "権限" in nobody.sent[-1]["embed"].title
-
 
 def test_win_result_shows_streak_and_mission_celebration(bot, monkeypatch):
     from core import missions
@@ -607,3 +587,68 @@ def test_replay_button_only_for_the_player_and_double_hidden_at_max_bet(bot, mon
     from play.common import MAX_BET, ReplayView
     assert not any("倍にして" in (c.label or "") for c in ReplayView(bot, 1, MAX_BET, None).children)
     assert any("倍にして" in (c.label or "") for c in view.children)
+
+
+def test_chinchiro_result_has_replay_button_with_original_bet(bot, monkeypatch):
+    monkeypatch.setattr(play_ch, "STEP", 0)
+    ctx, view = make_chinchiro_view(bot, 300, (1, 2, 4), [])
+    monkeypatch.setattr(ch, "roll_dice", lambda rng: (4, 5, 6))               # シゴロで、1回で決着
+    it = FakeInteraction()
+    run(view.roll.callback(it))                                               # 振って精算まで進める
+    replay = _last_view(it)
+    assert "同じ額" in replay.again.label and "300" in replay.again.label
+    again = FakeInteraction()
+    run(replay.again.callback(again))
+    assert bot.sessions.try_start(1) is not None and "地下チンチロ" in again.sent[-1]["embed"].title      # 新しいゲームが始まって、親が振っている
+
+
+def test_blackjack_result_replay_uses_the_original_bet_not_the_doubled_one(bot):
+    ctx, view = make_bj(bot, 1000, ("5", "6"), ("10", "7"), deck=("10",))
+    it = FakeInteraction()
+    run(view.double_button.callback(it))                                       # ダブルで賭け金が2000になる
+    replay = _last_view(it)
+    assert "1,000" in replay.again.label and "2,000" in replay.double.label
+    assert it.edits[-1]["view"] is replay
+
+
+def test_blackjack_double_win_shows_flair_counts_for_mission_and_has_no_other_game_hint(bot, monkeypatch):
+    from core import missions
+    monkeypatch.setattr(missions, "today_missions", lambda day: [missions.BY_ID["bj_double"], missions.BY_ID["game_スロット"], missions.BY_ID["play5"]])
+    ctx, view = make_bj(bot, 1000, ("5", "6"), ("10", "7"), deck=("10",))      # 11 に10を引いて21。ダブルで勝つ
+    it = FakeInteraction()
+    run(view.double_button.callback(it))
+    text = it.edits[-1]["embed"].description
+    assert "ダブルダウン成功" in text and "ミッション達成" in text and "ブラックジャックでダブルダウンに成功する" in text
+    assert "別のゲーム" not in text and "👉" not in text
+
+
+def test_blackjack_natural_flair(bot):
+    ctx, view = make_bj(bot, 1000, ("A", "K"), ("10", "7"))
+    assert "ナチュラルブラックジャック" in view.final_embed().description
+
+
+def _all_titles(it):
+    return [e["embed"].title for e in it.sent + it.edits if e.get("embed") is not None]
+
+
+@pytest.mark.parametrize("game", ["coin", "slot", "roulette", "pachinko", "chinchiro", "blackjack"])
+def test_every_game_title_shows_the_players_name(bot, monkeypatch, game):
+    from play import pachinko as play_pa
+    monkeypatch.setattr(simple, "STEP", 0)
+    monkeypatch.setattr(play_pa, "STEP", 0)
+    monkeypatch.setattr(play_ch, "STEP", 0)
+    it = FakeInteraction()                                                      # display_name は「テスト」
+    if game == "coin":
+        run(simple.play_coin(it, bot, 100, "表"))
+    elif game == "slot":
+        run(simple.play_slot(it, bot, 100))
+    elif game == "roulette":
+        run(simple.play_roulette(it, bot, 100, "red"))
+    elif game == "pachinko":
+        run(play_pa.play_pachinko(it, bot, 100))
+    elif game == "chinchiro":
+        run(play_ch.play_chinchiro(it, bot, 100))
+    else:
+        run(play_bj.play_blackjack(it, bot, 100))
+    titles = _all_titles(it)
+    assert titles and all("（テスト）" in t for t in titles), titles

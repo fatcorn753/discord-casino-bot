@@ -316,7 +316,7 @@ def test_failed_first_enable_is_rolled_back(setup):
     it = FakeInteraction(m, g)
     run(shop_cog.ShopCog.title_display.callback(cog, it, mode("on")))
     assert not eco.nick_pref(10, 1)                                 # 付けられなかったので、設定もONにならない
-    assert "ニックネームに付けられません" in it.sent[-1]["embed"].title and "503" in it.sent[-1]["embed"].description
+    assert "ニックネームに付けられません" in it.sent[-1]["embed"].title and "503" not in it.sent[-1]["embed"].description          # エラー番号などの開発者向けの表示は出さない
 
 
 def test_server_error_is_reported_when_equipping_not_shown_as_success(setup):

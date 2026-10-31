@@ -27,10 +27,16 @@ def build_embed(eco, guild_ids: Optional[set], title: str, viewer_id: Optional[i
             return f"『{item.name}』" if item else ""
 
         # 名前のあとに称号を付ける（ニックネームの「名前【称号】」と同じ順）
-        lines = [f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>{title_of(uid)}　**{ui.pelica(bal)}**" for r, uid, bal in top]
+        crypto = eco.crypto_values()
+
+        def worth(uid, total):
+            held = crypto.get(uid, 0)
+            return f"**{ui.pelica(total)}**" + (f"（うちCS {held:,}）" if held else "")
+
+        lines = [f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>{title_of(uid)}　{worth(uid, bal)}" for r, uid, bal in top]
         me = eco.rank_of(viewer_id, guild_ids) if viewer_id else None
         if me and me[0] > TOP_N:
-            lines.append(f"…\n`{me[0]:>2}` <@{viewer_id}>　**{ui.pelica(me[1])}**")
+            lines.append(f"…\n`{me[0]:>2}` <@{viewer_id}>　{worth(viewer_id, me[1])}")
         e = ui.embed(title, header + "\n".join(lines), ui.GOLD)
     if footer:
         e.set_footer(text=footer)

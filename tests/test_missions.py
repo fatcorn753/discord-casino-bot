@@ -18,6 +18,7 @@ def eco(tmp_path):
     return Economy(str(tmp_path / "t.db"), strict=True).for_guild(G)
 
 
+@pytest.mark.real_missions
 def test_missions_are_same_for_everyone_on_a_day_and_change_by_day():
     a = missions.today_missions(DAY)
     assert len(a) == missions.PER_DAY and len({m.id for m in a}) == missions.PER_DAY
@@ -114,3 +115,36 @@ def test_play_state_table_from_the_previous_version_is_upgraded(tmp_path):
     again = Economy(path, strict=True).for_guild(G)
     assert again.win_streak(U) == (4, 6)
     assert again.record_play(U, "コイン", 100, 100, DAY)["streak"] == 5
+
+
+# ----------------------------- ブラックジャック向けのミッション ----------------------------- #
+@pytest.mark.real_missions
+def test_blackjack_only_player_can_always_do_two_of_three_missions():
+    doable = {"play", "win", "wager", "streak"}
+    for i in range(400):
+        day = datetime.date(2026, 1, 1) + datetime.timedelta(days=i)
+        ms = missions.today_missions(day)
+        assert len(ms) == 3 and len({m.id for m in ms}) == 3
+        ok = [m for m in ms if m.kind in doable or m.game == missions.BLACKJACK or m.kind == "big_win"]
+        bj_ok = [m for m in ms if m.kind in doable or m.game == missions.BLACKJACK]
+        assert len(bj_ok) >= 2, (day, [m.id for m in ms])
+        assert ok
+
+
+def test_game_win_and_tag_missions_progress(eco, monkeypatch):
+    fixed = [missions.BY_ID["gwin_スロット"], missions.BY_ID["bj_double"], missions.BY_ID["bj_natural"]]
+    monkeypatch.setattr(missions, "today_missions", lambda day: fixed)
+    ev = eco.record_play(U, "コイン", 100, 100, DAY)                       # 別のゲームの勝ちは数えない
+    assert ev["completed"] == []
+    eco.record_play(U, "スロット", 100, 100, DAY)
+    ev = eco.record_play(U, "スロット", 100, -100, DAY)                    # 負けは数えない
+    assert not any(m.id == "gwin_スロット" for m, _ in ev["completed"])
+    ev = eco.record_play(U, "スロット", 100, 100, DAY)
+    assert any(m.id == "gwin_スロット" for m, _ in ev["completed"])
+    ev = eco.record_play(U, "ブラックジャック", 100, 100, DAY)             # 印がなければ進まない
+    assert ev["completed"] == []
+    ev = eco.record_play(U, "ブラックジャック", 100, 200, DAY, tags={"double_win"})
+    assert [m.id for m, _ in ev["completed"]] == ["bj_double"]
+    ev = eco.record_play(U, "ブラックジャック", 100, 150, DAY, tags={"natural"})
+    assert [m.id for m, _ in ev["completed"]] == ["bj_natural"] and ev["bonus"] == missions.COMPLETE_BONUS
+    assert "hint" not in ev                                                # 別のゲームへの案内は出さない

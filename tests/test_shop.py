@@ -25,7 +25,8 @@ def buy(eco, item_id, qty=1, uid=1):
 # ----------------------------- カタログ ----------------------------- #
 def test_catalog_is_consistent():
     assert len({i.id for i in shop.CATALOG}) == len(shop.CATALOG)
-    assert all(i.price > 0 for i in shop.CATALOG)
+    assert all(i.price > 0 for i in shop.CATALOG if not i.limited)           # 売り物には値段がある
+    assert all(i.price == 0 for i in shop.CATALOG if i.limited)
     for kind in shop.KIND_LABEL:
         assert shop.of_kind(kind), kind
     # 色ロールの色は 0x000000（Discord では「色なし」扱い）にしない

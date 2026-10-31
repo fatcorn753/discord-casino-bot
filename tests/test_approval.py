@@ -8,7 +8,6 @@ import discord
 import pytest
 
 from cogs.approval_cog import RENOTIFY_AFTER, ApprovalButton, ApprovalCog
-from cogs.economy_cog import EconomyCog
 from core import approval
 from core.economy import Economy
 from core.session import Sessions
@@ -238,14 +237,14 @@ def test_button_ids_survive_restart_format():
 
 # ----------------------------- 持ち主用コマンド ----------------------------- #
 def eco_cog(bot):
-    return EconomyCog(bot)
+    return ApprovalCog(bot)
 
 
 def test_server_commands_are_owner_only(eco):
     g = Guild(20)
     bot, cog, owner = make(eco, guilds=[g])
     c = eco_cog(bot)
-    for cmd, args in ((EconomyCog.server_list, ()), (EconomyCog.server_allow, ("20",)), (EconomyCog.server_revoke, ("20",))):
+    for cmd, args in ((ApprovalCog.server_list, ()), (ApprovalCog.server_allow, ("20",)), (ApprovalCog.server_revoke, ("20",))):
         it = Interaction(bot, FRIEND, g)
         run(cmd.callback(c, it, *args))
         assert "権限がありません" in it.sent[-1]["embed"].title
@@ -256,13 +255,13 @@ def test_owner_can_allow_list_and_revoke(eco):
     g = Guild(20, "友達の鯖")
     bot, cog, owner = make(eco, guilds=[g])
     c = eco_cog(bot)
-    run(EconomyCog.server_allow.callback(c, Interaction(bot, OWNER, g), "20"))
+    run(ApprovalCog.server_allow.callback(c, Interaction(bot, OWNER, g), "20"))
     assert eco.get_guild_status(20)["status"] == approval.APPROVED
     it = Interaction(bot, OWNER, g)
-    run(EconomyCog.server_list.callback(c, it))
+    run(ApprovalCog.server_list.callback(c, it))
     text = "\n".join(f.value for f in it.sent[-1]["embed"].fields)
     assert "友達の鯖" in text and "10" in text                              # 許可済みの一覧に出る（設定ファイル分も）
-    run(EconomyCog.server_revoke.callback(c, Interaction(bot, OWNER, g), "20"))
+    run(ApprovalCog.server_revoke.callback(c, Interaction(bot, OWNER, g), "20"))
     assert eco.get_guild_status(20)["status"] == approval.DENIED and g.left
 
 
@@ -271,18 +270,18 @@ def test_revoke_refuses_preapproved_servers_and_bad_ids(eco):
     bot, cog, owner = make(eco, guilds=[g])
     c = eco_cog(bot)
     it = Interaction(bot, OWNER, g)
-    run(EconomyCog.server_revoke.callback(c, it, "10"))
+    run(ApprovalCog.server_revoke.callback(c, it, "10"))
     assert "取り消せません" in it.sent[-1]["embed"].title and not g.left
     for bad in ("abc", "１２３", "12 3", ""):
         it = Interaction(bot, OWNER, g)
-        run(EconomyCog.server_allow.callback(c, it, bad))
+        run(ApprovalCog.server_allow.callback(c, it, bad))
         assert "入力エラー" in it.sent[-1]["embed"].title
     assert eco.list_guild_status() == []
 
 
 def test_allow_can_preapprove_a_server_the_bot_has_not_joined_yet(eco):
     bot, cog, owner = make(eco)
-    run(EconomyCog.server_allow.callback(eco_cog(bot), Interaction(bot, OWNER, Guild(10)), "555"))
+    run(ApprovalCog.server_allow.callback(eco_cog(bot), Interaction(bot, OWNER, Guild(10)), "555"))
     assert approval.is_allowed(eco, bot.config, 555, FRIEND)
 
 
@@ -318,3 +317,43 @@ def test_concurrent_commands_send_only_one_request_dm():
         await asyncio.gather(*(cog.ensure_requested(guild) for _ in range(5)))
     asyncio.run(go())
     assert len(sent) == 1
+
+
+# ----------------------------- DMでだけ使える「運営」と、管理ツール ----------------------------- #
+def test_owner_commands_are_dm_only_and_not_in_other_groups():
+    from discord import app_commands
+    assert ApprovalCog.group.name == "運営"
+    ctx = ApprovalCog.group.allowed_contexts
+    assert ctx.dm_channel and ctx.private_channel and not ctx.guild                 # サーバーのコマンド候補には出ない
+    from cogs.economy_cog import EconomyCog
+    assert not any(getattr(EconomyCog, n, None) for n in ("server_list", "server_allow", "server_revoke", "grant"))   # 「ペリカ」グループからは消えた
+    assert {c.name for c in ApprovalCog.group.commands} == {"サーバー一覧", "サーバー許可", "サーバー取消"}
+    assert app_commands  # noqa
+
+
+def fake_dm_interaction(root_name, uid, owner_ids=(OWNER,), guild=None):
+    sub = SimpleNamespace(name="サーバー一覧", root_parent=SimpleNamespace(name=root_name))
+    return SimpleNamespace(command=sub, guild=guild, user=SimpleNamespace(id=uid), client=SimpleNamespace(config={"owner_ids": list(owner_ids)}))
+
+
+def test_only_the_owner_may_use_the_dm_group_outside_a_server():
+    assert approval.is_owner_dm_command(fake_dm_interaction("運営", OWNER))
+    assert not approval.is_owner_dm_command(fake_dm_interaction("運営", FRIEND))                      # 他の人はDMでも使えない
+    assert not approval.is_owner_dm_command(fake_dm_interaction("ペリカ", OWNER))                     # 他のコマンドはDMで使えない
+    assert not approval.is_owner_dm_command(fake_dm_interaction("運営", OWNER, guild=SimpleNamespace(id=1)))   # サーバー内の扱いは、いつもどおり
+    assert not approval.is_owner_dm_command(SimpleNamespace(command=None, guild=None, user=SimpleNamespace(id=OWNER), client=SimpleNamespace(config={"owner_ids": [OWNER]})))
+
+
+@pytest.mark.real_scope
+def test_manage_tool_grants_to_the_right_server_and_lists_servers(tmp_path, capsys, monkeypatch):
+    import manage
+    path = str(tmp_path / "casino.db")
+    monkeypatch.setattr(manage, "DB_PATH", path)
+    Economy(path, strict=True).set_guild_status(10, approval.APPROVED, "友達の鯖")
+    assert manage.main(["grant", "10", "5", "777", "テスト"]) == 0
+    assert Economy(path, strict=True).for_guild(10).balance(5) == 3000 + 777 and Economy(path, strict=True).for_guild(20).peek_stats(5) is None
+    assert manage.main(["servers"]) == 0
+    out = capsys.readouterr().out
+    assert "777" in out and "友達の鯖" in out
+    assert manage.main(["grant", "10", "5", "0"]) == 2 and manage.main(["grant", "10", "5", "99999999"]) == 2     # 範囲外は断る
+    assert Economy(path, strict=True).for_guild(10).balance(5) == 3000 + 777

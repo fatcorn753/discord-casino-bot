@@ -165,12 +165,22 @@ class MarketCog(commands.Cog):
                 f"{'🔺' if pct >= 0 else '🔻'}**{pct:+.1f}%**\n評価損益: **{diff:+,}ペリカ**（売ったときの手取り {ui.pelica(value)}）")
 
     @group.command(name="売る", description=f"持っている{market.NAME}を売る")
-    @app_commands.rename(lots="枚数")
-    @app_commands.describe(lots="売る枚数（小数も可。省略すると全部売ります）")
-    async def sell(self, interaction: discord.Interaction, lots: Optional[app_commands.Range[float, 0.001, 1_000_000.0]] = None):
+    @app_commands.rename(lots="枚数", ratio="割合")
+    @app_commands.describe(lots="売る枚数（小数も可）", ratio="半分か全部（枚数を指定しないとき。どちらも省略すると全部売ります）")
+    @app_commands.choices(ratio=[app_commands.Choice(name="半分", value="half"), app_commands.Choice(name="全部", value="all")])
+    async def sell(self, interaction: discord.Interaction, lots: Optional[app_commands.Range[float, 0.001, 1_000_000.0]] = None,
+                   ratio: Optional[app_commands.Choice[str]] = None):
+        if lots is not None and ratio is not None:
+            return await interaction.response.send_message(embed=ui.error_embed("どちらか1つにしてください", "「枚数」と「割合」は、どちらか一方だけ指定できます。"), ephemeral=True)
+
         async def run(uid):
-            units = None if lots is None else int(round(lots * market.UNIT))
             have, cost = self.g(interaction).crypto_holding(uid)
+            if lots is not None:
+                units = int(round(lots * market.UNIT))
+            elif ratio is not None and ratio.value == "half":
+                units = max(1, have // 2)
+            else:
+                units = None
             if have <= 0:
                 return await interaction.response.send_message(embed=ui.error_embed("売れません", f"{market.NAME}を持っていません。`/暗号 買う` で買えます。"), ephemeral=True)
             price = self._price()

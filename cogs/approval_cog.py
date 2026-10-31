@@ -8,9 +8,16 @@ Bot が新しいサーバーに追加されると、持ち主（owner_ids）に 
 import time
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from core import approval, ui
+
+def valid_guild_id(text: str) -> bool:
+    """サーバーIDとして正しい文字列（半角数字で、SQLite の整数に収まる正の値）。"""
+    t = text.strip()
+    return t.isascii() and t.isdigit() and 1 <= int(t) < 2 ** 63
+
 
 RENOTIFY_AFTER = 3600       # 承認待ちのサーバーで誰かがコマンドを使ったとき、前の通知からこれ以上たっていれば催促する（秒）
 
@@ -134,6 +141,75 @@ class ApprovalCog(commands.Cog):
             return
         for guild in self.bot.guilds:        # Bot が止まっている間に追加されたサーバーも拾う
             await self.ensure_requested(guild)
+
+    # ------------------- 許可の管理（Bot の持ち主だけ・DMでだけ使える） ------------------- #
+    group = app_commands.Group(
+        name="運営", description="（持ち主のみ）Bot を使えるサーバーの管理。Bot とのDMで使えます",
+        allowed_contexts=app_commands.AppCommandContext(guild=False, dm_channel=True, private_channel=True))
+
+    async def _owner_only(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id not in approval.owner_ids(self.bot.config):
+            await interaction.response.send_message(embed=ui.error_embed("権限がありません", "このコマンドは Bot の持ち主だけが使えます。"), ephemeral=True)
+            return False
+        return True
+
+    @group.command(name="サーバー一覧", description="（持ち主のみ）許可・承認待ち・断ったサーバーを表示する")
+    async def server_list(self, interaction: discord.Interaction):
+        if not await self._owner_only(interaction):
+            return
+        joined = {g.id: g for g in self.bot.guilds}
+        rows = {r["guild_id"]: r for r in self.eco.list_guild_status()}
+        pre = approval.preapproved(self.bot.config)
+        groups = {"✅ 許可": [], "⏳ 承認待ち": [], "🚫 断った": []}
+        for gid in pre:
+            groups["✅ 許可"].append((gid, joined[gid].name if gid in joined else "（設定ファイルで許可）", gid in joined))
+        for gid, r in rows.items():
+            if gid in pre:
+                continue
+            key = {approval.APPROVED: "✅ 許可", approval.PENDING: "⏳ 承認待ち", approval.DENIED: "🚫 断った"}[r["status"]]
+            groups[key].append((gid, joined[gid].name if gid in joined else (r["name"] or "?"), gid in joined))
+        e = ui.embed("🌐 サーバーの許可状況", f"承認制: **{'ON' if approval.requires_approval(self.bot.config) else 'OFF'}**　参加中: {len(joined)}サーバー", ui.INFO)
+        for title, items in groups.items():
+            e.add_field(name=f"{title}（{len(items)}）", value="\n".join(f"{'🟢' if on else '⚪'} {name}　`{gid}`" for gid, name, on in items)[:1024] or "なし", inline=False)
+        e.set_footer(text="🟢 = いま参加中 / ⚪ = 参加していない")
+        await interaction.response.send_message(embed=e, ephemeral=True)
+
+    @group.command(name="サーバー許可", description="（持ち主のみ）サーバーIDを指定して、利用を許可する")
+    @app_commands.rename(guild_id="サーバーid")
+    @app_commands.describe(guild_id="許可するサーバーのID（承認待ちの一覧にあるもの）")
+    async def server_allow(self, interaction: discord.Interaction, guild_id: str):
+        if not await self._owner_only(interaction):
+            return
+        if not valid_guild_id(guild_id):
+            return await interaction.response.send_message(embed=ui.error_embed("入力エラー", "サーバーidは数字だけで入力してください。"), ephemeral=True)
+        gid = int(guild_id)
+        guild = self.bot.get_guild(gid)
+        self.eco.set_guild_status(gid, approval.APPROVED, guild.name if guild else None, interaction.user.id)
+        if guild is not None:
+            await self.announce_approved(guild)
+        await interaction.response.send_message(embed=ui.ok_embed("許可しました", f"`{gid}`" + (f"（{guild.name}）" if guild else "（まだ参加していません。追加されたらすぐ遊べます）") + " で遊べます。"), ephemeral=True)
+
+    @group.command(name="サーバー取消", description="（持ち主のみ）許可を取り消し、Bot をそのサーバーから退出させる")
+    @app_commands.rename(guild_id="サーバーid")
+    @app_commands.describe(guild_id="取り消すサーバーのID")
+    async def server_revoke(self, interaction: discord.Interaction, guild_id: str):
+        if not await self._owner_only(interaction):
+            return
+        if not valid_guild_id(guild_id):
+            return await interaction.response.send_message(embed=ui.error_embed("入力エラー", "サーバーidは数字だけで入力してください。"), ephemeral=True)
+        gid = int(guild_id)
+        if gid in approval.preapproved(self.bot.config):
+            return await interaction.response.send_message(embed=ui.warn_embed("取り消せません", "設定ファイル（allowed_guild_ids）で許可されているサーバーです。設定ファイルから外してください。"), ephemeral=True)
+        guild = self.bot.get_guild(gid)
+        self.eco.set_guild_status(gid, approval.DENIED, guild.name if guild else None, interaction.user.id)
+        left = ""
+        if guild is not None:
+            try:
+                await guild.leave()
+                left = "Bot はそのサーバーから退出しました。"
+            except discord.HTTPException:
+                left = "退出はできませんでしたが、コマンドは使えなくなりました。"
+        await interaction.response.send_message(embed=ui.ok_embed("取り消しました", f"`{gid}` の許可を取り消しました。{left}"), ephemeral=True)
 
 
 async def setup(bot):

@@ -53,6 +53,8 @@ class BotTree(app_commands.CommandTree):
         if late > 1.5:
             print(f"⚠ コマンドの受信が {late:.1f} 秒遅れました（{getattr(interaction.command, 'qualified_name', '?')}）。"
                   f"Bot のネットワークや、PC のスリープ・負荷を確認してください。ゲートウェイ遅延: {interaction.client.latency * 1000:.0f}ms")
+        if approval.is_owner_dm_command(interaction):       # 持ち主の「運営」コマンドは、Bot とのDMで使える
+            return True
         if interaction.guild is None:
             await interaction.response.send_message(
                 embed=ui.error_embed("利用できません", "このコマンドはサーバー内でのみ使えます。"), ephemeral=True)
@@ -70,7 +72,7 @@ class BotTree(app_commands.CommandTree):
         elif isinstance(cause, discord.Forbidden):
             text = "Bot の権限が足りないため実行できませんでした。チャンネルの権限を確認してください。"
         elif isinstance(cause, discord.HTTPException):
-            text = f"Discord 側のエラーで失敗しました（コード {cause.status}）。時間をおいてもう一度お試しください。"
+            text = "Discord 側のエラーで失敗しました。時間をおいてもう一度お試しください。"
         else:
             traceback.print_exception(type(error), error, error.__traceback__)
             text = "予期しないエラーが発生しました。精算の前なら賭けたペリカは返しています（`/ペリカ 履歴` で確認できます）。"

@@ -18,8 +18,9 @@ def local_today(bot) -> datetime.date:
 class GameContext:
     """1回のゲーム。賭け金は預かり済みで、settle() か abort() で必ず精算する。"""
 
-    def __init__(self, bot, user_id: int, escrow_id: int, game: str, bet: int, guild_id: int):
+    def __init__(self, bot, user_id: int, escrow_id: int, game: str, bet: int, guild_id: int, name: str = ""):
         self.bot = bot
+        self.name = name            # 遊んでいる人の表示名（タイトルに付けて、誰のゲームか分かるようにする）
         self.guild_id = guild_id
         self.user_id = user_id
         self.escrow_id = escrow_id
@@ -34,7 +35,7 @@ class GameContext:
     def economy(self):
         return self.bot.economy.for_guild(self.guild_id)      # ペリカはサーバーごとに別々
 
-    def settle(self, payout: int, penalty: int = 0, keep_session: bool = False) -> int:
+    def settle(self, payout: int, penalty: int = 0, keep_session: bool = False, tags=()) -> int:
         """払い戻し総額で精算し、損益を返す。二重に呼んでも一度しか払わない。
 
         penalty は倍払いなどの追加の支払い（残高の範囲まで）。精算と同じ1回の処理で行う。
@@ -55,7 +56,7 @@ class GameContext:
             return 0
         net, self.penalty_taken, self.insured_refund = result
         try:       # 連勝・ミッションの記録は演出なので、失敗しても精算の結果は変えない
-            self.events = self.economy.record_play(self.user_id, self.game, self.bet, net, local_today(self.bot))
+            self.events = self.economy.record_play(self.user_id, self.game, self.bet, net, local_today(self.bot), tags)
         except Exception as exc:
             print(f"連勝・ミッションの記録に失敗: {self.game}: {exc!r}")
         return net
@@ -99,7 +100,7 @@ async def start_game(interaction: discord.Interaction, bot, bet: int, game: str,
                 msg = (f"{factor_reason}賭け金の **{balance_factor}倍**（{ui.pelica(bet * balance_factor)}）以上の残高が必要です（いまの残高: {ui.pelica(balance)}）。\n"
                        f"いまの残高なら、**{ui.pelica(balance // balance_factor)}** まで賭けられます。")
             else:
-                msg = f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(balance)} です。\n`/ペリカ デイリー` で毎日もらえます。"
+                msg = f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(balance)} です。\n`/ペリカ デイリー` で6時間ごとにもらえます。"
             await interaction.response.send_message(embed=ui.error_embed("ペリカが足りません", msg), ephemeral=True)
             return None
         escrow = eco.place_bet(uid, bet, game)
@@ -107,10 +108,15 @@ async def start_game(interaction: discord.Interaction, bot, bet: int, game: str,
             await interaction.response.send_message(
                 embed=ui.error_embed("ペリカが足りません", f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(eco.balance(uid))} です。"), ephemeral=True)
             return None
-        return GameContext(bot, uid, escrow, game, bet, interaction.guild_id)
+        return GameContext(bot, uid, escrow, game, bet, interaction.guild_id, getattr(interaction.user, "display_name", "") or "")
     finally:
         if escrow is None:
             bot.sessions.end(uid)       # 始められなかった場合は、プレイ中のままにしない
+
+
+def game_title(base: str, ctx: GameContext) -> str:
+    """ゲームの見出しに、遊んでいる人の名前を付ける（例: 🃏 ブラックジャック（たろう））。"""
+    return f"{base}（{ctx.name}）" if ctx.name else base
 
 
 def signed(n: int) -> str:

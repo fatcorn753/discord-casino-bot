@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from core import approval, logthrottle, ranking, shop, ui
+from core import history as history_mod
 from core import missions as missions_mod
 from core.confirm import confirm_action
 from core.economy import Economy
@@ -20,15 +21,45 @@ BOARD_INTERVAL_MINUTES = 1       # ランキング掲示板を更新する間隔
 TRANSFER_MIN_GAMES = 3          # 送金できるのは、ゲームで3回以上遊んだ人（複数アカウントで稼ぐのを防ぐ）
 
 
+def reset_label(bot) -> str:
+    """日付が切り替わる（デイリーやミッションがリセットされる）時刻の表示。"""
+    offset = float(bot.config.get("utc_offset_hours", 9))
+    return "日本時間 0:00" if offset == 9 else f"UTC{offset:+g} の 0:00"
+
+
+DAILY_SLOT_HOURS = 6            # デイリーボーナスを受け取れる間隔（0・6・12・18時に切り替わる）
+
+
+def tz_label(bot) -> str:
+    offset = float(bot.config.get("utc_offset_hours", 9))
+    return "日本時間" if offset == 9 else f"UTC{offset:+g}"
+
+
+def slot_of(now: datetime.datetime) -> int:
+    """いまが、何番目の「受け取りの時間帯」か（6時間ごとに1つ進む）。"""
+    return now.date().toordinal() * (24 // DAILY_SLOT_HOURS) + now.hour // DAILY_SLOT_HOURS
+
+
+def next_slot(bot) -> datetime.datetime:
+    """次にデイリーボーナスを受け取れる時刻。"""
+    now = local_now(bot)
+    start = datetime.datetime.combine(now.date(), datetime.time(), tzinfo=now.tzinfo)
+    return start + datetime.timedelta(hours=(now.hour // DAILY_SLOT_HOURS + 1) * DAILY_SLOT_HOURS)
+
+
+def next_slot_label(bot) -> str:
+    t = next_slot(bot)
+    return f"{t.hour}:00（{tz_label(bot)}）"
+
+
+def next_reset(bot) -> datetime.datetime:
+    now = local_now(bot)
+    return datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time(), tzinfo=now.tzinfo)
+
+
 def local_now(bot) -> datetime.datetime:
     tz = datetime.timezone(datetime.timedelta(hours=float(bot.config.get("utc_offset_hours", 9))))
     return datetime.datetime.now(tz)
-
-
-def _valid_guild_id(text: str) -> bool:
-    """サーバーIDとして正しい文字列（半角数字で、SQLite の整数に収まる正の値）。"""
-    t = text.strip()
-    return t.isascii() and t.isdigit() and 1 <= int(t) < 2 ** 63
 
 
 def manage_guild_or_owner():
@@ -76,26 +107,37 @@ class EconomyCog(commands.Cog):
         e = ui.embed(f"{icon} {member.display_name} の残高", f"{title_line}# {ui.pelica(s['balance'])}", color_item.value if color_item else ui.GOLD)
         e.set_thumbnail(url=member.display_avatar.url)
         if rank:
-            e.add_field(name="このサーバーでの順位", value=f"{rank[0]}位 / {rank[2]}人", inline=True)
+            e.add_field(name="このサーバーでの順位（総資産）", value=f"{rank[0]}位 / {rank[2]}人", inline=True)
+        held = self.g(interaction).crypto_values().get(member.id, 0)
+        if held:
+            e.add_field(name="CSトークン評価額", value=ui.pelica(held), inline=True)
         e.add_field(name="遊んだ回数", value=f"{s['games_played']:,}回", inline=True)
         e.add_field(name="最大の勝ち", value=ui.pelica(s["biggest_win"]), inline=True)
-        e.add_field(name="連続ログイン", value=f"{s['daily_streak']}日", inline=True)
+        e.add_field(name="連続ログイン", value=f"{s['daily_streak']}日" if s["daily_streak"] else "まだ受け取っていません", inline=True)
+        play = self.g(interaction).play_summary(member.id)
+        if play["plays"]:
+            e.add_field(name="勝率", value=f"{play['wins'] * 100 // play['plays']}%（{play['plays']:,}戦）", inline=True)
+            e.add_field(name="ゲームの損益", value=f"{play['net_total']:+,}ペリカ", inline=True)
+        if play["best_streak"] >= 2:
+            e.add_field(name="最大連勝", value=f"{play['best_streak']}連勝", inline=True)
+        e.set_footer(text="勝率・損益は、集計を始めてからのゲームの分です")
         await interaction.response.send_message(embed=e)
 
-    @group.command(name="デイリー", description="1日1回の無料ボーナスを受け取る（連続で増える）")
+    @group.command(name="デイリー", description="6時間ごとの無料ボーナス（日本時間 0・6・12・18時に切り替わる）")
     async def daily(self, interaction: discord.Interaction):
         now = local_now(self.bot)
-        result = self.g(interaction).claim_daily(interaction.user.id, now.date())
+        result = self.g(interaction).claim_daily(interaction.user.id, now.date(), slot_of(now))
         if not result.ok:
-            tomorrow = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time(), tzinfo=now.tzinfo)
             return await interaction.response.send_message(embed=ui.warn_embed(
-                "今日はもう受け取りました",
-                f"次は <t:{int(tomorrow.timestamp())}:R>（日本時間 0:00）に受け取れます。\n連続ログイン: **{result.streak}日**"), ephemeral=True)
+                "まだ受け取れません",
+                f"次は **{next_slot_label(self.bot)}**（<t:{int(next_slot(self.bot).timestamp())}:R>）から受け取れます。\n"
+                f"ボーナスは6時間ごと（0・6・12・18時）です。\n連続ログイン: **{result.streak}日**"), ephemeral=True)
         next_bonus = Economy.DAILY_BASE + Economy.DAILY_STREAK_BONUS * min(result.streak, Economy.DAILY_STREAK_CAP)
         boost = "🎟️ デイリー2倍券を使った！\n" if result.boosted else ""
         await interaction.response.send_message(embed=ui.ok_embed(
             "デイリーボーナス",
-            f"{boost}**+{ui.pelica(result.amount)}**\n連続ログイン: **{result.streak}日**（明日は {ui.pelica(next_bonus)}）\n残高: **{ui.pelica(result.balance)}**"))
+            f"{boost}**+{ui.pelica(result.amount)}**\n連続ログイン: **{result.streak}日**（明日は {ui.pelica(next_bonus)}）\n残高: **{ui.pelica(result.balance)}**\n\n"
+            f"🕛 次のボーナスは **{next_slot_label(self.bot)}**（<t:{int(next_slot(self.bot).timestamp())}:R>）から。6時間ごと（0・6・12・18時）に受け取れます。"))
 
     @group.command(name="ミッション", description="今日のミッションと進み具合を見る（達成すると自動でペリカがもらえる）")
     async def missions(self, interaction: discord.Interaction):
@@ -107,25 +149,25 @@ class EconomyCog(commands.Cog):
             mark = "✅" if done else "🔸"
             shown = m.target if done else progress
             lines.append(f"{mark} **{m.name}**　報酬 {ui.pelica(m.reward)}\n{bar} {shown:,} / {m.target:,}")
-        tomorrow = datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time(), tzinfo=now.tzinfo)
+        tomorrow = next_reset(self.bot)
         streak, best = self.g(interaction).win_streak(interaction.user.id)
         lines.append(f"\n※ 賭け金 {ui.pelica(missions_mod.MIN_BET)} 以上のゲームだけが数えられます。連勝はその日の分だけです。")
         lines.append(f"🎁 3つ全部で、さらに **+{ui.pelica(missions_mod.COMPLETE_BONUS)}**")
         lines.append(f"🔥 いまの連勝: **{streak}** ／ 自己ベスト: **{best}**")
-        lines.append(f"🕛 次の更新: <t:{int(tomorrow.timestamp())}:R>（日本時間 0:00）")
+        lines.append(f"🕛 次の更新: **{reset_label(self.bot)}**（<t:{int(tomorrow.timestamp())}:R>）")
         await interaction.response.send_message(embed=ui.embed("📜 今日のミッション", "\n".join(lines), ui.GOLD), ephemeral=True)
 
     @group.command(name="ランキング", description="このサーバーで、ペリカの多い順に並べる")
     async def ranking(self, interaction: discord.Interaction):
-        e = ranking.build_embed(self.g(interaction), None, "🏆 このサーバーのランキング", interaction.user.id,
-                                footer="※ ペリカはサーバーごとに別々です。このサーバーで遊んだ人だけが載ります")
+        e = ranking.build_embed(self.g(interaction), None, "🏆 このサーバーのランキング（総資産）", interaction.user.id,
+                                footer="総資産 = 残高 + CSトークンの評価額 ｜ ペリカはサーバーごとに別々です")
         await interaction.response.send_message(embed=e, allowed_mentions=discord.AllowedMentions.none())
 
     # ------------------- 自動で更新されるランキング掲示板 ------------------- #
     def _board_embed(self, guild_id: int) -> discord.Embed:
         ts = int(datetime.datetime.now().timestamp())
         return ranking.build_embed(
-            self.bot.economy.for_guild(guild_id), None, "🏆 ペリカランキング",
+            self.bot.economy.for_guild(guild_id), None, "🏆 ペリカランキング（総資産）",
             header=f"最終更新: <t:{ts}:R>\n\n",
             footer=f"{BOARD_INTERVAL_MINUTES}分ごとに自動で更新されます")
 
@@ -250,89 +292,10 @@ class EconomyCog(commands.Cog):
 
     @group.command(name="履歴", description="最近の増減を表示（自分だけに見えます）")
     async def history(self, interaction: discord.Interaction):
-        rows = self.g(interaction).history(interaction.user.id, 12)
-        lines = [f"<t:{int(r['ts'])}:t> `{r['delta']:+,}` → {r['balance_after']:,}　{r['reason']}" for r in rows]
-        await interaction.response.send_message(embed=ui.embed("🧾 最近の増減", "\n".join(lines) or "まだ記録がありません。", ui.INFO), ephemeral=True)
-
-    # ----------------- サーバーの承認（Bot の持ち主だけ） ----------------- #
-    def _is_owner(self, user_id: int) -> bool:
-        return user_id in approval.owner_ids(self.bot.config)
-
-    async def _owner_only(self, interaction: discord.Interaction) -> bool:
-        if not self._is_owner(interaction.user.id):
-            await interaction.response.send_message(embed=ui.error_embed("権限がありません", "このコマンドは Bot の持ち主だけが使えます。"), ephemeral=True)
-            return False
-        return True
-
-    @group.command(name="サーバー一覧", description="（持ち主のみ）許可・承認待ち・断ったサーバーを表示する")
-    async def server_list(self, interaction: discord.Interaction):
-        if not await self._owner_only(interaction):
-            return
-        joined = {g.id: g for g in self.bot.guilds}
-        rows = {r["guild_id"]: r for r in self.eco.list_guild_status()}
-        pre = approval.preapproved(self.bot.config)
-        groups = {"✅ 許可": [], "⏳ 承認待ち": [], "🚫 断った": []}
-        for gid in pre:
-            groups["✅ 許可"].append((gid, joined[gid].name if gid in joined else "（設定ファイルで許可）", gid in joined))
-        for gid, r in rows.items():
-            if gid in pre:
-                continue
-            key = {approval.APPROVED: "✅ 許可", approval.PENDING: "⏳ 承認待ち", approval.DENIED: "🚫 断った"}[r["status"]]
-            groups[key].append((gid, joined[gid].name if gid in joined else (r["name"] or "?"), gid in joined))
-        e = ui.embed("🌐 サーバーの許可状況", f"承認制: **{'ON' if approval.requires_approval(self.bot.config) else 'OFF'}**　参加中: {len(joined)}サーバー", ui.INFO)
-        for title, items in groups.items():
-            e.add_field(name=f"{title}（{len(items)}）", value="\n".join(f"{'🟢' if on else '⚪'} {name}　`{gid}`" for gid, name, on in items)[:1024] or "なし", inline=False)
-        e.set_footer(text="🟢 = いま参加中 / ⚪ = 参加していない")
-        await interaction.response.send_message(embed=e, ephemeral=True)
-
-    @group.command(name="サーバー許可", description="（持ち主のみ）サーバーIDを指定して、利用を許可する")
-    @app_commands.rename(guild_id="サーバーid")
-    @app_commands.describe(guild_id="許可するサーバーのID（承認待ちの一覧にあるもの）")
-    async def server_allow(self, interaction: discord.Interaction, guild_id: str):
-        if not await self._owner_only(interaction):
-            return
-        if not _valid_guild_id(guild_id):
-            return await interaction.response.send_message(embed=ui.error_embed("入力エラー", "サーバーidは数字だけで入力してください。"), ephemeral=True)
-        gid = int(guild_id)
-        guild = self.bot.get_guild(gid)
-        self.eco.set_guild_status(gid, approval.APPROVED, guild.name if guild else None, interaction.user.id)
-        if guild is not None:
-            cog = self.bot.get_cog("ApprovalCog")
-            if cog is not None:
-                await cog.announce_approved(guild)
-        await interaction.response.send_message(embed=ui.ok_embed("許可しました", f"`{gid}`" + (f"（{guild.name}）" if guild else "（まだ参加していません。追加されたらすぐ遊べます）") + " で遊べます。"), ephemeral=True)
-
-    @group.command(name="サーバー取消", description="（持ち主のみ）許可を取り消し、Bot をそのサーバーから退出させる")
-    @app_commands.rename(guild_id="サーバーid")
-    @app_commands.describe(guild_id="取り消すサーバーのID")
-    async def server_revoke(self, interaction: discord.Interaction, guild_id: str):
-        if not await self._owner_only(interaction):
-            return
-        if not _valid_guild_id(guild_id):
-            return await interaction.response.send_message(embed=ui.error_embed("入力エラー", "サーバーidは数字だけで入力してください。"), ephemeral=True)
-        gid = int(guild_id)
-        if gid in approval.preapproved(self.bot.config):
-            return await interaction.response.send_message(embed=ui.warn_embed("取り消せません", "設定ファイル（allowed_guild_ids）で許可されているサーバーです。設定ファイルから外してください。"), ephemeral=True)
-        guild = self.bot.get_guild(gid)
-        self.eco.set_guild_status(gid, approval.DENIED, guild.name if guild else None, interaction.user.id)
-        left = ""
-        if guild is not None:
-            try:
-                await guild.leave()
-                left = "Bot はそのサーバーから退出しました。"
-            except discord.HTTPException:
-                left = "退出はできませんでしたが、コマンドは使えなくなりました。"
-        await interaction.response.send_message(embed=ui.ok_embed("取り消しました", f"`{gid}` の許可を取り消しました。{left}"), ephemeral=True)
-
-    @group.command(name="付与", description="（持ち主のみ）ペリカを付与する")
-    @app_commands.rename(member="対象", amount="金額")
-    @app_commands.describe(member="付与する相手", amount="付与する金額")
-    async def grant(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 10_000_000]):
-        if interaction.user.id not in set(self.bot.config.get("owner_ids") or []):
-            return await interaction.response.send_message(embed=ui.error_embed("権限がありません", "このコマンドは Bot の持ち主だけが使えます。"), ephemeral=True)
-        balance = self.g(interaction).credit(member.id, amount, f"付与（{interaction.user.id}）")
-        await interaction.response.send_message(embed=ui.ok_embed("付与しました", f"{member.mention} に {ui.pelica(amount)} を付与しました（残高 {ui.pelica(balance)}）。"),
-                                                allowed_mentions=discord.AllowedMentions.none())
+        rows = self.g(interaction).history(interaction.user.id, 60)       # 1ゲームは複数の行なので、多めに読んでまとめる
+        lines = history_mod.format_history(rows, 12)
+        await interaction.response.send_message(embed=ui.embed("🧾 最近の増減", "\n".join(lines) or "まだ記録がありません。", ui.INFO),
+                                                ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
 
 async def setup(bot):
