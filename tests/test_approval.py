@@ -327,7 +327,7 @@ def test_owner_commands_are_dm_only_and_not_in_other_groups():
     assert ctx.dm_channel and ctx.private_channel and not ctx.guild                 # サーバーのコマンド候補には出ない
     from cogs.economy_cog import EconomyCog
     assert not any(getattr(EconomyCog, n, None) for n in ("server_list", "server_allow", "server_revoke", "grant"))   # 「ペリカ」グループからは消えた
-    assert {c.name for c in ApprovalCog.group.commands} == {"サーバー一覧", "サーバー許可", "サーバー取消", "付与", "お知らせ", "抽選", "クイズ", "イベント", "口座", "貸付", "還元率", "パチンコ統計"}
+    assert {c.name for c in ApprovalCog.group.commands} == {"サーバー一覧", "サーバー許可", "サーバー取消", "付与", "お知らせ", "抽選", "クイズ", "イベント", "還元率", "パチンコ統計"}
     assert app_commands  # noqa
 
 

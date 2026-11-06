@@ -1,4 +1,4 @@
-"""/貸付 — ユーザー同士の貸し借り（日割りの単利）。運営口座からの貸付は `/運営 貸付`。
+"""/貸付 — ユーザー同士の貸し借り（日割りの単利）。
 
 - 貸す人が `/貸付 提案` で、相手・金額・日利・期間を決める。投稿の「承諾」を借りる本人が押すと成立し、お金が移る。
 - 返済は `/貸付 返済`。期限には、借りた人の残高から自動で回収する。足りない分は延滞になり、入ってくるお金から古い順に回収する。
@@ -17,11 +17,8 @@ from cogs.weekly_cog import announce_channel
 from core import approval, loans, logthrottle, ui
 from core.duration import format_minutes
 
-HOUSE = 0
-
-
 def who(user_id: int) -> str:
-    return "**運営**" if user_id == HOUSE else f"<@{user_id}>"
+    return f"<@{user_id}>"
 
 
 def terms_lines(loan: dict) -> list:
@@ -75,7 +72,7 @@ async def handle_button(bot, interaction: discord.Interaction, act: str, loan_id
     elif act == "decline":
         ok, reason = eco.loan_decline(loan_id, interaction.user.id)
     else:
-        ok, reason = eco.loan_cancel(loan_id, interaction.user.id, interaction.user.id in approval.owner_ids(bot.config))
+        ok, reason = eco.loan_cancel(loan_id, interaction.user.id)
     if not ok:
         return await interaction.response.send_message(embed=ui.error_embed("できません", reason), ephemeral=True)
     loan = eco.loan_get(loan_id)
@@ -119,24 +116,6 @@ class LoanCog(commands.Cog):
         await interaction.response.send_message(content=f"<@{member.id}>", embed=offer_embed(loan), view=offer_view(result),
                                                 allowed_mentions=discord.AllowedMentions(users=[member]))
         eco.loan_set_message(result, (await interaction.original_response()).id)
-
-    # 運営口座からの提案（`/運営 貸付 提案` から呼ぶ）
-    async def post_house_offer(self, guild: discord.Guild, borrower_id: int, principal: int, rate_tenths: int, days: int, channel=None) -> tuple:
-        eco = self.bot.economy.for_guild(guild.id)
-        channel = channel or announce_channel(guild, eco)
-        if channel is None:
-            return False, "投稿できるチャンネルがありません。"
-        ok, result = eco.loan_offer(HOUSE, borrower_id, principal, rate_tenths, days, channel.id, time.time())
-        if not ok:
-            return False, result
-        loan = eco.loan_get(result)
-        try:
-            message = await channel.send(content=f"<@{borrower_id}>", embed=offer_embed(loan), view=offer_view(result), allowed_mentions=discord.AllowedMentions(users=[discord.Object(id=borrower_id)]))
-        except discord.HTTPException as exc:
-            eco.loan_cancel(result, 0, True)
-            return False, f"投稿できませんでした: {exc}"
-        eco.loan_set_message(result, message.id)
-        return True, f"{guild.name} の {channel.mention} に、運営からの提案 #{result} を出しました（<@{borrower_id}> 宛）。"
 
     # ------------------------------ 返済・一覧 ------------------------------ #
     @group.command(name="返済", description="借りたペリカを返す（金額を省くと全額）")

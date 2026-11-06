@@ -32,7 +32,6 @@ from core import shop as shop_mod
 from core import weekly as weekly_mod
 from core.eco_bonds import BondMixin
 from core.eco_events import EventMixin
-from core.eco_house import HouseMixin
 from core.eco_loans import LoanMixin
 from core.eco_pachinko import PachinkoMixin
 from core.eco_rtp import RtpMixin
@@ -83,7 +82,7 @@ class TransferResult:
     sender_balance: int = 0
 
 
-class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, HouseMixin, RtpMixin, LoanMixin):
+class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, RtpMixin, LoanMixin):
     DAILY_BASE = 1000
     DAILY_STREAK_BONUS = 100     # 連続1日ごとの加算
     DAILY_STREAK_CAP = 9         # 加算は9日分まで（最大 +900）
@@ -425,36 +424,13 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
                 );
                 CREATE INDEX IF NOT EXISTS idx_pachinko_spins ON pachinko_spins (guild_id, ts);
                 CREATE INDEX IF NOT EXISTS idx_pachinko_sets ON pachinko_sets (guild_id, ts);
-                CREATE TABLE IF NOT EXISTS house (              -- 運営口座（サーバーごとに1つ。マイナスもある）
-                    guild_id    INTEGER PRIMARY KEY,
-                    balance     INTEGER NOT NULL,
-                    created     REAL    NOT NULL,             -- 口座を開いた時刻（毎日の公開は、この日から数える）
-                    last_report TEXT    NOT NULL DEFAULT ''   -- 最後に収支を公開した日（2026-11-06 の形。'' は未公開）
-                );
-                CREATE TABLE IF NOT EXISTS house_ledger (       -- 運営口座の帳簿。ユーザーの帳簿（ledger）とは別
-                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guild_id      INTEGER NOT NULL,
-                    ts            REAL    NOT NULL,
-                    category      TEXT    NOT NULL,           -- 分類（「ゲーム:スロット」「デイリー」「横領」など）
-                    delta         INTEGER NOT NULL,           -- 口座の増減（入金は正、出金は負）
-                    balance_after INTEGER NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_house_ledger ON house_ledger (guild_id, ts);
-                CREATE TABLE IF NOT EXISTS house_issue (        -- システムが発行したペリカ（デイリー・ミッション・初期支給）。運営口座には影響しない。毎日の公開に別に出す
-                    id       INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guild_id INTEGER NOT NULL,
-                    ts       REAL    NOT NULL,
-                    category TEXT    NOT NULL,
-                    amount   INTEGER NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_house_issue ON house_issue (guild_id, ts);
                 CREATE TABLE IF NOT EXISTS rtp_level (          -- ゲームごとの還元率レベル（1〜6。3は標準＝保存しない）
                     guild_id INTEGER NOT NULL,
                     game     TEXT    NOT NULL,
                     level    INTEGER NOT NULL,
                     PRIMARY KEY (guild_id, game)
                 );
-                CREATE TABLE IF NOT EXISTS loans (              -- 貸し借り（ユーザー同士、または運営口座から。lender_id=0 が運営）
+                CREATE TABLE IF NOT EXISTS loans (              -- 貸し借り（ユーザー同士）
                     id            INTEGER PRIMARY KEY AUTOINCREMENT,
                     guild_id      INTEGER NOT NULL,
                     lender_id     INTEGER NOT NULL,
@@ -531,7 +507,6 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
         )
         if cur.rowcount:
             self._ledger(user_id, INITIAL_BALANCE, INITIAL_BALANCE, "初期支給")
-            self._house_issue("初期支給", INITIAL_BALANCE)          # 新しい人への初期支給は、システムの発行（運営口座には影響しない）
 
     def _ledger(self, user_id: int, delta: int, balance_after: int, reason: str) -> None:
         self._conn.execute(
@@ -545,12 +520,8 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
     def _debt(self, user_id: int) -> int:
         return self._conn.execute("SELECT debt FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()["debt"]
 
-    def _apply(self, user_id: int, delta: int, reason: str, house: Optional[str] = None, issue: Optional[str] = None) -> int:
+    def _apply(self, user_id: int, delta: int, reason: str) -> int:
         """残高に delta を足す（0 未満にはならない）。実際に変化した量を返す。
-
-        house に分類名を渡すと、その実際の増減の逆（ユーザーが得た分は出金、失った分は入金）を、運営口座に記録する。
-        issue に分類名を渡すと、入った分を「システムの発行」として記録する（運営口座には影響しない）。
-        借金の返済に回った分は、「借金回収」として運営口座に入る。
 
         借金があるとき、入金（delta > 0）は先に借金の返済へ回す（強制徴収。完済まで）。
         賭け金の返金は、もともと自分のお金なので徴収しない。
@@ -560,16 +531,11 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
         self._conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, self._g(), user_id))
         if after != before:
             self._ledger(user_id, after - before, after, reason)
-            if house:
-                self._house_move(house, -(after - before))
-            if issue and after > before:
-                self._house_issue(issue, after - before)
         if delta > 0 and not reason.startswith("返金"):
             repay = min(self._debt(user_id), after)
             if repay > 0:
                 self._conn.execute("UPDATE users SET balance=balance-?, debt=debt-? WHERE guild_id=? AND user_id=?", (repay, repay, self._g(), user_id))
                 self._ledger(user_id, -repay, after - repay, "借金の返済")
-                self._house_move("借金回収", repay)
                 after -= repay
             if not getattr(self, "_loan_guard", False):        # 延滞中の貸付があれば、入ったお金から回収する（借金の返済のあと）
                 self._collect_overdue_for(user_id)
@@ -590,22 +556,22 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
             self._ensure(user_id)
             return self._balance(user_id)
 
-    def credit(self, user_id: int, amount: int, reason: str, house: Optional[str] = None) -> int:
-        """残高を増やす（amount > 0）。管理者の付与などに使う。house を渡すと、運営口座から出す。"""
+    def credit(self, user_id: int, amount: int, reason: str) -> int:
+        """残高を増やす（amount > 0）。管理者の付与などに使う。"""
         if amount <= 0:
             raise ValueError("amount は正の数にしてください")
         with self._lock, self._conn:
             self._ensure(user_id)
-            self._apply(user_id, amount, reason, house)
+            self._apply(user_id, amount, reason)
             return self._balance(user_id)
 
-    def debit_up_to(self, user_id: int, amount: int, reason: str, house: Optional[str] = None) -> int:
+    def debit_up_to(self, user_id: int, amount: int, reason: str) -> int:
         """残高の範囲で amount を引く。実際に引けた額を返す（チンチロの倍払いなど）。"""
         if amount <= 0:
             return 0
         with self._lock, self._conn:
             self._ensure(user_id)
-            return -self._apply(user_id, -amount, reason, house)
+            return -self._apply(user_id, -amount, reason)
 
     # ------------------------------------------------------------------ #
     # 賭け金の預かりと精算                                                #
@@ -618,7 +584,7 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
             self._ensure(user_id)
             if self._balance(user_id) < amount:
                 return None
-            self._apply(user_id, -amount, f"賭け:{game}", f"ゲーム:{game}")
+            self._apply(user_id, -amount, f"賭け:{game}")
             cur = self._conn.execute(
                 "INSERT INTO escrow (guild_id, user_id, amount, game, created_at) VALUES (?, ?, ?, ?, ?)",
                 (self._g(), user_id, amount, game, time.time()),
@@ -633,7 +599,7 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
             row = self._conn.execute("SELECT user_id, game FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g())).fetchone()
             if row is None or extra <= 0 or self._balance(row["user_id"]) < extra:
                 return False
-            self._apply(row["user_id"], -extra, f"追加の賭け:{row['game']}", f"ゲーム:{row['game']}")
+            self._apply(row["user_id"], -extra, f"追加の賭け:{row['game']}")
             self._conn.execute("UPDATE escrow SET amount = amount + ? WHERE id=? AND guild_id=?", (extra, escrow_id, self._g()))
             self._conn.execute("UPDATE users SET total_wagered = total_wagered + ? WHERE guild_id=? AND user_id=?",
                                (extra, self._g(), row["user_id"]))
@@ -673,9 +639,9 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
                     self._conn.execute("UPDATE profile SET insurance = insurance - 1 WHERE guild_id=? AND user_id=?", (self._g(), user_id))
             total = payout + insured
             if total:
-                self._apply(user_id, total, f"払い戻し:{game}" if payout else f"保険券で半額返金:{game}", f"ゲーム:{game}")
+                self._apply(user_id, total, f"払い戻し:{game}" if payout else f"保険券で半額返金:{game}")
             self._conn.execute("DELETE FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g()))
-            taken = -self._apply(user_id, -penalty, f"追加の支払い:{game}", f"ゲーム:{game}") if penalty > 0 else 0
+            taken = -self._apply(user_id, -penalty, f"追加の支払い:{game}") if penalty > 0 else 0
             if penalty > taken:           # 残高で足りない分は借金にする
                 self._conn.execute("UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (penalty - taken, self._g(), user_id))
                 self._ledger(user_id, 0, self._balance(user_id), f"借金:{game}（{penalty - taken:,}ペリカ）")
@@ -694,7 +660,7 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
             row = self._conn.execute("SELECT user_id, amount, game FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g())).fetchone()
             if row is None:
                 return False
-            self._apply(row["user_id"], row["amount"], f"返金:{row['game']}", f"ゲーム:{row['game']}")
+            self._apply(row["user_id"], row["amount"], f"返金:{row['game']}")
             self._conn.execute("DELETE FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g()))
             return True
 
@@ -759,13 +725,13 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
                                    "ON CONFLICT(guild_id, user_id, day, mission_id) DO UPDATE SET progress=excluded.progress, done=excluded.done",
                                    (g, user_id, d, m.id, min(progress, m.target), int(done)))
                 if done:
-                    self._apply(user_id, m.reward, f"ミッション報酬:{m.name}", issue="ミッション")
+                    self._apply(user_id, m.reward, f"ミッション報酬:{m.name}")
                     completed.append((m, m.reward))
             if completed:
                 n = self._conn.execute("SELECT COUNT(*) FROM missions WHERE guild_id=? AND user_id=? AND day=? AND done=1", (g, user_id, d)).fetchone()[0]
                 if n >= missions_mod.PER_DAY:
                     bonus = missions_mod.COMPLETE_BONUS
-                    self._apply(user_id, bonus, "ミッション全達成ボーナス", issue="ミッション")
+                    self._apply(user_id, bonus, "ミッション全達成ボーナス")
             return {"streak": streak, "new_best": new_best, "completed": completed, "bonus": bonus}
 
     def mission_status(self, user_id: int, day: datetime.date) -> list:
@@ -1113,7 +1079,7 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
                 amount *= 2
                 self._conn.execute("UPDATE profile SET daily_boost = daily_boost - 1 WHERE guild_id=? AND user_id=?", (self._g(), user_id))
             debt_before = self._debt(user_id)
-            self._apply(user_id, amount, f"デイリー（{streak}日連続{'・2倍券' if boosted else ''}）", issue="デイリー")
+            self._apply(user_id, amount, f"デイリー（{streak}日連続{'・2倍券' if boosted else ''}）")
             self._conn.execute("UPDATE users SET daily_streak=?, last_daily=?, last_slot=? WHERE guild_id=? AND user_id=?",
                                (streak, today.isoformat(), slot, self._g(), user_id))
             return DailyResult(True, amount, streak, self._balance(user_id), boosted, debt_before - self._debt(user_id))
@@ -1140,7 +1106,7 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
                 return PurchaseResult(False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、買い物はできません。", self._balance(user_id))
             if self._balance(user_id) < total:
                 return PurchaseResult(False, f"ペリカが足りません（{total:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。", self._balance(user_id))
-            self._apply(user_id, -total, f"購入:{label}" + (f"×{qty}" if qty > 1 else ""), "ショップ")
+            self._apply(user_id, -total, f"購入:{label}" + (f"×{qty}" if qty > 1 else ""))
             self._conn.execute(
                 "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty", (self._g(), user_id, item_id, qty))
@@ -1371,7 +1337,7 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, Hous
                 return TransferResult(False, f"残高が足りません（送金額 {amount:,} + 手数料 {fee:,} が必要です）。")
             self._apply(sender, -amount, f"送金（送）→{receiver}")       # 手数料は別の行にする（1日の上限は、送った額だけで数えるため）
             if fee:
-                self._apply(sender, -fee, "送金手数料", "送金手数料")
+                self._apply(sender, -fee, "送金手数料")
             self._apply(receiver, amount, f"送金（受）←{sender}")
             return TransferResult(True, received=amount, fee=fee, sender_balance=self._balance(sender))
 

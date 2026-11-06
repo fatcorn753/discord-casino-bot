@@ -1,4 +1,4 @@
-"""貸し借り: 日割り単利、承諾でお金が移る、返済、期限の自動回収、延滞の強制徴収、運営貸付、ボタンと通知。"""
+"""貸し借り: 日割り単利、承諾でお金が移る、返済、期限の自動回収、延滞の強制徴収、ボタンと通知。"""
 
 import asyncio
 from types import SimpleNamespace
@@ -39,7 +39,6 @@ def test_interest_is_simple_per_day_with_rounding_up_and_a_term_cap():
     assert loans.elapsed_days(0, 99 * DAY, 10) == 10                                      # 期間が上限（延滞の利息は付かない）
     assert loans.total_owed(1000, 20, 10, 0, 3 * DAY - 5) == 1000 + 3 * 20
     assert loans.full_term_total(1000, 20, 10) == 1200 and loans.rate_text(25) == "2.5%" and loans.rate_text(0) == "0%"
-    assert loans.split_payment(1000, 0, 300) == (300, 0) and loans.split_payment(1000, 900, 300) == (100, 200) and loans.split_payment(1000, 1000, 50) == (0, 50)
 
 
 # ----------------------------- 提案 ----------------------------- #
@@ -51,8 +50,6 @@ def test_offer_validation(eco):
         ok, reason = eco.loan_offer(*args, 777, NOW)
         assert not ok and fragment in reason, (args, reason)
     assert eco.loan_offer(A, B, 1000, 1000, 10, 777, NOW)[0]                              # 日利100%まで出せる
-    assert eco.loan_offer(0, B, 1_000_000, 20, 10, 777, NOW)[0]                          # 運営は残高に関係なく、上限100万まで
-    assert not eco.loan_offer(0, B, 1_000_001, 20, 10, 777, NOW)[0]
 
 
 def test_open_offer_limit(eco):
@@ -180,42 +177,13 @@ def test_repayment_does_not_chain_into_the_receivers_own_overdue_loans(eco):
     assert eco.loan_get(2)["paid"] == 0                                                               # 回収の連鎖は起きない（A の入金で、すぐ C へは払わない）
 
 
-# ----------------------------- 運営からの貸付 ----------------------------- #
-def test_house_loan_moves_money_through_the_house_account(eco):
-    eco.balance(B)
-    base = eco.house_balance()
-    lid = active(eco, lender=0, borrower=B, principal=10_000, rate=10)
-    assert eco.house_balance() == base - 10_000 and eco.balance(B) == INITIAL_BALANCE + 10_000
-    ok, paid = eco.loan_repay(lid, B, None, NOW + 1 + 2 * DAY + 100)                                 # 3日分 = 日利1.0% × 3
-    assert ok and paid == 10_000 + 3 * 100
-    assert eco.house_balance() == base - 10_000 + 10_000 + 300
-    rows = eco.house_summary(0, 9e12)["rows"]
-    assert rows["貸付"][1] == -10_000 and rows["貸付回収"][1] == 10_000 and rows["貸付利息"][1] == 300
-    assert eco._conn.execute("SELECT COALESCE(SUM(delta), 0) FROM house_ledger").fetchone()[0] == eco.house_balance()
-
-
-def test_house_loan_overdue_is_collected_into_the_house(eco):
-    lid = active(eco, lender=0, borrower=B, principal=1000, rate=0)
-    eco._conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (B,))
-    base = eco.house_balance()
-    assert eco.loan_collect_due(NOW + 1 + 10 * DAY)[0]["status"] == "overdue"
-    eco.credit(B, 700, "入金")
-    assert eco.house_balance() == base + 700 and eco.loan_get(lid)["paid"] == 700
-
-
-def test_house_loan_offer_can_only_be_cancelled_by_the_owner(eco):
-    lid = offer(eco, lender=0)
-    assert eco.loan_cancel(lid, A)[0] is False
-    assert eco.loan_cancel(lid, OWNER, is_owner=True) == (True, "")
-
-
 # ----------------------------- 一覧・通知 ----------------------------- #
 def test_lists_reminders_and_expiry(eco):
     o = offer(eco)
     a = active(eco, lender=A, borrower=C)
     data = eco.loan_list(A)
     assert [x["id"] for x in data["lent"]] == [o, a] and data["borrowed"] == []
-    assert [x["id"] for x in eco.loan_list(C)["borrowed"]] == [a] and eco.loan_house_list() == []
+    assert [x["id"] for x in eco.loan_list(C)["borrowed"]] == [a]
     assert eco.loan_due_soon(NOW + 5 * DAY) == []
     soon = eco.loan_due_soon(NOW + 1 + 9 * DAY + 100)                                                 # 期限の24時間前を切った
     assert [x["id"] for x in soon] == [a] and eco.loan_due_soon(NOW + 1 + 9 * DAY + 200) == []         # 1回だけ
@@ -252,10 +220,10 @@ def test_buttons_accept_decline_cancel_with_the_right_people(eco, monkeypatch):
     assert log[-1] == ("send", "❌ できません") and eco.loan_get(lid)["status"] == "offer"
     asyncio.run(handle_button(bot, click(B, log), "accept", lid))
     assert log[-1][:2] == ("edit", "🤝 貸付 #1 成立") and log[-1][2] is None and eco.loan_get(lid)["status"] == "active"
-    lid2 = offer(eco, lender=0)
-    asyncio.run(handle_button(bot, click(A, log), "cancel", lid2))                                    # 運営の提案を、他人は取り下げられない
+    lid2 = offer(eco)
+    asyncio.run(handle_button(bot, click(B, log), "cancel", lid2))                                    # 貸す側以外は、取り下げられない
     assert log[-1][0] == "send" and eco.loan_get(lid2)["status"] == "offer"
-    asyncio.run(handle_button(bot, click(OWNER, log), "cancel", lid2))
+    asyncio.run(handle_button(bot, click(A, log), "cancel", lid2))
     assert log[-1][1].endswith("取り下げられました") and eco.loan_get(lid2)["status"] == "cancelled"
     lid3 = offer(eco, principal=100)
     asyncio.run(handle_button(bot, click(B, log), "decline", lid3))
@@ -272,9 +240,9 @@ def test_dynamic_button_id_round_trip():
 
 
 def test_offer_embed_and_names(eco):
-    lid = offer(eco, lender=0)
+    lid = offer(eco)
     e = offer_embed(eco.loan_get(lid))
-    assert "運営" in e.description and "1,200ペリカ" in e.description and "日利: **2%**" in e.description and who(5) == "<@5>"
+    assert f"<@{A}>" in e.description and "1,200ペリカ" in e.description and "日利: **2%**" in e.description and who(5) == "<@5>"
 
 
 class Chan:

@@ -145,7 +145,6 @@ def test_settlement_applies_the_level_only_to_wins_and_stays_consistent(tmp_path
     assert net == 4000 and ctx.rtp_shift == 0
     eco = bot.economy
     assert eco._conn.execute("SELECT SUM(delta) FROM ledger WHERE user_id=1").fetchone()[0] == eco.balance(1)
-    assert eco._conn.execute("SELECT COALESCE(SUM(delta), 0) FROM house_ledger").fetchone()[0] == eco.house_balance()      # 運営口座にも反映される
 
 
 def test_roulette_passes_its_bet_kind_and_the_result_text_shows_the_adjusted_payout(tmp_path, monkeypatch):

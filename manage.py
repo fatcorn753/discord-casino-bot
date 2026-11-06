@@ -20,7 +20,7 @@ LABEL = {approval.APPROVED: "許可", approval.PENDING: "承認待ち", approval
 
 
 def cmd_grant(eco: Economy, args) -> int:
-    balance = eco.for_guild(args.guild_id).credit(args.user_id, args.amount, f"付与（管理）{args.reason}".strip(), "付与")
+    balance = eco.for_guild(args.guild_id).credit(args.user_id, args.amount, f"付与（管理）{args.reason}".strip())
     print(f"付与しました: サーバー {args.guild_id} / ユーザー {args.user_id} に {args.amount:,}ペリカ（残高 {balance:,}）")
     return 0
 

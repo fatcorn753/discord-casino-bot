@@ -9,7 +9,6 @@ import math
 
 USER_MIN_PRINCIPAL = 100
 USER_MAX_PRINCIPAL = 100_000
-HOUSE_MAX_PRINCIPAL = 1_000_000
 MAX_RATE_TENTHS = 1000           # 日利の上限（100.0%）。日利は 0.1% 刻みで、tenths（0.1%を1とした整数）で持つ
 MIN_TERM_DAYS = 1
 MAX_TERM_DAYS = 30
@@ -40,9 +39,3 @@ def total_owed(principal: int, rate_tenths: int, term_days: int, accepted_at: fl
 def full_term_total(principal: int, rate_tenths: int, term_days: int) -> int:
     """期間いっぱい借りた場合の返済総額。"""
     return principal + interest(principal, rate_tenths, term_days)
-
-
-def split_payment(principal: int, paid_before: int, amount: int) -> tuple:
-    """返済 amount を、(元本に充てた額, 利息に充てた額) に分ける。先に元本。"""
-    principal_part = min(paid_before + amount, principal) - min(paid_before, principal)
-    return principal_part, amount - principal_part

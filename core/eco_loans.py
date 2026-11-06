@@ -1,4 +1,4 @@
-"""貸し借りの記録（Economy に混ぜ込む部品）。ユーザー同士と、運営口座からの貸付（lender_id = 0）。
+"""貸し借りの記録（Economy に混ぜ込む部品）。ユーザー同士の貸し借り。
 
 流れ: 提案（offer）→ 借りる人が承諾（active、お金が移る）→ 返済（repaid）／期限に自動回収／足りなければ延滞（overdue）。
 延滞の残りは、借りた人に入ってくるお金から、借金の返済のあとで、古い順に自動で回収する。
@@ -9,8 +9,6 @@
 from typing import Optional
 
 from core import loans as loans_mod
-
-HOUSE = 0           # lender_id が 0 なら運営口座
 
 
 class LoanMixin:
@@ -31,17 +29,12 @@ class LoanMixin:
         return max(0, self._loan_owed(loan, now) - loan["paid"])
 
     def _loan_pay(self, loan: dict, amount: int) -> None:
-        """借りた人 → 貸した人へ amount を動かす（借りた人の残高は、呼び出し側が確かめておく）。運営口座なら、元本と利息に分けて口座に入れる。"""
-        principal_part, interest_part = loans_mod.split_payment(loan["principal"], loan["paid"], amount)
+        """借りた人 → 貸した人へ amount を動かす（借りた人の残高は、呼び出し側が確かめておく）。"""
         self._loan_guard = True                       # 回収の連鎖（受け取った人の延滞の回収）を止める
         try:
-            self._apply(loan["borrower_id"], -amount, f"貸付の返済→{loan['lender_id'] or '運営'}（#{loan['id']}）")
-            if loan["lender_id"] == HOUSE:
-                self._house_move("貸付回収", principal_part)
-                self._house_move("貸付利息", interest_part)
-            else:
-                self._ensure(loan["lender_id"])
-                self._apply(loan["lender_id"], amount, f"貸付の回収←{loan['borrower_id']}（#{loan['id']}）")
+            self._apply(loan["borrower_id"], -amount, f"貸付の返済→{loan['lender_id']}（#{loan['id']}）")
+            self._ensure(loan["lender_id"])
+            self._apply(loan["lender_id"], amount, f"貸付の回収←{loan['borrower_id']}（#{loan['id']}）")
         finally:
             self._loan_guard = False
         loan["paid"] += amount
@@ -60,8 +53,8 @@ class LoanMixin:
 
     # ---- 提案・承諾・辞退・取り下げ ---- #
     def loan_offer(self, lender_id: int, borrower_id: int, principal: int, rate_tenths: int, term_days: int, channel_id: int, now: float) -> tuple:
-        """貸す提案を作る。(成功か, 理由か貸付の番号) を返す。lender_id が 0 なら運営口座から。"""
-        high = loans_mod.HOUSE_MAX_PRINCIPAL if lender_id == HOUSE else loans_mod.USER_MAX_PRINCIPAL
+        """貸す提案を作る。(成功か, 理由か貸付の番号) を返す。"""
+        high = loans_mod.USER_MAX_PRINCIPAL
         low = loans_mod.USER_MIN_PRINCIPAL
         if lender_id == borrower_id:
             return False, "自分には貸せません。"
@@ -72,16 +65,15 @@ class LoanMixin:
         if not loans_mod.MIN_TERM_DAYS <= term_days <= loans_mod.MAX_TERM_DAYS:
             return False, f"期間は {loans_mod.MIN_TERM_DAYS}〜{loans_mod.MAX_TERM_DAYS}日 にしてください。"
         with self._lock, self._conn:
-            if lender_id != HOUSE:
-                self._ensure(lender_id)
-                if self._balance(lender_id) < principal:
-                    return False, f"残高が足りません（いまの残高: {self._balance(lender_id):,}ペリカ）。"
-                opened = self._conn.execute("SELECT COUNT(*) FROM loans WHERE guild_id=? AND lender_id=? AND status='offer'", (self._g(), lender_id)).fetchone()[0]
-                active = self._conn.execute("SELECT COUNT(*) FROM loans WHERE guild_id=? AND lender_id=? AND status IN ('active','overdue')", (self._g(), lender_id)).fetchone()[0]
-                if opened >= loans_mod.MAX_LENDER_OPEN:
-                    return False, f"承諾待ちの提案は {loans_mod.MAX_LENDER_OPEN} 件までです。"
-                if active >= loans_mod.MAX_LENDER_ACTIVE:
-                    return False, f"同時に貸せるのは {loans_mod.MAX_LENDER_ACTIVE} 件までです。"
+            self._ensure(lender_id)
+            if self._balance(lender_id) < principal:
+                return False, f"残高が足りません（いまの残高: {self._balance(lender_id):,}ペリカ）。"
+            opened = self._conn.execute("SELECT COUNT(*) FROM loans WHERE guild_id=? AND lender_id=? AND status='offer'", (self._g(), lender_id)).fetchone()[0]
+            active = self._conn.execute("SELECT COUNT(*) FROM loans WHERE guild_id=? AND lender_id=? AND status IN ('active','overdue')", (self._g(), lender_id)).fetchone()[0]
+            if opened >= loans_mod.MAX_LENDER_OPEN:
+                return False, f"承諾待ちの提案は {loans_mod.MAX_LENDER_OPEN} 件までです。"
+            if active >= loans_mod.MAX_LENDER_ACTIVE:
+                return False, f"同時に貸せるのは {loans_mod.MAX_LENDER_ACTIVE} 件までです。"
             cur = self._conn.execute(
                 "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires, channel_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, 'offer', ?, ?, ?)",
@@ -115,14 +107,11 @@ class LoanMixin:
                 return False, "延滞中の貸付があるので、借りられません。先に返してください。"
             if row["n"] >= loans_mod.MAX_BORROWER_ACTIVE:
                 return False, f"同時に借りられるのは {loans_mod.MAX_BORROWER_ACTIVE} 件までです。"
-            if loan["lender_id"] != HOUSE:
-                self._ensure(loan["lender_id"])
-                if self._balance(loan["lender_id"]) < loan["principal"]:
-                    return False, "貸す側の残高が足りなくなったので、成立しませんでした。"
-                self._apply(loan["lender_id"], -loan["principal"], f"貸付→{user_id}（#{loan_id}）")
-            else:
-                self._house_move("貸付", -loan["principal"])
-            self._apply(user_id, loan["principal"], f"借入←{loan['lender_id'] or '運営'}（#{loan_id}）")
+            self._ensure(loan["lender_id"])
+            if self._balance(loan["lender_id"]) < loan["principal"]:
+                return False, "貸す側の残高が足りなくなったので、成立しませんでした。"
+            self._apply(loan["lender_id"], -loan["principal"], f"貸付→{user_id}（#{loan_id}）")
+            self._apply(user_id, loan["principal"], f"借入←{loan['lender_id']}（#{loan_id}）")
             self._conn.execute("UPDATE loans SET status='active', accepted_at=?, due=? WHERE id=?", (now, now + loan["term_days"] * 86400, loan_id))
             return True, ""
 
@@ -137,13 +126,13 @@ class LoanMixin:
             self._conn.execute("UPDATE loans SET status='declined' WHERE id=?", (loan_id,))
             return True, ""
 
-    def loan_cancel(self, loan_id: int, user_id: int, is_owner: bool = False) -> tuple:
-        """貸す側が提案を取り下げる（運営の提案は、持ち主だけ）。"""
+    def loan_cancel(self, loan_id: int, user_id: int) -> tuple:
+        """貸す側が提案を取り下げる。"""
         with self._lock, self._conn:
             loan = self._loan_row(self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone())
             if loan is None or loan["status"] != "offer":
                 return False, "この提案はもう終わっています。"
-            if not (user_id == loan["lender_id"] and loan["lender_id"] != HOUSE) and not (loan["lender_id"] == HOUSE and is_owner):
+            if user_id != loan["lender_id"]:
                 return False, "取り下げられるのは、貸す側だけです。"
             self._conn.execute("UPDATE loans SET status='cancelled' WHERE id=?", (loan_id,))
             return True, ""
@@ -211,8 +200,3 @@ class LoanMixin:
             rows = [dict(r) for r in self._conn.execute(
                 "SELECT * FROM loans WHERE guild_id=? AND (borrower_id=? OR lender_id=?) AND status IN ('offer','active','overdue') ORDER BY id", (self._g(), user_id, user_id))]
         return {"borrowed": [r for r in rows if r["borrower_id"] == user_id], "lent": [r for r in rows if r["lender_id"] == user_id]}
-
-    def loan_house_list(self) -> list:
-        """運営口座が貸している、終了前の貸付。"""
-        with self._lock:
-            return [dict(r) for r in self._conn.execute("SELECT * FROM loans WHERE guild_id=? AND lender_id=0 AND status IN ('offer','active','overdue') ORDER BY id", (self._g(),))]
