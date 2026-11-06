@@ -7,8 +7,9 @@ from discord.ext import commands
 from play.blackjack import play_blackjack
 from play.chinchiro import play_chinchiro
 from play.common import MAX_BET, MIN_BET
+from games import pachinko as pachinko_game
 from play.pachinko import play_pachinko
-from play.simple import play_coin, play_roulette, play_slot
+from play.simple import play_roulette, play_slot
 
 BET_HELP = f"賭けるペリカ（{MIN_BET:,}〜{MAX_BET:,}）"
 
@@ -19,30 +20,24 @@ class Casino(commands.Cog):
 
     casino = app_commands.Group(name="カジノ", description="🎰 ペリカを賭けて遊ぶ（遊びのゲーム用の仮想通貨です）")
 
-    @casino.command(name="チンチロ", description="🎲 地下チンチロ。親と勝負、目が出なければ3回まで振れる")
+    @casino.command(name="チンチロ", description="🎲 チンチロ。親と勝負、目が出なければ3回まで振れる")
     @app_commands.rename(bet="賭け金")
     @app_commands.describe(bet=BET_HELP)
     async def chinchiro(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET, MAX_BET]):
         await play_chinchiro(interaction, self.bot, bet)
 
-    @casino.command(name="パチンコ", description="🎰 地下パチンコ。玉が落ちて、リールが回る演出つき")
-    @app_commands.rename(bet="賭け金")
-    @app_commands.describe(bet=BET_HELP)
-    async def pachinko(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET, MAX_BET]):
-        await play_pachinko(interaction, self.bot, bet)
+    @casino.command(name="パチンコ", description="🎰 玉を打ち出して、入った数だけ回転。当たれば連チャン")
+    @app_commands.rename(bet="賭け金", sets="回数")
+    @app_commands.describe(bet="1セット（100発）の賭け金", sets=f"連続で打つセット数（1〜{pachinko_game.MAX_SETS}。省略で1）。賭け金×回数が上限以内")
+    async def pachinko(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET, MAX_BET],
+                       sets: app_commands.Range[int, 1, pachinko_game.MAX_SETS] = 1):
+        await play_pachinko(interaction, self.bot, bet, sets)
 
     @casino.command(name="スロット", description="🍒 3つのリール。揃えば大きく増える")
     @app_commands.rename(bet="賭け金")
     @app_commands.describe(bet=BET_HELP)
     async def slot(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET, MAX_BET]):
         await play_slot(interaction, self.bot, bet)
-
-    @casino.command(name="コイン", description="🪙 コイン投げ。表か裏を当てる（当たりで1.95倍）")
-    @app_commands.rename(bet="賭け金", side="予想")
-    @app_commands.describe(bet=BET_HELP, side="表か裏か")
-    @app_commands.choices(side=[app_commands.Choice(name="表", value="表"), app_commands.Choice(name="裏", value="裏")])
-    async def coin(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET, MAX_BET], side: app_commands.Choice[str]):
-        await play_coin(interaction, self.bot, bet, side.value)
 
     @casino.command(name="ブラックジャック", description="🃏 21に近づけてディーラーに勝つ（ヒット・スタンド・ダブル）")
     @app_commands.rename(bet="賭け金")

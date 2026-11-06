@@ -170,7 +170,7 @@ def test_manual_event_announces_start_and_end_in_the_chosen_channel(tmp_path, mo
     assert len(chans[11].sent) == 1 and chans[10].sent == [] and eco.manual_event_get(time.time())["channel_id"] == 11
     asyncio.run(cog.stop_manual(guild))
     assert len(chans[11].sent) == 2 and "終了" in chans[11].sent[1]["embed"].title and chans[10].sent == []      # 終了も同じチャンネル
-    asyncio.run(cog.start_manual(guild, "コイン", 50, 30))                                          # 指定なしは告知チャンネル（system_channel）
+    asyncio.run(cog.start_manual(guild, "ルーレット", 50, 30))                                          # 指定なしは告知チャンネル（system_channel）
     assert len(chans[10].sent) == 1 and eco.manual_event_get(time.time())["channel_id"] == 0
 
 
@@ -180,7 +180,7 @@ def test_old_manual_event_table_gets_channel_id(tmp_path):
     Economy(path)
     c = sqlite3.connect(path)
     c.executescript("""DROP TABLE manual_event; CREATE TABLE manual_event (guild_id INTEGER PRIMARY KEY, game TEXT NOT NULL, boost INTEGER NOT NULL,
-        starts REAL NOT NULL, ends REAL NOT NULL, ended INTEGER NOT NULL DEFAULT 0); INSERT INTO manual_event VALUES (0, 'コイン', 50, 0, 9e12, 0);""")
+        starts REAL NOT NULL, ends REAL NOT NULL, ended INTEGER NOT NULL DEFAULT 0); INSERT INTO manual_event VALUES (0, 'ルーレット', 50, 0, 9e12, 0);""")
     c.commit()
     c.close()
     assert Economy(path).manual_event_get(100)["channel_id"] == 0

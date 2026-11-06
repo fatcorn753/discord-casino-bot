@@ -327,7 +327,7 @@ def test_owner_commands_are_dm_only_and_not_in_other_groups():
     assert ctx.dm_channel and ctx.private_channel and not ctx.guild                 # サーバーのコマンド候補には出ない
     from cogs.economy_cog import EconomyCog
     assert not any(getattr(EconomyCog, n, None) for n in ("server_list", "server_allow", "server_revoke", "grant"))   # 「ペリカ」グループからは消えた
-    assert {c.name for c in ApprovalCog.group.commands} == {"サーバー一覧", "サーバー許可", "サーバー取消", "付与", "お知らせ", "抽選", "クイズ", "イベント", "パチンコ統計"}
+    assert {c.name for c in ApprovalCog.group.commands} == {"サーバー一覧", "サーバー許可", "サーバー取消", "付与", "お知らせ", "抽選", "クイズ", "イベント", "口座", "貸付", "還元率", "パチンコ統計"}
     assert app_commands  # noqa
 
 
@@ -622,42 +622,54 @@ def test_event_admin_commands_target_one_or_all_allowed_guilds_and_are_owner_onl
 
 
 # ----------------------------- パチンコ統計 ----------------------------- #
+def make_set(starts=3, hits=1, rounds=((2,),), spins=None, mult=None):
+    """テスト用の SetResult。spins を渡さなければ、starts 回転のうち先頭 hits 回が当たり。"""
+    from games import pachinko
+    if spins is None:
+        spins = tuple(pachinko.SpinInfo("gold" if i == 0 else "", "super" if i == 0 else "", i < hits, tuple(rounds[i]) if i < hits else (), 0.1) for i in range(starts))
+    raw = sum(s.raw for s in spins)
+    return pachinko.SetResult(len(spins), spins, raw, raw if mult is None else mult)
+
+
 @pytest.mark.real_scope
-def test_pachinko_log_aggregates_by_omen_tier_guild_and_period(tmp_path):
+def test_pachinko_records_aggregate_by_omen_tier_guild_and_period(tmp_path):
     eco = Economy(str(tmp_path / "t.db"))
     g1, g2 = eco.for_guild(5), eco.for_guild(6)
-    g1.pachinko_record(1, "gold", "super", 20, 100, now=1000)
-    g1.pachinko_record(1, "", "", 0, 100, now=2000)
-    g1.pachinko_record(2, "gold", "", 0, 200, now=3000)
-    g2.pachinko_record(3, "red", "normal", 2, 50, now=4000)
+    g1.pachinko_record_set(1, 100, 100, make_set(3, 1, ((20, 10),)), now=1000)          # 3回転、先頭が当たり（連チャン2、30倍）
+    g1.pachinko_record_set(1, 100, 100, make_set(2, 0), now=2000)
+    g2.pachinko_record_set(3, 50, 100, make_set(1, 1, ((2,),)), now=4000)
     data = eco.pachinko_stats()
-    assert data["total"] == (4, 2, 450, 100 * 20 + 50 * 2)                           # 回転, 当たり, 賭け金, 払い戻し
-    assert data["omen"] == {"gold": (2, 1), "": (1, 0), "red": (1, 1)} and data["tier"] == {"super": (1, 1), "": (2, 0), "normal": (1, 1)}
-    assert eco.pachinko_stats(5)["total"][0] == 3 and eco.pachinko_stats(6)["total"][0] == 1
-    assert eco.pachinko_stats(5, since=2500)["total"] == (1, 0, 200, 0)               # 期間で絞れる
-    assert eco.pachinko_stats(99)["total"] == (0, 0, 0, 0)
+    sets_n, hit_sets, bet, back, balls, starts, chain_max = data["sets"]
+    assert (sets_n, hit_sets, bet, back, balls, starts, chain_max) == (3, 2, 250, 100 * 30 + 50 * 2, 300, 6, 2)
+    assert data["spins"] == (6, 2) and data["omen"] == {"gold": (3, 2), "": (3, 0)} and data["tier"] == {"super": (3, 2), "": (3, 0)}     # 各セットの1回転目が、金・スーパー
+    assert eco.pachinko_stats(5)["sets"][0] == 2 and eco.pachinko_stats(6)["sets"][0] == 1
+    assert eco.pachinko_stats(5, since=1500)["sets"][:4] == (1, 0, 100, 0)                # 期間で絞れる
+    assert eco.pachinko_stats(99)["sets"] == (0, 0, 0, 0, 0, 0, 0) and eco.pachinko_stats(99)["spins"] == (0, 0)
 
 
 def test_pachinko_stats_embed_compares_actual_to_design():
     from cogs.approval_cog import pachinko_stats_embed
     from games import pachinko
-    empty = pachinko_stats_embed({"omen": {}, "tier": {}, "total": (0, 0, 0, 0)}, "全サーバー")
+    empty = pachinko_stats_embed({"omen": {}, "tier": {}, "spins": (0, 0), "sets": (0, 0, 0, 0, 0, 0, 0)}, "全サーバー")
     assert "まだ記録がありません" in empty.description
-    data = {"omen": {"gold": (200, 110), "": (50, 5)}, "tier": {"super": (100, 45)}, "total": (250, 115, 25_000, 24_000)}
+    data = {"omen": {"gold": (200, 110), "": (50, 5)}, "tier": {"super": (100, 45)}, "spins": (250, 115),
+            "sets": (40, 5, 4000, 3600, 4000, 280, 6)}
     e = pachinko_stats_embed(data, "テスト鯖・過去7日")
-    assert "テスト鯖・過去7日" in e.title and "250回転" in e.description
-    assert "実績 **46.0%**" in e.description and f"設計 {pachinko.hit_rate():.1%}" in e.description
-    assert "還元率: 実績 **96.0%**" in e.description
+    assert "テスト鯖・過去7日" in e.title and "40セット（4,000発）" in e.description
+    assert "実績 **7.00回**" in e.description and "設計 7.00回" in e.description                       # 1セットあたりのスタート入賞
+    assert "当たったセット: 実績 **12.5%**" in e.description and f"設計 {pachinko.hit_rate():.1%}" in e.description
+    assert "還元率: 実績 **90.0%**" in e.description and "最大連チャン 6連" in e.description
+    assert "1回転の当たり率: 実績 **46.00%**" in e.description
     omen, tier = e.fields[0].value, e.fields[1].value
-    assert "🟡 金: 200回　実績 **55.0%**" in omen and "なし: 50回　実績 **10.0%**" in omen and "（参考）" in omen        # 50回転は参考
-    assert "🔵 青: 0回　実績 **—**" in omen
-    assert "スーパー: 100回　実績 **45.0%** ／ 設計 45.0%" in tier and "45.0%（参考）" not in tier             # 100回転以上は「参考」が付かない
+    assert "🟡 金: 200回転　実績 **55.0%**" in omen and "なし: 50回転　実績 **10.0%**" in omen and "（参考）" in omen        # 50回転は参考
+    assert "🔵 青: 0回転　実績 **—**" in omen
+    assert "スーパー: 100回転　実績 **45.0%** ／ 設計" in tier and "45.0%（参考）" not in tier
 
 
 def test_pachinko_stats_command_is_owner_only_and_scopes_to_the_chosen_guild(tmp_path):
     import asyncio
     cog, eco, guild, bot = make_admin(tmp_path)
-    eco.for_guild(5).pachinko_record(1, "red", "", 0, 100)
+    eco.for_guild(5).pachinko_record_set(1, 100, 100, make_set(1, 0))
     sent = []
 
     class R:

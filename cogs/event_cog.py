@@ -44,7 +44,7 @@ class EventCog(commands.Cog):
         return ui.embed(f"🔥 突発イベント発生！ {ev.title}", text, ui.GOLD)
 
     def manual_embed(self, m: dict, ended: bool) -> discord.Embed:
-        title, blurb = events.GAMES[m["game"]]
+        title, blurb = events.GAMES.get(m["game"], (m["game"], ""))          # 廃止したゲームのイベントが残っていても落ちない
         if ended:
             return ui.embed(f"{title} は終了しました", "また次のイベントをお楽しみに！", ui.INFO)
         text = (f"{blurb}\n\n<t:{int(m['starts'])}:t> 〜 <t:{int(m['ends'])}:t>（<t:{int(m['ends'])}:R>に終了）の間、"
@@ -67,7 +67,7 @@ class EventCog(commands.Cog):
         if m is None:
             return False, f"{guild.name}: 開催中の特別イベントはありません"
         await self._post(guild, eco, self.manual_embed(m, True), self._event_channel(guild, m))
-        return True, f"{guild.name}: {events.GAMES[m['game']][0]}を終わらせました"
+        return True, f"{guild.name}: {events.GAMES.get(m['game'], (m['game'],))[0]}を終わらせました"
 
     async def run_once(self) -> None:
         now = local_now(self.bot)

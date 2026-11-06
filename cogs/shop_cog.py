@@ -1,8 +1,14 @@
-"""/ショップ — ペリカで称号・カード・消耗品・名前の色を交換する。景品はすべてゲーム内・サーバー内で完結する。"""
+"""/ショップ — ペリカで称号・カード・消耗品・名前の色を交換する。景品はすべてゲーム内・サーバー内で完結する。
+
+`/ショップ` ひとつで、操作パネル（選択肢とボタン）を開く。見る・買う・身につける・外す・称号の表示を、パネルから行う。
+下の `_LEGACY` のコマンド（一覧・購入・持ち物・使う・称号表示）は、パネルが呼び出す処理として残してあり、Discord には登録しない。
+"""
 
 import asyncio
 
 import discord
+from types import SimpleNamespace
+
 from discord import app_commands
 from discord.ext import commands
 
@@ -110,6 +116,121 @@ async def apply_title_nick(guild: discord.Guild, member: discord.Member, title: 
         eco.set_nick_state(guild.id, member.id, new_state.original if new_state else None, new_state.applied if new_state else None)
 
 
+class ShopView(discord.ui.View):
+    """`/ショップ` の操作パネル。「ショップ」と「持ち物」の2つの画面を、同じメッセージの中で切り替える。
+
+    見る画面は、同じメッセージを書き換える。買う・使う・外す・称号の表示は、既存の処理を呼び出し、
+    結果は別のメッセージ（自分だけに見える）で返す。パネルを開いた本人だけが操作できる。
+    """
+
+    def __init__(self, cog: "ShopCog", user_id: int, guild_id: int, screen: str = "shop", kind: str = None):
+        super().__init__(timeout=600)
+        self.cog, self.user_id, self.guild_id, self.screen, self.kind, self.qty = cog, user_id, guild_id, screen, kind, 1
+        self._build()
+
+    # ---- 見た目 ---- #
+    def embed(self) -> discord.Embed:
+        if self.screen == "inv":
+            return self.cog._inventory_embed(self.guild_id, self.user_id)
+        return self.cog._catalog_embed(self.guild_id, self.user_id, [self.kind] if self.kind else None)
+
+    def _build(self) -> None:
+        self.clear_items()
+        if self.screen == "inv":
+            self._build_inventory()
+        else:
+            self._build_shop()
+
+    def _build_shop(self) -> None:
+        options = [discord.SelectOption(label="すべて", value="*", default=self.kind is None)]
+        options += [discord.SelectOption(label=kind_name(k), value=k, default=self.kind == k) for k in shop.KIND_LABEL]
+        kind_select = discord.ui.Select(placeholder="種類を選ぶ", options=options, row=0)
+        kind_select.callback = self._on_kind
+        self.add_item(kind_select)
+        items = [i for i in shop.of_kind(self.kind) if not i.limited] if self.kind else []
+        if items:
+            buy = discord.ui.Select(placeholder="買う景品を選ぶ", row=1, options=[
+                discord.SelectOption(label=shop.label(i)[:100], value=i.id, description=f"{i.price:,}ペリカ" + (f"　{i.desc}" if i.desc else "")[:60]) for i in items[:25]])
+            buy.callback = self._on_buy
+            self.add_item(buy)
+        if self.kind == shop.CONSUMABLE:
+            qty = discord.ui.Select(placeholder=f"個数（いま {self.qty} 個）", row=2, options=[discord.SelectOption(label=f"{n}個", value=str(n), default=n == self.qty) for n in range(1, MAX_QTY + 1)])
+            qty.callback = self._on_qty
+            self.add_item(qty)
+        go = discord.ui.Button(label="🎒 持ち物", style=discord.ButtonStyle.primary, row=3)
+        go.callback = self._to_inventory
+        self.add_item(go)
+
+    def _build_inventory(self) -> None:
+        eco = self.cog.bot.economy.for_guild(self.guild_id)
+        inv = eco.inventory(self.user_id)
+        owned = [i for i in (shop.BY_ID.get(item_id) for item_id in inv) if i is not None]
+        if owned:
+            use = discord.ui.Select(placeholder="身につける・使う景品を選ぶ", row=0, options=[
+                discord.SelectOption(label=shop.label(i)[:100], value=i.id, description=(f"×{inv[i.id]}" if not i.unique else "")) for i in owned[:25]])
+            use.callback = self._on_use
+            self.add_item(use)
+        unequip = discord.ui.Select(placeholder="外すものを選ぶ", row=1, options=[
+            discord.SelectOption(label="称号", value="title"), discord.SelectOption(label="カードの色", value="card_color"),
+            discord.SelectOption(label="カードのアイコン", value="card_icon"), discord.SelectOption(label="名前の色（ロール）", value="role")])
+        unequip.callback = self._on_unequip
+        self.add_item(unequip)
+        for label, mode, row in (("称号を名前の後ろに付ける", "on", 2), ("称号を名前に付けない", "off", 2)):
+            btn = discord.ui.Button(label=label, style=discord.ButtonStyle.secondary, row=row)
+            btn.callback = self._make_nick(mode)
+            self.add_item(btn)
+        back = discord.ui.Button(label="🛍️ ショップ", style=discord.ButtonStyle.primary, row=3)
+        back.callback = self._to_shop
+        self.add_item(back)
+
+    # ---- 操作 ---- #
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(embed=ui.error_embed("これは他の人のパネルです", "`/ショップ` で自分のパネルを開けます。"), ephemeral=True)
+            return False
+        return True
+
+    async def _redraw(self, interaction: discord.Interaction) -> None:
+        self._build()
+        await interaction.response.edit_message(embed=self.embed(), view=self)
+
+    async def _on_kind(self, interaction: discord.Interaction):
+        value = interaction.data["values"][0]
+        self.kind, self.qty = (None if value == "*" else value), 1
+        await self._redraw(interaction)
+
+    async def _on_qty(self, interaction: discord.Interaction):
+        self.qty = int(interaction.data["values"][0])
+        await self._redraw(interaction)
+
+    async def _on_buy(self, interaction: discord.Interaction):
+        await ShopCog.buy.callback(self.cog, interaction, interaction.data["values"][0], self.qty if self.kind == shop.CONSUMABLE else 1)
+
+    async def _to_inventory(self, interaction: discord.Interaction):
+        self.screen = "inv"
+        await self._redraw(interaction)
+
+    async def _to_shop(self, interaction: discord.Interaction):
+        self.screen = "shop"
+        await self._redraw(interaction)
+
+    async def _on_use(self, interaction: discord.Interaction):
+        await ShopCog.use.callback(self.cog, interaction, interaction.data["values"][0], None)
+
+    async def _on_unequip(self, interaction: discord.Interaction):
+        value = interaction.data["values"][0]
+        name = {"title": "称号", "card_color": "カードの色", "card_icon": "カードのアイコン", "role": "名前の色（ロール）"}[value]
+        await ShopCog.use.callback(self.cog, interaction, None, SimpleNamespace(value=value, name=name))
+
+    def _make_nick(self, mode: str):
+        async def callback(interaction: discord.Interaction):
+            await ShopCog.title_display.callback(self.cog, interaction, SimpleNamespace(value=mode))
+        return callback
+
+
+_LEGACY = app_commands.Group(name="ショップ", description="（Discord には登録しない。パネルが呼び出す処理）")
+
+
 class ShopCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -127,7 +248,6 @@ class ShopCog(commands.Cog):
     def eco(self):
         return self.bot.economy
 
-    group = app_commands.Group(name="ショップ", description="🛍️ ペリカで称号・色・消耗品を交換（景品はゲーム内のものだけ）")
 
     def _equipped_title(self, guild_id: int, user_id: int):
         """そのサーバーで装備している称号（景品はサーバーごとに別々）。"""
@@ -171,6 +291,12 @@ class ShopCog(commands.Cog):
     async def on_guild_remove(self, guild: discord.Guild):
         self.eco.delete_guild_nick_prefs(guild.id)      # Bot が外れたら、そのサーバーの設定は消す（再参加で勝手に復活しない）
 
+    @app_commands.command(name="ショップ", description="🛍️ 景品を見る・買う・身につける（ボタンで操作）")
+    @app_commands.guild_only()
+    async def shop_panel(self, interaction: discord.Interaction):
+        view = ShopView(self, interaction.user.id, interaction.guild.id)
+        await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+
     # ---------------------------- 候補の表示 ---------------------------- #
     async def _catalog_autocomplete(self, interaction: discord.Interaction, current: str):
         cur = current.lower()
@@ -193,16 +319,20 @@ class ShopCog(commands.Cog):
         return out[:25]
 
     # ------------------------------ 一覧 ------------------------------ #
-    @group.command(name="一覧", description="交換できる景品と値段を表示")
+    @_LEGACY.command(name="一覧", description="交換できる景品と値段を表示")
     @app_commands.rename(kind="種類")
     @app_commands.describe(kind="見たい種類（省略時: すべて）")
     @app_commands.choices(kind=[app_commands.Choice(name=kind_name(k), value=k) for k in shop.KIND_LABEL])
     async def list_items(self, interaction: discord.Interaction, kind: app_commands.Choice[str] = None):
-        inv = self.g(interaction).inventory(interaction.user.id)
-        kinds = [kind.value] if kind else list(shop.KIND_LABEL)
+        await interaction.response.send_message(embed=self._catalog_embed(interaction.guild.id, interaction.user.id, [kind.value] if kind else None), ephemeral=True)
+
+    def _catalog_embed(self, guild_id: int, user_id: int, kinds=None) -> discord.Embed:
+        """景品の一覧（kinds が None ならすべての種類）。残高つき。"""
+        eco = self.bot.economy.for_guild(guild_id)
+        inv = eco.inventory(user_id)
         e = ui.embed("🛍️ ペリカショップ", "景品はすべて、ゲーム内・サーバー内で完結するものです（現実の価値はありません）。\n"
-                     "`/ショップ 購入` で買い、`/ショップ 使う` で身につけます。", ui.GOLD)
-        for k in kinds:
+                     "種類を選ぶと、下の選択肢で買えます。身につけるのは「🎒 持ち物」の画面です。", ui.GOLD)
+        for k in kinds or list(shop.KIND_LABEL):
             items = shop.of_kind(k)
             if k == shop.COLOR_ROLE:
                 owned = [i.name for i in items if i.id in inv]
@@ -211,19 +341,19 @@ class ShopCog(commands.Cog):
                 value = "\n".join(f"{'✅ ' if i.id in inv and i.unique else ''}{i.value if k == shop.CARD_ICON else ''}{i.name} — {ui.pelica(i.price)}"
                                   + (f"\n　└ {i.desc}" if i.desc else "") for i in items)
             e.add_field(name=shop.KIND_LABEL[k], value=value[:1024], inline=False)
-        me = self.g(interaction).peek_stats(interaction.user.id)
+        me = eco.peek_stats(user_id)
         e.set_footer(text=f"あなたの残高: {ui.pelica(me['balance'] if me else 0)}")
-        await interaction.response.send_message(embed=e, ephemeral=True)
+        return e
 
     # ------------------------------ 購入 ------------------------------ #
-    @group.command(name="購入", description="ペリカで景品を買う")
+    @_LEGACY.command(name="購入", description="ペリカで景品を買う")
     @app_commands.rename(item="商品", qty="個数")
     @app_commands.describe(item="買う景品（候補から選べます）", qty=f"消耗品の個数 1〜{MAX_QTY}（省略時: 1）")
     @app_commands.autocomplete(item=_catalog_autocomplete)
     async def buy(self, interaction: discord.Interaction, item: str, qty: app_commands.Range[int, 1, MAX_QTY] = 1):
         it = shop.find(item)
         if it is None:
-            return await interaction.response.send_message(embed=ui.error_embed("景品が見つかりません", "候補から選ぶか、`/ショップ 一覧` で確認してください。"), ephemeral=True)
+            return await interaction.response.send_message(embed=ui.error_embed("景品が見つかりません", "`/ショップ` の画面で選んでください。"), ephemeral=True)
         if it.limited:
             return await interaction.response.send_message(embed=ui.error_embed("買えません", f"**{it.name}** は買えない限定称号です。毎週月曜0時の週間ランキングで、1位の人に贈られます。"), ephemeral=True)
         # 買い物の間は「プレイ中」にする。ゲーム中に残高を減らして倍払いを避ける／確認待ちの間にゲームを始める、を防ぐ
@@ -238,7 +368,7 @@ class ShopCog(commands.Cog):
             # 確認ボタンを出す前に、買えるかを先に調べる（足りないのに確認だけさせない）
             balance = self.g(interaction).balance(uid)         # 自分の口座なので、初めてなら初期支給つきで作ってよい
             if it.unique and self.g(interaction).inventory(uid).get(it.id, 0) > 0:
-                return await interaction.response.send_message(embed=ui.error_embed("買えませんでした", "すでに持っています。`/ショップ 使う` で身につけられます。"), ephemeral=True)
+                return await interaction.response.send_message(embed=ui.error_embed("買えませんでした", "すでに持っています。「🎒 持ち物」の画面で身につけられます。"), ephemeral=True)
             if balance < total:
                 return await interaction.response.send_message(embed=ui.error_embed(
                     "買えませんでした", f"ペリカが足りません（{total:,}ペリカ必要・残高 {balance:,}ペリカ）。\n`/ペリカ デイリー` で6時間ごとにもらえます。"), ephemeral=True)
@@ -252,18 +382,24 @@ class ShopCog(commands.Cog):
             res = self.g(interaction).purchase(uid, it.id, shop.label(it), it.price, it.unique, qty)
             if not res.ok:
                 return await reply(embed=ui.error_embed("買えませんでした", res.reason), ephemeral=True)
-            hint = "`/ショップ 使う` で身につけましょう。" if it.unique else "`/ショップ 使う` で使えます。"
+            hint = "「🎒 持ち物」の画面で身につけましょう。" if it.unique else "「🎒 持ち物」の画面で使えます。"
             await reply(embed=ui.ok_embed("購入しました", f"**{shop.label(it)}**" + (f" ×{qty}" if qty > 1 else "") + f"\n残高: **{ui.pelica(res.balance)}**\n{hint}"), ephemeral=True)
         finally:
             self.bot.sessions.end(uid)
 
     # ------------------------------ 持ち物 ------------------------------ #
-    @group.command(name="持ち物", description="持っている景品と、装備中のものを表示")
+    @_LEGACY.command(name="持ち物", description="持っている景品と、装備中のものを表示")
     async def inventory(self, interaction: discord.Interaction):
-        inv = self.g(interaction).inventory(interaction.user.id)
-        prof = self.g(interaction).get_profile(interaction.user.id)
+        e = self._inventory_embed(interaction.guild.id, interaction.user.id)
+        await interaction.response.send_message(embed=e, ephemeral=True)
+
+    def _inventory_embed(self, guild_id: int, user_id: int) -> discord.Embed:
+        """持ち物と、装備中のもの、使用中の効果。何も持っていなければ、その案内。"""
+        eco = self.bot.economy.for_guild(guild_id)
+        inv = eco.inventory(user_id)
+        prof = eco.get_profile(user_id)
         if not inv and not prof["daily_boost"] and not prof["insurance"]:
-            return await interaction.response.send_message(embed=ui.embed("🎒 持ち物", "まだ何も持っていません。`/ショップ 一覧` を見てみましょう。", ui.INFO), ephemeral=True)
+            return ui.embed("🎒 持ち物", "まだ何も持っていません。「🛍️ ショップ」の画面で、景品を買えます。", ui.INFO)
         equipped = {prof["title"], prof["card_color"], prof["card_icon"]}
         e = ui.embed("🎒 持ち物", color=ui.INFO)
         for k in shop.KIND_LABEL:
@@ -281,12 +417,12 @@ class ShopCog(commands.Cog):
             active.append(f"保険券（次に負けたとき半額返金）×{prof['insurance']}")
         if active:
             e.add_field(name="⏳ 使用中の効果", value="\n".join(active), inline=False)
-        await interaction.response.send_message(embed=e, ephemeral=True)
+        return e
 
     # ------------------------------ 使う ------------------------------ #
-    @group.command(name="使う", description="持っている景品を身につける・使う。装備を外すときも、これを使う")
+    @_LEGACY.command(name="使う", description="景品を身につける・使う（外すときも、これ）")
     @app_commands.rename(item="商品", unequip="外す")
-    @app_commands.describe(item="使う景品（持っているものが候補に出ます）", unequip="装備を外すとき、外すものを選ぶ（商品は指定しない）")
+    @app_commands.describe(item="使う景品（持っているものが候補に出ます）", unequip="外したいものを選ぶ（商品は空にする）")
     @app_commands.autocomplete(item=_owned_autocomplete)
     @app_commands.choices(unequip=[
         app_commands.Choice(name="称号", value="title"), app_commands.Choice(name="カードの色", value="card_color"),
@@ -303,7 +439,7 @@ class ShopCog(commands.Cog):
         owned = [i for i in shop.find_all(item) if inv.get(i.id, 0) > 0]
         it = owned[0] if owned else shop.find(item)
         if it is None or inv.get(it.id, 0) <= 0:
-            return await interaction.response.send_message(embed=ui.error_embed("持っていません", "`/ショップ 持ち物` で確認できます。"), ephemeral=True)
+            return await interaction.response.send_message(embed=ui.error_embed("持っていません", "「🎒 持ち物」の画面で確認できます。"), ephemeral=True)
         if it.kind == shop.CONSUMABLE:
             if self.bot.sessions.is_active(uid):
                 # ゲームの結果を見てから保険券を使う、などを防ぐ
@@ -334,7 +470,7 @@ class ShopCog(commands.Cog):
             return await interaction.followup.send(embed=ui.ok_embed("装備しました", f"**{shop.label(it)}**\n`/ペリカ 残高` で確認できます。{note}"), ephemeral=True)
         await interaction.response.send_message(embed=ui.ok_embed("装備しました", f"**{shop.label(it)}**\n`/ペリカ 残高` で確認できます。"), ephemeral=True)
 
-    # ------------------------------ 外す（/ショップ 使う の「外す」） ------------------------------ #
+    # ------------------------------ 外す（使う の「外す」） ------------------------------ #
     async def _unequip(self, interaction: discord.Interaction, what: app_commands.Choice[str]):
         if what.value == "role":
             await interaction.response.defer(ephemeral=True)
@@ -355,9 +491,9 @@ class ShopCog(commands.Cog):
         await interaction.response.send_message(embed=ui.ok_embed("外しました", f"{what.name}を外しました。"), ephemeral=True)
 
     # ------------------------- 称号をニックネームに ------------------------- #
-    @group.command(name="称号表示", description="称号をニックネームの後ろに付ける／付けない（このサーバーでの設定）")
+    @_LEGACY.command(name="称号表示", description="称号をニックネームに付ける／付けない")
     @app_commands.rename(mode="表示")
-    @app_commands.describe(mode="ニックネームに付けると、メッセージの名前の横に出ます（例: たつ【ざわ…ざわ…】）")
+    @app_commands.describe(mode="付けると、名前の横に称号が出ます")
     @app_commands.choices(mode=[app_commands.Choice(name="ニックネームに付ける", value="on"),
                                 app_commands.Choice(name="付けない（元に戻す）", value="off")])
     async def title_display(self, interaction: discord.Interaction, mode: app_commands.Choice[str]):
@@ -376,8 +512,8 @@ class ShopCog(commands.Cog):
                     self.eco.set_nick_pref(guild.id, uid, False)
                 return await interaction.followup.send(embed=ui.error_embed("ニックネームに付けられません", problem), ephemeral=True)
             msg = (f"称号 **{title}** をニックネームの後ろに付けました。" if title else
-                   "称号を装備すると、ニックネームの後ろに付きます。`/ショップ 使う` で称号を選んでください。")
-            return await interaction.followup.send(embed=ui.ok_embed("ニックネームに付けます", msg + "\n自分でニックネームを変えると、称号が消えることがあります。そのときは `/ショップ 使う` で付け直せます。"), ephemeral=True)
+                   "称号を装備すると、ニックネームの後ろに付きます。「🎒 持ち物」の画面で称号を選んでください。")
+            return await interaction.followup.send(embed=ui.ok_embed("ニックネームに付けます", msg + "\n自分でニックネームを変えると、称号が消えることがあります。そのときは「🎒 持ち物」の画面で付け直せます。"), ephemeral=True)
         await interaction.response.defer(ephemeral=True)
         problem = ""
         if was_on:       # ONにしていた人だけ、元のニックネームに戻す（ONにしたことがない人の名前には触らない）

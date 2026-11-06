@@ -5,7 +5,7 @@ from typing import Optional
 
 
 class Sessions:
-    def __init__(self, cooldown: float = 2.0):
+    def __init__(self, cooldown: float = 1.5):
         self._active = set()
         self._last_end = {}
         self.cooldown = cooldown

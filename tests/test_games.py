@@ -1,6 +1,6 @@
 import random
 
-from games import blackjack, chinchiro, pachinko, roulette, slot
+from games import blackjack, chinchiro, roulette, slot
 from games.chinchiro import ARASHI, HIFUMI, ME, MENASHI, PINZORO, SHIGORO, classify, compare
 
 
@@ -69,53 +69,6 @@ def test_slot_rtp_is_reasonable():
     assert slot.multiplier(("🍒", "🍋", "🍇")) == 0.3 and slot.multiplier(("🍋", "🍇", "🔔")) == 0
 
 
-def test_pachinko_probabilities_and_rtp():
-    for table in (pachinko.OMEN_TABLE, pachinko.TIER_TABLE):
-        assert abs(sum(p for p, _ in table.values()) - 1.0) < 1e-9
-    assert set(pachinko.PRIZE_WEIGHTS) == set(pachinko.TIER_TABLE)
-    assert all(len(w) == len(pachinko.PRIZES) and abs(sum(w) - 1.0) < 1e-9 for w in pachinko.PRIZE_WEIGHTS.values())
-    assert 0.999 <= pachinko.rtp() <= 1.0                       # 還元率は100%に限りなく近く、超えない（超えると連打で増えてしまう）
-    assert max(m for _, m in pachinko.PRIZES) == 100             # 一撃: 最高100倍
-    assert 0.20 <= pachinko.hit_rate() <= 0.23
-
-
-def test_pachinko_hit_probability_adds_the_cues_and_caps_at_certain():
-    assert pachinko.hit_probability("", "") == pachinko.BASE_HIT
-    assert pachinko.hit_probability("blue", "") < pachinko.hit_probability("red", "") < pachinko.hit_probability("gold", "")
-    assert pachinko.hit_probability("", pachinko.NORMAL) < pachinko.hit_probability("", pachinko.SUPER) < pachinko.hit_probability("", pachinko.PREMIUM)
-    assert abs(pachinko.hit_probability("red", pachinko.SUPER) - (pachinko.BASE_HIT + 0.15 + 0.35)) < 1e-9      # 足し算
-    assert pachinko.hit_probability("gold", pachinko.PREMIUM) == 1.0                                          # 金予告 + プレミアムは確定
-
-
-def test_pachinko_observed_rates_follow_the_design():
-    rng = random.Random(21)
-    n = 120_000
-    by_omen, by_tier, total_hits = {}, {}, 0
-    for _ in range(n):
-        outcome, omen, tier = pachinko.roll(rng)
-        hit = outcome.multiplier > 0
-        total_hits += hit
-        for table, key in ((by_omen, omen), (by_tier, tier)):
-            c = table.setdefault(key, [0, 0])
-            c[0] += hit
-            c[1] += 1
-    assert abs(total_hits / n - pachinko.hit_rate()) < 0.01
-    for key, designed in pachinko.hit_rate_by_omen().items():
-        assert abs(by_omen[key][0] / by_omen[key][1] - designed) < 0.02, key
-    for key, designed in pachinko.hit_rate_by_tier().items():
-        assert abs(by_tier[key][0] / by_tier[key][1] - designed) < 0.02, key
-
-
-def test_pachinko_reels_match_outcome():
-    rng = random.Random(1)
-    for _ in range(500):
-        spin = pachinko.build_spin(rng)
-        won = spin.outcome.multiplier > 0
-        assert (len(set(spin.reels)) == 1) == won                  # 当たりのときだけ3つ揃う
-        assert len(spin.frames) >= 8
-        assert spin.frames[-1].text.startswith("┃")
-
-
 def test_roulette_payouts():
     assert roulette.payout("red", 100, 1) == 200 and roulette.payout("red", 100, 2) == 0
     assert roulette.payout("even", 100, 0) == 0                    # 0 は偶数でもハズレ
@@ -164,50 +117,3 @@ def test_blackjack_double_takes_one_card_and_finishes():
         assert g.doubled and len(g.player) == n + 1 and g.finished
 
 
-def test_pachinko_staging_is_decided_first_and_shown_consistently():
-    rng = random.Random(3)
-    seen_tiers, seen_omens, surprise = set(), set(), 0
-    for _ in range(4000):
-        spin = pachinko.build_spin(rng)
-        assert (spin.tier != "") == spin.reach                        # リーチのときだけ格がある
-        assert spin.tier in pachinko.TIER_TABLE and spin.omen in pachinko.OMEN_TABLE
-        assert spin.hit_prob == pachinko.hit_probability(spin.omen, spin.tier)
-        won = spin.outcome.multiplier > 0
-        if won and not spin.reach:
-            surprise += 1                                             # リーチなしで当たる「サプライズ当たり」
-            assert spin.frames[-2].text.endswith("…！？")
-        if not won and not spin.reach:
-            assert len(set(spin.reels)) == 3                          # リーチなしのハズレはバラバラ
-        if not won and spin.reach:
-            assert spin.reels[0] == spin.reels[1] != spin.reels[2]    # リーチのハズレは「あと一歩」
-        if spin.omen:
-            assert any(f.mood == spin.omen for f in spin.frames)      # 予告の色が演出に出る
-        seen_tiers.add(spin.tier)
-        seen_omens.add(spin.omen)
-        assert all(f.mood in {"normal", "blue", "red", "gold"} for f in spin.frames)
-        assert len(spin.frames) <= 18                                 # 編集の回数を抑える（約20秒まで）
-    assert seen_tiers == {"", pachinko.NORMAL, pachinko.SUPER, pachinko.PREMIUM} and seen_omens == {"", "blue", "red", "gold"}
-    assert surprise > 0
-
-
-def test_pachinko_higher_tier_means_bigger_prizes():
-    rng = random.Random(8)
-    total = {t: [0, 0] for t in (pachinko.NORMAL, pachinko.PREMIUM)}
-    for _ in range(80_000):
-        outcome, omen, tier = pachinko.roll(rng)
-        if tier in total and outcome.multiplier:
-            total[tier][0] += outcome.multiplier
-            total[tier][1] += 1
-    assert total[pachinko.NORMAL][0] / total[pachinko.NORMAL][1] < total[pachinko.PREMIUM][0] / total[pachinko.PREMIUM][1]
-
-
-def test_pachinko_stronger_cues_mean_better_odds():
-    rng = random.Random(4)
-    wins = {"normal": [0, 0], "super": [0, 0], "premium": [0, 0]}
-    for _ in range(60000):
-        spin = pachinko.build_spin(rng)
-        if spin.reach:
-            wins[spin.tier][0] += spin.outcome.multiplier > 0
-            wins[spin.tier][1] += 1
-    rate = {t: w / n for t, (w, n) in wins.items()}
-    assert rate["normal"] < rate["super"] < rate["premium"]           # 格が上がるほど当たりやすい

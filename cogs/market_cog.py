@@ -134,7 +134,7 @@ class MarketCog(commands.Cog):
             f"📈 {market.NAME}", f"現在 **{market.pel(s['last'])}**（1枚）\n24時間: **{s['change']:+.1f}%**　高値 {market.fmt(s['high'])}　安値 {market.fmt(s['low'])}\n"
             f"`/暗号 チャート` で値動きを見られます。", ui.GOLD), ephemeral=True)
 
-    @group.command(name="チャート", description=f"{market.NAME}の値動きをチャートで表示（みんなに見える。{LIVE_MINUTES}分間は自動で更新・1チャンネルに1つ）")
+    @group.command(name="チャート", description=f"{market.NAME}の値動きをチャートで表示（{LIVE_MINUTES}分間、自動で更新）")
     @app_commands.rename(period="期間")
     @app_commands.describe(period="どの期間を見るか（省略時: 24時間）")
     @app_commands.choices(period=PERIOD_CHOICES)
@@ -191,7 +191,7 @@ class MarketCog(commands.Cog):
 
     @group.command(name="買い戻し", description=f"空売りした{market.NAME}を買い戻して、建玉を閉じる")
     @app_commands.rename(lots="枚数", ratio="割合")
-    @app_commands.describe(lots="買い戻す枚数（小数も可）", ratio="半分か全部（枚数を指定しないとき。どちらも省略すると全部）")
+    @app_commands.describe(lots="買い戻す枚数（小数も可）", ratio="半分か全部（枚数のかわりに指定。省略で全部）")
     @app_commands.choices(ratio=[app_commands.Choice(name="半分", value="half"), app_commands.Choice(name="全部", value="all")])
     async def cover(self, interaction: discord.Interaction, lots: Optional[app_commands.Range[float, 0.001, 1_000_000.0]] = None,
                     ratio: Optional[app_commands.Choice[str]] = None):
@@ -252,7 +252,7 @@ class MarketCog(commands.Cog):
 
     @group.command(name="売る", description=f"持っている{market.NAME}を売る")
     @app_commands.rename(lots="枚数", ratio="割合")
-    @app_commands.describe(lots="売る枚数（小数も可）", ratio="半分か全部（枚数を指定しないとき。どちらも省略すると全部売ります）")
+    @app_commands.describe(lots="売る枚数（小数も可）", ratio="半分か全部（枚数のかわりに指定。省略で全部）")
     @app_commands.choices(ratio=[app_commands.Choice(name="半分", value="half"), app_commands.Choice(name="全部", value="all")])
     async def sell(self, interaction: discord.Interaction, lots: Optional[app_commands.Range[float, 0.001, 1_000_000.0]] = None,
                    ratio: Optional[app_commands.Choice[str]] = None):
@@ -291,10 +291,10 @@ class MarketCog(commands.Cog):
                                        ui.OK if res.profit >= 0 else ui.ERROR))
         await self._trade(interaction, run)
 
-    @group.command(name="空売り", description=f"{market.NAME}を空売り。価格が下がると儲かる（担保が必要・損失が担保の半分で強制決済）")
+    @group.command(name="空売り", description=f"{market.NAME}を空売り。価格が下がると儲かる（担保が必要）")
     @app_commands.rename(lots="枚数", amount="金額", leverage="レバレッジ")
-    @app_commands.describe(lots="空売りする枚数（小数も可）", amount="空売りする額（ペリカ。この額に近い枚数を売り建てます。枚数のかわりに指定）",
-                           leverage="倍率。大きいほど担保は少なく、損益は大きく、ロスカットされやすい（省略すると1倍）")
+    @app_commands.describe(lots="空売りする枚数（小数も可）", amount="空売りする額（枚数のかわりに指定）",
+                           leverage="倍率（大きいほど損益が大きく、強制決済されやすい。省略で1倍）")
     @app_commands.choices(leverage=[app_commands.Choice(name=f"{n}倍", value=n) for n in Economy.SHORT_LEVERAGES])
     async def short(self, interaction: discord.Interaction, lots: Optional[app_commands.Range[float, 0.001, 1_000_000.0]] = None,
                     amount: Optional[app_commands.Range[int, 10, 10_000_000]] = None, leverage: Optional[app_commands.Choice[int]] = None):

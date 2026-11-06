@@ -128,7 +128,7 @@ class EconomyCog(commands.Cog):
         e.set_footer(text="勝率・損益は、集計を始めてからのゲームの分です")
         await interaction.response.send_message(embed=e)
 
-    @group.command(name="デイリー", description="6時間ごとの無料ボーナス（日本時間 0・6・12・18時に切り替わる）")
+    @group.command(name="デイリー", description="6時間ごとにもらえる無料ボーナス")
     async def daily(self, interaction: discord.Interaction):
         now = local_now(self.bot)
         result = self.g(interaction).claim_daily(interaction.user.id, now.date(), slot_of(now))
@@ -145,7 +145,7 @@ class EconomyCog(commands.Cog):
             f"{boost}**+{ui.pelica(result.amount)}**\n{debt_line}連続ログイン: **{result.streak}日**（明日は {ui.pelica(next_bonus)}）\n残高: **{ui.pelica(result.balance)}**\n\n"
             f"🕛 次のボーナスは **{next_slot_label(self.bot)}**（<t:{int(next_slot(self.bot).timestamp())}:R>）から。6時間ごと（0・6・12・18時）に受け取れます。"))
 
-    @group.command(name="ミッション", description="今日のミッションと進み具合を見る（達成すると自動でペリカがもらえる）")
+    @group.command(name="ミッション", description="今日のミッションと進み具合を見る")
     async def missions(self, interaction: discord.Interaction):
         now = local_now(self.bot)
         status = self.g(interaction).mission_status(interaction.user.id, now.date())
@@ -264,9 +264,9 @@ class EconomyCog(commands.Cog):
         self.eco.delete_leaderboard(interaction.guild.id)
         await interaction.followup.send(embed=ui.ok_embed("掲示を止めました", "自動の更新をやめて、ランキングの投稿を削除しました。"), ephemeral=True)
 
-    @group.command(name="送金", description="ほかの人にペリカを送る（手数料10%・1日の上限あり・3回遊んでから）")
+    @group.command(name="送金", description="ほかの人にペリカを送る（手数料10%）")
     @app_commands.rename(member="相手", amount="金額")
-    @app_commands.describe(member="送る相手", amount=f"送る金額（手数料は別に{int(TRANSFER_FEE_RATE * 100)}%かかります）")
+    @app_commands.describe(member="送る相手", amount="送る金額")
     async def transfer(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 1_000_000]):
         if member.bot:
             return await interaction.response.send_message(embed=ui.error_embed("送れません", "Bot には送金できません。"), ephemeral=True)

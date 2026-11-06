@@ -217,7 +217,7 @@ def test_commands_and_games_use_the_servers_own_account(tmp_path):
     import unittest.mock as mock
     with mock.patch("asyncio.sleep", nosleep):
         random.seed(1)
-        run(simple.play_coin(It(A), bot, 1_000, "表"))                                 # Aで遊ぶ
+        run(simple.play_roulette(It(A), bot, 1_000, "red"))                                 # Aで遊ぶ
         after_a = eco.for_guild(A).balance(U1)
         assert eco.for_guild(B).balance(U1) == INITIAL_BALANCE and after_a != INITIAL_BALANCE
         eco_cog, shop_cog = EconomyCog(bot), ShopCog(bot)

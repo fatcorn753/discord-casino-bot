@@ -93,15 +93,13 @@ def test_cannot_start_second_game_while_playing(bot):
 
 
 # ------------------------- 結果が出るゲーム ------------------------- #
-@pytest.mark.parametrize("play", ["slot", "coin", "roulette"])
+@pytest.mark.parametrize("play", ["slot", "roulette"])
 def test_instant_games_settle_and_keep_ledger_consistent(bot, monkeypatch, play):
     monkeypatch.setattr(simple, "RNG", random.Random(5))
     for i in range(30):
         it = FakeInteraction()
         if play == "slot":
             run(simple.play_slot(it, bot, 100))
-        elif play == "coin":
-            run(simple.play_coin(it, bot, 100, "表"))
         else:
             run(simple.play_roulette(it, bot, 100, "red"))
         assert_clean(bot)
@@ -109,14 +107,11 @@ def test_instant_games_settle_and_keep_ledger_consistent(bot, monkeypatch, play)
     assert ledger_matches_balance(bot)
 
 
-def test_coin_win_pays_1_95x(bot, monkeypatch):
-    class Heads:
-        def choice(self, seq):
-            return "表"
-    monkeypatch.setattr(simple, "RNG", Heads())
+def test_roulette_red_win_pays_double(bot, monkeypatch):
+    monkeypatch.setattr(simple.roulette, "spin", lambda rng: 1)               # 出目は必ず赤の1
     it = FakeInteraction()
-    run(simple.play_coin(it, bot, 1000, "表"))
-    assert bot.economy.balance(1) == INITIAL_BALANCE - 1000 + 1950
+    run(simple.play_roulette(it, bot, 1000, "red"))
+    assert bot.economy.balance(1) == INITIAL_BALANCE - 1000 + 2000
 
 
 def test_roulette_validates_number_before_charging(bot):
@@ -136,12 +131,9 @@ def http_error(status):
 
 def test_display_failure_after_result_does_not_change_the_result(bot, monkeypatch):
     """演出の途中でメッセージが消えても、結果は先に精算済み（外れが返金に変わらない）。"""
-    class Tails:
-        def choice(self, seq):
-            return "裏"
-    monkeypatch.setattr(simple, "RNG", Tails())
-    it = FakeInteraction(fail_edit_after=1, fail_with=http_error(404))      # 予想は「表」だが結果は「裏」＝ハズレ
-    run(simple.play_coin(it, bot, 500, "表"))
+    monkeypatch.setattr(simple.roulette, "spin", lambda rng: 2)               # 赤に賭けたが、出目は黒の2＝ハズレ
+    it = FakeInteraction(fail_edit_after=1, fail_with=http_error(404))
+    run(simple.play_roulette(it, bot, 500, "red"))
     assert bot.economy.balance(1) == INITIAL_BALANCE - 500
     assert_clean(bot)
 
@@ -171,14 +163,17 @@ def test_error_before_settle_refunds_bet(bot, monkeypatch):
 
 def test_pachinko_plays_all_frames_and_settles(bot, monkeypatch):
     monkeypatch.setattr(play_pa, "RNG", random.Random(2))
+    monkeypatch.setattr(play_pa, "STEP", 0)
+    bot.economy.credit(1, 100_000, "テスト")                                          # 40回遊ぶので、残高を増やしておく
     for _ in range(40):
         it = FakeInteraction()
         run(play_pa.play_pachinko(it, bot, 100))
-        assert len(it.edits) >= 9 and "パチンコ" in title_of(it)
+        assert len(it.edits) >= 4 and "パチンコ" in title_of(it)
         assert_clean(bot)
     assert ledger_matches_balance(bot)
     stats = bot.economy.pachinko_stats()
-    assert stats["total"][0] == 40 and sum(n for n, _ in stats["omen"].values()) == 40          # 回転ごとに統計用の記録が残る
+    assert stats["sets"][0] == 40 and stats["spins"][0] == stats["sets"][5]                      # セットと回転ごとに、統計用の記録が残る
+    assert sum(n for n, _ in stats["omen"].values()) == stats["spins"][0]
 
 
 # ------------------------------ チンチロ ------------------------------ #
@@ -331,7 +326,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
     asyncio.run(load())
     payloads = [c.to_dict(cmd_bot.tree) for c in cmd_bot.tree.get_commands()]
     names = [n for p in payloads for n in _names(p)]
-    assert {p["name"] for p in payloads} == {"ペリカ", "カジノ", "ショップ", "help", "暗号", "運営", "債券", "クイズ"}
+    assert {p["name"] for p in payloads} == {"ペリカ", "カジノ", "ショップ", "help", "暗号", "運営", "債券", "クイズ", "貸付"}
     assert [n for n in names if re.search(r"[A-Z]", n) or not 1 <= len(n) <= 32] == []
 
     missing = []
@@ -348,11 +343,11 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
     assert missing == []
     admin = next(p for p in payloads if p["name"] == "運営")                 # 管理者用は、DM専用の「運営」にまとまっている
     assert admin["contexts"] == [1, 2] and all(o["description"].startswith("[管理者]") for o in admin["options"] if o["type"] != 2)
-    assert {o["name"] for o in admin["options"]} == {"サーバー一覧", "サーバー許可", "サーバー取消", "付与", "お知らせ", "抽選", "クイズ", "イベント", "パチンコ統計"}
+    assert {o["name"] for o in admin["options"]} == {"サーバー一覧", "サーバー許可", "サーバー取消", "付与", "お知らせ", "抽選", "クイズ", "イベント", "口座", "貸付", "還元率", "パチンコ統計"}
     quiz = next(p for p in payloads if p["name"] == "クイズ")
     assert {o["name"] for o in quiz["options"]} == {"挑戦", "出題", "取り下げ"}                 # サーバー内のクイズに管理者用は出ない
     casino = next(p for p in payloads if p["name"] == "カジノ")
-    assert {o["name"] for o in casino["options"]} == {"チンチロ", "パチンコ", "スロット", "コイン", "ブラックジャック", "ルーレット"}
+    assert {o["name"] for o in casino["options"]} == {"チンチロ", "パチンコ", "スロット", "ブラックジャック", "ルーレット"}
 
 
 # ----------------- 抜け道・競合に対する回帰テスト ----------------- #
@@ -506,14 +501,11 @@ def test_win_result_shows_streak_and_mission_celebration(bot, monkeypatch):
     from core import missions
     monkeypatch.setattr(missions, "today_missions", lambda day: [missions.BY_ID["streak2"], missions.BY_ID["play5"], missions.BY_ID["win3"]])
 
-    class Heads:
-        def choice(self, seq):
-            return "表"
-    monkeypatch.setattr(simple, "RNG", Heads())
+    monkeypatch.setattr(simple.roulette, "spin", lambda rng: 1)               # 出目は必ず赤の1
     texts = []
     for _ in range(2):
         it = FakeInteraction()
-        run(simple.play_coin(it, bot, 1000, "表"))
+        run(simple.play_roulette(it, bot, 1000, "red"))
         e = (it.edits[-1] if it.edits else it.sent[-1])["embed"]
         texts.append(e.description)
     assert "連勝" not in texts[0] and "2連勝中" in texts[1]
@@ -525,17 +517,14 @@ def test_result_title_shows_profit_and_order_puts_dice_before_mission_notice(bot
     from core import missions
     monkeypatch.setattr(missions, "today_missions", lambda day: [missions.BY_ID["play5"], missions.BY_ID["win3"], missions.BY_ID["wager5k"]])
 
-    class Heads:
-        def choice(self, seq):
-            return "表"
-    monkeypatch.setattr(simple, "RNG", Heads())
+    monkeypatch.setattr(simple.roulette, "spin", lambda rng: 1)               # 出目は必ず赤の1
     for _ in range(5):
         it = FakeInteraction()
-        run(simple.play_coin(it, bot, 1000, "表"))
+        run(simple.play_roulette(it, bot, 1000, "red"))
     e = (it.edits[-1] if it.edits else it.sent[-1])["embed"]
-    assert "ペリカ" in e.title and "+950" in e.title                       # タイトルに損益
+    assert "ペリカ" in e.title and "+1,000" in e.title                       # タイトルに損益
     d = e.description
-    assert d.index("あなたの予想") < d.index("賭け金") < d.index("ミッション達成")      # 出目 → 数字 → ミッション通知
+    assert d.index("あなたの賭け") < d.index("賭け金") < d.index("ミッション達成")      # 出目 → 数字 → ミッション通知
 
 
 
@@ -577,12 +566,12 @@ def _last_view(it):
     return next(e["view"] for e in reversed(it.edits) if e.get("view") is not None)
 
 
-@pytest.mark.parametrize("game", ["coin", "slot", "roulette", "pachinko"])
+@pytest.mark.parametrize("game", ["slot", "roulette", "pachinko"])
 def test_replay_button_plays_again_with_same_and_double_bet(bot, monkeypatch, game):
     from play import pachinko as play_pa
     monkeypatch.setattr(simple, "STEP", 0)
     monkeypatch.setattr(play_pa, "STEP", 0)
-    start = {"coin": lambda it: simple.play_coin(it, bot, 100, "表"), "slot": lambda it: simple.play_slot(it, bot, 100),
+    start = {"slot": lambda it: simple.play_slot(it, bot, 100),
              "roulette": lambda it: simple.play_roulette(it, bot, 100, "red"), "pachinko": lambda it: play_pa.play_pachinko(it, bot, 100)}[game]
     it = FakeInteraction()
     run(start(it))
@@ -600,7 +589,7 @@ def test_replay_button_plays_again_with_same_and_double_bet(bot, monkeypatch, ga
 def test_replay_button_only_for_the_player_and_double_hidden_at_max_bet(bot, monkeypatch):
     monkeypatch.setattr(simple, "STEP", 0)
     it = FakeInteraction()
-    run(simple.play_coin(it, bot, 100, "表"))
+    run(simple.play_roulette(it, bot, 100, "red"))
     view = _last_view(it)
     other = FakeInteraction(uid=2)
     assert run(view.interaction_check(other)) is False and "他の人" in other.sent[-1]["content"]
@@ -651,16 +640,14 @@ def _all_titles(it):
     return [e["embed"].title for e in it.sent + it.edits if e.get("embed") is not None]
 
 
-@pytest.mark.parametrize("game", ["coin", "slot", "roulette", "pachinko", "chinchiro", "blackjack"])
+@pytest.mark.parametrize("game", ["slot", "roulette", "pachinko", "chinchiro", "blackjack"])
 def test_every_game_title_shows_the_players_name(bot, monkeypatch, game):
     from play import pachinko as play_pa
     monkeypatch.setattr(simple, "STEP", 0)
     monkeypatch.setattr(play_pa, "STEP", 0)
     monkeypatch.setattr(play_ch, "STEP", 0)
     it = FakeInteraction()                                                      # display_name は「テスト」
-    if game == "coin":
-        run(simple.play_coin(it, bot, 100, "表"))
-    elif game == "slot":
+    if game == "slot":
         run(simple.play_slot(it, bot, 100))
     elif game == "roulette":
         run(simple.play_roulette(it, bot, 100, "red"))
@@ -685,7 +672,6 @@ def test_display_failure_is_logged_with_game_step_and_status_and_settlement_stil
 
 
 @pytest.mark.parametrize("play, name", [
-    (lambda it, bot: simple.play_coin(it, bot, 100, "heads"), "コイン"),
     (lambda it, bot: simple.play_slot(it, bot, 100), "スロット"),
     (lambda it, bot: play_pa.play_pachinko(it, bot, 100), "パチンコ"),
 ])
@@ -700,3 +686,50 @@ def test_display_failure_is_logged_for_every_animated_game(bot, capsys, play, na
 def test_log_display_failure_handles_errors_without_status(capsys):
     common.log_display_failure("テスト", "結果の表示", RuntimeError("boom"))
     assert "演出の表示に失敗: テスト/結果の表示: RuntimeError status=? code=?: boom" in capsys.readouterr().out
+
+
+# ------------------- パチンコ: 連続投入とボタン ------------------- #
+def test_pachinko_sets_play_in_one_go_and_settle_once(bot, monkeypatch):
+    monkeypatch.setattr(play_pa, "RNG", random.Random(7))
+    monkeypatch.setattr(play_pa, "STEP", 0)
+    it = FakeInteraction()
+    run(play_pa.play_pachinko(it, bot, 200, 5))                                    # 200 × 5セット = 1,000
+    stats = bot.economy.pachinko_stats()
+    assert stats["sets"][0] == 5 and stats["sets"][2] == 5 * 200 and bot.economy.stats(1)["total_wagered"] == 1000
+    assert bot.economy.stats(1)["games_played"] == 1                                # 連続投入は、1回の遊びとして数える
+    assert "×" in it.sent[0]["embed"].description and "5セット" in it.sent[0]["embed"].description
+    final = it.edits[-1]["embed"]
+    assert "5セット" in final.description or "セット" in final.description
+    assert len(it.edits) == 2 + 5 + 1 and ledger_matches_balance(bot)               # 打ち出し2コマ + セットの数ぶん + 結果
+    assert_clean(bot)
+
+
+def test_pachinko_sets_total_must_fit_the_bet_limit_and_nothing_is_charged(bot):
+    from play.common import MAX_BET
+    it = FakeInteraction()
+    run(play_pa.play_pachinko(it, bot, MAX_BET // 2 + 1, 2))
+    assert "合計が上限" in it.sent[0]["embed"].title and bot.economy.balance(1) == INITIAL_BALANCE and bot.economy.pachinko_stats()["sets"][0] == 0
+
+
+def test_pachinko_buttons_again_double_and_extra_sets(bot, monkeypatch):
+    monkeypatch.setattr(play_pa, "RNG", random.Random(3))
+    monkeypatch.setattr(play_pa, "STEP", 0)
+    bot.economy.credit(1, 50_000, "テスト")
+    it = FakeInteraction()
+    run(play_pa.play_pachinko(it, bot, 100, 1))
+    view = _last_view(it)
+    labels = [c.label for c in view.children]
+    assert any("同じ額" in l for l in labels) and any("×5連続（500）" in l for l in labels)           # 1セットのときは ×5連続
+    extra = next(c for c in view.children if "×5連続" in c.label)
+    again = FakeInteraction()
+    run(extra.callback(again))
+    assert bot.economy.pachinko_stats()["sets"][0] == 1 + 5
+    view5 = _last_view(again)
+    assert any("×10連続（1,000）" in c.label for c in view5.children)                                # 5セットのあとは ×10連続
+    same = FakeInteraction()
+    run(next(c for c in view5.children if "同じ額" in c.label).callback(same))
+    assert bot.economy.pachinko_stats()["sets"][0] == 1 + 5 + 5                                       # 同じ額 = 同じセット数のまま
+    big = FakeInteraction()
+    run(play_pa.play_pachinko(big, bot, 100, 10))
+    assert not any("連続" in c.label for c in _last_view(big).children if c.label)                    # 10セットなら、これ以上の連続ボタンはない
+    assert ledger_matches_balance(bot)

@@ -77,7 +77,7 @@ class WeeklyCog(commands.Cog):
         champ = result["champion"]
         if champ:
             lines += ["", f"👑 **<@{champ[0]}>** が **{KING.name}** を獲得しました！（通算{result['wins']}回目）",
-                      f"今週の稼ぎ **{champ[1]:+,}ペリカ**（{champ[2]}戦）。`/ショップ 使う` で身につけられます（次の発表まで）。"]
+                      f"今週の稼ぎ **{champ[1]:+,}ペリカ**（{champ[2]}戦）。`/ショップ` の「持ち物」の画面で身につけられます（次の発表まで）。"]
         else:
             lines += ["", f"今週は、{weekly.MIN_PLAYS}ゲーム以上遊んでプラスだった人がいませんでした。王者はお休みです。"]
         if result["previous"]:

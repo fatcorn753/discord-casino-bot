@@ -6,6 +6,7 @@ import time
 import discord
 
 from core import approval, events, missions, ui
+from games import rtplevel
 
 MIN_BET = 10
 MAX_BET = 100_000
@@ -43,13 +44,14 @@ class GameContext:
         self.penalty_taken = 0       # チンチロの倍払いなどで、預かり金のほかに引いた額
         self.insured_refund = 0      # 保険券で戻った額
         self.event_bonus = 0         # 突発イベントで上乗せされた額
+        self.rtp_shift = 0           # 還元率レベルで増減した払い戻し（表示の払い戻しに足す。レベルそのものは見せない）
         self.events = {}             # 連勝・ミッションの結果（演出の表示に使う）
 
     @property
     def economy(self):
         return self.bot.economy.for_guild(self.guild_id)      # ペリカはサーバーごとに別々
 
-    def settle(self, payout: int, penalty: int = 0, keep_session: bool = False, tags=()) -> int:
+    def settle(self, payout: int, penalty: int = 0, keep_session: bool = False, tags=(), rtp_kind: str = None, rtp_done: bool = False) -> int:
         """払い戻し総額で精算し、損益を返す。二重に呼んでも一度しか払わない。
 
         penalty は倍払いなどの追加の支払い（残高の範囲まで）。精算と同じ1回の処理で行う。
@@ -57,6 +59,10 @@ class GameContext:
         """
         if self.done:
             return 0
+        level = self.economy.rtp_level_get(self.game)
+        if level != rtplevel.DEFAULT_LEVEL and not rtp_done:    # 持ち主が決めた還元率レベル（勝ち分だけを増減する）。rtp_done なら、呼び出し側が済ませている（rtp_shift も設定済み）
+            adjusted = rtplevel.adjust(self.game, level, self.economy.escrow_amount(self.escrow_id), payout, rtp_kind)
+            self.rtp_shift, payout = adjusted - payout, adjusted
         boost = events.best_boost(self.game, events.active(self.guild_id, local_now(self.bot)), self.economy.manual_event_get(time.time()))
         if boost:
             self.event_bonus = events.bonus(self.bet, payout, boost)
@@ -148,7 +154,7 @@ def result_lines(ctx: GameContext, payout: int, net: int, extra: str = "") -> st
     if ctx.insured_refund:
         top.append(f"🎟️ 保険券を使った！ 賭け金の半分（{ui.pelica(ctx.insured_refund)}）が戻った")
     event = [f"🔥 **突発イベントのボーナス +{ui.pelica(ctx.event_bonus)}**"] if ctx.event_bonus else []
-    stats = event + [f"賭け金: **{ui.pelica(ctx.bet)}**", f"払い戻し: **{ui.pelica(payout + ctx.insured_refund)}**",
+    stats = event + [f"賭け金: **{ui.pelica(ctx.bet)}**", f"払い戻し: **{ui.pelica(payout + ctx.rtp_shift + ctx.insured_refund)}**",
              f"損益: **{signed(net)}ペリカ**", f"残高: **{ui.pelica(balance)}**"]
     debt = ctx.economy.debt(ctx.user_id)
     if debt:

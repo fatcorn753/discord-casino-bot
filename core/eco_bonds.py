@@ -28,7 +28,7 @@ class BondMixin:
             held = self._bond_held(user_id, kind_key)
             if held + amount > kind.max_total:
                 return False, f"{kind.name}は元本の合計が {kind.max_total:,}ペリカ まで（いま {held:,}ペリカ 保有）。あと {kind.max_total - held:,}ペリカ まで買えます。"
-            self._apply(user_id, -amount, f"債券購入:{kind.name}")
+            self._apply(user_id, -amount, f"債券購入:{kind.name}", "債券")
             self._conn.execute("INSERT INTO bonds (guild_id, user_id, kind, principal, due, ts) VALUES (?, ?, ?, ?, ?, ?)",
                                (self._g(), user_id, kind_key, amount, now + kind.hours * 3600, now))
             return True, ""
@@ -63,7 +63,7 @@ class BondMixin:
                 else:
                     status, paid = "paid", bonds_mod.maturity_payout(kind, row["principal"])
                     self._ensure(row["user_id"])
-                    self._apply(row["user_id"], paid, f"債券償還:{kind.name}")
+                    self._apply(row["user_id"], paid, f"債券償還:{kind.name}", "債券")
                 self._conn.execute("UPDATE bonds SET status=?, paid=? WHERE id=?", (status, paid, row["id"]))
                 out.append({**dict(row), "status": status, "paid": paid})
         return out
@@ -78,6 +78,6 @@ class BondMixin:
             if kind.cancel_penalty is None:
                 return False, f"{kind.name}は解約できません。"
             refund = bonds_mod.cancel_refund(kind, row["principal"])
-            self._apply(user_id, refund, "返金:債券解約")      # もともと自分のお金なので、借金の徴収はしない
+            self._apply(user_id, refund, "返金:債券解約", "債券")      # もともと自分のお金なので、借金の徴収はしない
             self._conn.execute("UPDATE bonds SET status='cancelled', paid=? WHERE id=?", (refund, bond_id))
             return True, refund

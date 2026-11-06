@@ -137,18 +137,18 @@ def test_bonus_takes_a_custom_boost_and_best_boost_never_stacks():
     assert events.best_boost("スロット", None, manual) == 1.2
     assert events.best_boost("スロット", ev, manual) == 1.2                      # 重ねず、大きいほう
     assert events.best_boost("スロット", ev, {"game": "スロット", "boost": 20}) == events.BOOST
-    assert events.best_boost("コイン", ev, manual) == 0                           # 別のゲームには付かない
+    assert events.best_boost("ルーレット", ev, manual) == 0                           # 別のゲームには付かない
 
 
 def test_manual_event_lifecycle(tmp_path):
     eco = Economy(str(tmp_path / "t.db")).for_guild(G)
     assert eco.manual_event_get(100) is None and eco.manual_event_stop(100) is None and eco.manual_event_finish_due(100) is None
-    eco.manual_event_start("コイン", 80, 50, 200)
+    eco.manual_event_start("ルーレット", 80, 50, 200)
     assert eco.manual_event_get(49) is None                                        # 開始前
     assert eco.manual_event_get(50)["boost"] == 80 and eco.manual_event_get(199) is not None and eco.manual_event_get(200) is None
     assert eco.manual_event_finish_due(199) is None                                 # まだ
     done = eco.manual_event_finish_due(200)
-    assert done["game"] == "コイン" and eco.manual_event_finish_due(300) is None    # 終了の告知は1回だけ
+    assert done["game"] == "ルーレット" and eco.manual_event_finish_due(300) is None    # 終了の告知は1回だけ
     eco.manual_event_start("パチンコ", 50, 0, 1000)
     eco.manual_event_start("スロット", 60, 0, 1000)                                  # 新しく開くと置き換わる
     assert eco.manual_event_get(10)["game"] == "スロット"
@@ -159,7 +159,7 @@ def test_manual_event_lifecycle(tmp_path):
 
 def test_manual_events_are_per_guild(tmp_path):
     eco = Economy(str(tmp_path / "t.db"))
-    eco.for_guild(G).manual_event_start("コイン", 50, 0, 1000)
+    eco.for_guild(G).manual_event_start("ルーレット", 50, 0, 1000)
     assert eco.for_guild(G).manual_event_get(10) and eco.for_guild(G + 1).manual_event_get(10) is None
 
 
@@ -169,7 +169,7 @@ def test_settle_applies_the_manual_boost_for_its_game_only(tmp_path, monkeypatch
     eco = bot.economy.for_guild(G)
     t = time.time()
     eco.manual_event_start("スロット", 100, t - 10, t + 600)
-    for game, expect in (("スロット", 2000), ("コイン", 0)):
+    for game, expect in (("スロット", 2000), ("ルーレット", 0)):
         eid = eco.place_bet(1, 1000, game)
         ctx = common.GameContext(bot, 1, eid, game, 1000, G)
         net = ctx.settle(3000)
@@ -209,8 +209,8 @@ def test_cog_start_announces_replaces_and_stop_announces_the_end(tmp_path, monke
     assert ok and "45分" in text and "+80%" in text and "置き換え" not in text
     e = chan.sent[-1]["embed"]
     assert "特別イベント発生" in e.title and "1.8倍" in e.description and "/カジノ スロット" in e.description
-    ok, text = run(cog.start_manual(guild, "コイン", 50, 30))
-    assert "置き換え" in text and bot.economy.for_guild(G).manual_event_get(time.time())["game"] == "コイン"
+    ok, text = run(cog.start_manual(guild, "ルーレット", 50, 30))
+    assert "置き換え" in text and bot.economy.for_guild(G).manual_event_get(time.time())["game"] == "ルーレット"
     ok, text = run(cog.stop_manual(guild))
     assert ok and "終了" in chan.sent[-1]["embed"].title
     ok, text = run(cog.stop_manual(guild))
@@ -220,8 +220,27 @@ def test_cog_start_announces_replaces_and_stop_announces_the_end(tmp_path, monke
 def test_cog_announces_the_end_once_when_time_runs_out(tmp_path, monkeypatch):
     cog, bot, guild, chan = make_cog(tmp_path, monkeypatch)
     t = time.time()
-    bot.economy.for_guild(G).manual_event_start("コイン", 50, t - 100, t - 1)         # 時間が過ぎた
+    bot.economy.for_guild(G).manual_event_start("ルーレット", 50, t - 100, t - 1)         # 時間が過ぎた
     run(cog.run_once())
     run(cog.run_once())
     run(EventCog(bot).run_once())
     assert len(chan.sent) == 1 and "終了" in chan.sent[0]["embed"].title
+
+
+def test_a_removed_game_in_a_running_manual_event_does_not_break_the_announcements(tmp_path, monkeypatch):
+    """廃止したゲーム（例: コイン）の特別イベントが DB に残っていても、終了の告知で落ちない。"""
+    cog, bot, guild, chan = make_cog(tmp_path, monkeypatch)
+    t = time.time()
+    bot.economy.for_guild(G).manual_event_start("コイン", 50, t - 100, t - 1)
+    run(cog.run_once())
+    assert len(chan.sent) == 1 and "終了" in chan.sent[0]["embed"].title
+    bot.economy.for_guild(G).manual_event_start("コイン", 50, t - 10, t + 600)
+    ok, text = run(cog.stop_manual(guild))
+    assert ok and "コイン" in text
+
+
+def test_the_coin_game_is_gone():
+    from cogs.casino_cog import Casino
+    from core import missions
+    assert "コイン" not in events.GAMES and "コイン" not in missions.GAMES
+    assert not hasattr(Casino, "coin")

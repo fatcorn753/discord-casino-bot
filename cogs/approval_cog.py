@@ -5,6 +5,7 @@ Bot が新しいサーバーに追加されると、持ち主（owner_ids）に 
 ボタンは Bot を再起動しても動く（DynamicItem）。
 """
 
+import datetime
 import io
 import re
 import time
@@ -17,7 +18,8 @@ from discord.ext import commands
 from cogs.weekly_cog import announce_channel
 from core import approval, events, quizimport, ui
 from core.duration import format_minutes
-from games import pachinko
+from cogs.house_cog import report_embed as house_report_embed
+from games import pachinko, rtplevel
 
 def valid_guild_id(text: str) -> bool:
     """サーバーIDとして正しい文字列（半角数字で、SQLite の整数に収まる正の値）。"""
@@ -147,25 +149,46 @@ SMALL_SAMPLE = 100       # これより少ない回転数の行には「参考�
 
 
 def pachinko_stats_embed(data: dict, scope: str) -> discord.Embed:
-    """設計した当たり率・還元率と、実際の記録を並べる。"""
-    spins, hits, bet, back = data["total"]
-    if not spins:
+    """設計した数字と、実際の記録を並べる（セット全体と、予告・リーチごとの回転）。"""
+    sets, hit_sets, bet, back, balls, starts, chain_max = data["sets"]
+    if not sets:
         return ui.embed(f"🎰 パチンコ統計（{scope}）", "まだ記録がありません。", ui.INFO)
+    spins, spin_hits = data["spins"]
 
     def rows(group: dict, names: dict, designed: dict) -> str:
         lines = []
         for key, name in names.items():
             n, h = group.get(key, (0, 0))
             actual = f"{h / n:.1%}" if n else "—"
-            lines.append(f"{name}: {n:,}回　実績 **{actual}** ／ 設計 {designed[key]:.1%}" + ("（参考）" if n < SMALL_SAMPLE else ""))
+            lines.append(f"{name}: {n:,}回転　実績 **{actual}** ／ 設計 {designed[key]:.1%}" + ("（参考）" if n < SMALL_SAMPLE else ""))
         return "\n".join(lines)
 
+    per_set_design = pachinko.BALLS_PER_SET * pachinko.P_START
     e = ui.embed(f"🎰 パチンコ統計（{scope}）",
-                 f"{spins:,}回転　当たり率: 実績 **{hits / spins:.1%}** ／ 設計 {pachinko.hit_rate():.1%}\n"
-                 f"還元率: 実績 **{back / bet:.1%}** ／ 設計 {pachinko.rtp():.1%}（賭け金 {ui.pelica(bet)}）", ui.INFO)
-    e.add_field(name="予告の色ごとの当たり率", value=rows(data["omen"], OMEN_NAME, pachinko.hit_rate_by_omen()), inline=False)
-    e.add_field(name="リーチの格ごとの当たり率", value=rows(data["tier"], TIER_NAME, pachinko.hit_rate_by_tier()), inline=False)
-    e.set_footer(text=f"{SMALL_SAMPLE}回転に満たない行は参考値です。還元率は大当たりの偏りで大きくぶれます")
+                 f"{sets:,}セット（{balls:,}発）　スタート入賞: 1セットあたり 実績 **{starts / sets:.2f}回** ／ 設計 {per_set_design:.2f}回\n"
+                 f"当たったセット: 実績 **{hit_sets / sets:.1%}** ／ 設計 {pachinko.hit_rate():.1%}\n"
+                 f"還元率: 実績 **{back / bet:.1%}** ／ 設計 {pachinko.rtp():.1%}（賭け金 {ui.pelica(bet)}）　最大連チャン {chain_max}連\n"
+                 f"1回転の当たり率: 実績 **{spin_hits / spins:.2%}** ／ 設計 {pachinko.mean_hit_prob():.2%}（{spins:,}回転）", ui.INFO)
+    e.add_field(name="予告の色ごとの当たり率（1回転あたり）", value=rows(data["omen"], OMEN_NAME, pachinko.hit_rate_by_omen()), inline=False)
+    e.add_field(name="リーチの格ごとの当たり率（1回転あたり）", value=rows(data["tier"], TIER_NAME, pachinko.hit_rate_by_tier()), inline=False)
+    e.set_footer(text=f"{SMALL_SAMPLE}回転に満たない行は参考値です。還元率は連チャンの偏りで大きくぶれます（還元率レベルをかける前の数字です）")
+    return e
+
+
+LEVEL_NAME = {1: "かなり渋い", 2: "渋い", 3: "標準", 4: "甘い", 5: "かなり甘い", 6: "大盤振る舞い"}
+
+
+def rtp_table_embed(levels: dict, title: str) -> discord.Embed:
+    """ゲームごとの、いまのレベルと、還元率の目安。"""
+    lines = []
+    for game in rtplevel.GAMES:
+        level = levels[game]
+        shown = rtplevel.approx_rtp(game, level)
+        mark = "" if level == rtplevel.DEFAULT_LEVEL else "　⚠️ 標準から変更中"
+        extra = "（赤・黒などの目安。数字賭けは別）" if game == "ルーレット" else ("（目安）" if game in ("チンチロ", "ブラックジャック") else "")
+        lines.append(f"**{game}**　レベル **{level}**（{LEVEL_NAME[level]}）　還元率 約{shown:.1%}{extra}{mark}")
+    e = ui.embed(title, "\n".join(lines), ui.INFO)
+    e.set_footer(text="レベル1〜6。3が標準。1段階で還元率が約4ポイント動きます。勝ち分だけが増減します（ユーザーには見せません）")
     return e
 
 
@@ -320,6 +343,9 @@ class ApprovalCog(commands.Cog):
     raffle_group = app_commands.Group(name="抽選", description="[管理者] 抽選の開催・再掲示・中止", parent=group)
     quiz_group = app_commands.Group(name="クイズ", description="[管理者] クイズの登録・一覧・削除", parent=group)
     event_group = app_commands.Group(name="イベント", description="[管理者] 特別イベントを開く・終わらせる", parent=group)
+    house_group = app_commands.Group(name="口座", description="[管理者] 運営口座の確認・資金追加・横領", parent=group)
+    loan_group = app_commands.Group(name="貸付", description="[管理者] 運営口座から貸す・貸付を確認する", parent=group)
+    rtp_group = app_commands.Group(name="還元率", description="[管理者] ゲームごとの還元率のレベル（1〜6。3が標準）を変える", parent=group)
 
     def _guild_choices(self, current: str) -> list:
         cur = current.strip().lower()
@@ -401,7 +427,7 @@ class ApprovalCog(commands.Cog):
             return await interaction.response.send_message(embed=ui.error_embed("確認できません", f"メンバーを確認できませんでした: {exc}"), ephemeral=True)
         if member.bot:
             return await interaction.response.send_message(embed=ui.error_embed("Bot には付与できません"), ephemeral=True)
-        balance = self.bot.economy.for_guild(guild.id).credit(uid, amount, f"付与（管理）{reason}".strip())
+        balance = self.bot.economy.for_guild(guild.id).credit(uid, amount, f"付与（管理）{reason}".strip(), "付与")
         await interaction.response.send_message(embed=ui.ok_embed("付与しました", f"{guild.name} の {member.mention}（{member.display_name}）に **{ui.pelica(amount)}** を付与しました（残高 {ui.pelica(balance)}）。"
                                                                   + (f"\n理由: {reason}" if reason else "")), ephemeral=True)
     grant.autocomplete("guild_id")(guild_autocomplete)
@@ -449,6 +475,157 @@ class ApprovalCog(commands.Cog):
         lines = [(await cog.stop_manual(g))[1] for g in self._event_targets(guild_id)]
         await interaction.followup.send(embed=ui.embed("特別イベントを終わらせました", "\n".join(lines)[:3900] or "対象がありません。", ui.INFO), ephemeral=True)
     event_stop.autocomplete("guild_id")(guild_autocomplete)
+
+    # ---- 運営口座 ---- #
+    @house_group.command(name="状況", description="[管理者] 運営口座の残高と、きょうの収支を見る")
+    @app_commands.rename(guild_id="サーバー")
+    @app_commands.describe(guild_id="見るサーバー（候補から選ぶ。空なら全サーバー）")
+    async def house_status(self, interaction: discord.Interaction, guild_id: str = None):
+        if not await self._owner_only(interaction):
+            return
+        guild = await self._pick_guild(interaction, guild_id) if guild_id else None
+        if guild_id and guild is None:
+            return
+        targets = [guild] if guild else [g for g in self.bot.guilds if approval.is_allowed(self.bot.economy, self.bot.config, g.id, 0)]
+        now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=float(self.bot.config.get("utc_offset_hours", 9)))))
+        start = datetime.datetime.combine(now.date(), datetime.time(0, 0), tzinfo=now.tzinfo).timestamp()
+        embeds = []
+        for g in targets[:10]:
+            eco = self.bot.economy.for_guild(g.id)
+            embeds.append(house_report_embed(eco.house_summary(start, start + 86400), f"🏦 {g.name} の運営口座（総合）"))
+        await interaction.response.send_message(embeds=embeds or [ui.error_embed("対象がありません")], ephemeral=True)
+    house_status.autocomplete("guild_id")(guild_autocomplete)
+
+    @house_group.command(name="資金追加", description="[管理者] 運営口座に資金を足す（あとから追加する操作）")
+    @app_commands.rename(guild_id="サーバー", amount="金額")
+    @app_commands.describe(guild_id="足すサーバー（候補から選ぶ）", amount="足す額（1〜1,000,000,000）")
+    async def house_add(self, interaction: discord.Interaction, guild_id: str, amount: app_commands.Range[int, 1, 1_000_000_000]):
+        if not await self._owner_only(interaction):
+            return
+        guild = await self._pick_guild(interaction, guild_id)
+        if guild is None:
+            return
+        balance = self.bot.economy.for_guild(guild.id).house_add_funds(amount)
+        await interaction.response.send_message(embed=ui.ok_embed("資金を足しました", f"{guild.name} の運営口座に **{ui.pelica(amount)}** を足しました（残高 {ui.pelica(balance)}）。毎日の公開に「資金追加」として出ます。"), ephemeral=True)
+    house_add.autocomplete("guild_id")(guild_autocomplete)
+
+    @house_group.command(name="入金", description="[管理者] 自分の遊ぶ口座から、運営口座へ入金する（毎日の公開に出る）")
+    @app_commands.rename(guild_id="サーバー", amount="金額")
+    @app_commands.describe(guild_id="入金するサーバー（候補から選ぶ）", amount="入金する額（自分の残高まで）")
+    async def house_deposit(self, interaction: discord.Interaction, guild_id: str, amount: app_commands.Range[int, 1, 1_000_000_000]):
+        if not await self._owner_only(interaction):
+            return
+        guild = await self._pick_guild(interaction, guild_id)
+        if guild is None:
+            return
+        eco = self.bot.economy.for_guild(guild.id)
+        ok, result = eco.house_deposit(interaction.user.id, amount)
+        if not ok:
+            return await interaction.response.send_message(embed=ui.error_embed("入金できません", result), ephemeral=True)
+        await interaction.response.send_message(embed=ui.ok_embed("入金しました", f"{guild.name} の運営口座へ **{ui.pelica(result)}** を入金しました（あなたの残高 {ui.pelica(eco.balance(interaction.user.id))} ／ 運営口座 {ui.pelica(eco.house_balance())}）。毎日の公開に「入金」として出ます。"), ephemeral=True)
+    house_deposit.autocomplete("guild_id")(guild_autocomplete)
+
+    @house_group.command(name="横領", description="[管理者] 運営口座から、自分の遊ぶ口座へお金を移す（毎日の公開に出る）")
+    @app_commands.rename(guild_id="サーバー", amount="金額")
+    @app_commands.describe(guild_id="横領するサーバー（候補から選ぶ）", amount="移す額（口座の残高まで）")
+    async def house_embezzle(self, interaction: discord.Interaction, guild_id: str, amount: app_commands.Range[int, 1, 1_000_000_000]):
+        if not await self._owner_only(interaction):
+            return
+        guild = await self._pick_guild(interaction, guild_id)
+        if guild is None:
+            return
+        eco = self.bot.economy.for_guild(guild.id)
+        ok, result = eco.house_embezzle(interaction.user.id, amount)
+        if not ok:
+            return await interaction.response.send_message(embed=ui.error_embed("横領できません", result), ephemeral=True)
+        await interaction.response.send_message(embed=ui.ok_embed("横領しました", f"{guild.name} の運営口座から **{ui.pelica(result)}** を、あなたの遊ぶ口座へ移しました（あなたの残高 {ui.pelica(eco.balance(interaction.user.id))} ／ 運営口座 {ui.pelica(eco.house_balance())}）。毎日の公開に「横領」として出ます。"), ephemeral=True)
+    house_embezzle.autocomplete("guild_id")(guild_autocomplete)
+
+    # ---- 運営からの貸付 ---- #
+    @loan_group.command(name="提案", description="[管理者] 運営口座から、指定した人にペリカを貸す提案を出す（承諾すると成立）")
+    @app_commands.rename(guild_id="サーバー", user_id="ユーザー", principal="金額", rate="日利", days="期間", channel_id="チャンネル")
+    @app_commands.describe(guild_id="貸すサーバー（候補から選ぶ）", user_id="借りる相手（名前の候補が出なければ、ユーザーIDを貼る）", principal="貸す額（100〜1,000,000）",
+                           rate="1日あたりの利息（％。0〜100。0.1刻み）", days="返済の期限（日。1〜30）", channel_id="提案を出すチャンネル（候補から選ぶ。空なら告知チャンネル）")
+    async def loan_offer(self, interaction: discord.Interaction, guild_id: str, user_id: str, principal: app_commands.Range[int, 100, 1_000_000],
+                         rate: app_commands.Range[float, 0.0, 100.0], days: app_commands.Range[int, 1, 30], channel_id: str = None):
+        if not await self._owner_only(interaction):
+            return
+        guild = await self._pick_guild(interaction, guild_id)
+        if guild is None:
+            return
+        ok, channel = await self._pick_channel(interaction, guild, channel_id)
+        if not ok:
+            return
+        uid = parse_user_id(user_id)
+        if uid is None:
+            return await interaction.response.send_message(embed=ui.error_embed("ユーザーを指定してください", "候補から選ぶか、ユーザーID（数字）を入れてください。"), ephemeral=True)
+        try:
+            member = await guild.fetch_member(uid)
+        except discord.NotFound:
+            return await interaction.response.send_message(embed=ui.error_embed("そのサーバーにいません", f"`{uid}` は {guild.name} のメンバーではありません。"), ephemeral=True)
+        except discord.HTTPException as exc:
+            return await interaction.response.send_message(embed=ui.error_embed("確認できません", f"メンバーを確認できませんでした: {exc}"), ephemeral=True)
+        if member.bot:
+            return await interaction.response.send_message(embed=ui.error_embed("Bot には貸せません"), ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        ok, text = await self.bot.get_cog("LoanCog").post_house_offer(guild, uid, principal, round(rate * 10), days, channel)
+        await interaction.followup.send(embed=ui.ok_embed("提案を出しました", text) if ok else ui.error_embed("提案できません", text), ephemeral=True)
+    loan_offer.autocomplete("guild_id")(guild_autocomplete)
+    loan_offer.autocomplete("user_id")(user_autocomplete)
+    loan_offer.autocomplete("channel_id")(channel_autocomplete)
+
+    @loan_group.command(name="一覧", description="[管理者] 運営口座が貸している、終了前の貸付を見る")
+    @app_commands.rename(guild_id="サーバー")
+    @app_commands.describe(guild_id="見るサーバー（候補から選ぶ）")
+    async def loan_house_list(self, interaction: discord.Interaction, guild_id: str):
+        if not await self._owner_only(interaction):
+            return
+        guild = await self._pick_guild(interaction, guild_id)
+        if guild is None:
+            return
+        eco = self.bot.economy.for_guild(guild.id)
+        now, lines = time.time(), []
+        for loan in eco.loan_house_list():
+            if loan["status"] == "offer":
+                state = "承諾待ち"
+            else:
+                left = eco.loan_remaining(loan, loan["due"] if loan["status"] == "overdue" else now)
+                state = f"残り {left:,}　" + ("⚠️延滞" if loan["status"] == "overdue" else f"期限 <t:{int(loan['due'])}:R>")
+            lines.append(f"`#{loan['id']}` <@{loan['borrower_id']}>　元本{loan['principal']:,}　日利{loan['rate_tenths'] / 10:g}%・{loan['term_days']}日　{state}")
+        await interaction.response.send_message(embed=ui.embed(f"🤝 {guild.name} の運営の貸付", "\n".join(lines) or "貸している貸付はありません。", ui.INFO), ephemeral=True)
+    loan_house_list.autocomplete("guild_id")(guild_autocomplete)
+
+    # ---- 還元率 ---- #
+    @rtp_group.command(name="設定", description="[管理者] ゲームの還元率レベル（1〜6。3が標準）を変える")
+    @app_commands.rename(guild_id="サーバー", game="ゲーム", level="レベル")
+    @app_commands.describe(guild_id="変えるサーバー（候補から選ぶ）", game="対象のゲーム（「すべて」で全ゲーム）", level="1(渋い)〜6(甘い)。3が標準")
+    @app_commands.choices(game=[app_commands.Choice(name="すべて", value="*")] + [app_commands.Choice(name=g, value=g) for g in rtplevel.GAMES],
+                          level=[app_commands.Choice(name=f"{n}　{LEVEL_NAME[n]}" + ("（標準）" if n == 3 else ""), value=n) for n in rtplevel.LEVELS])
+    async def rtp_set(self, interaction: discord.Interaction, guild_id: str, game: app_commands.Choice[str], level: app_commands.Choice[int]):
+        if not await self._owner_only(interaction):
+            return
+        guild = await self._pick_guild(interaction, guild_id)
+        if guild is None:
+            return
+        eco = self.bot.economy.for_guild(guild.id)
+        changed = eco.rtp_level_set(None if game.value == "*" else game.value, level.value)
+        await interaction.response.send_message(embeds=[ui.ok_embed("還元率のレベルを変えました", f"{guild.name}: {'、'.join(changed)} → レベル {level.value}（{LEVEL_NAME[level.value]}）"),
+                                                        rtp_table_embed(eco.rtp_levels(), f"🎚️ {guild.name} の還元率")], ephemeral=True)
+    rtp_set.autocomplete("guild_id")(guild_autocomplete)
+
+    @rtp_group.command(name="一覧", description="[管理者] ゲームごとの還元率レベルと、還元率の目安を見る")
+    @app_commands.rename(guild_id="サーバー")
+    @app_commands.describe(guild_id="見るサーバー（候補から選ぶ。空なら全サーバー）")
+    async def rtp_list(self, interaction: discord.Interaction, guild_id: str = None):
+        if not await self._owner_only(interaction):
+            return
+        guild = await self._pick_guild(interaction, guild_id) if guild_id else None
+        if guild_id and guild is None:
+            return
+        targets = [guild] if guild else [g for g in self.bot.guilds if approval.is_allowed(self.bot.economy, self.bot.config, g.id, 0)]
+        embeds = [rtp_table_embed(self.bot.economy.for_guild(g.id).rtp_levels(), f"🎚️ {g.name} の還元率") for g in targets[:10]]
+        await interaction.response.send_message(embeds=embeds or [ui.error_embed("対象がありません")], ephemeral=True)
+    rtp_list.autocomplete("guild_id")(guild_autocomplete)
 
     # ---- パチンコ統計 ---- #
     @group.command(name="パチンコ統計", description="[管理者] パチンコの当たり率を、設計した数字と実際の記録で比べる")

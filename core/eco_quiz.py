@@ -105,7 +105,7 @@ class QuizMixin:
             if correct:
                 if author:
                     self._apply(author, -q["reward"], "クイズ報酬の支払い")
-                paid = self._apply(user_id, q["reward"], "クイズ報酬")
+                paid = self._apply(user_id, q["reward"], "クイズ報酬", None if author else "クイズ報酬")      # 持ち主の問題の報酬は運営口座から。みんなの問題は出題者から
             result = {"correct": correct, "reward": paid, "answer": q["choices"][0], "explanation": q["explanation"],
                       "author_id": author, "author_delta": 0, "author_total": 0}
             if author:
@@ -122,10 +122,10 @@ class QuizMixin:
         earned = self._conn.execute("SELECT earned FROM quiz_questions WHERE id=?", (q["id"],)).fetchone()[0]
         diff = entitled - earned
         if diff > 0:
-            self._apply(q["author_id"], diff, "クイズ出題報酬")
+            self._apply(q["author_id"], diff, "クイズ出題報酬", "クイズ出題報酬")
             moved = diff
         elif diff < 0:
-            moved = -self.debit_up_to(q["author_id"], -diff, "クイズ出題報酬（調整）")
+            moved = -self.debit_up_to(q["author_id"], -diff, "クイズ出題報酬（調整）", "クイズ出題報酬")
         else:
             moved = 0
         self._conn.execute("UPDATE quiz_questions SET earned=? WHERE id=?", (earned + moved, q["id"]))

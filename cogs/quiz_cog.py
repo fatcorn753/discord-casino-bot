@@ -322,7 +322,7 @@ class QuizCog(commands.Cog):
 
     group = app_commands.Group(name="クイズ", description="📰 時事ネタ・豆知識の4択に答えて、正解でペリカをもらう")
 
-    @group.command(name="挑戦", description="まだ答えていないクイズに挑戦する（正解でペリカがもらえる。1問1回だけ）")
+    @group.command(name="挑戦", description="クイズに挑戦する（正解でペリカがもらえる）")
     async def play(self, interaction: discord.Interaction):
         eco = self.bot.economy.for_guild(interaction.guild_id)
         quiz, remaining = eco.quiz_next(interaction.user.id, time.time())
@@ -330,13 +330,13 @@ class QuizCog(commands.Cog):
             return await interaction.response.send_message(embed=ui.embed("📰 クイズ", "いま挑戦できる問題はありません。新しい問題を待ってください。", ui.INFO), ephemeral=True)
         await interaction.response.send_message(embed=question_embed(quiz, quiz["order"], remaining), view=AnswerView(self, interaction.user.id, quiz, quiz["order"]), ephemeral=True)
 
-    @group.command(name="出題", description=f"自分のクイズを出す。正解者への報酬（最大{quizpay.USER_MAX_REWARD:,}）は自分のペリカから払う")
+    @group.command(name="出題", description="自分のクイズを出す（報酬は自分のペリカから払う）")
     async def post(self, interaction: discord.Interaction):
         await interaction.response.send_modal(UserModal(self))
 
-    @group.command(name="取り下げ", description="自分が出したクイズをすぐ終わらせる（出題報酬はその時点で決まる）")
+    @group.command(name="取り下げ", description="自分が出したクイズを終わらせる")
     @app_commands.rename(quiz_id="番号")
-    @app_commands.describe(quiz_id="取り下げる問題（自分が出した、終了前の問題だけ候補に出ます）")
+    @app_commands.describe(quiz_id="取り下げる問題（自分の問題だけ候補に出ます）")
     async def withdraw(self, interaction: discord.Interaction, quiz_id: int):
         done = self.bot.economy.for_guild(interaction.guild_id).quiz_withdraw(interaction.user.id, quiz_id, time.time())
         if done is None:

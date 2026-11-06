@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 BLACKJACK = "ブラックジャック"
-GAMES = ["スロット", "コイン", "ルーレット", "チンチロ", BLACKJACK, "パチンコ"]
+GAMES = ["スロット", "ルーレット", "チンチロ", BLACKJACK, "パチンコ"]
 MIN_BET = 100                # これ未満の賭けは、ミッションの進み具合に数えない（小さい賭けの量産で報酬を稼がせない）
 COMPLETE_BONUS = 500         # 3つ全部達成したときの追加ボーナス
 PER_DAY = 3

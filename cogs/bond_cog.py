@@ -48,7 +48,7 @@ class BondCog(commands.Cog):
 
     group = app_commands.Group(name="債券", description="🏦 ペリカを預けて満期に受け取る（ゲーム内の通貨・現実のお金とは無関係）")
 
-    @group.command(name="買う", description=f"債券を買う（{bonds.MIN_AMOUNT:,}ペリカ以上。通常債は元本保証、ジャンク債は倒産あり）")
+    @group.command(name="買う", description=f"債券を買う（{bonds.MIN_AMOUNT:,}ペリカ以上）")
     @app_commands.rename(kind="種類", amount="金額")
     @app_commands.describe(kind="通常債かジャンク債", amount=f"預ける元本（{bonds.MIN_AMOUNT:,}ペリカ以上）")
     @app_commands.choices(kind=KIND_CHOICES)
@@ -67,7 +67,7 @@ class BondCog(commands.Cog):
             lines.append(f"元本保証です。途中解約は元本の{k.cancel_penalty}%が引かれます（`/債券 解約`）。")
         await interaction.response.send_message(embed=ui.ok_embed(f"{k.emoji} {k.name}を買いました", "\n".join(lines)))
 
-    @group.command(name="保有", description="持っている債券と、最近の決着を見る（自分だけに見える）")
+    @group.command(name="保有", description="持っている債券と最近の結果を見る")
     async def holdings(self, interaction: discord.Interaction):
         eco = self.g(interaction)
         eco.bond_settle(time.time(), RNG)
@@ -82,7 +82,7 @@ class BondCog(commands.Cog):
         e.set_footer(text="ランキングの総資産には、預けている元本も含まれます")
         await interaction.response.send_message(embed=e, ephemeral=True)
 
-    @group.command(name="解約", description="通常債を途中で解約する（元本から違約金が引かれる。ジャンク債は解約できない）")
+    @group.command(name="解約", description="通常債を途中で解約する（違約金あり）")
     @app_commands.rename(bond_id="番号")
     @app_commands.describe(bond_id="`/債券 保有` に出ている # の番号")
     async def cancel(self, interaction: discord.Interaction, bond_id: int):
