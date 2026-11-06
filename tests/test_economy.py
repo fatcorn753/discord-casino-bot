@@ -132,3 +132,45 @@ def test_sessions_block_double_play_and_cooldown():
     assert "少し待って" in s.try_start(1, now=102.0)    # 終了直後は待つ
     assert s.try_start(1, now=103.5) is None
     assert s.try_start(2, now=100.0) is None            # 他の人には影響しない
+
+
+def test_debt_is_collected_from_every_income_and_blocks_spending(eco):
+    eco.balance(1)
+    eid = eco.place_bet(1, INITIAL_BALANCE, "チンチロ")
+    assert eco.settle_with_penalty(eid, 0, "チンチロ", 5000)[:2] == (-INITIAL_BALANCE - 5000, 5000)     # 残高0、5000が借金
+    assert (eco.balance(1), eco.debt(1)) == (0, 5000)
+    assert eco.purchase(1, "x", "x", 100, False).ok is False and eco.crypto_buy(1, 100, 10.0).ok is False
+    assert eco.transfer(1, 2, 10, 0.0, 10_000, 0).ok is False                 # 借金中は、お金を逃がせない
+    eco.claim_daily(1, datetime.date(2026, 11, 1))               # デイリーも先に返済へ
+    assert (eco.balance(1), eco.debt(1)) == (0, 4000)
+    eco.credit(1, 6000, "テスト")
+    assert (eco.balance(1), eco.debt(1)) == (2000, 0)                          # 完済して、残りが残高
+    assert eco.top(5)[0][1] in (1, 2)
+
+
+def test_refund_is_not_taken_for_debt_and_ranking_subtracts_debt(eco):
+    eco.balance(1)
+    eco.balance(2)
+    eid = eco.place_bet(1, 1000, "コイン")
+    eco._conn.execute("UPDATE users SET debt=500 WHERE user_id=1")
+    eco.refund(eid)
+    assert eco.balance(1) == INITIAL_BALANCE and eco.debt(1) == 500            # 返金は徴収しない
+    assert dict((u, a) for _, u, a in eco.top(5)) == {1: INITIAL_BALANCE - 500, 2: INITIAL_BALANCE}
+
+
+def test_transfer_daily_limit_counts_only_the_amount_not_the_fee(eco):
+    eco.credit(1, 100_000, "テスト")
+    ok = eco.transfer(1, 2, 20_000, 0.1, 20_000, 0.0)                           # 上限ちょうどの金額を、手数料つきで送れる
+    assert ok.ok and ok.fee == 2_000 and eco.balance(2) == INITIAL_BALANCE + 20_000
+    assert eco.balance(1) == INITIAL_BALANCE + 100_000 - 22_000
+    blocked = eco.transfer(1, 2, 1, 0.1, 20_000, 0.0)
+    assert not blocked.ok and "1日の送金" in blocked.reason                      # 上限に達したあとは、1ペリカも送れない
+    assert eco.transfer(1, 2, 100, 0.1, 20_000, 1e12).ok
+
+
+def test_history_shows_transfer_and_fee_as_one_line(eco):
+    from core import history
+    eco.credit(1, 5_000, "テスト")
+    eco.transfer(1, 2, 1_000, 0.1, 20_000, 0.0)
+    lines = history.format_history(eco.history(1, 10), 3)
+    assert "送金 → <@2>" in lines[0] and "-1,100" in lines[0] and "手数料" not in lines[0]

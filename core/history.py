@@ -29,7 +29,11 @@ def _lines_oldest_first(rows: list) -> list:
             continue
         m = _TRANSFER.match(reason)
         if m:
-            out.append((r["ts"], f"送金 {'→' if m.group(1) == '送' else '←'} <@{m.group(2)}>", r["delta"], r["balance_after"], None))
+            delta, bal = r["delta"], r["balance_after"]
+            if m.group(1) == "送" and i + 1 < len(rows) and rows[i + 1]["reason"] == "送金手数料":       # 手数料の行は、送金の行にまとめて見せる
+                delta, bal = delta + rows[i + 1]["delta"], rows[i + 1]["balance_after"]
+                i += 1
+            out.append((r["ts"], f"送金 {'→' if m.group(1) == '送' else '←'} <@{m.group(2)}>", delta, bal, None))
         else:
             out.append((r["ts"], reason, r["delta"], r["balance_after"], None))
         i += 1

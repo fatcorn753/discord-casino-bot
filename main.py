@@ -96,7 +96,7 @@ bot = commands.Bot(
     intents=intents,
     help_command=None,
     tree_cls=BotTree,
-    activity=discord.Game(name=config.get("status", "/ヘルプ でペリカを稼ごう")),
+    activity=discord.Game(name=config.get("status", "/help でペリカを稼ごう")),
 )
 bot.config = config
 if config.get("debug_http"):

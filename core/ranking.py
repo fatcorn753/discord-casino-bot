@@ -4,7 +4,7 @@ from typing import Optional
 
 import discord
 
-from core import shop, ui
+from core import ui
 
 MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
 TOP_N = 10
@@ -20,20 +20,17 @@ def build_embed(eco, guild_ids: Optional[set], title: str, viewer_id: Optional[i
     if not top:
         e = ui.embed(title, f"{header}まだ誰も遊んでいません。`/ペリカ デイリー` から始めましょう。", ui.INFO)
     else:
-        profiles = eco.profiles_of([uid for _, uid, _ in top])
-
-        def title_of(uid):
-            item = shop.BY_ID.get((profiles.get(uid) or {}).get("title"))
-            return f"『{item.name}』" if item else ""
-
-        # 名前のあとに称号を付ける（ニックネームの「名前【称号】」と同じ順）
-        crypto = eco.crypto_values()
+        crypto, bonds = eco.crypto_values(), eco.bond_values()
 
         def worth(uid, total):
-            held = crypto.get(uid, 0)
-            return f"**{ui.pelica(total)}**" + (f"（うちCS {held:,}）" if held else "")
+            parts = []
+            if crypto.get(uid, 0):
+                parts.append(f"CS {crypto[uid]:,}")
+            if bonds.get(uid, 0):
+                parts.append(f"債券 {bonds[uid]:,}")
+            return f"**{ui.pelica(total)}**" + (f"（うち{'・'.join(parts)}）" if parts else "")
 
-        lines = [f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>{title_of(uid)}　{worth(uid, bal)}" for r, uid, bal in top]
+        lines = [f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>　{worth(uid, bal)}" for r, uid, bal in top]
         me = eco.rank_of(viewer_id, guild_ids) if viewer_id else None
         if me and me[0] > TOP_N:
             lines.append(f"…\n`{me[0]:>2}` <@{viewer_id}>　{worth(viewer_id, me[1])}")

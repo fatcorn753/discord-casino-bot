@@ -327,7 +327,7 @@ def test_owner_commands_are_dm_only_and_not_in_other_groups():
     assert ctx.dm_channel and ctx.private_channel and not ctx.guild                 # サーバーのコマンド候補には出ない
     from cogs.economy_cog import EconomyCog
     assert not any(getattr(EconomyCog, n, None) for n in ("server_list", "server_allow", "server_revoke", "grant"))   # 「ペリカ」グループからは消えた
-    assert {c.name for c in ApprovalCog.group.commands} == {"サーバー一覧", "サーバー許可", "サーバー取消"}
+    assert {c.name for c in ApprovalCog.group.commands} == {"サーバー一覧", "サーバー許可", "サーバー取消", "付与", "お知らせ", "抽選", "クイズ", "イベント", "パチンコ統計"}
     assert app_commands  # noqa
 
 
@@ -357,3 +357,315 @@ def test_manage_tool_grants_to_the_right_server_and_lists_servers(tmp_path, caps
     assert "777" in out and "友達の鯖" in out
     assert manage.main(["grant", "10", "5", "0"]) == 2 and manage.main(["grant", "10", "5", "99999999"]) == 2     # 範囲外は断る
     assert Economy(path, strict=True).for_guild(10).balance(5) == 3000 + 777
+
+
+def make_admin(tmp_path, guilds=None, extra_cogs=None):
+    eco = Economy(str(tmp_path / "t.db"))
+    cogs = dict(extra_cogs or {})
+    guild = SimpleNamespace(id=5, name="友達鯖", members=[], fetch_member=None)
+    by_id = {5: guild} if guilds is None else guilds
+    bot = SimpleNamespace(config={"owner_ids": [OWNER]}, economy=eco, guilds=list(by_id.values()),
+                          get_guild=lambda gid: by_id.get(gid), get_cog=lambda name: cogs.get(name))
+    return ApprovalCog(bot), eco, guild, bot
+
+
+class Resp2:
+    def __init__(self, log):
+        self.log = log
+
+    async def send_message(self, **kw):
+        self.log.append(("send", kw["embed"].title))
+
+    async def defer(self, **kw):
+        self.log.append(("defer",))
+
+    async def send_modal(self, modal):
+        self.log.append(("modal", type(modal).__name__))
+
+
+class Follow2:
+    def __init__(self, log):
+        self.log = log
+
+    async def send(self, **kw):
+        self.log.append(("follow", kw["embed"].title))
+
+
+def dm(uid, log):
+    return SimpleNamespace(user=SimpleNamespace(id=uid), guild_id=None, response=Resp2(log), followup=Follow2(log), namespace=SimpleNamespace())
+
+
+def test_grant_in_dm_pays_the_chosen_member_in_the_chosen_guild(tmp_path):
+    import asyncio
+    from core.economy import INITIAL_BALANCE
+    cog, eco, guild, bot = make_admin(tmp_path)
+
+    async def fetch(uid):
+        if uid == 42:
+            return SimpleNamespace(id=42, bot=False, mention="<@42>", display_name="友達")
+        if uid == 43:
+            return SimpleNamespace(id=43, bot=True, mention="<@43>", display_name="bot")
+        raise discord.NotFound(SimpleNamespace(status=404, reason="x"), "unknown member")
+    guild.fetch_member = fetch
+    log = []
+    asyncio.run(cog.grant.callback(cog, dm(FRIEND, log), "5", "42", 1000))
+    assert log == [("send", "❌ 権限がありません")] and eco.balance(42) == INITIAL_BALANCE
+    log.clear()
+    asyncio.run(cog.grant.callback(cog, dm(OWNER, log), "5", "<@42>", 1000, "テスト"))        # メンションの形でも受け付ける
+    assert log == [("send", "✅ 付与しました")] and eco.balance(42) == INITIAL_BALANCE + 1000
+    log.clear()
+    for args in (("999", "42"), ("5", "abc"), ("5", "43"), ("5", "44")):                       # 不明なサーバー・ID・Bot・サーバーにいない人
+        asyncio.run(cog.grant.callback(cog, dm(OWNER, log), *args, 1000))
+    assert [t for _, t in log] == ["❌ サーバーが見つかりません", "❌ ユーザーを指定してください", "❌ Bot には付与できません", "❌ そのサーバーにいません"]
+    assert eco.balance(42) == INITIAL_BALANCE + 1000 and eco.balance(44) == INITIAL_BALANCE
+
+
+def test_parse_user_id_and_autocomplete(tmp_path):
+    import asyncio
+    from cogs.approval_cog import parse_user_id
+    assert parse_user_id(" 123 ") == 123 and parse_user_id("<@123>") == 123 and parse_user_id("<@!123>") == 123
+    assert parse_user_id("abc") is None and parse_user_id("") is None and parse_user_id("0") is None
+    cog, eco, guild, bot = make_admin(tmp_path)
+    guild.members = [SimpleNamespace(id=1, name="alice", display_name="ありす", bot=False), SimpleNamespace(id=2, name="bot", display_name="bot", bot=True)]
+    inter = dm(OWNER, [])
+    assert [c.value for c in asyncio.run(cog.guild_autocomplete(inter, "友達"))] == ["5"]
+    assert asyncio.run(cog.guild_autocomplete(dm(FRIEND, []), "友達")) == []                     # 持ち主以外には候補も出さない
+    inter.namespace = SimpleNamespace(**{"サーバー": "5"})
+    assert [c.value for c in asyncio.run(cog.user_autocomplete(inter, "ありす"))] == ["1"]       # Bot は出ない
+    assert asyncio.run(cog.user_autocomplete(inter, "")) == []
+
+
+def test_raffle_and_quiz_admin_commands_delegate_and_are_owner_only(tmp_path):
+    import asyncio
+    calls = []
+
+    class FakeRaffle:
+        async def host(self, guild, host_id, fee, minutes, channel=None):
+            calls.append(("host", guild.id, fee, minutes))
+            return True, "投稿した"
+
+        async def repost(self, guild, channel=None):
+            calls.append(("repost", guild.id))
+            return False, "募集なし"
+
+        async def cancel(self, guild):
+            calls.append(("cancel", guild.id))
+            return True, "中止した"
+
+    class FakeQuiz:
+        def add_modal(self, announce=True, guild=None, channel=None):
+            calls.append(("modal", announce))
+            return SimpleNamespace()
+
+        def listing_embed(self):
+            return __import__("core.ui", fromlist=["ui"]).embed("一覧")
+
+        def remove(self, qid):
+            return qid == 1
+
+    cog, eco, guild, bot = make_admin(tmp_path, extra_cogs={"RaffleCog": FakeRaffle(), "QuizCog": FakeQuiz()})
+    log = []
+    asyncio.run(cog.raffle_start.callback(cog, dm(FRIEND, log), "5", 1000, 30))
+    asyncio.run(cog.quiz_delete.callback(cog, dm(FRIEND, log), 1))
+    assert [x[1] for x in log] == ["❌ 権限がありません"] * 2 and calls == []
+    log.clear()
+    asyncio.run(cog.raffle_start.callback(cog, dm(OWNER, log), "5", 1000, 30))
+    asyncio.run(cog.raffle_repost.callback(cog, dm(OWNER, log), "5"))
+    asyncio.run(cog.raffle_cancel.callback(cog, dm(OWNER, log), "5"))
+    asyncio.run(cog.raffle_start.callback(cog, dm(OWNER, log), "77", None, 60))                  # 不明なサーバー
+    assert calls == [("host", 5, 1000, 30), ("repost", 5), ("cancel", 5)]
+    assert [x[1] for x in log if x[0] == "follow"] == ["✅ 抽選を始めました", "❌ 出し直せません", "✅ 中止しました"] and log[-1] == ("send", "❌ サーバーが見つかりません")
+    log.clear()
+    asyncio.run(cog.quiz_add.callback(cog, dm(OWNER, log), SimpleNamespace(value=0)))
+    asyncio.run(cog.quiz_list.callback(cog, dm(OWNER, log)))
+    asyncio.run(cog.quiz_delete.callback(cog, dm(OWNER, log), 1))
+    asyncio.run(cog.quiz_delete.callback(cog, dm(OWNER, log), 2))
+    assert calls[-1] == ("modal", False) and [x[1] for x in log] == ["SimpleNamespace", "一覧", "✅ クイズ #1 を削除しました", "❌ その番号の問題はありません"]
+
+
+# ----------------------------- お知らせ ----------------------------- #
+class FakeImage:
+    def __init__(self, content_type="image/png", size=1000, filename="a.png", data=b"PNGDATA"):
+        self.content_type, self.size, self.filename, self._data = content_type, size, filename, data
+
+    async def read(self):
+        return self._data
+
+
+def make_announce(tmp_path, monkeypatch, guild_ids=(5, 6), no_channel=(), fail=()):
+    guilds, posts = {}, []
+
+    class Chan:
+        def __init__(self, gid):
+            self.gid = gid
+
+        async def send(self, **kw):
+            if self.gid in fail:
+                raise discord.HTTPException(SimpleNamespace(status=403, reason="x"), "forbidden")
+            posts.append((self.gid, kw["embed"].title, kw["embed"].description, kw["embed"].image.url, kw["file"] is not discord.utils.MISSING))
+
+    for gid in guild_ids:
+        guilds[gid] = SimpleNamespace(id=gid, name=f"鯖{gid}", members=[])
+    cog, eco, _, bot = make_admin(tmp_path, guilds=guilds)
+    monkeypatch.setattr("cogs.approval_cog.announce_channel", lambda g, e: None if g.id in no_channel else Chan(g.id))
+    monkeypatch.setattr("cogs.approval_cog.approval.is_allowed", lambda e, c, gid, uid: gid != 6 or uid != 0)
+    return cog, guilds, posts
+
+
+def test_announce_validates_image_and_opens_the_modal_for_the_owner_only(tmp_path, monkeypatch):
+    import asyncio
+    cog, guilds, posts = make_announce(tmp_path, monkeypatch)
+    log = []
+    asyncio.run(cog.announce.callback(cog, dm(FRIEND, log), None, None, None))
+    assert log == [("send", "❌ 権限がありません")]
+    log.clear()
+    asyncio.run(cog.announce.callback(cog, dm(OWNER, log), None, FakeImage(content_type="application/pdf"), None))
+    asyncio.run(cog.announce.callback(cog, dm(OWNER, log), None, FakeImage(size=9 * 1024 * 1024), None))
+    asyncio.run(cog.announce.callback(cog, dm(OWNER, log), "999", None, None))
+    assert [x[1] for x in log] == ["❌ 画像を使えません", "❌ 画像を使えません", "❌ サーバーが見つかりません"]
+    log.clear()
+    asyncio.run(cog.announce.callback(cog, dm(OWNER, log), "5", FakeImage(), "見出し"))
+    assert log == [("modal", "AnnounceModal")]
+
+
+def run_announce(cog, guilds_arg, heading, body, image, clicks):
+    """モーダルの送信→確認ボタンまでを動かす。clicks は押すボタンの名前（send / cancel）。"""
+    import asyncio
+    from cogs.approval_cog import AnnounceModal
+    edits, shown = [], {}
+
+    class Follow:
+        async def send(self, **kw):
+            shown.update(kw)
+
+    class Resp:
+        async def defer(self, **kw):
+            pass
+
+        async def edit_message(self, **kw):
+            assert not ("embed" in kw and "embeds" in kw), "embed と embeds は同時に渡せない（Discord.py が TypeError にする）"
+            edits.append(kw["embeds"][0].title)
+
+    inter = SimpleNamespace(user=SimpleNamespace(id=OWNER), response=Resp(), followup=Follow())
+
+    async def edit_original(**kw):
+        edits.append(kw["embed"].title + "|" + kw["embed"].description)
+    inter.edit_original_response = edit_original
+    modal = AnnounceModal(cog, guilds_arg, heading, image)
+    modal.body._value = body
+    asyncio.run(modal.on_submit(inter))
+    view = shown["view"]
+    other = SimpleNamespace(user=SimpleNamespace(id=FRIEND))
+    assert asyncio.run(view.interaction_check(other)) is False              # 持ち主以外は押せない
+    asyncio.run(getattr(view, clicks).callback(inter))
+    return shown, edits
+
+
+def test_announce_preview_then_send_to_all_allowed_guilds_with_image(tmp_path, monkeypatch):
+    cog, guilds, posts = make_announce(tmp_path, monkeypatch)
+    shown, edits = run_announce(cog, list(guilds.values()), "", "こんにちは\n2行目", FakeImage(), "send")
+    assert [e.title for e in shown["embeds"]] == ["📢 送信前の確認", "📢 お知らせ"] and len(shown["files"]) == 1      # プレビューが出る
+    assert "鯖5" in shown["embeds"][0].description and "鯖6" in shown["embeds"][0].description
+    assert posts == [(5, "📢 お知らせ", "こんにちは\n2行目", "attachment://a.png", True), (6, "📢 お知らせ", "こんにちは\n2行目", "attachment://a.png", True)]
+    assert edits[0] == "📢 送信中…" and edits[1].startswith("✅ お知らせを送りました|✅ 2サーバーに送りました")
+
+
+def test_announce_reports_failures_and_text_only_has_no_file(tmp_path, monkeypatch):
+    cog, guilds, posts = make_announce(tmp_path, monkeypatch, guild_ids=(5, 6, 7), no_channel=(6,), fail=(7,))
+    shown, edits = run_announce(cog, list(guilds.values()), "重要", "本文のみ", None, "send")
+    assert shown["files"] == [] and [x[0] for x in posts] == [5]          # 添付なし。鯖6は投稿先なし、鯖7は投稿失敗、鯖5だけ成功
+    final = edits[-1]
+    assert "1サーバーに送りました" in final and "鯖6（投稿できるチャンネルがありません）" in final and "鯖7" in final
+
+
+def test_announce_text_only_post_has_no_attachment(tmp_path, monkeypatch):
+    cog, guilds, posts = make_announce(tmp_path, monkeypatch, guild_ids=(5,))
+    run_announce(cog, [guilds[5]], "重要", "本文のみ", None, "send")
+    assert posts == [(5, "重要", "本文のみ", None, False)]
+
+
+def test_announce_cancel_sends_nothing(tmp_path, monkeypatch):
+    cog, guilds, posts = make_announce(tmp_path, monkeypatch)
+    shown, edits = run_announce(cog, list(guilds.values()), "", "やめる", None, "cancel")
+    assert posts == [] and edits == ["📢 お知らせ"]
+
+
+def test_event_admin_commands_target_one_or_all_allowed_guilds_and_are_owner_only(tmp_path, monkeypatch):
+    import asyncio
+    calls = []
+
+    class FakeEvent:
+        async def start_manual(self, guild, game, boost, minutes, channel=None):
+            calls.append(("start", guild.id, game, boost, minutes))
+            return True, f"{guild.name}: 開いた"
+
+        async def stop_manual(self, guild):
+            calls.append(("stop", guild.id))
+            return True, f"{guild.name}: 終わらせた"
+
+    guilds = {5: SimpleNamespace(id=5, name="鯖5", members=[]), 6: SimpleNamespace(id=6, name="鯖6", members=[])}
+    cog, eco, _, bot = make_admin(tmp_path, guilds=guilds, extra_cogs={"EventCog": FakeEvent()})
+    monkeypatch.setattr("cogs.approval_cog.approval.is_allowed", lambda e, c, gid, uid: gid != 6)        # 6 は許可されていない
+    log = []
+    game = SimpleNamespace(value="スロット")
+    asyncio.run(cog.event_start.callback(cog, dm(FRIEND, log), game, 30, 50, None))
+    asyncio.run(cog.event_stop.callback(cog, dm(FRIEND, log), None))
+    assert [x[1] for x in log] == ["❌ 権限がありません"] * 2 and calls == []
+    log.clear()
+    asyncio.run(cog.event_start.callback(cog, dm(OWNER, log), game, 45, 80, None))                    # 全サーバー（許可されている分だけ）
+    asyncio.run(cog.event_start.callback(cog, dm(OWNER, log), game, 10, 100, "6"))                    # 指定したサーバーには、許可外でも開ける
+    asyncio.run(cog.event_stop.callback(cog, dm(OWNER, log), "5"))
+    asyncio.run(cog.event_start.callback(cog, dm(OWNER, log), game, 10, 100, "999"))                  # 不明なサーバー
+    assert calls == [("start", 5, "スロット", 80, 45), ("start", 6, "スロット", 100, 10), ("stop", 5)]
+    assert [x[1] for x in log if x[0] == "follow"] == ["✅ 特別イベントを開きました（1サーバー）", "✅ 特別イベントを開きました（1サーバー）", "特別イベントを終わらせました"]
+    assert log[-1] == ("send", "❌ サーバーが見つかりません")
+
+
+# ----------------------------- パチンコ統計 ----------------------------- #
+@pytest.mark.real_scope
+def test_pachinko_log_aggregates_by_omen_tier_guild_and_period(tmp_path):
+    eco = Economy(str(tmp_path / "t.db"))
+    g1, g2 = eco.for_guild(5), eco.for_guild(6)
+    g1.pachinko_record(1, "gold", "super", 20, 100, now=1000)
+    g1.pachinko_record(1, "", "", 0, 100, now=2000)
+    g1.pachinko_record(2, "gold", "", 0, 200, now=3000)
+    g2.pachinko_record(3, "red", "normal", 2, 50, now=4000)
+    data = eco.pachinko_stats()
+    assert data["total"] == (4, 2, 450, 100 * 20 + 50 * 2)                           # 回転, 当たり, 賭け金, 払い戻し
+    assert data["omen"] == {"gold": (2, 1), "": (1, 0), "red": (1, 1)} and data["tier"] == {"super": (1, 1), "": (2, 0), "normal": (1, 1)}
+    assert eco.pachinko_stats(5)["total"][0] == 3 and eco.pachinko_stats(6)["total"][0] == 1
+    assert eco.pachinko_stats(5, since=2500)["total"] == (1, 0, 200, 0)               # 期間で絞れる
+    assert eco.pachinko_stats(99)["total"] == (0, 0, 0, 0)
+
+
+def test_pachinko_stats_embed_compares_actual_to_design():
+    from cogs.approval_cog import pachinko_stats_embed
+    from games import pachinko
+    empty = pachinko_stats_embed({"omen": {}, "tier": {}, "total": (0, 0, 0, 0)}, "全サーバー")
+    assert "まだ記録がありません" in empty.description
+    data = {"omen": {"gold": (200, 110), "": (50, 5)}, "tier": {"super": (100, 45)}, "total": (250, 115, 25_000, 24_000)}
+    e = pachinko_stats_embed(data, "テスト鯖・過去7日")
+    assert "テスト鯖・過去7日" in e.title and "250回転" in e.description
+    assert "実績 **46.0%**" in e.description and f"設計 {pachinko.hit_rate():.1%}" in e.description
+    assert "還元率: 実績 **96.0%**" in e.description
+    omen, tier = e.fields[0].value, e.fields[1].value
+    assert "🟡 金: 200回　実績 **55.0%**" in omen and "なし: 50回　実績 **10.0%**" in omen and "（参考）" in omen        # 50回転は参考
+    assert "🔵 青: 0回　実績 **—**" in omen
+    assert "スーパー: 100回　実績 **45.0%** ／ 設計 45.0%" in tier and "45.0%（参考）" not in tier             # 100回転以上は「参考」が付かない
+
+
+def test_pachinko_stats_command_is_owner_only_and_scopes_to_the_chosen_guild(tmp_path):
+    import asyncio
+    cog, eco, guild, bot = make_admin(tmp_path)
+    eco.for_guild(5).pachinko_record(1, "red", "", 0, 100)
+    sent = []
+
+    class R:
+        async def send_message(self, **kw):
+            sent.append(kw["embed"].title)
+    inter = lambda uid: SimpleNamespace(user=SimpleNamespace(id=uid), guild_id=None, response=R())      # noqa: E731
+    asyncio.run(cog.pachinko_stats.callback(cog, inter(FRIEND), None, None))
+    asyncio.run(cog.pachinko_stats.callback(cog, inter(OWNER), "5", 7))
+    asyncio.run(cog.pachinko_stats.callback(cog, inter(OWNER), None, None))
+    asyncio.run(cog.pachinko_stats.callback(cog, inter(OWNER), "999", None))
+    assert sent == ["❌ 権限がありません", "🎰 パチンコ統計（友達鯖・過去7日）", "🎰 パチンコ統計（全サーバー・全期間）", "❌ サーバーが見つかりません"]

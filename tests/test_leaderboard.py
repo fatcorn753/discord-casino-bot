@@ -157,10 +157,10 @@ def test_unset_stops_and_removes_the_message(eco):
     cog, guild, ch = make(eco)
     run(EconomyCog.board_set.callback(cog, FakeInteraction(guild), ch))
     mid = eco.get_leaderboard(10)["message_id"]
-    run(EconomyCog.board_unset.callback(cog, FakeInteraction(guild)))
+    run(EconomyCog.board_set.callback(cog, FakeInteraction(guild), None, True))
     assert eco.get_leaderboard(10) is None and ch.messages[mid].deleted
     it = FakeInteraction(guild)
-    run(EconomyCog.board_unset.callback(cog, it))                               # 掲示がないときは案内する
+    run(EconomyCog.board_set.callback(cog, it, None, True))                               # 掲示がないときは案内する
     assert "掲示していません" in it.sent[-1]["embed"].title
 
 
@@ -241,8 +241,7 @@ def test_board_storage_roundtrip_and_replace(eco):
     assert len(eco.list_leaderboards()) == 1
 
 
-def test_ranking_shows_the_title_after_the_name(eco):
-    """称号は名前の後ろ（ニックネームの「名前【称号】」と同じ順）。"""
+def test_ranking_does_not_show_titles_to_keep_each_row_on_one_line(eco):
     from core import shop
     play_in_guild(eco, 1)
     it = shop.BY_ID["title_zawa"]
@@ -250,7 +249,7 @@ def test_ranking_shows_the_title_after_the_name(eco):
     assert eco.purchase(1, it.id, shop.label(it), it.price, True).ok
     eco.equip(1, "title", it.id)
     e = ranking.build_embed(eco, eco.guild_user_ids(10), "🏆 テスト")
-    assert "<@1>『ざわ…ざわ…』" in e.description and "『ざわ…ざわ…』<@1>" not in e.description
+    assert "ざわ…ざわ…" not in e.description and "<@1>　" in e.description
 
 
 # ----------------------------- 掲示の権限 ----------------------------- #
@@ -260,7 +259,7 @@ def _check(command, user_id, manage_guild, owners):
     return command.checks[0](it)
 
 
-@pytest.mark.parametrize("command", [EconomyCog.board_set, EconomyCog.board_unset])
+@pytest.mark.parametrize("command", [EconomyCog.board_set])
 def test_board_commands_allow_server_managers_and_bot_owners_only(command):
     assert _check(command, 5, True, [])                 # サーバー管理権限がある
     assert _check(command, 7, False, [7])               # 権限がなくても、Bot の持ち主はどのサーバーでも使える

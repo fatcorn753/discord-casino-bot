@@ -177,6 +177,8 @@ def test_pachinko_plays_all_frames_and_settles(bot, monkeypatch):
         assert len(it.edits) >= 9 and "パチンコ" in title_of(it)
         assert_clean(bot)
     assert ledger_matches_balance(bot)
+    stats = bot.economy.pachinko_stats()
+    assert stats["total"][0] == 40 and sum(n for n, _ in stats["omen"].values()) == 40          # 回転ごとに統計用の記録が残る
 
 
 # ------------------------------ チンチロ ------------------------------ #
@@ -195,12 +197,12 @@ def test_chinchiro_win_pays_by_role(bot):
     assert_clean(bot)
 
 
-def test_chinchiro_lose_with_multiplier_is_capped_at_balance(bot):
-    # 全財産を賭けて、親のピンゾロ（5倍払い）で負ける: 追加で引かれるのは残高の範囲まで
+def test_chinchiro_loss_beyond_balance_becomes_debt(bot):
+    # 全財産を賭けて、親のピンゾロ（5倍払い）で負ける: 残高は0、払い切れない分は借金になる
     ctx, view = make_chinchiro_view(bot, INITIAL_BALANCE, (1, 1, 1), [(2, 2, 3)])
     embed = view.final_embed()
-    assert bot.economy.balance(1) == 0
-    assert "全財産" in embed.description
+    assert bot.economy.balance(1) == 0 and bot.economy.debt(1) == INITIAL_BALANCE * 4
+    assert "借金" in embed.description
     assert_clean(bot) and ledger_matches_balance(bot)
 
 
@@ -329,7 +331,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
     asyncio.run(load())
     payloads = [c.to_dict(cmd_bot.tree) for c in cmd_bot.tree.get_commands()]
     names = [n for p in payloads for n in _names(p)]
-    assert {p["name"] for p in payloads} == {"ペリカ", "カジノ", "ショップ", "ヘルプ", "暗号", "運営"}
+    assert {p["name"] for p in payloads} == {"ペリカ", "カジノ", "ショップ", "help", "暗号", "運営", "債券", "クイズ"}
     assert [n for n in names if re.search(r"[A-Z]", n) or not 1 <= len(n) <= 32] == []
 
     missing = []
@@ -344,30 +346,38 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
     for p in payloads:
         walk(p, p["name"])
     assert missing == []
+    admin = next(p for p in payloads if p["name"] == "運営")                 # 管理者用は、DM専用の「運営」にまとまっている
+    assert admin["contexts"] == [1, 2] and all(o["description"].startswith("[管理者]") for o in admin["options"] if o["type"] != 2)
+    assert {o["name"] for o in admin["options"]} == {"サーバー一覧", "サーバー許可", "サーバー取消", "付与", "お知らせ", "抽選", "クイズ", "イベント", "パチンコ統計"}
+    quiz = next(p for p in payloads if p["name"] == "クイズ")
+    assert {o["name"] for o in quiz["options"]} == {"挑戦", "出題", "取り下げ"}                 # サーバー内のクイズに管理者用は出ない
     casino = next(p for p in payloads if p["name"] == "カジノ")
     assert {o["name"] for o in casino["options"]} == {"チンチロ", "パチンコ", "スロット", "コイン", "ブラックジャック", "ルーレット"}
 
 
 # ----------------- 抜け道・競合に対する回帰テスト ----------------- #
-def test_chinchiro_all_in_is_rejected_because_of_multiplier_payments(bot):
+def test_chinchiro_all_in_is_allowed_and_debt_is_collected_from_next_income(bot):
     it = FakeInteraction()
-    run(play_ch.play_chinchiro(it, bot, INITIAL_BALANCE))          # 全財産では倍払いに備えられない
-    assert "足りません" in it.sent[0]["embed"].title and "5倍" in it.sent[0]["embed"].description
-    assert bot.economy.balance(1) == INITIAL_BALANCE
-    assert_clean(bot)
-    it = FakeInteraction()
-    run(play_ch.play_chinchiro(it, bot, INITIAL_BALANCE // 5))      # 残高の1/5までなら遊べる
+    run(play_ch.play_chinchiro(it, bot, INITIAL_BALANCE))          # 全財産でも遊べる（倍払いの超過は借金になる）
     assert it.edits and it.edits[-1].get("view") is not None
     it.edits[-1]["view"].ctx.abort()
+    ctx, view = make_chinchiro_view(bot, INITIAL_BALANCE, (1, 1, 1), [(2, 2, 3)])
+    view.final_embed()
+    assert bot.economy.debt(1) == INITIAL_BALANCE * 4
+    bot.economy.credit(1, 5000, "テスト")                              # 入金は先に借金へ回る
+    assert bot.economy.balance(1) == 0 and bot.economy.debt(1) == INITIAL_BALANCE * 4 - 5000
+    bot.economy.credit(1, 20_000, "テスト")                            # 完済して、残りが残高になる
+    assert bot.economy.debt(1) == 0 and bot.economy.balance(1) == 20_000 - (INITIAL_BALANCE * 4 - 5000)
+    assert_clean(bot) and ledger_matches_balance(bot)
 
 
 def test_chinchiro_loss_is_always_fully_collectable_at_max_bet(bot):
-    """残高の1/5を賭けて親のピンゾロ（5倍払い）で負けても、払い切れる（上限で頭打ちにならない）。"""
-    bet = INITIAL_BALANCE // 5
-    ctx, view = make_chinchiro_view(bot, bet, (1, 1, 1), [(2, 2, 3)])
+    """残高の1/10を賭けて親のピンゾロ×自分のヒフミ（10倍払い）で負けても、払い切れる（上限で頭打ちにならない）。"""
+    bet = INITIAL_BALANCE // 10
+    ctx, view = make_chinchiro_view(bot, bet, (1, 1, 1), [(3, 2, 1)])
     view.final_embed()
-    assert ctx.penalty_taken == bet * 4
-    assert bot.economy.balance(1) == INITIAL_BALANCE - bet * 5
+    assert ctx.penalty_taken == bet * 9
+    assert bot.economy.balance(1) == INITIAL_BALANCE - bet * 10
 
 
 def test_chinchiro_timeout_and_button_race_settles_once(bot):
@@ -394,6 +404,7 @@ def test_chinchiro_deleting_message_while_rolling_also_settles(bot, monkeypatch)
     from games import chinchiro as rules
     strong = [((1, 1, 1), rules.Hand(rules.PINZORO))]
     monkeypatch.setattr(rules, "play_hand", lambda rng: strong)
+    monkeypatch.setattr(rules, "roll_dice", lambda rng: (1, 2, 4))              # 振る目も固定する（ヒフミが出ると、倍払いが10倍になって結果が変わる）
     ctx, view = make_chinchiro_view(bot, 300, (1, 1, 1), [(1, 2, 4), (1, 2, 4), (1, 2, 4)])
     it = FakeInteraction(fail_edit_after=0, fail_with=http_error(404))
     run(view.roll.callback(it))
@@ -439,15 +450,16 @@ def test_transfer_blocked_while_playing_and_needs_min_games(bot, tmp_path):
     bot.sessions.end(1)
 
 
-def test_transfer_fee_rounds_up_and_counts_toward_limit(bot):
+def test_transfer_fee_rounds_up_and_does_not_count_toward_limit(bot):
     eco = bot.economy
     for _ in range(3):
         eco.settle(eco.place_bet(1, 10, "テスト"), 10, "テスト")
     r = eco.transfer(1, 2, 5, 0.1, 20_000, 0.0, 3)
     assert r.ok and r.fee == 1                              # 少額でも手数料は切り上げ
     eco.credit(1, 100_000, "テスト")
-    assert eco.transfer(1, 2, 1000, 0.1, 1200, 0.0, 3).ok                       # 1000 + 手数料100 = 1100（+過去の6）
-    assert not eco.transfer(1, 2, 100, 0.1, 1200, 0.0, 3).ok                     # 手数料込みの合計で上限を超える
+    assert eco.transfer(1, 2, 1000, 0.1, 1200, 0.0, 3).ok                       # 送った額は 5 + 1000 = 1005（手数料は数えない）
+    assert not eco.transfer(1, 2, 200, 0.1, 1200, 0.0, 3).ok                     # 1205 になるので上限を超える
+    assert eco.transfer(1, 2, 195, 0.1, 1200, 0.0, 3).ok                         # ちょうど上限の 1200 までは送れる
 
 
 def test_balance_of_others_does_not_create_accounts(bot):
@@ -526,16 +538,10 @@ def test_result_title_shows_profit_and_order_puts_dice_before_mission_notice(bot
     assert d.index("あなたの予想") < d.index("賭け金") < d.index("ミッション達成")      # 出目 → 数字 → ミッション通知
 
 
-def test_chinchiro_balance_error_shows_the_max_bet(bot):
-    it = FakeInteraction()
-    run(play_ch.play_chinchiro(it, bot, 1000))                               # 残高3000は賭け金1000の5倍に足りない
-    text = it.sent[-1]["embed"].description
-    assert "まで賭けられます" in text and "600" in text
 
-
-def test_help_has_steps_payouts_and_admin_section():
+def test_help_is_short_and_has_a_page_per_category():
     import asyncio
-    from cogs.help_cog import Help
+    from cogs.help_cog import BUTTONS, HOME, Help, HelpView, page_embed
     it = type("I", (), {})()
     sent = []
 
@@ -544,13 +550,27 @@ def test_help_has_steps_payouts_and_admin_section():
     it.response = type("R", (), {"send_message": staticmethod(send)})()
     asyncio.run(Help.help.callback(Help(None), it))
     e = sent[0]["embed"]
-    names = [f.name for f in e.fields]
-    assert "はじめの3ステップ" in e.description and any("管理者向け" in n for n in names)
-    text = e.description + "\n".join(f.value for f in e.fields)
-    assert "7️⃣500倍" in text and "還元率" not in text and "期待値" not in text
-    start = next(f.value for f in e.fields if "まずはここから" in f.name)
-    assert "サーバー許可" not in start and "ランキング掲示" not in start      # 初心者向けの欄に管理者コマンドを混ぜない
-    assert all(len(f.value) <= 1024 for f in e.fields) and len(e) <= 6000      # Discord の埋め込みの上限
+    assert "はじめの3ステップ" in e.description and sent[0]["ephemeral"] is True and len(e.description) < 400      # 最初の画面は短く
+    view = sent[0]["view"]
+    assert [b.label for b in view.children] == [label for _, label in BUTTONS]
+    text = ""
+    for key, _ in BUTTONS:
+        page = page_embed(key)
+        text += page.title + page.description
+        assert len(page.description) <= 1000 and len(page) <= 6000                                                 # Discord の上限
+    assert "7️⃣" in text and "還元率" not in text and "期待値" not in text and "借金" in text and "空売り" in text
+    assert "サーバー許可" not in text and "ランキング掲示" in page_embed("admin").description
+    assert "ランキング掲示" not in page_embed(HOME).description and "ランキング掲示" not in page_embed("pelica").description   # 管理者のコマンドを初心者向けに混ぜない
+
+    edits = []
+
+    async def edit_message(**kw):
+        edits.append(kw)
+    click = type("I", (), {})()
+    click.response = type("R", (), {"edit_message": staticmethod(edit_message)})()
+    asyncio.run(view.children[1].callback(click))                                                                  # 「ゲーム」ボタン
+    assert edits[0]["embed"].title == page_embed("game").title and isinstance(edits[0]["view"], HelpView)
+
 
 
 def _last_view(it):
@@ -652,3 +672,31 @@ def test_every_game_title_shows_the_players_name(bot, monkeypatch, game):
         run(play_bj.play_blackjack(it, bot, 100))
     titles = _all_titles(it)
     assert titles and all("（テスト）" in t for t in titles), titles
+
+
+# ------------------- 演出の表示に失敗したときの記録 ------------------- #
+def test_display_failure_is_logged_with_game_step_and_status_and_settlement_still_holds(bot, capsys):
+    it = FakeInteraction(fail_edit_after=1, fail_with=http_error(503))              # 途中のコマの書き換えで、Discord 側の障害
+    run(simple.play_roulette(it, bot, 100, "red"))
+    out = capsys.readouterr().out
+    assert "演出の表示に失敗: ルーレット/途中のコマ 2/2: " in out and "status=503" in out
+    assert_clean(bot)                                                                # 精算は済み、次のゲームを始められる
+    assert ledger_matches_balance(bot)
+
+
+@pytest.mark.parametrize("play, name", [
+    (lambda it, bot: simple.play_coin(it, bot, 100, "heads"), "コイン"),
+    (lambda it, bot: simple.play_slot(it, bot, 100), "スロット"),
+    (lambda it, bot: play_pa.play_pachinko(it, bot, 100), "パチンコ"),
+])
+def test_display_failure_is_logged_for_every_animated_game(bot, capsys, play, name):
+    it = FakeInteraction(fail_edit_after=0, fail_with=http_error(404))              # 最初の書き換えで、メッセージが消えていた
+    run(play(it, bot))
+    out = capsys.readouterr().out
+    assert f"演出の表示に失敗: {name}/" in out and "status=404" in out
+    assert_clean(bot)
+
+
+def test_log_display_failure_handles_errors_without_status(capsys):
+    common.log_display_failure("テスト", "結果の表示", RuntimeError("boom"))
+    assert "演出の表示に失敗: テスト/結果の表示: RuntimeError status=? code=?: boom" in capsys.readouterr().out

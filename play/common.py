@@ -1,18 +1,31 @@
 """ゲーム共通の流れ: 賭け金の検証と預かり、精算、ボタンの持ち主確認、結果の表示。"""
 
 import datetime
+import time
 
 import discord
 
-from core import approval, missions, ui
+from core import approval, events, missions, ui
 
 MIN_BET = 10
 MAX_BET = 100_000
 
 
-def local_today(bot) -> datetime.date:
+def local_now(bot) -> datetime.datetime:
     tz = datetime.timezone(datetime.timedelta(hours=float(bot.config.get("utc_offset_hours", 9))))
-    return datetime.datetime.now(tz).date()
+    return datetime.datetime.now(tz)
+
+
+def local_today(bot) -> datetime.date:
+    return local_now(bot).date()
+
+
+def log_display_failure(game: str, step: str, exc: Exception) -> None:
+    """演出の表示（メッセージの書き換え）に失敗したことを記録する。精算は済んでいるので結果には影響しないが、
+    画面が途中で止まって見える原因（通信エラーなど）を、あとから調べられるようにする。"""
+    status = getattr(exc, "status", "?")
+    code = getattr(exc, "code", "?")
+    print(f"演出の表示に失敗: {game}/{step}: {type(exc).__name__} status={status} code={code}: {exc}")
 
 
 class GameContext:
@@ -29,6 +42,7 @@ class GameContext:
         self.done = False
         self.penalty_taken = 0       # チンチロの倍払いなどで、預かり金のほかに引いた額
         self.insured_refund = 0      # 保険券で戻った額
+        self.event_bonus = 0         # 突発イベントで上乗せされた額
         self.events = {}             # 連勝・ミッションの結果（演出の表示に使う）
 
     @property
@@ -43,6 +57,10 @@ class GameContext:
         """
         if self.done:
             return 0
+        boost = events.best_boost(self.game, events.active(self.guild_id, local_now(self.bot)), self.economy.manual_event_get(time.time()))
+        if boost:
+            self.event_bonus = events.bonus(self.bet, payout, boost)
+            payout += self.event_bonus
         try:
             result = self.economy.settle_with_penalty(self.escrow_id, payout, self.game, penalty)
         except Exception:
@@ -129,8 +147,12 @@ def result_lines(ctx: GameContext, payout: int, net: int, extra: str = "") -> st
     top = [extra] if extra else []
     if ctx.insured_refund:
         top.append(f"🎟️ 保険券を使った！ 賭け金の半分（{ui.pelica(ctx.insured_refund)}）が戻った")
-    stats = [f"賭け金: **{ui.pelica(ctx.bet)}**", f"払い戻し: **{ui.pelica(payout + ctx.insured_refund)}**",
+    event = [f"🔥 **突発イベントのボーナス +{ui.pelica(ctx.event_bonus)}**"] if ctx.event_bonus else []
+    stats = event + [f"賭け金: **{ui.pelica(ctx.bet)}**", f"払い戻し: **{ui.pelica(payout + ctx.insured_refund)}**",
              f"損益: **{signed(net)}ペリカ**", f"残高: **{ui.pelica(balance)}**"]
+    debt = ctx.economy.debt(ctx.user_id)
+    if debt:
+        stats.append(f"借金: **{ui.pelica(debt)}**（入ったお金から先に返済されます）")
     head, tail = _celebration(ctx, net)
     if top and head:
         top.append("")

@@ -15,6 +15,19 @@ CHECK_MINUTES = 5
 KING = shop.BY_ID[shop.WEEKLY_KING]
 
 
+def announce_channel(guild: discord.Guild, eco):
+    """自動の告知を投稿するチャンネル。ランキング掲示のチャンネル、無ければシステムチャンネル。投稿できなければ None。"""
+    board = eco.get_leaderboard(guild.id)
+    candidates = [guild.get_channel(board["channel_id"])] if board else []
+    candidates.append(guild.system_channel)
+    for ch in candidates:
+        if ch is not None:
+            perms = ch.permissions_for(guild.me)
+            if perms.view_channel and perms.send_messages and perms.embed_links:
+                return ch
+    return None
+
+
 class WeeklyCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -57,15 +70,7 @@ class WeeklyCog(commands.Cog):
                     print(f"週間ランキングの発表に失敗: guild={guild.id}: {exc!r}")
 
     def _channel(self, guild: discord.Guild, eco):
-        board = eco.get_leaderboard(guild.id)
-        candidates = [guild.get_channel(board["channel_id"])] if board else []
-        candidates.append(guild.system_channel)
-        for ch in candidates:
-            if ch is not None:
-                perms = ch.permissions_for(guild.me)
-                if perms.view_channel and perms.send_messages and perms.embed_links:
-                    return ch
-        return None
+        return announce_channel(guild, eco)
 
     def build_embed(self, week: str, result: dict) -> discord.Embed:
         lines = weekly.standings_lines(result["standings"])

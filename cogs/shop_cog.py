@@ -284,11 +284,19 @@ class ShopCog(commands.Cog):
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     # ------------------------------ 使う ------------------------------ #
-    @group.command(name="使う", description="持っている景品を身につける・使う")
-    @app_commands.rename(item="商品")
-    @app_commands.describe(item="使う景品（持っているものが候補に出ます）")
+    @group.command(name="使う", description="持っている景品を身につける・使う。装備を外すときも、これを使う")
+    @app_commands.rename(item="商品", unequip="外す")
+    @app_commands.describe(item="使う景品（持っているものが候補に出ます）", unequip="装備を外すとき、外すものを選ぶ（商品は指定しない）")
     @app_commands.autocomplete(item=_owned_autocomplete)
-    async def use(self, interaction: discord.Interaction, item: str):
+    @app_commands.choices(unequip=[
+        app_commands.Choice(name="称号", value="title"), app_commands.Choice(name="カードの色", value="card_color"),
+        app_commands.Choice(name="カードのアイコン", value="card_icon"), app_commands.Choice(name="名前の色（ロール）", value="role")])
+    async def use(self, interaction: discord.Interaction, item: str = None, unequip: app_commands.Choice[str] = None):
+        if (item is None) == (unequip is None):
+            return await interaction.response.send_message(embed=ui.error_embed(
+                "どちらか1つだけ指定してください", "使う景品を「商品」に指定するか、外すものを「外す」で選んでください。"), ephemeral=True)
+        if unequip is not None:
+            return await self._unequip(interaction, unequip)
         uid = interaction.user.id
         inv = self.g(interaction).inventory(uid)
         # 「赤」のように同じ名前が複数ある場合は、持っているものを優先して選ぶ
@@ -326,14 +334,8 @@ class ShopCog(commands.Cog):
             return await interaction.followup.send(embed=ui.ok_embed("装備しました", f"**{shop.label(it)}**\n`/ペリカ 残高` で確認できます。{note}"), ephemeral=True)
         await interaction.response.send_message(embed=ui.ok_embed("装備しました", f"**{shop.label(it)}**\n`/ペリカ 残高` で確認できます。"), ephemeral=True)
 
-    # ------------------------------ 外す ------------------------------ #
-    @group.command(name="外す", description="装備している称号・カード・名前の色を外す")
-    @app_commands.rename(what="種類")
-    @app_commands.describe(what="外すもの")
-    @app_commands.choices(what=[
-        app_commands.Choice(name="称号", value="title"), app_commands.Choice(name="カードの色", value="card_color"),
-        app_commands.Choice(name="カードのアイコン", value="card_icon"), app_commands.Choice(name="名前の色（ロール）", value="role")])
-    async def unequip(self, interaction: discord.Interaction, what: app_commands.Choice[str]):
+    # ------------------------------ 外す（/ショップ 使う の「外す」） ------------------------------ #
+    async def _unequip(self, interaction: discord.Interaction, what: app_commands.Choice[str]):
         if what.value == "role":
             await interaction.response.defer(ephemeral=True)
             try:

@@ -46,9 +46,8 @@ def _rolling_text() -> str:
 
 
 async def play_chinchiro(interaction: discord.Interaction, bot, bet: int):
-    # 負けたときは最大5倍払い。賭け金のほかに払う分を確実に払えるよう、残高が賭け金の5倍以上ある人だけ遊べる
-    ctx = await start_game(interaction, bot, bet, "チンチロ", balance_factor=rules.ROLE_MULT[rules.PINZORO],
-                           factor_reason="チンチロは最大5倍払いになるため、")
+    # 負けの倍払い（最大10倍）が残高を超えた分は借金になり、次の入金から強制で返済する
+    ctx = await start_game(interaction, bot, bet, "チンチロ")
     if ctx is None:
         return
     try:
@@ -118,7 +117,6 @@ class ChinchiroView(OwnerView):
         payout, extra = rules.payout(self.ctx.bet, outcome)
         # 負けの倍払い（預かり金で足りない分）は、精算と同じ1回の処理で、残高の範囲まで引く
         net = self.ctx.settle(payout, penalty=extra)
-        taken = self.ctx.penalty_taken
         if outcome.result == "win":
             line, color = WIN_LINE.get(player.kind, WIN_LINE[rules.ME]), ui.OK
             if dealer.kind == rules.HIFUMI:
@@ -126,8 +124,8 @@ class ChinchiroView(OwnerView):
         elif outcome.result == "lose":
             key = rules.HIFUMI if player.kind == rules.HIFUMI else dealer.kind
             line, color = LOSE_LINE.get(key, LOSE_LINE[rules.ME]), ui.ERROR
-            if extra and taken < extra:
-                line += "\n全財産を持っていかれた…"
+            if extra and self.ctx.economy.debt(self.ctx.user_id) > 0:
+                line += "\n払い切れない…！ 残りは借金になった…"
         else:
             line, color = "引き分け…。ざわ……何も動かない…", ui.INFO
         mult = f"（{outcome.multiplier}倍）" if outcome.result != "draw" and outcome.multiplier > 1 else ""

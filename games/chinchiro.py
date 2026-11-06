@@ -6,7 +6,7 @@
   ピンゾロ(1-1-1) > 嵐(2〜6のゾロ目) > シゴロ(4-5-6) > 目(ペア＋1つ。1つの数が目) > 目なし > ヒフミ(1-2-3)
 倍率（勝ったときに受け取る倍率。賭け金に対して）:
   ピンゾロ 5倍 / 嵐 3倍 / シゴロ 2倍 / 目 1倍
-  ヒフミは負け役で、負けると 2倍払い。3回振って目が出なければ「目なし」で最弱（ヒフミよりは強い）
+  ヒフミは負け役で、負けると相手の役の倍率がさらに2倍になる（例: シゴロ対ヒフミは 2×2=4倍）。3回振って目が出なければ「目なし」で最弱（ヒフミよりは強い）
 """
 
 import random
@@ -20,6 +20,8 @@ DICE_FACES = {1: "⚀", 2: "⚁", 3: "⚂", 4: "⚃", 5: "⚄", 6: "⚅"}
 # 役ごとの表示名と、役の倍率
 ROLE_NAME = {PINZORO: "ピンゾロ", ARASHI: "嵐（アラシ）", SHIGORO: "シゴロ", ME: "目", MENASHI: "目なし", HIFUMI: "ヒフミ"}
 ROLE_MULT = {PINZORO: 5, ARASHI: 3, SHIGORO: 2, ME: 1, MENASHI: 1, HIFUMI: 1}
+HIFUMI_FACTOR = 2                       # ヒフミが負けたとき、相手の役の倍率にかかる倍率
+MAX_MULT = ROLE_MULT[PINZORO] * HIFUMI_FACTOR     # 1回で負ける最大の倍率（ピンゾロ対ヒフミ）
 
 
 @dataclass(frozen=True)
@@ -92,7 +94,7 @@ class Outcome:
 def compare(player: Hand, dealer: Hand) -> Outcome:
     """子（プレイヤー）と親（ディーラー）の役を比べる。
 
-    勝った側の役の倍率が適用される。負けた側がヒフミなら、倍率は最低でも2倍。
+    勝った側の役の倍率が適用される。負けた側がヒフミなら、その倍率がさらに2倍になる（シゴロ対ヒフミは4倍）。
     同じ強さは引き分け（返金）。ただし目なし同士は親の勝ち。
     """
     if player.strength == dealer.strength:
@@ -101,9 +103,9 @@ def compare(player: Hand, dealer: Hand) -> Outcome:
             return Outcome("lose", 1)
         return Outcome("draw", 0)
     if player.strength > dealer.strength:
-        mult = max(ROLE_MULT[player.kind], 2 if dealer.kind == HIFUMI else 1)
+        mult = ROLE_MULT[player.kind] * (HIFUMI_FACTOR if dealer.kind == HIFUMI else 1)
         return Outcome("win", mult)
-    mult = max(ROLE_MULT[dealer.kind], 2 if player.kind == HIFUMI else 1)
+    mult = ROLE_MULT[dealer.kind] * (HIFUMI_FACTOR if player.kind == HIFUMI else 1)
     return Outcome("lose", mult)
 
 

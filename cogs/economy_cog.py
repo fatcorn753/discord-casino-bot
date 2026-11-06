@@ -15,7 +15,7 @@ from core.confirm import confirm_action
 from core.economy import Economy
 
 TRANSFER_FEE_RATE = 0.10        # 送る側が、送金額の10%を手数料として払う
-TRANSFER_DAILY_LIMIT = 20_000   # 1日に送れる合計（手数料を含む）
+TRANSFER_DAILY_LIMIT = 20_000   # 1日に送れる合計（送る金額だけで数える。手数料は含まない）
 TRANSFER_CONFIRM_FROM = 5_000   # この額以上は確認ボタンを挟む
 BOARD_INTERVAL_MINUTES = 1       # ランキング掲示板を更新する間隔
 TRANSFER_MIN_GAMES = 3          # 送金できるのは、ゲームで3回以上遊んだ人（複数アカウントで稼ぐのを防ぐ）
@@ -103,14 +103,19 @@ class EconomyCog(commands.Cog):
         prof = self.g(interaction).get_profile(member.id)
         color_item, icon_item, title_item = (shop.BY_ID.get(prof[k]) for k in ("card_color", "card_icon", "title"))
         icon = icon_item.value if icon_item else "💴"
-        title_line = f"🏷️ **{title_item.name}**\n" if title_item else ""
+        title_line = f"## 🏷️ {title_item.name}\n" if title_item else ""
         e = ui.embed(f"{icon} {member.display_name} の残高", f"{title_line}# {ui.pelica(s['balance'])}", color_item.value if color_item else ui.GOLD)
         e.set_thumbnail(url=member.display_avatar.url)
+        if s.get("debt"):
+            e.add_field(name="借金", value=f"{ui.pelica(s['debt'])}（入ったお金から先に返済）", inline=False)
         if rank:
             e.add_field(name="このサーバーでの順位（総資産）", value=f"{rank[0]}位 / {rank[2]}人", inline=True)
         held = self.g(interaction).crypto_values().get(member.id, 0)
         if held:
             e.add_field(name="CSトークン評価額", value=ui.pelica(held), inline=True)
+        bonds = self.g(interaction).bond_values().get(member.id, 0)
+        if bonds:
+            e.add_field(name="債券（預けている元本）", value=ui.pelica(bonds), inline=True)
         e.add_field(name="遊んだ回数", value=f"{s['games_played']:,}回", inline=True)
         e.add_field(name="最大の勝ち", value=ui.pelica(s["biggest_win"]), inline=True)
         e.add_field(name="連続ログイン", value=f"{s['daily_streak']}日" if s["daily_streak"] else "まだ受け取っていません", inline=True)
@@ -134,9 +139,10 @@ class EconomyCog(commands.Cog):
                 f"ボーナスは6時間ごと（0・6・12・18時）です。\n連続ログイン: **{result.streak}日**"), ephemeral=True)
         next_bonus = Economy.DAILY_BASE + Economy.DAILY_STREAK_BONUS * min(result.streak, Economy.DAILY_STREAK_CAP)
         boost = "🎟️ デイリー2倍券を使った！\n" if result.boosted else ""
+        debt_line = f"💸 借金の返済に **{ui.pelica(result.repaid)}** 引かれた\n" if result.repaid else ""
         await interaction.response.send_message(embed=ui.ok_embed(
             "デイリーボーナス",
-            f"{boost}**+{ui.pelica(result.amount)}**\n連続ログイン: **{result.streak}日**（明日は {ui.pelica(next_bonus)}）\n残高: **{ui.pelica(result.balance)}**\n\n"
+            f"{boost}**+{ui.pelica(result.amount)}**\n{debt_line}連続ログイン: **{result.streak}日**（明日は {ui.pelica(next_bonus)}）\n残高: **{ui.pelica(result.balance)}**\n\n"
             f"🕛 次のボーナスは **{next_slot_label(self.bot)}**（<t:{int(next_slot(self.bot).timestamp())}:R>）から。6時間ごと（0・6・12・18時）に受け取れます。"))
 
     @group.command(name="ミッション", description="今日のミッションと進み具合を見る（達成すると自動でペリカがもらえる）")
@@ -225,11 +231,17 @@ class EconomyCog(commands.Cog):
             except discord.HTTPException:
                 pass
 
-    @group.command(name="ランキング掲示", description="ランキングを1つ投稿し、自動で更新し続ける（サーバー管理）")
-    @app_commands.rename(channel="チャンネル")
-    @app_commands.describe(channel=f"ランキングを置くチャンネル（{BOARD_INTERVAL_MINUTES}分ごとに自動で更新。1サーバーに1つ）")
+    @group.command(name="ランキング掲示", description="[管理者] ランキングを投稿して自動で更新する／止める（サーバー管理）")
+    @app_commands.rename(channel="チャンネル", stop="止める")
+    @app_commands.describe(channel=f"ランキングを置くチャンネル（{BOARD_INTERVAL_MINUTES}分ごとに自動で更新。1サーバーに1つ）",
+                           stop="掲示を止めて、投稿を削除する（このときチャンネルは不要）")
     @manage_guild_or_owner()
-    async def board_set(self, interaction: discord.Interaction, channel: discord.TextChannel):
+    async def board_set(self, interaction: discord.Interaction, channel: discord.TextChannel = None, stop: bool = False):
+        if stop:
+            return await self._board_unset(interaction)
+        if channel is None:
+            return await interaction.response.send_message(embed=ui.error_embed(
+                "チャンネルを指定してください", "掲示するチャンネルを指定します。止めるときは「止める」を True にしてください。"), ephemeral=True)
         perms = channel.permissions_for(interaction.guild.me)
         if not (perms.view_channel and perms.send_messages and perms.embed_links):
             return await interaction.response.send_message(embed=ui.error_embed(
@@ -241,11 +253,9 @@ class EconomyCog(commands.Cog):
         await self._delete_board_message(interaction.guild, old)        # 前の掲示板があれば、新しいものと入れ替える
         await interaction.followup.send(embed=ui.ok_embed(
             "ランキングを掲示しました",
-            f"{message.jump_url}\n{BOARD_INTERVAL_MINUTES}分ごとに、この投稿を自動で書き換えます。止めるときは `/ペリカ ランキング掲示解除` を使ってください。"), ephemeral=True)
+            f"{message.jump_url}\n{BOARD_INTERVAL_MINUTES}分ごとに、この投稿を自動で書き換えます。止めるときは `/ペリカ ランキング掲示` の「止める」を True にしてください。"), ephemeral=True)
 
-    @group.command(name="ランキング掲示解除", description="ランキングの掲示を止めて、投稿を削除する（サーバー管理）")
-    @manage_guild_or_owner()
-    async def board_unset(self, interaction: discord.Interaction):
+    async def _board_unset(self, interaction: discord.Interaction):
         board = self.eco.get_leaderboard(interaction.guild.id)
         if board is None:
             return await interaction.response.send_message(embed=ui.warn_embed("掲示していません", "このサーバーには、ランキングの掲示がありません。"), ephemeral=True)

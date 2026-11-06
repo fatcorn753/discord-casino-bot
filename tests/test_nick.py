@@ -247,7 +247,7 @@ def test_unequipping_the_title_restores_the_nickname(setup):
     eco.set_nick_pref(10, 1, True)
     g, m = guild_for(), Member(nick_="あだ名【常連】")
     cog.bot.get_guild = lambda gid: g if gid == g.id else None
-    run(shop_cog.ShopCog.unequip.callback(cog, FakeInteraction(m, g), SimpleNamespace(value="title", name="称号")))
+    run(shop_cog.ShopCog.use.callback(cog, FakeInteraction(m, g), None, SimpleNamespace(value="title", name="称号")))
     assert m.nick == "あだ名" and eco.get_profile(1)["title"] is None
 
 
@@ -387,3 +387,13 @@ def test_old_database_without_nick_state_columns_is_migrated(tmp_path):
     assert eco.nick_pref(10, 1)
     eco.set_nick_state(10, 1, None, "tatu【常連】")
     assert eco.get_nick_state(10, 1) == (None, "tatu【常連】")
+
+
+def test_use_needs_exactly_one_of_item_or_unequip(setup):
+    eco, cog = setup
+    g, m = guild_for(), Member()
+    both, neither = FakeInteraction(m, g), FakeInteraction(m, g)
+    run(shop_cog.ShopCog.use.callback(cog, both, "title_regular", SimpleNamespace(value="title", name="称号")))
+    run(shop_cog.ShopCog.use.callback(cog, neither, None, None))
+    for it in (both, neither):
+        assert "どちらか1つだけ" in it.sent[0]["embed"].title

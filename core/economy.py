@@ -15,6 +15,7 @@
 
 import collections
 import copy
+import json
 import datetime
 import math
 import os
@@ -29,6 +30,11 @@ from core import market as market_mod
 from core import missions as missions_mod
 from core import shop as shop_mod
 from core import weekly as weekly_mod
+from core.eco_bonds import BondMixin
+from core.eco_events import EventMixin
+from core.eco_pachinko import PachinkoMixin
+from core.eco_quiz import QuizMixin
+from core.eco_raffle import RaffleMixin
 
 INITIAL_BALANCE = 3000
 INSURANCE_CAP = 1_000     # 保険券で戻る額の上限（core/shop.py の説明と同じ値）
@@ -44,6 +50,7 @@ class DailyResult:
     streak: int = 0
     balance: int = 0
     boosted: bool = False        # デイリー2倍券を使った
+    repaid: int = 0              # 受け取った額から、借金の返済として引かれた額
 
 
 @dataclass(frozen=True)
@@ -73,7 +80,7 @@ class TransferResult:
     sender_balance: int = 0
 
 
-class Economy:
+class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin):
     DAILY_BASE = 1000
     DAILY_STREAK_BONUS = 100     # 連続1日ごとの加算
     DAILY_STREAK_CAP = 9         # 加算は9日分まで（最大 +900）
@@ -94,6 +101,20 @@ class Economy:
         self._strict = strict
         self._migrate_to_guild_scope(legacy_guild_id)
         self._init_schema()
+        self._retire_autoplay()
+
+    def _retire_autoplay(self) -> None:
+        """廃止した自動プレイの表が残っていたら、預け中の分を残高に戻してから表を消す（預けた額を失わせない）。"""
+        with self._lock, self._conn:
+            if not self._conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='autoplay'").fetchone():
+                return
+            for row in self._conn.execute("SELECT guild_id, user_id, pot FROM autoplay").fetchall():
+                if row["pot"] > 0:
+                    view = copy.copy(self)
+                    view.guild_id = row["guild_id"]
+                    view._ensure(row["user_id"])
+                    view._apply(row["user_id"], row["pot"], "自動プレイ精算")
+            self._conn.execute("DROP TABLE autoplay")
 
     # ------------------------------------------------------------------ #
     # サーバー単位の見え方                                                #
@@ -178,6 +199,7 @@ class Economy:
             biggest_win  INTEGER NOT NULL DEFAULT 0,
             created_at   REAL NOT NULL,
             last_slot    INTEGER,                 -- 最後にボーナスを受け取った「時間帯」の番号（6時間ごとの受け取り用）
+            debt         INTEGER NOT NULL DEFAULT 0,   -- 借金（チンチロの倍払いが残高を超えた分）。入金のたびに強制で返済する
             PRIMARY KEY (guild_id, user_id)
         )"""
     _INVENTORY_DDL = """
@@ -276,6 +298,73 @@ class Economy:
                     cost     INTEGER NOT NULL,        -- 買うのにかかった総額（損益の表示用）
                     PRIMARY KEY (guild_id, user_id)
                 );
+                CREATE TABLE IF NOT EXISTS crypto_short (      -- CSトークンの空売り（1人1つの建玉）
+                    guild_id    INTEGER NOT NULL,
+                    user_id     INTEGER NOT NULL,
+                    units       INTEGER NOT NULL,         -- 売り建てた口数
+                    entry_value REAL NOT NULL,            -- 建てたときの総額（口数×価格）。損益 = これ − いまの総額
+                    margin      INTEGER NOT NULL,         -- 預けた担保
+                    PRIMARY KEY (guild_id, user_id)
+                );
+                CREATE TABLE IF NOT EXISTS quiz_questions (     -- クイズの問題（全サーバー共通。持ち主が登録する）
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    question    TEXT    NOT NULL,
+                    choices     TEXT    NOT NULL,         -- JSON の配列。先頭が正解（表示のたびにシャッフルする）
+                    explanation TEXT    NOT NULL DEFAULT '',
+                    shown_order TEXT    NOT NULL DEFAULT '',   -- 表示する並び（choices の添字を並べ替えた JSON。登録時に1回だけシャッフルして固定）
+                    author_id   INTEGER NOT NULL DEFAULT 0,    -- 出題者。0 なら持ち主の問題（全サーバー共通・システムが報酬を払う）
+                    guild_id    INTEGER NOT NULL DEFAULT 0,    -- ユーザーの問題は、出題したサーバーの中だけ（出題者のペリカがサーバー別なので）
+                    channel_id  INTEGER NOT NULL DEFAULT 0,
+                    message_id  INTEGER NOT NULL DEFAULT 0,
+                    settled     INTEGER NOT NULL DEFAULT 0,    -- 出題者への報酬を決着させたか
+                    earned      INTEGER NOT NULL DEFAULT 0,    -- 出題者が、回答のたびにここまで受け取った累計
+                    creator_name TEXT   NOT NULL DEFAULT '',   -- 制作者の表示名（登録したときの名前。問題に出す）
+                    reward      INTEGER NOT NULL,
+                    expires     REAL,                     -- 期限（epoch秒）。NULL なら無期限
+                    created     REAL    NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS quiz_answers (       -- 回答（1問につき1人1回。サーバーごとに別の口座なので guild_id も持つ）
+                    question_id INTEGER NOT NULL,
+                    guild_id    INTEGER NOT NULL,
+                    user_id     INTEGER NOT NULL,
+                    correct     INTEGER NOT NULL,
+                    ts          REAL    NOT NULL,
+                    PRIMARY KEY (question_id, guild_id, user_id)
+                );
+                CREATE TABLE IF NOT EXISTS bonds (              -- 債券（買った分ごとに1行）。元本は買った時点で残高から預かる
+                    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id  INTEGER NOT NULL,
+                    user_id   INTEGER NOT NULL,
+                    kind      TEXT    NOT NULL,           -- normal / junk
+                    principal INTEGER NOT NULL,
+                    due       REAL    NOT NULL,           -- 満期（epoch秒）
+                    status    TEXT    NOT NULL DEFAULT 'active',   -- active / paid / defaulted / cancelled
+                    paid      INTEGER NOT NULL DEFAULT 0, -- 満期・解約で戻した額
+                    ts        REAL    NOT NULL            -- 買った時刻
+                );
+                CREATE TABLE IF NOT EXISTS raffle (             -- 抽選（持ち主が開催。1サーバーに募集中は1つだけ）
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id   INTEGER NOT NULL,
+                    host_id    INTEGER NOT NULL,
+                    fee        INTEGER NOT NULL,          -- 参加費（全員同じ額）
+                    closes     REAL    NOT NULL,          -- 締切（epoch秒）
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL DEFAULT 0,
+                    status     TEXT    NOT NULL DEFAULT 'open'   -- open / done / cancelled
+                );
+                CREATE TABLE IF NOT EXISTS raffle_entries (     -- 抽選の参加者。参加費は締切まで預かる
+                    raffle_id INTEGER NOT NULL,
+                    user_id   INTEGER NOT NULL,
+                    PRIMARY KEY (raffle_id, user_id)
+                );
+                CREATE TABLE IF NOT EXISTS chart_posts (       -- /暗号 チャート で出したチャート（1チャンネルに1つ。最後に使ってから一定時間だけ自動で更新）
+                    channel_id INTEGER PRIMARY KEY,
+                    message_id INTEGER NOT NULL,
+                    guild_id   INTEGER NOT NULL DEFAULT 0,
+                    period     TEXT    NOT NULL DEFAULT '24h',
+                    ts         REAL    NOT NULL DEFAULT 0,     -- 出した時刻（ここから一定時間、更新する）
+                    live       INTEGER NOT NULL DEFAULT 1      -- 1: 更新中 / 0: 更新は終了
+                );
                 CREATE TABLE IF NOT EXISTS chart_boards (
                     guild_id   INTEGER PRIMARY KEY,
                     channel_id INTEGER NOT NULL,
@@ -296,6 +385,29 @@ class Economy:
                     net      INTEGER NOT NULL,
                     PRIMARY KEY (guild_id, week)
                 );
+                CREATE TABLE IF NOT EXISTS event_state (       -- 突発イベントの告知の進み具合（0=まだ 1=開始を告知 2=終了を告知）。再起動しても二重に告知しない
+                    guild_id INTEGER NOT NULL, day TEXT NOT NULL, phase INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (guild_id, day)
+                );
+                CREATE TABLE IF NOT EXISTS manual_event (      -- 持ち主が開いた特別イベント（1サーバーに1つ。新しく開くと置き換わる）
+                    guild_id INTEGER PRIMARY KEY,
+                    game     TEXT    NOT NULL,
+                    boost    INTEGER NOT NULL,             -- 勝ち分に上乗せする割合（％）
+                    starts   REAL    NOT NULL,
+                    ends     REAL    NOT NULL,
+                    ended    INTEGER NOT NULL DEFAULT 0,   -- 終了を告知したか（時間切れ・手動終了のどちらでも 1）
+                    channel_id INTEGER NOT NULL DEFAULT 0  -- 開始を告知したチャンネル（終了の告知も同じ所へ。0 なら告知チャンネル）
+                );
+                CREATE TABLE IF NOT EXISTS pachinko_log (       -- パチンコの1回転ごとの記録（設計した当たり率と実績を比べる統計用）
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id   INTEGER NOT NULL,
+                    user_id    INTEGER NOT NULL,
+                    ts         REAL    NOT NULL,
+                    omen       TEXT    NOT NULL,          -- 予告の色（'' は予告なし）
+                    tier       TEXT    NOT NULL,          -- リーチの格（'' はリーチなし）
+                    multiplier INTEGER NOT NULL,          -- 払い戻しの倍率（0 ならハズレ）
+                    bet        INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS weekly_state (      -- サーバーごとの、最後に発表した週（guild_id=0 は、過去分の補完を済ませた印）
                     guild_id  INTEGER PRIMARY KEY,
                     last_week TEXT NOT NULL
@@ -310,9 +422,29 @@ class Economy:
                 """
             )
             # 作成済みの古い表に、列を足す（初回の版には元のニックネームの記録がなかった）
+            cp = {r["name"] for r in self._conn.execute("PRAGMA table_info(chart_posts)")}
+            for col, ddl in (("guild_id", "INTEGER NOT NULL DEFAULT 0"), ("period", "TEXT NOT NULL DEFAULT '24h'"),
+                             ("ts", "REAL NOT NULL DEFAULT 0"), ("live", "INTEGER NOT NULL DEFAULT 1")):
+                if col not in cp:
+                    self._conn.execute(f"ALTER TABLE chart_posts ADD COLUMN {col} {ddl}")
+            me = {r["name"] for r in self._conn.execute("PRAGMA table_info(manual_event)")}
+            if "channel_id" not in me:
+                self._conn.execute("ALTER TABLE manual_event ADD COLUMN channel_id INTEGER NOT NULL DEFAULT 0")
+            qq = {r["name"] for r in self._conn.execute("PRAGMA table_info(quiz_questions)")}
+            if "shown_order" not in qq:
+                self._conn.execute("ALTER TABLE quiz_questions ADD COLUMN shown_order TEXT NOT NULL DEFAULT ''")
+            for col in ("author_id", "guild_id", "channel_id", "message_id", "settled", "earned"):
+                if col not in qq:
+                    self._conn.execute(f"ALTER TABLE quiz_questions ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+            if "creator_name" not in qq:
+                self._conn.execute("ALTER TABLE quiz_questions ADD COLUMN creator_name TEXT NOT NULL DEFAULT ''")
+            for r in self._conn.execute("SELECT id FROM quiz_questions WHERE shown_order=''").fetchall():       # 並びが未設定の古い問題に、1回だけ決めて固定する
+                self._conn.execute("UPDATE quiz_questions SET shown_order=? WHERE id=?", (json.dumps(self._new_quiz_order()), r["id"]))
             us = {r["name"] for r in self._conn.execute("PRAGMA table_info(users)")}
             if "last_slot" not in us:
                 self._conn.execute("ALTER TABLE users ADD COLUMN last_slot INTEGER")
+            if "debt" not in us:
+                self._conn.execute("ALTER TABLE users ADD COLUMN debt INTEGER NOT NULL DEFAULT 0")
             ps = {r["name"] for r in self._conn.execute("PRAGMA table_info(play_state)")}
             for col, ddl in (("day_streak", "INTEGER NOT NULL DEFAULT 0"), ("streak_day", "TEXT"),
                              ("plays", "INTEGER NOT NULL DEFAULT 0"), ("wins", "INTEGER NOT NULL DEFAULT 0"), ("net_total", "INTEGER NOT NULL DEFAULT 0")):
@@ -344,14 +476,33 @@ class Economy:
     def _balance(self, user_id: int) -> int:
         return self._conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()["balance"]
 
+    def _debt(self, user_id: int) -> int:
+        return self._conn.execute("SELECT debt FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()["debt"]
+
     def _apply(self, user_id: int, delta: int, reason: str) -> int:
-        """残高に delta を足す（0 未満にはならない）。実際に変化した量を返す。"""
+        """残高に delta を足す（0 未満にはならない）。実際に変化した量を返す。
+
+        借金があるとき、入金（delta > 0）は先に借金の返済へ回す（強制徴収。完済まで）。
+        賭け金の返金は、もともと自分のお金なので徴収しない。
+        """
         before = self._balance(user_id)
         after = max(0, before + delta)
         self._conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, self._g(), user_id))
         if after != before:
             self._ledger(user_id, after - before, after, reason)
+        if delta > 0 and not reason.startswith("返金"):
+            repay = min(self._debt(user_id), after)
+            if repay > 0:
+                self._conn.execute("UPDATE users SET balance=balance-?, debt=debt-? WHERE guild_id=? AND user_id=?", (repay, repay, self._g(), user_id))
+                self._ledger(user_id, -repay, after - repay, "借金の返済")
+                after -= repay
         return after - before
+
+    def debt(self, user_id: int) -> int:
+        """借金の残り。口座が無ければ 0（口座は作らない）。"""
+        with self._lock:
+            row = self._conn.execute("SELECT debt FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()
+            return row["debt"] if row else 0
 
     # ------------------------------------------------------------------ #
     # 残高                                                                #
@@ -426,8 +577,8 @@ class Economy:
     def settle_with_penalty(self, escrow_id: int, payout: int, game: str, penalty: int) -> Optional[tuple]:
         """精算と、倍払いなどの追加の支払いを、1回のトランザクションで行う。
 
-        penalty は残高の範囲まで引く。負けて払い戻しが 0 のとき、保険券があれば賭け金の半分を返す。
-        (損益（追加の支払い・保険を含む）, 実際に引いた追加額, 保険で戻った額) を返す。
+        penalty はまず残高から引き、足りない分は借金にする。負けて払い戻しが 0 のとき、保険券があれば賭け金の半分を返す。
+        (損益（追加の支払い・保険を含む）, 追加の支払い（借金にした分を含む）, 保険で戻った額) を返す。
         すでに精算済みなら何もせず None（二重に精算も追加の支払いもしない）。
         """
         with self._lock, self._conn:
@@ -447,6 +598,10 @@ class Economy:
                 self._apply(user_id, total, f"払い戻し:{game}" if payout else f"保険券で半額返金:{game}")
             self._conn.execute("DELETE FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g()))
             taken = -self._apply(user_id, -penalty, f"追加の支払い:{game}") if penalty > 0 else 0
+            if penalty > taken:           # 残高で足りない分は借金にする
+                self._conn.execute("UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (penalty - taken, self._g(), user_id))
+                self._ledger(user_id, 0, self._balance(user_id), f"借金:{game}（{penalty - taken:,}ペリカ）")
+            taken = max(penalty, 0)
             net = total - amount - taken
             self._conn.execute(
                 "UPDATE users SET games_played = games_played + 1, total_won = total_won + ?, "
@@ -679,6 +834,8 @@ class Economy:
             self._ensure(user_id)
             if amount <= 0 or price <= 0:
                 return CryptoResult(False, "金額が正しくありません。")
+            if self._debt(user_id) > 0:
+                return CryptoResult(False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、買えません。", balance=self._balance(user_id))
             if self._balance(user_id) < amount:
                 return CryptoResult(False, f"ペリカが足りません（残高 {self._balance(user_id):,}ペリカ）。", balance=self._balance(user_id))
             units, total, fee = market_mod.buy_quote(amount, price)
@@ -712,15 +869,135 @@ class Economy:
                 self._conn.execute("UPDATE crypto SET units=units-?, cost=cost-? WHERE guild_id=? AND user_id=?", (units, removed, self._g(), user_id))
             return CryptoResult(True, units=units, money=proceeds, fee=fee, balance=self._balance(user_id), profit=proceeds - removed)
 
-    def set_chart_board(self, guild_id: int, channel_id: int, message_id: int) -> None:
-        with self._lock, self._conn:
-            self._conn.execute("INSERT OR REPLACE INTO chart_boards (guild_id, channel_id, message_id) VALUES (?, ?, ?)", (guild_id, channel_id, message_id))
+    # ------------------------------------------------------------------ #
+    # CSトークンの空売り                                                  #
+    # ------------------------------------------------------------------ #
+    SHORT_LEVERAGES = (1, 2, 3, 5)
+    LOSSCUT = 0.5                    # 損失が担保のこの割合に達したら、強制決済（1分に動く最大幅 ×5倍でも、担保を超えない）
+    SHORT_MIN_MARGIN = 10
 
-    def get_chart_board(self, guild_id: int) -> Optional[dict]:
+    def short_position(self, user_id: int) -> tuple:
+        """(口数, 建てた総額, 担保)。建てていなければ (0, 0.0, 0)。"""
         with self._lock:
-            r = self._conn.execute("SELECT * FROM chart_boards WHERE guild_id=?", (guild_id,)).fetchone()
-            return dict(r) if r else None
+            r = self._conn.execute("SELECT units, entry_value, margin FROM crypto_short WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()
+            return (r["units"], r["entry_value"], r["margin"]) if r else (0, 0.0, 0)
 
+    @staticmethod
+    def short_pnl(units: int, entry_value: float, price: float) -> int:
+        """空売りの含み損益（価格が下がるとプラス）。"""
+        return round(entry_value - units * price / market_mod.UNIT)
+
+    def short_holders(self, limit: int = 10) -> list:
+        """[(ユーザーID, 口数, 建てた総額)] 建てている口数が多い順。チャートの表示用。"""
+        with self._lock:
+            return [(r["user_id"], r["units"], r["entry_value"]) for r in self._conn.execute(
+                "SELECT user_id, units, entry_value FROM crypto_short WHERE guild_id=? AND units>0 ORDER BY units DESC, user_id LIMIT ?", (self._g(), limit))]
+
+    def short_equity(self) -> dict:
+        """このサーバーの {ユーザーID: 空売りの評価額（担保 + 含み損益。0未満にはしない）}。総資産に足す。"""
+        with self._lock:
+            latest = self.market_latest()
+            if latest is None:
+                return {}
+            return {r["user_id"]: max(0, r["margin"] + self.short_pnl(r["units"], r["entry_value"], latest[1])) for r in self._conn.execute(
+                "SELECT user_id, units, entry_value, margin FROM crypto_short WHERE guild_id=?", (self._g(),))}
+
+    def short_open(self, user_id: int, units: int, price: float, leverage: int) -> "CryptoResult":
+        """units 口を売り建てる。担保 = 総額 ÷ レバレッジ（切り上げ）を、残高から預かる。"""
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            if leverage not in self.SHORT_LEVERAGES or units < 1 or price <= 0:
+                return CryptoResult(False, "指定が正しくありません。")
+            if self._debt(user_id) > 0:
+                return CryptoResult(False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、空売りはできません。", balance=self._balance(user_id))
+            notional = units * price / market_mod.UNIT
+            margin = math.ceil(round(notional / leverage, 6))
+            if margin < self.SHORT_MIN_MARGIN:
+                return CryptoResult(False, f"担保が {self.SHORT_MIN_MARGIN}ペリカ 未満になる量です。枚数を増やしてください。", balance=self._balance(user_id))
+            if self._balance(user_id) < margin:
+                return CryptoResult(False, f"担保が足りません（{margin:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。", balance=self._balance(user_id))
+            self._apply(user_id, -margin, f"空売り担保:{market_mod.lots(units)}@{market_mod.fmt(price)}（{leverage}倍）")
+            self._conn.execute(
+                "INSERT INTO crypto_short (guild_id, user_id, units, entry_value, margin) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units, entry_value=entry_value+excluded.entry_value, margin=margin+excluded.margin",
+                (self._g(), user_id, units, notional, margin))
+            return CryptoResult(True, units=units, money=margin, balance=self._balance(user_id))
+
+    def _short_close_locked(self, user_id: int, units: Optional[int], price: float, label: str) -> "CryptoResult":
+        have, entry_value, margin = self.short_position(user_id)
+        if have <= 0:
+            return CryptoResult(False, "空売りを建てていません。")
+        units = have if units is None else units
+        if units < 1 or units > have:
+            return CryptoResult(False, f"買い戻せるのは 0.001〜{market_mod.lots(have)} です（建てている分）。")
+        whole = units == have
+        part_margin = margin if whole else round(margin * units / have)
+        part_entry = entry_value if whole else entry_value * units / have
+        pnl = self.short_pnl(units, part_entry, price)
+        payout = max(0, part_margin + pnl)
+        if payout:
+            self._apply(user_id, payout, f"{label}:{market_mod.lots(units)}@{market_mod.fmt(price)}")
+        if whole:
+            self._conn.execute("DELETE FROM crypto_short WHERE guild_id=? AND user_id=?", (self._g(), user_id))
+        else:
+            self._conn.execute("UPDATE crypto_short SET units=units-?, entry_value=entry_value-?, margin=margin-? WHERE guild_id=? AND user_id=?",
+                               (units, part_entry, part_margin, self._g(), user_id))
+        return CryptoResult(True, units=units, money=payout, balance=self._balance(user_id), profit=payout - part_margin)
+
+    def short_close(self, user_id: int, units: Optional[int], price: float) -> "CryptoResult":
+        """units 口を買い戻して決済する（None なら全部）。担保 + 損益が戻る（0未満にはならない）。"""
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            return self._short_close_locked(user_id, units, price, "空売り決済")
+
+    def short_losscut(self, price: float) -> list:
+        """全サーバーの建玉のうち、損失が担保の LOSSCUT に達したものを強制決済する。[(サーバー, ユーザー, 損失)]。"""
+        done = []
+        with self._lock, self._conn:
+            for r in self._conn.execute("SELECT guild_id, user_id, units, entry_value, margin FROM crypto_short").fetchall():
+                if -self.short_pnl(r["units"], r["entry_value"], price) < self.LOSSCUT * r["margin"]:
+                    continue
+                try:
+                    view = self.for_guild(r["guild_id"])
+                except ValueError:
+                    continue
+                res = view._short_close_locked(r["user_id"], None, price, "空売りロスカット")
+                if res.ok:
+                    done.append((r["guild_id"], r["user_id"], -res.profit))
+        return done
+
+    def swap_chart_post(self, channel_id: int, message_id: int, guild_id: int, period: str, ts: float) -> Optional[int]:
+        """そのチャンネルのチャートを新しいものに入れ替え（更新中にする）、前のメッセージID（無ければ None）を返す。"""
+        with self._lock, self._conn:
+            prev = self._conn.execute("SELECT message_id FROM chart_posts WHERE channel_id=?", (channel_id,)).fetchone()
+            self._conn.execute(
+                "INSERT INTO chart_posts (channel_id, message_id, guild_id, period, ts, live) VALUES (?, ?, ?, ?, ?, 1) "
+                "ON CONFLICT(channel_id) DO UPDATE SET message_id=excluded.message_id, guild_id=excluded.guild_id, "
+                "period=excluded.period, ts=excluded.ts, live=1", (channel_id, message_id, guild_id, period, ts))
+            return prev["message_id"] if prev else None
+
+    def live_chart_posts(self) -> list:
+        """自動で更新中のチャート。"""
+        with self._lock:
+            return [dict(r) for r in self._conn.execute("SELECT * FROM chart_posts WHERE live=1")]
+
+    def end_chart_post(self, channel_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("UPDATE chart_posts SET live=0 WHERE channel_id=?", (channel_id,))
+
+    def delete_chart_post(self, channel_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM chart_posts WHERE channel_id=?", (channel_id,))
+
+    def delete_guild_chart_posts(self, guild_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM chart_posts WHERE guild_id=?", (guild_id,))
+
+    def prune_chart_posts(self, before_ts: float) -> None:
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM chart_posts WHERE ts<? AND live=0", (before_ts,))
+
+    # 昔の「チャート掲示」（廃止）の後始末用
     def list_chart_boards(self) -> list:
         with self._lock:
             return [dict(r) for r in self._conn.execute("SELECT * FROM chart_boards")]
@@ -757,10 +1034,11 @@ class Economy:
             if boosted:
                 amount *= 2
                 self._conn.execute("UPDATE profile SET daily_boost = daily_boost - 1 WHERE guild_id=? AND user_id=?", (self._g(), user_id))
+            debt_before = self._debt(user_id)
             self._apply(user_id, amount, f"デイリー（{streak}日連続{'・2倍券' if boosted else ''}）")
             self._conn.execute("UPDATE users SET daily_streak=?, last_daily=?, last_slot=? WHERE guild_id=? AND user_id=?",
                                (streak, today.isoformat(), slot, self._g(), user_id))
-            return DailyResult(True, amount, streak, self._balance(user_id), boosted)
+            return DailyResult(True, amount, streak, self._balance(user_id), boosted, debt_before - self._debt(user_id))
 
     # ------------------------------------------------------------------ #
     # ショップ（持ち物・装備・消耗品）                                    #
@@ -780,6 +1058,8 @@ class Economy:
             have = self._conn.execute("SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=?", (self._g(), user_id, item_id)).fetchone()
             if unique and have:
                 return PurchaseResult(False, "すでに持っています。", self._balance(user_id))
+            if self._debt(user_id) > 0:
+                return PurchaseResult(False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、買い物はできません。", self._balance(user_id))
             if self._balance(user_id) < total:
                 return PurchaseResult(False, f"ペリカが足りません（{total:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。", self._balance(user_id))
             self._apply(user_id, -total, f"購入:{label}" + (f"×{qty}" if qty > 1 else ""))
@@ -941,10 +1221,14 @@ class Economy:
                 "SELECT user_id, units FROM crypto WHERE guild_id=? AND units>0", (self._g(),))}
 
     def _ranked(self, user_ids: Optional[set]) -> list:
-        """[(ユーザーID, 総資産)] を多い順に。総資産は、残高にCSトークンの評価額を足したもの。"""
+        """[(ユーザーID, 総資産)] を多い順に。総資産は、残高にCSトークンの評価額を足し、借金を引いたもの。"""
         with self._lock:
-            rows = self._conn.execute("SELECT user_id, balance FROM users WHERE guild_id=?", (self._g(),)).fetchall()
+            rows = self._conn.execute("SELECT user_id, balance - debt AS balance FROM users WHERE guild_id=?", (self._g(),)).fetchall()
             values = self.crypto_values()
+            for uid, eq in self.short_equity().items():
+                values[uid] = values.get(uid, 0) + eq
+            for uid, held in self.bond_values().items():
+                values[uid] = values.get(uid, 0) + held                            # 預けている債券の元本も総資産
         total = [(r["user_id"], r["balance"] + values.get(r["user_id"], 0)) for r in rows if user_ids is None or r["user_id"] in user_ids]
         return sorted(total, key=lambda t: (-t[1], t[0]))
 
@@ -992,7 +1276,7 @@ class Economy:
             return TransferResult(False, "自分には送金できません。")
         if amount <= 0:
             return TransferResult(False, "金額は1以上にしてください。")
-        fee = math.ceil(round(amount * fee_rate, 6)) if fee_rate else 0     # 切り上げ（少額でも手数料は最低1）
+        fee = math.ceil(round(amount * fee_rate, 6)) if fee_rate else 0     # 切り上げ（少額でも手数料は最低1）。1日の上限には数えない
         with self._lock, self._conn:
             self._ensure(sender)
             self._ensure(receiver)
@@ -1001,11 +1285,15 @@ class Economy:
                 (self._g(), sender, day_start_ts)).fetchone()["s"])
             if self._conn.execute("SELECT games_played FROM users WHERE guild_id=? AND user_id=?", (self._g(), sender)).fetchone()["games_played"] < min_games:
                 return TransferResult(False, f"送金は、{min_games}回以上ゲームで遊んでからできます（複数アカウントでの稼ぎ対策です）。")
-            if sent_today + amount + fee > daily_limit:
+            if sent_today + amount > daily_limit:
                 return TransferResult(False, f"1日の送金は合計 {daily_limit:,} ペリカまでです（今日は {sent_today:,} ペリカ送金済み）。")
+            if self._debt(sender) > 0:
+                return TransferResult(False, f"借金が {self._debt(sender):,}ペリカ 残っているので、送金はできません。")
             if self._balance(sender) < amount + fee:
                 return TransferResult(False, f"残高が足りません（送金額 {amount:,} + 手数料 {fee:,} が必要です）。")
-            self._apply(sender, -(amount + fee), f"送金（送）→{receiver}")
+            self._apply(sender, -amount, f"送金（送）→{receiver}")       # 手数料は別の行にする（1日の上限は、送った額だけで数えるため）
+            if fee:
+                self._apply(sender, -fee, "送金手数料")
             self._apply(receiver, amount, f"送金（受）←{sender}")
             return TransferResult(True, received=amount, fee=fee, sender_balance=self._balance(sender))
 
