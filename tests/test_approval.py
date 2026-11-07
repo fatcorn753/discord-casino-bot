@@ -740,7 +740,7 @@ def test_event_admin_commands_target_one_or_all_allowed_guilds_and_are_owner_onl
 
 
 # ----------------------------- パチンコ統計 ----------------------------- #
-def make_set(starts=3, hits=1, rounds=((2,),), spins=None, mult=None):
+def make_set(starts=3, hits=1, rounds=((2,),), spins=None):
     """テスト用の SetResult。spins を渡さなければ、starts 回転のうち先頭 hits 回が当たり。"""
     from games import pachinko
 
@@ -752,7 +752,7 @@ def make_set(starts=3, hits=1, rounds=((2,),), spins=None, mult=None):
             for i in range(starts)
         )
     raw = sum(s.raw for s in spins)
-    return pachinko.SetResult(len(spins), spins, raw, raw if mult is None else mult)
+    return pachinko.SetResult(len(spins), spins, raw)
 
 
 @pytest.mark.real_scope

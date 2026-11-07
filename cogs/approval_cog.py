@@ -538,11 +538,13 @@ class ApprovalCog(commands.Cog):
     announce.autocomplete("channel_id")(channel_autocomplete)
 
     # ---- 抽選 ---- #
-    @raffle_group.command(name="開催", description="[管理者] 抽選を始める。掛金は500〜3,000ペリカ。省略するとランダム")
+    @raffle_group.command(
+        name="開催", description="[管理者] 抽選を始める。参加費は500ペリカ以上（上限なし）。省略するとランダム"
+    )
     @app_commands.rename(guild_id="サーバー", fee="掛金", minutes="募集時間", channel_id="チャンネル")
     @app_commands.describe(
         guild_id="抽選を開くサーバー（候補から選ぶ）",
-        fee="参加費（500〜3,000。省略するとランダム）",
+        fee="参加費（500以上。省略すると500〜3,000のランダム）",
         minutes="募集する時間（分。省略で60分）",
         channel_id="募集を出すチャンネル（候補から選ぶ。空なら告知チャンネル）",
     )
@@ -550,7 +552,7 @@ class ApprovalCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         guild_id: str,
-        fee: app_commands.Range[int, 500, 3_000] = None,
+        fee: app_commands.Range[int, 500] = None,
         minutes: app_commands.Range[int, 1, 1440] = 60,
         channel_id: str = None,
     ):

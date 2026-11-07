@@ -5,7 +5,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core import ui
-from play.common import MAX_BET, MIN_BET
+from play.common import MIN_BET
 
 HOME = "home"
 
@@ -103,7 +103,7 @@ def page_embed(key: str) -> discord.Embed:
             "くわしくは、下のボタンで見られます。",
             ui.GOLD,
         )
-        e.set_footer(text=f"賭け金は {MIN_BET:,} 〜 {MAX_BET:,} ペリカ ｜ 同時に遊べるゲームは1つ")
+        e.set_footer(text=f"賭け金は {MIN_BET:,} ペリカ以上（上限なし） ｜ 同時に遊べるゲームは1つ")
         return e
     title, lines = PAGES[key]
     return ui.embed(title, "\n".join(lines), ui.GOLD)

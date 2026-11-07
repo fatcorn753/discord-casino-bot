@@ -3,17 +3,15 @@
 - 利息 = 元本 × 日利 × 経過日数。経過日数は、貸した時刻から数えて切り上げ（最低1日）、期間（日数）が上限。
 - 期限を過ぎても、利息は期間ぶんで止まる（延滞の利息は付かない）。
 - 返済は、まず元本、次に利息に充てる。
+- 日利は 0.1% 刻みで、tenths（0.1%を1とした整数）で持つ。金額と日利に上限はない（貸す人の残高と、借りる人の承諾が歯止め）。
 """
 
 import math
 
 USER_MIN_PRINCIPAL = 100
-USER_MAX_PRINCIPAL = 100_000
-MAX_RATE_TENTHS = 1000  # 日利の上限（100.0%）。日利は 0.1% 刻みで、tenths（0.1%を1とした整数）で持つ
 MIN_TERM_DAYS = 1
 MAX_TERM_DAYS = 30
 OFFER_HOURS = 24  # 承諾を待つ時間
-MAX_BORROWER_ACTIVE = 3  # 同時に借りられる件数
 MAX_LENDER_OPEN = 5  # 同時に出せる提案（承諾待ち）の数
 MAX_LENDER_ACTIVE = 10  # 同時に貸せる件数
 REMIND_HOURS = 24  # 期限のこの時間前に知らせる

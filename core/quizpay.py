@@ -9,11 +9,13 @@ f は正答率が TARGET_RATE に近いほど大きい係数（ちょうどで 1
 
 import math
 
-USER_MAX_REWARD = 1_000  # 出題者が決める、正解1人あたりの報酬の上限
 USER_MIN_MINUTES = 1  # 出題の有効期間（分）
 USER_MAX_MINUTES = 7 * 24 * 60  # 7日
 USER_DEFAULT_MINUTES = 3 * 24 * 60
 MIN_PARTICIPANTS = 2  # 出題者報酬が出る最低の回答者数
+MIN_GAMES_FOR_REWARD = (
+    3  # 正解の報酬をもらえるのは、ゲームを3回以上遊んだ人だけ（複数アカウントで稼ぐのを防ぐ。送金と同じ）
+)
 OPEN_LIMIT = 2  # 1人が同時に出せる問題の数
 DAILY_LIMIT = 3  # 1人が24時間に出せる問題の数
 BASE_REWARD = 100

@@ -160,6 +160,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             user_id     INTEGER NOT NULL,
             correct     INTEGER NOT NULL,
             ts          REAL    NOT NULL,
+            counted     INTEGER NOT NULL DEFAULT 1,   -- 出題者の報酬に数えるか。ゲームを3回遊んでいない人の回答は 0（複数アカウントで稼ぐのを防ぐ）
             PRIMARY KEY (question_id, guild_id, user_id)
         );
         CREATE TABLE IF NOT EXISTS bonds (              -- 債券（買った分ごとに1行）。元本は買った時点で残高から預かる
@@ -340,3 +341,6 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     for col in ("original_nick", "applied_nick"):
         if col not in cols:
             conn.execute(f"ALTER TABLE nick_prefs ADD COLUMN {col} TEXT")
+    answers = {r["name"] for r in conn.execute("PRAGMA table_info(quiz_answers)")}
+    if "counted" not in answers:
+        conn.execute("ALTER TABLE quiz_answers ADD COLUMN counted INTEGER NOT NULL DEFAULT 1")

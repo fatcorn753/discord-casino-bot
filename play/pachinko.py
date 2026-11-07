@@ -11,7 +11,7 @@ import discord
 
 from core import ui
 from games import pachinko, rtplevel
-from play.common import MAX_BET, ReplayView, game_title, log_display_failure, result_lines, signed, start_game
+from play.common import ReplayView, game_title, log_display_failure, result_lines, signed, start_game
 
 RNG = random.SystemRandom()
 TITLE = "🎰 地下パチンコ"
@@ -49,10 +49,9 @@ def reveal_frames(spin: pachinko.SpinInfo, limit: int = SHOWN_ROUNDS) -> list:
     if n > limit:
         title = "20連 突破！！！" if n >= 20 else ("10連 突破！！" if n >= 10 else f"{n}連チャン！！")
         frames.append(pachinko.Frame(f"# 🎆🎆 {title} 🎆🎆\n合計 **{n}連**　累計 **+{spin.raw}倍**", "gold"))
-    capped = "（上限）" if spin.raw > pachinko.CAP_MULT else ""
     frames.append(
         pachinko.Frame(
-            f"✨ **連チャン終了** ✨\n**{n}連**　出玉 **+{min(spin.raw, pachinko.CAP_MULT)}倍**{capped}\n{rank_of(spin.raw)}",
+            f"✨ **連チャン終了** ✨\n**{n}連**　出玉 **+{spin.raw}倍**\n{rank_of(spin.raw)}",
             "gold",
         )
     )
@@ -108,8 +107,7 @@ def set_line(index: int, result: pachinko.SetResult) -> str:
     mark = NUMBER[index] if index < len(NUMBER) else str(index + 1)
     if not result.mult:
         return f"{mark} 入賞 {result.starts:>2} … ハズレ"
-    capped = "（上限）" if result.raw > pachinko.CAP_MULT else ""
-    return f"{mark} 入賞 {result.starts:>2} … 🎉 **{result.chains}連** **+{result.mult}倍**{capped}"
+    return f"{mark} 入賞 {result.starts:>2} … 🎉 **{result.chains}連** **+{result.mult}倍**"
 
 
 def multi_frames(rng: random.Random, results: list) -> list:
@@ -185,7 +183,7 @@ class PachinkoView(ReplayView):
         super().__init__(bot, user_id, per_bet * sets, replay, timeout)
         self.per_bet, self.sets = per_bet, sets
         extra = next((n for n in EXTRA_SETS if n > sets), None)
-        if extra is not None and per_bet * extra <= MAX_BET:
+        if extra is not None:
             button = discord.ui.Button(
                 label=f"🎰 ×{extra}連続（{per_bet * extra:,}）", style=discord.ButtonStyle.success
             )
@@ -200,17 +198,9 @@ class PachinkoView(ReplayView):
 
 
 async def play_pachinko(interaction: discord.Interaction, bot, bet: int, sets: int = 1):
-    """bet は1セットあたりの賭け金。合計（bet × sets）が賭け金の範囲に収まること。"""
+    """bet は1セットあたりの賭け金。合計（bet × sets）が、そのまま賭け金になる（残高が足りなければ始まらない）。"""
     sets = max(1, min(int(sets), pachinko.MAX_SETS))
     total = bet * sets
-    if total > MAX_BET:
-        return await interaction.response.send_message(
-            embed=ui.error_embed(
-                "賭け金の合計が上限を超えています",
-                f"賭け金 × 回数 の合計は {ui.pelica(MAX_BET)} までです（いま {ui.pelica(total)}）。賭け金か回数を減らしてください。",
-            ),
-            ephemeral=True,
-        )
     ctx = await start_game(interaction, bot, total, "パチンコ")
     if ctx is None:
         return

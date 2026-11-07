@@ -9,7 +9,6 @@ from core import approval, events, missions, ui
 from games import rtplevel
 
 MIN_BET = 10
-MAX_BET = 100_000
 
 
 def local_now(bot) -> datetime.datetime:
@@ -127,11 +126,9 @@ async def start_game(
         return None
     escrow = None
     try:
-        if not MIN_BET <= bet <= MAX_BET:
+        if bet < MIN_BET:
             await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "賭け金が範囲外です", f"{ui.pelica(MIN_BET)} 〜 {ui.pelica(MAX_BET)} の間で指定してください。"
-                ),
+                embed=ui.error_embed("賭け金が少なすぎます", f"{ui.pelica(MIN_BET)} 以上で指定してください。"),
                 ephemeral=True,
             )
             return None
@@ -228,10 +225,7 @@ class ReplayView(discord.ui.View):
         self.bot, self.user_id, self.bet, self.replay = bot, user_id, bet, replay
         self.origin = None  # この結果を出したメッセージの元になった interaction（時間切れでボタンを消すのに使う）
         self.again.label = f"🔁 同じ額でもう一度（{bet:,}）"
-        if bet * 2 > MAX_BET:
-            self.remove_item(self.double)
-        else:
-            self.double.label = f"⏫ 倍にして（{bet * 2:,}）"
+        self.double.label = f"⏫ 倍にして（{bet * 2:,}）"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:

@@ -15,7 +15,8 @@ from discord.ext import commands, tasks
 from cogs.weekly_cog import announce_channel
 from core import approval, logthrottle, ui
 
-MIN_FEE, MAX_FEE = 500, 3_000
+MIN_FEE = 500  # 参加費の最小。上限はない
+RANDOM_FEE_RANGE = (500, 3_000)  # 参加費を省略したときの、ランダムの範囲
 DEFAULT_MINUTES = 60
 MAX_MINUTES = 24 * 60
 JOIN_ID = "raffle:join"
@@ -92,7 +93,7 @@ class RaffleCog(commands.Cog):
                 False,
                 "投稿できるチャンネルがありません（ランキング掲示のチャンネル、またはシステムチャンネルに、投稿の権限が必要です）。",
             )
-        fee = fee or random.randint(MIN_FEE // 100, MAX_FEE // 100) * 100
+        fee = fee or random.randint(RANDOM_FEE_RANGE[0] // 100, RANDOM_FEE_RANGE[1] // 100) * 100
         ok, reason = eco.raffle_open(host_id, fee, time.time() + minutes * 60, channel.id)
         if not ok:
             return False, reason

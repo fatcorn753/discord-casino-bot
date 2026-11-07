@@ -61,7 +61,7 @@ class Economy(
 ):
     DAILY_BASE = 1000
     DAILY_STREAK_BONUS = 100  # 連続1日ごとの加算
-    DAILY_STREAK_CAP = 9  # 加算は9日分まで（最大 +900）
+    DAILY_STREAK_CAP = 20  # 加算は20日分まで（最大 +2,000。1回の額は最大 3,000）
     _loan_guard = False  # 貸付の返済中だけ True。受け取った人の延滞の回収が、連鎖しないようにする
 
     def __init__(self, db_path: str, legacy_guild_id: Optional[int] = None, strict: bool = False):

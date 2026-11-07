@@ -73,11 +73,10 @@ def ledger_matches_balance(bot, uid=1):
 
 
 # ---------------------------- 賭け金の検証 ---------------------------- #
-def test_bet_out_of_range_and_insufficient_are_rejected_without_charging(bot):
-    for bet in (1, common.MAX_BET + 1):
-        it = FakeInteraction()
-        assert run(common.start_game(it, bot, bet, "テスト")) is None
-        assert it.sent[0]["ephemeral"] and "範囲外" in it.sent[0]["embed"].title
+def test_bet_below_the_minimum_and_insufficient_are_rejected_without_charging(bot):
+    it = FakeInteraction()
+    assert run(common.start_game(it, bot, 1, "テスト")) is None
+    assert it.sent[0]["ephemeral"] and "少なすぎ" in it.sent[0]["embed"].title
     it = FakeInteraction()
     assert run(common.start_game(it, bot, INITIAL_BALANCE + 1, "テスト")) is None
     assert "足りません" in it.sent[0]["embed"].title
@@ -649,16 +648,18 @@ def test_replay_button_plays_again_with_same_and_double_bet(bot, monkeypatch, ga
     assert bot.economy.stats(1)["games_played"] == 3 and ledger_matches_balance(bot) and assert_clean(bot) is None
 
 
-def test_replay_button_only_for_the_player_and_double_hidden_at_max_bet(bot, monkeypatch):
+def test_replay_button_only_for_the_player_and_double_is_always_offered(bot, monkeypatch):
     monkeypatch.setattr(simple, "STEP", 0)
     it = FakeInteraction()
     run(simple.play_roulette(it, bot, 100, "red"))
     view = _last_view(it)
     other = FakeInteraction(uid=2)
     assert run(view.interaction_check(other)) is False and "他の人" in other.sent[-1]["content"]
-    from play.common import MAX_BET, ReplayView
+    from play.common import ReplayView
 
-    assert not any("倍にして" in (c.label or "") for c in ReplayView(bot, 1, MAX_BET, None).children)
+    assert any(
+        "倍にして（2,000,000）" in (c.label or "") for c in ReplayView(bot, 1, 1_000_000, None).children
+    )  # 上限がないので、大きな額でも出る
     assert any("倍にして" in (c.label or "") for c in view.children)
 
 
@@ -781,13 +782,11 @@ def test_pachinko_sets_play_in_one_go_and_settle_once(bot, monkeypatch):
     assert_clean(bot)
 
 
-def test_pachinko_sets_total_must_fit_the_bet_limit_and_nothing_is_charged(bot):
-    from play.common import MAX_BET
-
+def test_pachinko_sets_total_has_no_cap_but_needs_the_balance_and_nothing_is_charged_otherwise(bot):
     it = FakeInteraction()
-    run(play_pa.play_pachinko(it, bot, MAX_BET // 2 + 1, 2))
+    run(play_pa.play_pachinko(it, bot, 1_000_000, 2))  # 合計200万は、残高に足りない
     assert (
-        "合計が上限" in it.sent[0]["embed"].title
+        "足りません" in it.sent[0]["embed"].title
         and bot.economy.balance(1) == INITIAL_BALANCE
         and bot.economy.pachinko_stats()["sets"][0] == 0
     )

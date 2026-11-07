@@ -50,8 +50,6 @@ def test_offer_validation(eco):
     cases = [
         ((A, A, 1000, 20, 10), "自分には"),
         ((A, B, 99, 20, 10), "金額は"),
-        ((A, B, 100_001, 20, 10), "金額は"),
-        ((A, B, 1000, 1001, 10), "日利は"),
         ((A, B, 1000, -1, 10), "日利は"),
         ((A, B, 1000, 20, 0), "期間は"),
         ((A, B, 1000, 20, 31), "期間は"),
@@ -98,14 +96,21 @@ def test_accept_guards(eco):
     )  # 二重に承諾できない
 
 
-def test_borrower_limits_and_overdue_blocks_new_loans(eco):
-    for i in range(loans.MAX_BORROWER_ACTIVE):
+def test_there_is_no_cap_on_how_many_loans_one_can_borrow_but_overdue_blocks_new_ones(eco):
+    for i in range(5):  # 以前は同時に3件まで。いまは上限がない
         active(eco, lender=100 + i, principal=100)
     lid = offer(eco, lender=200, principal=100)
-    assert "同時に借りられる" in eco.loan_accept(lid, B, NOW + 5)[1]
-    eco2 = eco
-    eco2._conn.execute("UPDATE loans SET status='overdue' WHERE borrower_id=? AND id=1", (B,))
-    assert "延滞中" in eco2.loan_accept(lid, B, NOW + 5)[1]
+    assert eco.loan_accept(lid, B, NOW + 5) == (True, "")
+    eco._conn.execute("UPDATE loans SET status='overdue' WHERE borrower_id=? AND id=1", (B,))
+    lid2 = offer(eco, lender=201, principal=100)
+    assert "延滞中" in eco.loan_accept(lid2, B, NOW + 5)[1]
+
+
+def test_principal_and_rate_have_no_upper_limit_but_the_lenders_balance_still_applies(eco):
+    eco.credit(A, 5_000_000, "テスト")
+    assert eco.loan_offer(A, B, 4_000_000, 5000, 10, 777, NOW)[0]  # 400万を、日利500%で
+    assert not eco.loan_offer(A, C, 9_000_000, 20, 10, 777, NOW)[0]  # 貸す人の残高を超える額は、出せない
+    assert loans.total_owed(4_000_000, 5000, 10, 0, 10 * 86400) == 4_000_000 + 4_000_000 * 5000 * 10 // 1000
 
 
 def test_decline_and_cancel(eco):

@@ -24,7 +24,6 @@ from core import approval, logthrottle, quizpay, ui
 from core.duration import format_minutes, parse_duration
 
 MAX_CHOICE_LEN = 80
-MAX_REWARD = 10_000
 MAX_VERDICT_LEN = 20  # 正解・不正解の見出しの文言の最大文字数
 DEFAULT_RIGHT, DEFAULT_WRONG = "正解！", "不正解…"
 DEFAULT_REWARD = 100
@@ -98,7 +97,13 @@ def question_embed(q: dict, order: list, remaining: int) -> discord.Embed:
 
 
 def result_embed(result: dict, more: int, quiz: dict = None) -> discord.Embed:
-    if result["correct"]:
+    if result["correct"] and result["reward_blocked"]:
+        e = ui.embed(
+            f"⭕ {verdict(quiz, True)}",
+            f"**報酬はありません**（ゲームを{quizpay.MIN_GAMES_FOR_REWARD}回以上遊ぶと、みんなの問題の報酬をもらえます）",
+            ui.OK,
+        )
+    elif result["correct"]:
         e = ui.embed(f"⭕ {verdict(quiz, True)}", f"**+{ui.pelica(result['reward'])}**", ui.OK)
     else:
         e = ui.embed(f"❌ {verdict(quiz, False)}", f"正解は **{result['answer']}** でした。", ui.ERROR)
@@ -169,11 +174,11 @@ async def record_answer(bot, interaction: discord.Interaction, quiz_id: int, pos
         embed=result_embed(result, eco.quiz_next(interaction.user.id, time.time())[1], quiz), ephemeral=True
     )
     # 結果（正解か不正解か）だけを、みんなに見える形で出す。選んだ答えと正解は出さない（まだ答えていない人のため）
-    line = (
-        f"⭕ <@{interaction.user.id}> が #{quiz_id} に **{verdict(quiz, True)}**（+{ui.pelica(result['reward'])}）"
-        if result["correct"]
-        else f"❌ <@{interaction.user.id}> が #{quiz_id} に **{verdict(quiz, False)}**"
-    )
+    if result["correct"]:
+        paid = "報酬なし" if result["reward_blocked"] else f"+{ui.pelica(result['reward'])}"
+        line = f"⭕ <@{interaction.user.id}> が #{quiz_id} に **{verdict(quiz, True)}**（{paid}）"
+    else:
+        line = f"❌ <@{interaction.user.id}> が #{quiz_id} に **{verdict(quiz, False)}**"
     if result["author_debt_added"]:  # 出題者の残高で払いきれなかった分は、出題者の借金になる
         line += (
             f"\n⚠️ 出題者 <@{result['author_id']}> の残高が足りないため、不足 "
@@ -281,12 +286,14 @@ class QuizForm(discord.ui.Modal):
         label="解説（なくてもよい）", style=discord.TextStyle.paragraph, required=False, max_length=800
     )
 
-    def read(self, max_reward: int, default_minutes: Optional[int], min_minutes: int, max_minutes: int) -> FormValues:
+    def read(
+        self, max_reward: Optional[int], default_minutes: Optional[int], min_minutes: int, max_minutes: int
+    ) -> FormValues:
         """入力を検証して返す。問題があれば ValueError（文面はそのまま利用者に見せる）。"""
         choices = parse_choices(self.choices.value)
         reward, duration = parse_terms(self.terms.value)
-        if not 1 <= reward <= max_reward:
-            raise ValueError(f"報酬は 1〜{max_reward:,} で入力してください。")
+        if reward < 1 or (max_reward is not None and reward > max_reward):
+            raise ValueError("報酬は 1 以上で入力してください。")
         msg_right, msg_wrong = parse_verdicts(self.verdicts.value)
         minutes = parse_duration(duration) if duration else default_minutes
         if minutes is not None and not min_minutes <= minutes <= max_minutes:
@@ -301,7 +308,7 @@ class AddModal(QuizForm, title="クイズを追加"):
         label="報酬 / 期間（例: 100 / 3日。期間は省略可）",
         default=str(DEFAULT_REWARD),
         max_length=30,
-        placeholder=f"報酬は 1〜{MAX_REWARD:,}。期間は 90分・2時間・3日 など（省略で無期限）",
+        placeholder="報酬は 1 以上（上限なし）。期間は 90分・2時間・3日 など（省略で無期限）",
     )
     verdicts = verdicts_input()
 
@@ -311,7 +318,7 @@ class AddModal(QuizForm, title="クイズを追加"):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            form = self.read(MAX_REWARD, None, 1, 365 * 1440)
+            form = self.read(None, None, 1, 365 * 1440)
         except ValueError as exc:
             return await interaction.response.send_message(embed=ui.error_embed("入力エラー", str(exc)), ephemeral=True)
         now = time.time()
@@ -347,7 +354,7 @@ class UserModal(QuizForm, title="クイズを出題"):
         label="報酬 / 期間（例: 100 / 2日。期間は省略可）",
         default="100",
         max_length=30,
-        placeholder=f"報酬は正解1人あたり 1〜{quizpay.USER_MAX_REWARD:,}（あなたのペリカ）。期間は最長7日、省略で{format_minutes(quizpay.USER_DEFAULT_MINUTES)}",
+        placeholder=f"報酬は正解1人あたり 1 以上（上限なし。あなたのペリカ）。期間は最長7日、省略で{format_minutes(quizpay.USER_DEFAULT_MINUTES)}",
     )
     verdicts = verdicts_input()
 
@@ -358,7 +365,7 @@ class UserModal(QuizForm, title="クイズを出題"):
     async def on_submit(self, interaction: discord.Interaction):
         try:
             form = self.read(
-                quizpay.USER_MAX_REWARD,
+                None,
                 quizpay.USER_DEFAULT_MINUTES,
                 quizpay.USER_MIN_MINUTES,
                 quizpay.USER_MAX_MINUTES,

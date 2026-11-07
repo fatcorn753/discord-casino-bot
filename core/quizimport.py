@@ -26,7 +26,6 @@ MAX_QUESTIONS = 30
 MAX_QUESTION_LEN = 500
 MAX_CHOICE_LEN = 80
 MAX_EXPLANATION_LEN = 800
-MAX_REWARD = 10_000
 MAX_MINUTES = 365 * 1440  # 有効期間の上限（1年）
 DEFAULT_REWARD = 100
 
@@ -115,8 +114,8 @@ def _parse_block(lines: list, number: int, errors: list) -> Optional[dict]:
     reward = DEFAULT_REWARD
     if "reward" in fields:
         reward = _int(fields["reward"])
-        if reward is None or not 1 <= reward <= MAX_REWARD:
-            errors.append(head + f"報酬は 1〜{MAX_REWARD:,} の数字で書いてください。")
+        if reward is None or reward < 1:
+            errors.append(head + "報酬は 1 以上の数字で書いてください。")
             reward = DEFAULT_REWARD
     minutes = None
     given = [k for k in ("duration", "hours", "days", "mins") if k in fields]

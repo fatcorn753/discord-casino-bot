@@ -1,4 +1,4 @@
-"""パチンコ（打ち出し型）: 設計の数字、1セットの抽選、連チャンと上限、演出のコマ、1回転ごとの確率。"""
+"""パチンコ（打ち出し型）: 設計の数字、1セットの抽選、連チャン（上限なし）、演出のコマ、1回転ごとの確率。"""
 
 import random
 
@@ -19,9 +19,9 @@ def test_tables_are_consistent_and_rtp_never_exceeds_one():
     assert 0.07 <= pachinko.hit_rate() <= 0.11  # 当たるセットは約9%
 
 
-def test_set_distribution_is_a_probability_distribution_with_the_cap():
+def test_set_distribution_is_a_probability_distribution_up_to_the_analysis_limit():
     dist = pachinko._set_distribution()
-    assert len(dist) == pachinko.CAP_MULT + 1 and abs(sum(dist) - 1.0) < 1e-9
+    assert len(dist) == pachinko.ANALYSIS_MAX + 1 and abs(sum(dist) - 1.0) < 1e-9
     assert dist[1] == 0 and dist[0] > 0.9 and dist[2] > 0  # 払い戻しは0か2倍以上（1倍はない）
     assert sum(a * p for a, p in enumerate(dist)) == pytest.approx(pachinko.rtp())
 
@@ -33,7 +33,7 @@ def test_observed_set_results_follow_the_design():
     assert abs(sum(r.starts for r in results) / n - pachinko.BALLS_PER_SET * pachinko.P_START) < 0.1  # 平均7回転
     assert abs(sum(1 for r in results if r.mult) / n - pachinko.hit_rate()) < 0.006
     assert abs(sum(r.mult for r in results) / n - pachinko.rtp()) < 0.08  # 大当たりの偏りで大きくぶれる
-    assert all(r.mult == 0 or 2 <= r.mult <= pachinko.CAP_MULT for r in results)  # 払い戻しは0か、2倍以上（上限まで）
+    assert all(r.mult == 0 or r.mult >= 2 for r in results)  # 払い戻しは0か、2倍以上（上限はない）
 
 
 def test_hit_probability_adds_the_cues_and_caps_at_certain():
@@ -73,28 +73,23 @@ def test_not_every_ball_reaches_the_start_hole():
 
 def test_a_set_has_one_spin_per_start_and_totals_match():
     rng = random.Random(2)
-    saw_chain = saw_cap = False
+    saw_chain = False
     for _ in range(4000):
         r = pachinko.roll_set(rng)
-        assert (
-            len(r.spins) == r.starts
-            and r.raw == sum(s.raw for s in r.spins)
-            and r.mult == min(r.raw, pachinko.CAP_MULT)
-        )
+        assert len(r.spins) == r.starts and r.raw == sum(s.raw for s in r.spins) and r.mult == r.raw
         assert r.hits == sum(1 for s in r.spins if s.hit) and r.chains == sum(len(s.rounds) for s in r.spins)
         for s in r.spins:
             assert (len(s.rounds) > 0) == s.hit and all(x in {m for _, m, _ in pachinko.ROUNDS} for x in s.rounds)
         saw_chain |= r.max_chain >= 2
-        saw_cap |= r.raw > pachinko.CAP_MULT
     assert saw_chain  # 連チャンが起きる
 
 
-def test_cap_applies_to_the_whole_set():
+def test_there_is_no_cap_on_the_payout():
     spin = pachinko.SpinInfo("", "", True, (30,) * 8, 0.1)  # 30倍×8連 = 240倍
-    result = pachinko.SetResult(1, (spin,), spin.raw, min(spin.raw, pachinko.CAP_MULT))
+    result = pachinko.SetResult(1, (spin,), spin.raw)
     assert (
-        result.raw == 240 and result.mult == pachinko.CAP_MULT == 200 and result.max_chain == 8 and result.chains == 8
-    )
+        result.raw == result.mult == 240 and result.max_chain == 8 and result.chains == 8
+    )  # 200倍を超えても、そのまま払う
 
 
 def test_chain_continues_with_the_configured_probability():
@@ -197,7 +192,7 @@ REEL = "┃"
 
 def make_result(spins):
     raw = sum(s.raw for s in spins)
-    return pachinko.SetResult(len(spins), tuple(spins), raw, min(raw, pachinko.CAP_MULT))
+    return pachinko.SetResult(len(spins), tuple(spins), raw)
 
 
 def reel_frames(frames):
@@ -268,7 +263,9 @@ def test_reveal_frames_show_big_counters_milestones_and_a_finish():
     assert len(short) == 3 and "大当たり" in short[0].text and "好調" in short[-1].text  # 宣言 + 1連目 + 終了
     assert not any("達成" in f.text for f in short)
     huge = play_pa.reveal_frames(pachinko.SpinInfo("", "", True, (30,) * 8, 0.1))
-    assert "（上限）" in huge[-1].text and "+200倍" in huge[-1].text and "伝説級" in huge[-1].text
+    assert (
+        "（上限）" not in huge[-1].text and "+240倍" in huge[-1].text and "伝説級" in huge[-1].text
+    )  # 200倍を超えても、そのまま出る
     assert len(play_pa.reveal_frames(pachinko.SpinInfo("", "", True, (2,) * 25, 0.1))) <= 11
     assert any("20連 突破" in f.text for f in play_pa.reveal_frames(pachinko.SpinInfo("", "", True, (2,) * 25, 0.1)))
 

@@ -121,14 +121,14 @@ class LoanCog(commands.Cog):
     # ------------------------------ 提案 ------------------------------ #
     async def _principal_autocomplete(self, interaction: discord.Interaction, current: str):
         """貸す額の欄に、残高を見せる。"""
-        return balance_choices(self.bot, interaction, current, loans.USER_MIN_PRINCIPAL, loans.USER_MAX_PRINCIPAL)
+        return balance_choices(self.bot, interaction, current, loans.USER_MIN_PRINCIPAL)
 
     @group.command(name="提案", description="相手にペリカを貸す提案を出す")
     @app_commands.rename(member="相手", principal="金額", rate="日利", days="期間")
     @app_commands.describe(
         member="貸す相手",
-        principal=f"貸す額（{loans.USER_MIN_PRINCIPAL:,}〜{loans.USER_MAX_PRINCIPAL:,}）",
-        rate=f"1日の利息（％。0〜{loans.MAX_RATE_TENTHS // 10}、0.1刻み）",
+        principal=f"貸す額（{loans.USER_MIN_PRINCIPAL:,}以上。上限なし。貸す人の残高が足りること）",
+        rate="1日の利息（％。0以上、0.1刻み。上限なし）",
         days=f"返済の期限（日。{loans.MIN_TERM_DAYS}〜{loans.MAX_TERM_DAYS}）",
     )
     @app_commands.autocomplete(principal=_principal_autocomplete)
@@ -136,8 +136,8 @@ class LoanCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         member: discord.Member,
-        principal: app_commands.Range[int, loans.USER_MIN_PRINCIPAL, loans.USER_MAX_PRINCIPAL],
-        rate: app_commands.Range[float, 0.0, loans.MAX_RATE_TENTHS / 10],
+        principal: app_commands.Range[int, loans.USER_MIN_PRINCIPAL],
+        rate: app_commands.Range[float, 0.0],
         days: app_commands.Range[int, loans.MIN_TERM_DAYS, loans.MAX_TERM_DAYS],
     ):
         if member.bot:

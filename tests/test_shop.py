@@ -301,7 +301,9 @@ def test_insurance_cap_does_not_reduce_small_refunds(eco):
 
 def test_daily_double_ticket_is_never_profitable():
     max_daily = Economy.DAILY_BASE + Economy.DAILY_STREAK_BONUS * Economy.DAILY_STREAK_CAP
-    assert max_daily < shop.BY_ID[shop.DAILY_DOUBLE].price  # 増える分(最大1,900)より券(3,000)のほうが高い
+    assert (
+        max_daily <= shop.BY_ID[shop.DAILY_DOUBLE].price
+    )  # 増える分(最大3,000)より券(3,000)のほうが、安くはない（儲からない）
 
 
 def test_purchase_rejects_nonsense_quantities_and_prices(eco):

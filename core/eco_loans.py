@@ -66,14 +66,13 @@ class LoanMixin:
         now: float,
     ) -> tuple:
         """貸す提案を作る。(成功か, 理由か貸付の番号) を返す。"""
-        high = loans_mod.USER_MAX_PRINCIPAL
         low = loans_mod.USER_MIN_PRINCIPAL
         if lender_id == borrower_id:
             return False, "自分には貸せません。"
-        if not low <= principal <= high:
-            return False, f"金額は {low:,}〜{high:,}ペリカ にしてください。"
-        if not 0 <= rate_tenths <= loans_mod.MAX_RATE_TENTHS:
-            return False, f"日利は 0〜{loans_mod.rate_text(loans_mod.MAX_RATE_TENTHS)} にしてください。"
+        if principal < low:
+            return False, f"金額は {low:,}ペリカ 以上にしてください。"
+        if rate_tenths < 0:
+            return False, "日利は 0 以上にしてください。"
         if not loans_mod.MIN_TERM_DAYS <= term_days <= loans_mod.MAX_TERM_DAYS:
             return False, f"期間は {loans_mod.MIN_TERM_DAYS}〜{loans_mod.MAX_TERM_DAYS}日 にしてください。"
         with self._lock, self._conn:
@@ -134,13 +133,11 @@ class LoanMixin:
             if self._debt(user_id) > 0:
                 return False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、借りられません。"
             row = self._conn.execute(
-                "SELECT COUNT(*) AS n, COALESCE(SUM(status='overdue'), 0) AS late FROM loans WHERE guild_id=? AND borrower_id=? AND status IN ('active','overdue')",
+                "SELECT COALESCE(SUM(status='overdue'), 0) AS late FROM loans WHERE guild_id=? AND borrower_id=? AND status IN ('active','overdue')",
                 (self._g(), user_id),
             ).fetchone()
             if row["late"]:
                 return False, "延滞中の貸付があるので、借りられません。先に返してください。"
-            if row["n"] >= loans_mod.MAX_BORROWER_ACTIVE:
-                return False, f"同時に借りられるのは {loans_mod.MAX_BORROWER_ACTIVE} 件までです。"
             self._ensure(loan["lender_id"])
             if self._balance(loan["lender_id"]) < loan["principal"]:
                 return False, "貸す側の残高が足りなくなったので、成立しませんでした。"

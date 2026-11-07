@@ -263,9 +263,9 @@ def test_pachinko_sets_apply_the_level_to_each_set_not_to_the_sum(tmp_path, monk
     miss = pg.SpinInfo("", "", False, (), 0.01)
     plan = iter(
         [
-            pg.SetResult(3, (hit, miss, miss), 10, 10),
-            pg.SetResult(3, (miss,) * 3, 0, 0),
-            pg.SetResult(3, (miss,) * 3, 0, 0),
+            pg.SetResult(3, (hit, miss, miss), 10),
+            pg.SetResult(3, (miss,) * 3, 0),
+            pg.SetResult(3, (miss,) * 3, 0),
         ]
     )  # 10倍が1回、あとは2回ハズレ
     monkeypatch.setattr(pg, "roll_set", lambda rng: next(plan))

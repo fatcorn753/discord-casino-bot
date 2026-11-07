@@ -19,6 +19,14 @@ from cogs.quiz_cog import (
 from core.economy import INITIAL_BALANCE, Economy
 
 NOW = 1_000_000.0
+REAL_GAMES_PLAYED = Economy._games_played
+
+
+@pytest.fixture(autouse=True)
+def experienced_players(request, monkeypatch):
+    """ふつうのテストでは、回答者はゲームを何回も遊んだ人にする（報酬の条件は、専用のテストで確かめる）。"""
+    if not request.node.get_closest_marker("new_players"):
+        monkeypatch.setattr(Economy, "_games_played", lambda self, user_id: 99)
 
 
 @pytest.fixture
@@ -527,7 +535,7 @@ def test_user_modal_posts_publicly_and_saves_the_message(eco):
     assert log == [("send", "📰 みんなのクイズ #1")] and len(sent["kw"]["view"].children) == 4
     assert (q["author_id"], q["reward"], q["message_id"], q["channel_id"]) == (AUTHOR, 250, 9090, 777)
     assert abs(q["expires"] - q["created"] - 3 * DAY) < 1  # 日数の既定は3日
-    m.terms._value = "1001"  # 上限超え
+    m.terms._value = "0"  # 報酬は 1 以上
     log.clear()
     asyncio.run(m.on_submit(inter))
     assert log == [("send", "❌ 入力エラー")] and len(eco.quiz_list()) == 1
@@ -722,10 +730,14 @@ def test_default_wording_is_used_when_the_author_leaves_it_blank(eco):
     assert (
         (q["msg_right"], q["msg_wrong"]) == ("", "") and verdict(q, True) == "正解！" and verdict(q, False) == "不正解…"
     )
-    assert result_embed({"correct": True, "reward": 100, "explanation": ""}, 0, q).title == "⭕ 正解！"
+    assert (
+        result_embed({"correct": True, "reward": 100, "reward_blocked": False, "explanation": ""}, 0, q).title
+        == "⭕ 正解！"
+    )
     assert result_embed({"correct": False, "answer": "東京", "explanation": ""}, 0, q).title == "❌ 不正解…"
     assert (
-        result_embed({"correct": True, "reward": 100, "explanation": ""}, 0).title == "⭕ 正解！"
+        result_embed({"correct": True, "reward": 100, "reward_blocked": False, "explanation": ""}, 0).title
+        == "⭕ 正解！"
     )  # 問題を渡さなくても既定
 
 
@@ -737,7 +749,7 @@ def test_custom_wording_replaces_only_the_headline_everywhere(eco):
     )
     q = eco.quiz_get(qid)
     assert verdict(q, True) == "お見事！" and verdict(q, False) == "不正解…"  # 片方だけ決めたら、もう片方は既定
-    e = result_embed({"correct": True, "reward": 100, "explanation": "解説"}, 0, q)
+    e = result_embed({"correct": True, "reward": 100, "reward_blocked": False, "explanation": "解説"}, 0, q)
     assert e.title == "⭕ お見事！" and "+100" in e.description  # 報酬の表示は残る
     e = result_embed({"correct": False, "answer": "東京", "explanation": "解説"}, 0, q)
     assert e.title == "❌ 不正解…" and "東京" in e.description
@@ -797,3 +809,61 @@ def test_public_answer_line_and_result_use_the_custom_wording(eco):
     assert log[-1] == ("send", "⭕ お見事！") and public[-1] == f"⭕ <@1> が #{qid} に **お見事！**（+100ペリカ）"
     asyncio.run(PublicButton(qid, (pos + 1) % 4).callback(click(2)))
     assert log[-1] == ("send", "❌ おしい！") and public[-1] == f"❌ <@2> が #{qid} に **おしい！**"
+
+
+# ----------------------------- 報酬の条件（ゲームを3回以上）と、上限なしの報酬 ----------------------------- #
+@pytest.mark.new_players
+def test_players_with_few_games_get_no_reward_but_the_answer_counts_as_correct(eco):
+    ok, qid = post(eco, reward=500)
+    eco.balance(1)
+    eco._conn.execute("UPDATE users SET games_played=2 WHERE user_id=1")  # ゲームを2回だけ遊んだ人
+    eco._conn.commit()
+    ok, result = eco.quiz_answer(1, qid, "東京", NOW)
+    assert ok and result["correct"] and result["reward_blocked"] and result["reward"] == 0  # 正解扱い。報酬はなし
+    assert eco.balance(1) == INITIAL_BALANCE
+    assert eco.balance(AUTHOR) == INITIAL_BALANCE and eco.debt(AUTHOR) == 0  # 出題者は払わない
+    assert result["author_delta"] == 0 and result["author_debt_added"] == 0
+
+
+@pytest.mark.new_players
+def test_players_with_three_games_get_the_reward(eco):
+    ok, qid = post(eco, reward=500)
+    eco.balance(1)
+    eco._conn.execute("UPDATE users SET games_played=3 WHERE user_id=1")
+    eco._conn.commit()
+    ok, result = eco.quiz_answer(1, qid, "東京", NOW)
+    assert (
+        ok and not result["reward_blocked"] and result["reward"] == 500 and eco.balance(AUTHOR) == INITIAL_BALANCE - 500
+    )
+
+
+@pytest.mark.new_players
+def test_owner_questions_pay_everyone_and_the_authors_payout_ignores_ineligible_answers(eco):
+    qid = add(eco, reward=200)
+    ok, result = eco.quiz_answer(9, qid, "東京", NOW)
+    assert ok and result["reward"] == 200 and not result["reward_blocked"]  # 持ち主の問題には条件がない
+    ok, qid2 = post(eco, reward=100)
+    for uid in (1, 2, 3):  # ゲームを遊んでいない3人が答えても、出題者の報酬には数えない
+        assert eco.quiz_answer(uid, qid2, "東京", NOW)[1]["author_delta"] == 0
+    assert eco.balance(AUTHOR) == INITIAL_BALANCE  # 出題者は払わず、受け取りもない
+    assert (
+        eco._conn.execute("SELECT COUNT(*) FROM quiz_answers WHERE question_id=? AND counted=1", (qid2,)).fetchone()[0]
+        == 0
+    )
+
+
+def test_rewards_have_no_upper_limit(eco):
+    qid = add(eco, reward=5_000_000)  # 持ち主の問題: 500万
+    ok, result = eco.quiz_answer(1, qid, "東京", NOW)
+    assert ok and result["reward"] == 5_000_000
+    eco.credit(AUTHOR, 2_000_000, "テスト")
+    ok, qid2 = post(eco, reward=2_000_000)  # みんなの問題: 200万（出題者の残高があれば出せる）
+    assert ok and eco.quiz_answer(2, qid2, "東京", NOW)[1]["reward"] == 2_000_000
+
+
+@pytest.mark.new_players
+def test_messages_tell_the_player_about_the_games_needed(eco):
+    from cogs.quiz_cog import result_embed
+
+    e = result_embed({"correct": True, "reward": 0, "reward_blocked": True, "explanation": ""}, 0)
+    assert "報酬はありません" in e.description and "3回以上" in e.description

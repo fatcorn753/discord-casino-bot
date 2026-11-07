@@ -134,13 +134,15 @@ class QuizMixin:
             ).fetchone():
                 return False, "この問題にはもう答えています。"
             correct = chosen == q["choices"][0]
+            # 出題者がいる問題は、ゲームを3回以上遊んだ人だけが報酬をもらえる（正解にはなる）。遊んでいない人の回答は、出題者の報酬にも数えない
+            eligible = not author or self._games_played(user_id) >= quizpay_mod.MIN_GAMES_FOR_REWARD
             self._conn.execute(
-                "INSERT INTO quiz_answers (question_id, guild_id, user_id, correct, ts) VALUES (?, ?, ?, ?, ?)",
-                (quiz_id, self._g(), user_id, int(correct), now),
+                "INSERT INTO quiz_answers (question_id, guild_id, user_id, correct, ts, counted) VALUES (?, ?, ?, ?, ?, ?)",
+                (quiz_id, self._g(), user_id, int(correct), now, int(eligible)),
             )
             paid = 0
             debt_added = 0
-            if correct:
+            if correct and eligible:
                 if author:
                     taken = -self._apply(author, -q["reward"], "クイズ報酬の支払い")
                     debt_added = q["reward"] - taken  # 残高で払えなかった分は、出題者の借金になる
@@ -161,10 +163,17 @@ class QuizMixin:
                 "author_delta": 0,
                 "author_total": 0,
                 "author_debt_added": debt_added,
+                "reward_blocked": correct and not eligible,
             }
-            if author:
+            if author and eligible:
                 result["author_delta"], result["author_total"] = self._quiz_pay_author(q)
             return True, result
+
+    def _games_played(self, user_id: int) -> int:
+        row = self._conn.execute(
+            "SELECT games_played FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
+        ).fetchone()
+        return row["games_played"] if row else 0
 
     def _quiz_pay_author(self, q: dict) -> tuple:
         """いまの回答状況での出題者の受け取り額（基本+ボーナス+参加報酬）と、すでに払った累計の差を払う（減るときは戻す）。
@@ -172,7 +181,7 @@ class QuizMixin:
         (動いた額, 累計) を返す。戻すときは、出題者の残高の範囲まで。期限のときの最終合計は、回答のたびに払った累計と同じになる。
         """
         n, c = self._conn.execute(
-            "SELECT COUNT(*), COALESCE(SUM(correct), 0) FROM quiz_answers WHERE question_id=? AND guild_id=?",
+            "SELECT COUNT(*), COALESCE(SUM(correct), 0) FROM quiz_answers WHERE question_id=? AND guild_id=? AND counted=1",
             (q["id"], self._g()),
         ).fetchone()
         entitled = sum(quizpay_mod.author_payout(n, c, q["reward"]))
@@ -268,7 +277,7 @@ class QuizMixin:
                 (self._g(), now),
             ).fetchall():
                 n, c = self._conn.execute(
-                    "SELECT COUNT(*), COALESCE(SUM(correct), 0) FROM quiz_answers WHERE question_id=? AND guild_id=?",
+                    "SELECT COUNT(*), COALESCE(SUM(correct), 0) FROM quiz_answers WHERE question_id=? AND guild_id=? AND counted=1",
                     (row["id"], self._g()),
                 ).fetchone()
                 base, bonus, part = quizpay_mod.author_payout(n, c, row["reward"])

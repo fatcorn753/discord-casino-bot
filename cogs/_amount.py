@@ -30,11 +30,11 @@ def typed_amount(current: str) -> Optional[int]:
 
 
 def balance_choices(
-    bot, interaction: discord.Interaction, current: str, minimum: int, maximum: int
+    bot, interaction: discord.Interaction, current: str, minimum: int, maximum: Optional[int] = None
 ) -> list[app_commands.Choice[int]]:
     """残高を見せる、1行だけの候補。
 
-    - 範囲（minimum〜maximum）内の数字を入力中なら「500（残高 8,000ペリカ）」。選ぶと、その数字になる。
+    - 範囲（minimum 以上、maximum があればそれ以下）内の数字を入力中なら「500（残高 8,000ペリカ）」。選ぶと、その数字になる。
     - それ以外（空・範囲外）は「残高 8,000ペリカ」。選ぶと minimum になるので、見るだけなら選ばずに数字を打つ。
     DM では候補を出さない。
     """
@@ -42,6 +42,6 @@ def balance_choices(
     if balance is None:
         return []
     typed = typed_amount(current)
-    if typed is not None and minimum <= typed <= maximum:
+    if typed is not None and typed >= minimum and (maximum is None or typed <= maximum):
         return [app_commands.Choice(name=f"{typed:,}（残高 {balance:,}ペリカ）", value=typed)]
     return [app_commands.Choice(name=f"残高 {balance:,}ペリカ（選ぶと {minimum:,} になります）", value=minimum)]

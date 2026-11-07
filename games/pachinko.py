@@ -4,7 +4,7 @@
   ① 100発を打ち出す → 1発ごとに、約7%がスタートに入る（残りは釘やハズレの穴に落ちる）。入った数だけ回転する。
   ② 回転ごとに、予告の色とリーチの格を抽選し、当たる確率 = 基本 + 予告ぶん + リーチぶん で当落を決める。
   ③ 当たると大当たり。出玉は ROUNDS の表のどれか（2倍・10倍・30倍。割合は表のとおり）で、確変の連チャンが CONTINUE の確率で続く。
-  ④ セット全体の払い戻しは、出玉の合計（賭け金の倍数）。上限は CAP_MULT 倍。
+  ④ セット全体の払い戻しは、出玉の合計（賭け金の倍数）。上限はない。
 還元率は 100% を超えないこと（超えると、連打するだけでペリカが増えてしまう）。いまは約97%。数字はすべてこのファイルの表に集めてある。
 
 演出は Discord のメッセージを何度も編集して見せる。ここでは「何コマ目に何を表示するか」だけを作る。
@@ -23,7 +23,7 @@ NORMAL, SUPER, PREMIUM = "normal", "super", "premium"
 BALLS_PER_SET = 100  # 1セットで打ち出す玉の数（賭け金 ÷ この数 が、玉1発の値段）
 P_START = 0.07  # 玉1発が、スタートに入る確率
 MAX_SETS = 10  # 連続投入できるセット数
-CAP_MULT = 200  # 1セットの払い戻しの上限（賭け金の倍数）
+ANALYSIS_MAX = 400  # 還元率などの計算で、これ以上の出玉は「それ以上」にまとめる（遊びには上限がない。確率は 1e-9 以下で、計算への影響は無視できる）
 
 # 大当たり1回の出玉（名前, 賭け金の倍数, 確率）と、確変が続く確率
 ROUNDS = [
@@ -88,8 +88,12 @@ class SetResult:
 
     starts: int  # スタートに入った玉の数 = 回転数
     spins: tuple  # SpinInfo の並び
-    raw: int  # 出玉の合計（上限をかける前）
-    mult: int  # 払い戻しの倍数（上限をかけたあと。0 ならハズレ）
+    raw: int  # 出玉の合計 = 払い戻しの倍数（0 ならハズレ）
+
+    @property
+    def mult(self) -> int:
+        """払い戻しの倍数。出玉の合計と同じ（上限はない）。"""
+        return self.raw
 
     @property
     def hits(self) -> int:
@@ -136,7 +140,7 @@ def roll_set(rng: random.Random) -> SetResult:
     starts = sum(1 for _ in range(BALLS_PER_SET) if rng.random() < P_START)
     spins = tuple(roll_spin(rng) for _ in range(starts))
     raw = sum(s.raw for s in spins)
-    return SetResult(starts, spins, raw, min(raw, CAP_MULT))
+    return SetResult(starts, spins, raw)
 
 
 # ----------------------------- 設計上の数字（厳密な計算） ----------------------------- #
@@ -155,32 +159,32 @@ def hit_rate_by_tier() -> dict:
 
 
 def _convolve(a: list, b: list) -> list:
-    """合計の分布（0〜CAP_MULT。CAP_MULT の位置には「それ以上」をまとめる）。"""
-    out = [0.0] * (CAP_MULT + 1)
+    """合計の分布（0〜ANALYSIS_MAX。ANALYSIS_MAX の位置には「それ以上」をまとめる）。"""
+    out = [0.0] * (ANALYSIS_MAX + 1)
     for i, pa in enumerate(a):
         if pa:
             for j, pb in enumerate(b):
                 if pb:
-                    out[min(i + j, CAP_MULT)] += pa * pb
+                    out[min(i + j, ANALYSIS_MAX)] += pa * pb
     return out
 
 
 @lru_cache(maxsize=None)
 def _set_distribution() -> tuple:
-    """1セットの払い戻しの倍数の分布 [0..CAP_MULT]（上限は CAP_MULT にまとめる）。"""
-    one = [0.0] * (CAP_MULT + 1)
+    """1セットの払い戻しの倍数の分布 [0..ANALYSIS_MAX]（それ以上は ANALYSIS_MAX にまとめる。計算のためだけで、遊びに上限はない）。"""
+    one = [0.0] * (ANALYSIS_MAX + 1)
     for _, m, p in ROUNDS:
         one[m] += p
     chain = list(one)  # 連チャン1回ぶんの合計の分布: f = (1-c)R + c (R * f)
-    for _ in range(CAP_MULT):
+    for _ in range(ANALYSIS_MAX):
         step = _convolve(one, chain)
-        new = [(1 - CONTINUE) * one[a] + CONTINUE * step[a] for a in range(CAP_MULT + 1)]
+        new = [(1 - CONTINUE) * one[a] + CONTINUE * step[a] for a in range(ANALYSIS_MAX + 1)]
         if max(abs(x - y) for x, y in zip(new, chain)) < 1e-15:
             break
         chain = new
     q = P_START * mean_hit_prob()  # 玉1発が、大当たりの始まりになる確率
-    total = [1.0] + [0.0] * CAP_MULT
-    result = [0.0] * (CAP_MULT + 1)
+    total = [1.0] + [0.0] * ANALYSIS_MAX
+    result = [0.0] * (ANALYSIS_MAX + 1)
     comb = 1.0  # 二項分布 P(M = m) を、漸化式で求める
     for m in range(0, 31):
         p_m = comb * q**m * (1 - q) ** (BALLS_PER_SET - m) if m <= BALLS_PER_SET else 0.0
@@ -191,7 +195,7 @@ def _set_distribution() -> tuple:
 
 
 def rtp() -> float:
-    """設計上の還元率（セットの払い戻しの倍数の期待値。上限を含む）。"""
+    """設計上の還元率（セットの払い戻しの倍数の期待値）。"""
     return sum(a * p for a, p in enumerate(_set_distribution()))
 
 

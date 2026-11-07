@@ -8,11 +8,11 @@ from cogs._amount import balance_choices
 from games import pachinko as pachinko_game
 from play.blackjack import play_blackjack
 from play.chinchiro import play_chinchiro
-from play.common import MAX_BET, MIN_BET
+from play.common import MIN_BET
 from play.pachinko import play_pachinko
 from play.simple import play_roulette, play_slot
 
-BET_HELP = f"賭けるペリカ（{MIN_BET:,}〜{MAX_BET:,}）"
+BET_HELP = f"賭けるペリカ（{MIN_BET:,}以上。上限なし）"
 
 
 class Casino(commands.Cog):
@@ -23,13 +23,13 @@ class Casino(commands.Cog):
 
     async def _bet_autocomplete(self, interaction: discord.Interaction, current: str):
         """賭け金の欄に、残高を見せる。"""
-        return balance_choices(self.bot, interaction, current, MIN_BET, MAX_BET)
+        return balance_choices(self.bot, interaction, current, MIN_BET)
 
     @casino.command(name="チンチロ", description="🎲 チンチロ。親と勝負、目が出なければ3回まで振れる")
     @app_commands.rename(bet="賭け金")
     @app_commands.describe(bet=BET_HELP)
     @app_commands.autocomplete(bet=_bet_autocomplete)
-    async def chinchiro(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET, MAX_BET]):
+    async def chinchiro(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET]):
         await play_chinchiro(interaction, self.bot, bet)
 
     @casino.command(name="パチンコ", description="🎰 玉を打ち出して、入った数だけ回転。当たれば連チャン")
@@ -42,7 +42,7 @@ class Casino(commands.Cog):
     async def pachinko(
         self,
         interaction: discord.Interaction,
-        bet: app_commands.Range[int, MIN_BET, MAX_BET],
+        bet: app_commands.Range[int, MIN_BET],
         sets: app_commands.Range[int, 1, pachinko_game.MAX_SETS] = 1,
     ):
         await play_pachinko(interaction, self.bot, bet, sets)
@@ -51,14 +51,14 @@ class Casino(commands.Cog):
     @app_commands.rename(bet="賭け金")
     @app_commands.describe(bet=BET_HELP)
     @app_commands.autocomplete(bet=_bet_autocomplete)
-    async def slot(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET, MAX_BET]):
+    async def slot(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET]):
         await play_slot(interaction, self.bot, bet)
 
     @casino.command(name="ブラックジャック", description="🃏 21に近づけてディーラーに勝つ（ヒット・スタンド・ダブル）")
     @app_commands.rename(bet="賭け金")
     @app_commands.describe(bet=BET_HELP)
     @app_commands.autocomplete(bet=_bet_autocomplete)
-    async def blackjack(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET, MAX_BET]):
+    async def blackjack(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET]):
         await play_blackjack(interaction, self.bot, bet)
 
     @casino.command(name="ルーレット", description="🎡 色・偶奇・範囲・数字に賭ける")
@@ -86,7 +86,7 @@ class Casino(commands.Cog):
     async def roulette(
         self,
         interaction: discord.Interaction,
-        bet: app_commands.Range[int, MIN_BET, MAX_BET],
+        bet: app_commands.Range[int, MIN_BET],
         kind: app_commands.Choice[str],
         number: app_commands.Range[int, 0, 36] = None,
     ):
