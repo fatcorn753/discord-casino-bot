@@ -368,6 +368,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
         "サーバー取消",
         "付与",
         "お知らせ",
+        "発言削除",
         "抽選",
         "クイズ",
         "イベント",

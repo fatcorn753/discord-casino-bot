@@ -356,6 +356,7 @@ def test_owner_commands_are_dm_only_and_not_in_other_groups():
         "サーバー取消",
         "付与",
         "お知らせ",
+        "発言削除",
         "抽選",
         "クイズ",
         "イベント",

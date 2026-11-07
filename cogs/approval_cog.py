@@ -14,7 +14,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs._admin_embeds import LEVEL_NAME, bulk_preview_lines, pachinko_stats_embed, rtp_table_embed
-from cogs._admin_views import AnnounceModal, QuizBulkConfirm
+from cogs._admin_purge import can_read_history
+from cogs._admin_views import AnnounceModal, PurgeConfirm, QuizBulkConfirm
 from core import approval, events, quizimport, ui
 from games import rtplevel
 
@@ -96,6 +97,7 @@ class ApprovalButton(
 class ApprovalCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.purging = set()  # 発言を消している最中のチャンネル（同じチャンネルを二重に消さない）
 
     async def cog_load(self):
         self.bot.add_dynamic_items(ApprovalButton)
@@ -536,6 +538,44 @@ class ApprovalCog(commands.Cog):
 
     announce.autocomplete("guild_id")(guild_autocomplete)
     announce.autocomplete("channel_id")(channel_autocomplete)
+
+    @group.command(
+        name="発言削除", description="[管理者] 指定したチャンネルの、Bot 自身の発言をすべて消す（元に戻せない）"
+    )
+    @app_commands.rename(guild_id="サーバー", channel_id="チャンネル")
+    @app_commands.describe(
+        guild_id="消すサーバー（候補から選ぶ）", channel_id="消すチャンネル（サーバーを選んでから、候補から選ぶ）"
+    )
+    async def purge_own_messages(self, interaction: discord.Interaction, guild_id: str, channel_id: str):
+        if not await self._owner_only(interaction):
+            return
+        guild = await self._pick_guild(interaction, guild_id)
+        if guild is None:
+            return
+        ok, channel = await self._pick_channel(interaction, guild, channel_id)
+        if not ok:
+            return
+        if not can_read_history(channel, guild):
+            return await interaction.response.send_message(
+                embed=ui.error_embed(
+                    "履歴を読めません",
+                    f"Bot は #{channel.name} の「メッセージ履歴を読む」権限がありません。招待URLの権限に足して（README を参照）、もう一度試してください。",
+                ),
+                ephemeral=True,
+            )
+        warning = (
+            f"**{guild.name}** の **#{channel.name}** にある、**Bot 自身の発言を、すべて消します。元に戻せません。**\n"
+            "ランキング掲示板、チャートの自動更新、クイズ・貸付・抽選の投稿（ボタン付き）も消え、ボタンは使えなくなります。"
+            "Bot 以外の人の発言には触れません。件数が多いと、数分かかります。"
+        )
+        await interaction.response.send_message(
+            embeds=[ui.embed("🧹 発言の削除（確認）", warning, ui.WARN)],
+            view=PurgeConfirm(self, interaction.user.id, channel),
+            ephemeral=True,
+        )
+
+    purge_own_messages.autocomplete("guild_id")(guild_autocomplete)
+    purge_own_messages.autocomplete("channel_id")(channel_autocomplete)
 
     # ---- 抽選 ---- #
     @raffle_group.command(
