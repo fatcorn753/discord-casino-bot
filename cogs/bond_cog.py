@@ -1,18 +1,16 @@
-"""/債券 — 元本を預けて、満期に利息つきで受け取る。通常債（元本保証）とジャンク債（高利回り・倒産あり）。
+"""債券の満期の入金（1分ごと）と、表示の部品。通常債（元本保証）とジャンク債（高利回り・倒産あり）。
 
-種類ごとの利率・期間・上限は core/bonds.py。満期は 1分ごとに確認して自動で入金し、
-決着の結果は `/債券 保有` の「最近の決着」で見られる（通知は出さない）。
+コマンドは `/証券 債券 …`（cogs/market_cog.py）。種類ごとの利率・期間・上限は core/bonds.py。
+決着の結果は `/証券 債券 保有` の「最近の決着」で見られる（通知は出さない）。
 ミッション・連勝・週間ランキング・突発イベントには数えない。
 """
 
 import random
 import time
 
-import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from cogs._amount import balance_choices
 from core import approval, bonds, ui
 
 RNG = random.SystemRandom()
@@ -49,74 +47,6 @@ class BondCog(commands.Cog):
 
     def cog_unload(self):
         self.tick.cancel()
-
-    def g(self, interaction: discord.Interaction):
-        return self.bot.economy.for_guild(interaction.guild_id)
-
-    group = app_commands.Group(
-        name="債券", description="🏦 ペリカを預けて満期に受け取る（ゲーム内の通貨・現実のお金とは無関係）"
-    )
-
-    async def _amount_autocomplete(self, interaction: discord.Interaction, current: str):
-        """預ける元本の欄に、残高を見せる。"""
-        return balance_choices(self.bot, interaction, current, bonds.MIN_AMOUNT, 1_000_000)
-
-    @group.command(name="買う", description=f"債券を買う（{bonds.MIN_AMOUNT:,}ペリカ以上）")
-    @app_commands.rename(kind="種類", amount="金額")
-    @app_commands.describe(kind="通常債かジャンク債", amount=f"預ける元本（{bonds.MIN_AMOUNT:,}ペリカ以上）")
-    @app_commands.choices(kind=KIND_CHOICES)
-    @app_commands.autocomplete(amount=_amount_autocomplete)
-    async def buy(
-        self,
-        interaction: discord.Interaction,
-        kind: app_commands.Choice[str],
-        amount: app_commands.Range[int, bonds.MIN_AMOUNT, 1_000_000],
-    ):
-        eco = self.g(interaction)
-        eco.bond_settle(time.time(), RNG)  # 満期の分を先に入金して、買える額を正しくする
-        ok, reason = eco.bond_buy(interaction.user.id, kind.value, amount, time.time())
-        if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("買えません", reason), ephemeral=True)
-        k = bonds.KINDS[kind.value]
-        lines = [
-            f"元本: **{ui.pelica(amount)}**　満期: {k.hours // 24}日後（{due_text(time.time() + k.hours * 3600)}）",
-            f"満期に受け取る額: **{ui.pelica(bonds.maturity_payout(k, amount))}**（利息 +{k.rate}%）",
-        ]
-        if k.default_pct:
-            lines.append(f"⚠️ **{k.default_pct}%の確率で倒産**して、元本が戻りません。途中で解約もできません。")
-        else:
-            lines.append(f"元本保証です。途中解約は元本の{k.cancel_penalty}%が引かれます（`/債券 解約`）。")
-        await interaction.response.send_message(embed=ui.ok_embed(f"{k.emoji} {k.name}を買いました", "\n".join(lines)))
-
-    @group.command(name="保有", description="持っている債券と最近の結果を見る")
-    async def holdings(self, interaction: discord.Interaction):
-        eco = self.g(interaction)
-        eco.bond_settle(time.time(), RNG)
-        data = eco.bond_list(interaction.user.id)
-        lines = []
-        for r in data["active"]:
-            k = bonds.KINDS[r["kind"]]
-            lines.append(
-                f"`#{r['id']}` {k.emoji} {k.name} 元本 {ui.pelica(r['principal'])} → 満期 {due_text(r['due'])}（受取 {ui.pelica(bonds.maturity_payout(k, r['principal']))}）"
-            )
-        e = ui.embed("🏦 保有中の債券", "\n".join(lines) or "債券は持っていません。`/債券 買う` で買えます。", ui.INFO)
-        if data["done"]:
-            e.add_field(name="最近の決着", value="\n".join(describe_done(r) for r in data["done"]), inline=False)
-        e.set_footer(text="ランキングの総資産には、預けている元本も含まれます")
-        await interaction.response.send_message(embed=e, ephemeral=True)
-
-    @group.command(name="解約", description="通常債を途中で解約する（違約金あり）")
-    @app_commands.rename(bond_id="番号")
-    @app_commands.describe(bond_id="`/債券 保有` に出ている # の番号")
-    async def cancel(self, interaction: discord.Interaction, bond_id: int):
-        ok, result = self.g(interaction).bond_cancel(interaction.user.id, bond_id)
-        if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("解約できません", result), ephemeral=True
-            )
-        await interaction.response.send_message(
-            embed=ui.ok_embed("解約しました", f"{ui.pelica(result)}を残高に戻しました。"), ephemeral=True
-        )
 
     # ------------------------------ 満期の入金 ------------------------------ #
     @tasks.loop(minutes=1)

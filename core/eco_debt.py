@@ -106,14 +106,24 @@ class DebtMixin:
         covered = self._take_cash(user_id, need, reason)
         if covered >= need:
             return covered
-        price = (self.market_latest() or (0, 0, 0))[1]
-        if price > 0 and self.short_position(user_id)[0] > 0:
-            result = self._short_close_locked(user_id, None, price, "強制執行:空売り決済")
-            self._note(user_id, f"💥 空売りの建玉が強制決済されました（戻り {result.money:,}ペリカ）。")
+        prices = self.latest_prices()
+        for symbol, units, _, _ in self.short_positions(user_id):  # 空売りを、銘柄の順に強制決済
+            if covered >= need or symbol not in prices:
+                continue
+            result = self._short_close_locked(user_id, None, prices[symbol], "強制執行:空売り決済", symbol)
+            self._note(
+                user_id,
+                f"💥 {market_mod.BY_KEY[symbol].name}の空売りが強制決済されました（戻り {result.money:,}ペリカ）。",
+            )
             covered += self._take_cash(user_id, need - covered, reason)
-        if covered < need and price > 0 and self.crypto_holding(user_id)[0] > 0:
-            result = self._crypto_sell_locked(user_id, None, price)
-            self._note(user_id, f"💥 保有していた{market_mod.NAME}が差し押さえられました（{result.money:,}ペリカ）。")
+        for symbol, units, _ in self.holdings(user_id):  # 現物を、銘柄の順に差し押さえ
+            if covered >= need or symbol not in prices:
+                continue
+            result = self._crypto_sell_locked(user_id, None, prices[symbol], symbol)
+            self._note(
+                user_id,
+                f"💥 保有していた{market_mod.BY_KEY[symbol].name}が差し押さえられました（{result.money:,}ペリカ）。",
+            )
             covered += self._take_cash(user_id, need - covered, reason)
         for row in self._conn.execute(
             "SELECT id, kind FROM bonds WHERE guild_id=? AND user_id=? AND status='active' ORDER BY id",
@@ -201,11 +211,13 @@ class DebtMixin:
         通常債は途中解約の返金額、解約できない債券（ジャンク債）は、元本の SEIZE_RATE で換金する。
         """
         total = 0
-        price = (self.market_latest() or (0, 0, 0))[1]
-        if price > 0 and self.short_position(user_id)[0] > 0:
-            self._short_close_locked(user_id, None, price, "破産:空売り決済")
-        if price > 0 and self.crypto_holding(user_id)[0] > 0:
-            self._crypto_sell_locked(user_id, None, price)
+        prices = self.latest_prices()
+        for symbol, _, _, _ in self.short_positions(user_id):
+            if symbol in prices:
+                self._short_close_locked(user_id, None, prices[symbol], "破産:空売り決済", symbol)
+        for symbol, _, _ in self.holdings(user_id):
+            if symbol in prices:
+                self._crypto_sell_locked(user_id, None, prices[symbol], symbol)
         for row in self._conn.execute(
             "SELECT id, principal FROM bonds WHERE guild_id=? AND user_id=? AND status='active' ORDER BY id",
             (self._g(), user_id),

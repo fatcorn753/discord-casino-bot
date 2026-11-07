@@ -1,38 +1,110 @@
-"""CSトークンの市場。価格の動き・売買の計算・文字のチャート。Discord と DB に依存しない純粋なロジック。
+"""証券の市場（CSトークン・TEIO重工・NUMAバイオ・GOLD地金）。価格の動き・売買の計算・文字のチャート。Discord と DB に依存しない純粋なロジック。
 
-価格は全サーバー共通の1つ。1分ごとにランダムに動き、期待値は変わらない（平均への引き戻しなどの偏りも入れない）ので、先を読んで儲けることはできない。
-売買の手数料は今はかけていない（FEE_RATE で変えられる）。ペリカもトークンも、現実のお金とは関係ない。
+価格は全サーバー共通。4銘柄が1分ごとに、相関をもって動く（分散共分散行列とコレスキー分解）。どの銘柄も期待値は変わらない（平均への引き戻しなどの偏りも入れない）ので、先を読んで儲けることはできない。
+売買の手数料は今はかけていない（FEE_RATE で変えられる）。ペリカも銘柄も、現実のお金とは関係ない。
 """
 
 import math
 import random
+from dataclasses import dataclass
 from typing import Optional
 
-NAME = "CSトークン"
-START_PRICE = 1_000.0
 MIN_PRICE = 20
 MAX_PRICE = 50_000
-SIGMA = 0.004  # 1分あたりの値動きの大きさ（約±0.4%。1日で±15〜20%ほど）
-EVENT_PROB = 1 / 720  # 1日に2回ほど、急騰・急落が起こる
-EVENT_RANGE = (0.03, 0.08)  # 急騰・急落の大きさ（±3〜8%）
+EVENT_PROB = 1 / 720  # 1日に2回ほど、有事（全銘柄が同じ向きに動く急騰・急落）が起こる
+EVENT_RANGE = (0.03, 0.08)  # 有事の大きさ（CSトークンで±3〜8%。ほかの銘柄は、値動きの大きさ σ の比をかける）
+EVENT_SCALE_MAX = 2.0  # 有事の大きさにかける比の上限（NUMAバイオが、動きすぎないように）
 UNIT = 1_000  # 1枚 = 1000口。小数で買えるよう、保有は口で数える
 FEE_RATE = 0.0  # 買うときと売るときに、それぞれ取引額にかかる割合（今は無料）
 
 
-def next_price(price: float, rng: random.Random) -> tuple:
-    """1分後の価格と、起きた出来事（+1 急騰 / -1 急落 / 0 なし）。
+@dataclass(frozen=True)
+class Symbol:
+    key: str
+    name: str
+    emoji: str
+    start: float  # 開始価格
+    sigma: float  # 1分あたりの値動きの大きさ
 
-    価格の期待値がちょうど変わらない（マルチンゲール）ように作っている。
-    ふつうの揺れは対数の補正（-σ²/2）、急騰・急落は ×(1+x) と ×(1-x) を同じ確率にして打ち消す。
-    平均への引き戻しなどの偏りを入れると、「安いときに買えば得」という必勝法が生まれてしまう。
+
+# 銘柄。値動きの大きさ σ と、銘柄どうしの相関 ρ は、ここの数字だけで決まる（調整はここを書き換える）
+CS = Symbol("cs", "CSトークン", "🪙", 1_000.0, 0.004)  # 標準（約±0.4%。1日で±15〜20%ほど）
+TEIO = Symbol("teio", "TEIO重工", "🏭", 1_200.0, 0.0035)  # CSと強い正相関
+NUMA = Symbol("numa", "NUMAバイオ", "🧪", 400.0, 0.012)  # 超高ボラの仕手株。ほかとはほぼ無相関
+GOLD = Symbol("gold", "GOLD地金", "🥇", 3_000.0, 0.002)  # CS・TEIOと逆相関の避難先
+SYMBOLS = (CS, TEIO, NUMA, GOLD)
+BY_KEY = {s.key: s for s in SYMBOLS}
+DEFAULT = CS.key
+CORRELATION = {
+    ("cs", "teio"): 0.85,
+    ("cs", "numa"): 0.05,
+    ("teio", "numa"): 0.05,
+    ("cs", "gold"): -0.6,
+    ("teio", "gold"): -0.5,
+    ("numa", "gold"): -0.1,
+}
+
+# 互換のための別名（CSトークン）
+NAME = CS.name
+START_PRICE = CS.start
+SIGMA = CS.sigma
+
+
+def correlation(a: str, b: str) -> float:
+    """銘柄 a と b の相関。同じ銘柄は 1。"""
+    if a == b:
+        return 1.0
+    return CORRELATION.get((a, b), CORRELATION.get((b, a), 0.0))
+
+
+def covariance_matrix() -> list:
+    """分散共分散行列 Σ（Σ_ij = σ_i σ_j ρ_ij）。SYMBOLS の並びの順。"""
+    return [[a.sigma * b.sigma * correlation(a.key, b.key) for b in SYMBOLS] for a in SYMBOLS]
+
+
+def cholesky(matrix: list) -> list:
+    """コレスキー分解 Σ = L Lᵀ の下三角行列 L。正定値でなければ ValueError。"""
+    n = len(matrix)
+    low = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1):
+            total = sum(low[i][k] * low[j][k] for k in range(j))
+            if i == j:
+                diag = matrix[i][i] - total
+                if diag <= 0:
+                    raise ValueError("相関の数字が正しくありません（行列が正定値ではありません）")
+                low[i][j] = math.sqrt(diag)
+            else:
+                low[i][j] = (matrix[i][j] - total) / low[j][j]
+    return low
+
+
+COVARIANCE = covariance_matrix()
+CHOLESKY = cholesky(COVARIANCE)
+
+
+def next_prices(prices: dict, rng: random.Random) -> tuple:
+    """1分後の全銘柄の価格と、有事の出来事（+1 急騰 / -1 急落 / 0 なし）。
+
+    独立な標準正規乱数 z から、相関のある揺れ ε = L z を作り、P_i ← P_i · exp(-Σ_ii/2 + ε_i) と動かす（Σ = L Lᵀ）。
+    対数の補正（-Σ_ii/2）で、どの銘柄も価格の期待値がちょうど変わらない（マルチンゲール）ので、先を読んで儲けることはできない。
+    有事は、全銘柄が同じ向きに動く（逆相関のヘッジが効かなくなる）。大きさは、CSトークンの ±3〜8% に、銘柄の値動きの大きさの比をかけたもの。急騰と急落は同じ確率で、打ち消し合う。
     """
-    factor = math.exp(-SIGMA * SIGMA / 2 + SIGMA * rng.gauss(0, 1))
-    event = 0
+    z = [rng.gauss(0, 1) for _ in SYMBOLS]
+    shock = [sum(CHOLESKY[i][k] * z[k] for k in range(i + 1)) for i in range(len(SYMBOLS))]
+    event, size = 0, 0.0
     if rng.random() < EVENT_PROB:
         event = 1 if rng.random() < 0.5 else -1
-        factor *= 1 + event * rng.uniform(*EVENT_RANGE)
-    new = round(price * factor, 2)  # 低い価格でも動きが止まらないよう、小数2桁まで持つ
-    return min(MAX_PRICE, max(MIN_PRICE, new)), event
+        size = rng.uniform(*EVENT_RANGE)
+    out = {}
+    for i, sym in enumerate(SYMBOLS):
+        panic = 1 + event * size * min(
+            EVENT_SCALE_MAX, sym.sigma / CS.sigma
+        )  # 急騰と急落は同じ確率なので、打ち消し合う
+        factor = math.exp(-COVARIANCE[i][i] / 2 + shock[i]) * panic
+        new = round(prices[sym.key] * factor, 2)  # 低い価格でも動きが止まらないよう、小数2桁まで持つ
+        out[sym.key] = min(MAX_PRICE, max(MIN_PRICE, new))
+    return out, event
 
 
 def fmt(price: float) -> str:
@@ -83,6 +155,36 @@ UNIT_NAME = "ペリカ"
 
 def lots(units: int) -> str:
     return f"{units / UNIT:,.3f}枚"
+
+
+def correlation_from_history(hist_a: list, hist_b: list) -> Optional[float]:
+    """2つの銘柄の価格の履歴 [(時刻, 価格, 出来事), ...] から、1分ごとの値動き（対数の変化）の相関を求める。足りなければ None。"""
+    a = {t: p for t, p, _ in hist_a}
+    pairs = [(a[t], p) for t, p, _ in hist_b if t in a]  # 同じ時刻の価格だけを使う
+    if len(pairs) < 30:
+        return None
+    ra = [math.log(y[0] / x[0]) for x, y in zip(pairs, pairs[1:])]
+    rb = [math.log(y[1] / x[1]) for x, y in zip(pairs, pairs[1:])]
+    ma, mb = sum(ra) / len(ra), sum(rb) / len(rb)
+    va, vb = sum((x - ma) ** 2 for x in ra), sum((x - mb) ** 2 for x in rb)
+    if va <= 0 or vb <= 0:
+        return None
+    return sum((x - ma) * (y - mb) for x, y in zip(ra, rb)) / math.sqrt(va * vb)
+
+
+def describe_correlation(value: Optional[float]) -> str:
+    """相関を、ひと目で分かる言葉にする。"""
+    if value is None:
+        return "—"
+    if value >= 0.6:
+        return f"🔗 強く連動（{value:+.2f}）"
+    if value >= 0.3:
+        return f"↗️ やや連動（{value:+.2f}）"
+    if value > -0.3:
+        return f"➖ ほぼ無関係（{value:+.2f}）"
+    if value > -0.6:
+        return f"↘️ やや逆に動く（{value:+.2f}）"
+    return f"🔀 逆に動く（{value:+.2f}）"
 
 
 # ----------------------------- 文字のチャート ----------------------------- #

@@ -5,7 +5,6 @@ from types import SimpleNamespace
 import pytest
 
 from cogs._amount import balance_choices, typed_amount
-from cogs.bond_cog import BondCog
 from cogs.casino_cog import Casino
 from cogs.economy_cog import EconomyCog
 from cogs.loan_cog import LoanCog
@@ -87,8 +86,8 @@ def test_commands_use_the_balance_choices_on_their_amount_fields():
     wired = {
         "カジノ": ({"チンチロ", "パチンコ", "スロット", "ブラックジャック", "ルーレット"}, "bet", Casino.casino),
         "ペリカ": ({"送金"}, "amount", EconomyCog.group),
-        "債券": ({"買う"}, "amount", BondCog.group),
-        "暗号": ({"買う"}, "amount", MarketCog.group),
+        "証券": ({"買う"}, "amount", MarketCog.group),
+        "証券 債券": ({"買う"}, "amount", MarketCog.bond_group),
         "貸付": ({"提案"}, "principal", LoanCog.group),
     }
     for group_name, (names, param, group) in wired.items():

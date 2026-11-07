@@ -1,6 +1,6 @@
-"""CSトークンの売買・空売り・チャート掲示（Economy に混ぜ込む部品）。
+"""証券（CSトークン・TEIO重工・NUMAバイオ・GOLD地金）の売買・空売り・チャート掲示（Economy に混ぜ込む部品）。
 
-表の定義は core/economy.py の _init_schema にある。
+表の定義は core/schema.py にある。銘柄は、symbol（core/market.py の BY_KEY のキー）で指定する。省略すると CSトークン。
 """
 
 import math
@@ -8,33 +8,42 @@ from typing import Optional
 
 from core import market as market_mod
 from core.eco_types import CryptoResult
+from core.market import DEFAULT
 
 
 class CryptoMixin:
-    """CSトークンの売買・空売り・チャート掲示（Economy に混ぜ込む部品）。"""
+    """証券の価格・売買・空売り・チャート掲示。"""
 
     # ------------------------------------------------------------------ #
-    # CSトークン                                                          #
+    # 証券（銘柄ごとの価格・現物）                                        #
     # ------------------------------------------------------------------ #
-    def market_latest(self) -> Optional[tuple]:
+    def market_latest(self, symbol: str = DEFAULT) -> Optional[tuple]:
         """いまの価格 (時刻, 価格, 出来事)。まだ無ければ None。時計が戻っても、最後に記録した行を最新とする。"""
         with self._lock:
-            r = self._conn.execute("SELECT ts, price, event FROM market_prices ORDER BY rowid DESC LIMIT 1").fetchone()
+            r = self._conn.execute(
+                "SELECT ts, price, event FROM market_prices WHERE symbol=? ORDER BY rowid DESC LIMIT 1", (symbol,)
+            ).fetchone()
             return (r["ts"], r["price"], r["event"]) if r else None
 
-    def market_set(self, ts: float, price: float, event: int = 0) -> None:
+    def latest_prices(self) -> dict:
+        """いまの全銘柄の価格 {銘柄: 価格}。まだ価格がない銘柄は入らない。"""
+        with self._lock:
+            return {k: p for k in market_mod.BY_KEY if (p := (self.market_latest(k) or (0, 0, 0))[1])}
+
+    def market_set(self, ts: float, price: float, event: int = 0, symbol: str = DEFAULT) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT OR REPLACE INTO market_prices (ts, price, event) VALUES (?, ?, ?)", (ts, price, event)
+                "INSERT OR REPLACE INTO market_prices (symbol, ts, price, event) VALUES (?, ?, ?, ?)",
+                (symbol, ts, price, event),
             )
 
-    def market_history(self, since: float) -> list:
+    def market_history(self, since: float, symbol: str = DEFAULT) -> list:
         """since（UNIX時間）以降の価格の列 [(時刻, 価格, 出来事), ...]。古い順。"""
         with self._lock:
             return [
                 (r["ts"], r["price"], r["event"])
                 for r in self._conn.execute(
-                    "SELECT ts, price, event FROM market_prices WHERE ts>=? ORDER BY ts", (since,)
+                    "SELECT ts, price, event FROM market_prices WHERE symbol=? AND ts>=? ORDER BY ts", (symbol, since)
                 )
             ]
 
@@ -42,26 +51,39 @@ class CryptoMixin:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM market_prices WHERE ts<?", (before,))
 
-    def crypto_holding(self, user_id: int) -> tuple:
+    def crypto_holding(self, user_id: int, symbol: str = DEFAULT) -> tuple:
         """(保有口数, 買うのにかかった総額)。読み取り専用。"""
         with self._lock:
             r = self._conn.execute(
-                "SELECT units, cost FROM crypto WHERE guild_id=? AND user_id=?", (self._g(), user_id)
+                "SELECT units, cost FROM crypto WHERE guild_id=? AND user_id=? AND symbol=?",
+                (self._g(), user_id, symbol),
             ).fetchone()
             return (r["units"], r["cost"]) if r else (0, 0)
 
-    def crypto_holders(self, limit: int = 10) -> list:
-        """このサーバーの保有者 [(user_id, 口数, 買った総額), ...]。買った額の大きい順。"""
+    def holdings(self, user_id: int) -> list:
+        """持っている現物 [(銘柄, 口数, 買った総額), ...]（全銘柄）。"""
+        with self._lock:
+            return [
+                (r["symbol"], r["units"], r["cost"])
+                for r in self._conn.execute(
+                    "SELECT symbol, units, cost FROM crypto WHERE guild_id=? AND user_id=? AND units>0 ORDER BY symbol",
+                    (self._g(), user_id),
+                )
+            ]
+
+    def crypto_holders(self, limit: int = 10, symbol: str = DEFAULT) -> list:
+        """このサーバーのその銘柄の保有者 [(user_id, 口数, 買った総額), ...]。買った額の大きい順。"""
         with self._lock:
             return [
                 (r["user_id"], r["units"], r["cost"])
                 for r in self._conn.execute(
-                    "SELECT user_id, units, cost FROM crypto WHERE guild_id=? AND units>0 ORDER BY cost DESC, user_id LIMIT ?",
-                    (self._g(), limit),
+                    "SELECT user_id, units, cost FROM crypto WHERE guild_id=? AND symbol=? AND units>0 "
+                    "ORDER BY cost DESC, user_id LIMIT ?",
+                    (self._g(), symbol, limit),
                 )
             ]
 
-    def crypto_buy(self, user_id: int, amount: int, price: float) -> "CryptoResult":
+    def crypto_buy(self, user_id: int, amount: int, price: float, symbol: str = DEFAULT) -> "CryptoResult":
         """amount ペリカの範囲で、price の価格で買えるだけ買う（手数料込み）。"""
         with self._lock, self._conn:
             self._ensure(user_id)
@@ -84,24 +106,31 @@ class CryptoMixin:
                 return CryptoResult(
                     False, "その金額では 0.001枚も買えません。金額を増やしてください。", balance=self._balance(user_id)
                 )
-            self._apply(user_id, -total, f"{market_mod.NAME}購入:{market_mod.lots(units)}@{market_mod.fmt(price)}")
+            self._apply(
+                user_id,
+                -total,
+                f"{market_mod.BY_KEY[symbol].name}購入:{market_mod.lots(units)}@{market_mod.fmt(price)}",
+            )
             self._conn.execute(
-                "INSERT INTO crypto (guild_id, user_id, units, cost) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units, cost=cost+excluded.cost",
-                (self._g(), user_id, units, total),
+                "INSERT INTO crypto (guild_id, user_id, symbol, units, cost) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id, symbol) DO UPDATE SET units=units+excluded.units, cost=cost+excluded.cost",
+                (self._g(), user_id, symbol, units, total),
             )
             return CryptoResult(True, units=units, money=total, fee=fee, balance=self._balance(user_id))
 
-    def crypto_sell(self, user_id: int, units: Optional[int], price: float) -> "CryptoResult":
+    def crypto_sell(self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT) -> "CryptoResult":
         """units 口を売る（None なら全部）。受け取る額は手数料を引いたもの。"""
         with self._lock, self._conn:
-            return self._crypto_sell_locked(user_id, units, price)
+            return self._crypto_sell_locked(user_id, units, price, symbol)
 
-    def _crypto_sell_locked(self, user_id: int, units: Optional[int], price: float) -> "CryptoResult":
+    def _crypto_sell_locked(
+        self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT
+    ) -> "CryptoResult":
         """crypto_sell の本体（呼び出し側が、ロックとトランザクションの中で使う）。"""
-        have, cost = self.crypto_holding(user_id)
+        name = market_mod.BY_KEY[symbol].name
+        have, cost = self.crypto_holding(user_id, symbol)
         if have <= 0:
-            return CryptoResult(False, f"{market_mod.NAME}を持っていません。")
+            return CryptoResult(False, f"{name}を持っていません。")
         units = have if units is None else units
         if units < 1 or units > have:
             return CryptoResult(False, f"売れるのは 0.001〜{market_mod.lots(have)} です（持っている分）。")
@@ -112,13 +141,15 @@ class CryptoMixin:
             cost if units == have else round(cost * units / have)
         )  # 端数の按分は四捨五入（切り捨てだと取得額が少しずつ残る）
         self._ensure(user_id)
-        self._apply(user_id, proceeds, f"{market_mod.NAME}売却:{market_mod.lots(units)}@{market_mod.fmt(price)}")
+        self._apply(user_id, proceeds, f"{name}売却:{market_mod.lots(units)}@{market_mod.fmt(price)}")
         if units == have:
-            self._conn.execute("DELETE FROM crypto WHERE guild_id=? AND user_id=?", (self._g(), user_id))
+            self._conn.execute(
+                "DELETE FROM crypto WHERE guild_id=? AND user_id=? AND symbol=?", (self._g(), user_id, symbol)
+            )
         else:
             self._conn.execute(
-                "UPDATE crypto SET units=units-?, cost=cost-? WHERE guild_id=? AND user_id=?",
-                (units, removed, self._g(), user_id),
+                "UPDATE crypto SET units=units-?, cost=cost-? WHERE guild_id=? AND user_id=? AND symbol=?",
+                (units, removed, self._g(), user_id, symbol),
             )
         return CryptoResult(
             True, units=units, money=proceeds, fee=fee, balance=self._balance(user_id), profit=proceeds - removed
@@ -131,45 +162,59 @@ class CryptoMixin:
     LOSSCUT = 0.5  # 損失が担保のこの割合に達したら、強制決済（1分に動く最大幅 ×5倍でも、担保を超えない）
     SHORT_MIN_MARGIN = 10
 
-    def short_position(self, user_id: int) -> tuple:
+    def short_position(self, user_id: int, symbol: str = DEFAULT) -> tuple:
         """(口数, 建てた総額, 担保)。建てていなければ (0, 0.0, 0)。"""
         with self._lock:
             r = self._conn.execute(
-                "SELECT units, entry_value, margin FROM crypto_short WHERE guild_id=? AND user_id=?",
-                (self._g(), user_id),
+                "SELECT units, entry_value, margin FROM crypto_short WHERE guild_id=? AND user_id=? AND symbol=?",
+                (self._g(), user_id, symbol),
             ).fetchone()
             return (r["units"], r["entry_value"], r["margin"]) if r else (0, 0.0, 0)
+
+    def short_positions(self, user_id: int) -> list:
+        """建てている空売り [(銘柄, 口数, 建てた総額, 担保), ...]（全銘柄）。"""
+        with self._lock:
+            return [
+                (r["symbol"], r["units"], r["entry_value"], r["margin"])
+                for r in self._conn.execute(
+                    "SELECT symbol, units, entry_value, margin FROM crypto_short WHERE guild_id=? AND user_id=? AND units>0 ORDER BY symbol",
+                    (self._g(), user_id),
+                )
+            ]
 
     @staticmethod
     def short_pnl(units: int, entry_value: float, price: float) -> int:
         """空売りの含み損益（価格が下がるとプラス）。"""
         return round(entry_value - units * price / market_mod.UNIT)
 
-    def short_holders(self, limit: int = 10) -> list:
+    def short_holders(self, limit: int = 10, symbol: str = DEFAULT) -> list:
         """[(ユーザーID, 口数, 建てた総額)] 建てている口数が多い順。チャートの表示用。"""
         with self._lock:
             return [
                 (r["user_id"], r["units"], r["entry_value"])
                 for r in self._conn.execute(
-                    "SELECT user_id, units, entry_value FROM crypto_short WHERE guild_id=? AND units>0 ORDER BY units DESC, user_id LIMIT ?",
-                    (self._g(), limit),
+                    "SELECT user_id, units, entry_value FROM crypto_short WHERE guild_id=? AND symbol=? AND units>0 "
+                    "ORDER BY units DESC, user_id LIMIT ?",
+                    (self._g(), symbol, limit),
                 )
             ]
 
     def short_equity(self) -> dict:
-        """このサーバーの {ユーザーID: 空売りの評価額（担保 + 含み損益。0未満にはしない）}。総資産に足す。"""
+        """このサーバーの {ユーザーID: 空売りの評価額（担保 + 含み損益。建玉ごとに、0未満にはしない。全銘柄の合計）}。総資産に足す。"""
         with self._lock:
-            latest = self.market_latest()
-            if latest is None:
-                return {}
-            return {
-                r["user_id"]: max(0, r["margin"] + self.short_pnl(r["units"], r["entry_value"], latest[1]))
-                for r in self._conn.execute(
-                    "SELECT user_id, units, entry_value, margin FROM crypto_short WHERE guild_id=?", (self._g(),)
-                )
-            }
+            prices = self.latest_prices()
+            out = {}
+            for r in self._conn.execute(
+                "SELECT user_id, symbol, units, entry_value, margin FROM crypto_short WHERE guild_id=?", (self._g(),)
+            ):
+                if r["symbol"] in prices:
+                    value = max(0, r["margin"] + self.short_pnl(r["units"], r["entry_value"], prices[r["symbol"]]))
+                    out[r["user_id"]] = out.get(r["user_id"], 0) + value
+            return out
 
-    def short_open(self, user_id: int, units: int, price: float, leverage: int) -> "CryptoResult":
+    def short_open(
+        self, user_id: int, units: int, price: float, leverage: int, symbol: str = DEFAULT
+    ) -> "CryptoResult":
         """units 口を売り建てる。担保 = 総額 ÷ レバレッジ（切り上げ）を、残高から預かる。"""
         with self._lock, self._conn:
             self._ensure(user_id)
@@ -195,18 +240,22 @@ class CryptoMixin:
                     f"担保が足りません（{margin:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。",
                     balance=self._balance(user_id),
                 )
+            name = market_mod.BY_KEY[symbol].name
             self._apply(
-                user_id, -margin, f"空売り担保:{market_mod.lots(units)}@{market_mod.fmt(price)}（{leverage}倍）"
+                user_id, -margin, f"{name}空売り担保:{market_mod.lots(units)}@{market_mod.fmt(price)}（{leverage}倍）"
             )
             self._conn.execute(
-                "INSERT INTO crypto_short (guild_id, user_id, units, entry_value, margin) VALUES (?, ?, ?, ?, ?) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units, entry_value=entry_value+excluded.entry_value, margin=margin+excluded.margin",
-                (self._g(), user_id, units, notional, margin),
+                "INSERT INTO crypto_short (guild_id, user_id, symbol, units, entry_value, margin) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id, symbol) DO UPDATE SET units=units+excluded.units, "
+                "entry_value=entry_value+excluded.entry_value, margin=margin+excluded.margin",
+                (self._g(), user_id, symbol, units, notional, margin),
             )
             return CryptoResult(True, units=units, money=margin, balance=self._balance(user_id))
 
-    def _short_close_locked(self, user_id: int, units: Optional[int], price: float, label: str) -> "CryptoResult":
-        have, entry_value, margin = self.short_position(user_id)
+    def _short_close_locked(
+        self, user_id: int, units: Optional[int], price: float, label: str, symbol: str = DEFAULT
+    ) -> "CryptoResult":
+        have, entry_value, margin = self.short_position(user_id, symbol)
         if have <= 0:
             return CryptoResult(False, "空売りを建てていません。")
         units = have if units is None else units
@@ -220,50 +269,56 @@ class CryptoMixin:
         if payout:
             self._apply(user_id, payout, f"{label}:{market_mod.lots(units)}@{market_mod.fmt(price)}")
         if whole:
-            self._conn.execute("DELETE FROM crypto_short WHERE guild_id=? AND user_id=?", (self._g(), user_id))
+            self._conn.execute(
+                "DELETE FROM crypto_short WHERE guild_id=? AND user_id=? AND symbol=?", (self._g(), user_id, symbol)
+            )
         else:
             self._conn.execute(
-                "UPDATE crypto_short SET units=units-?, entry_value=entry_value-?, margin=margin-? WHERE guild_id=? AND user_id=?",
-                (units, part_entry, part_margin, self._g(), user_id),
+                "UPDATE crypto_short SET units=units-?, entry_value=entry_value-?, margin=margin-? "
+                "WHERE guild_id=? AND user_id=? AND symbol=?",
+                (units, part_entry, part_margin, self._g(), user_id, symbol),
             )
         return CryptoResult(
             True, units=units, money=payout, balance=self._balance(user_id), profit=payout - part_margin
         )
 
-    def short_close(self, user_id: int, units: Optional[int], price: float) -> "CryptoResult":
+    def short_close(self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT) -> "CryptoResult":
         """units 口を買い戻して決済する（None なら全部）。担保 + 損益が戻る（0未満にはならない）。"""
         with self._lock, self._conn:
             self._ensure(user_id)
-            return self._short_close_locked(user_id, units, price, "空売り決済")
+            return self._short_close_locked(user_id, units, price, "空売り決済", symbol)
 
-    def short_losscut(self, price: float) -> list:
-        """全サーバーの建玉のうち、損失が担保の LOSSCUT に達したものを強制決済する。[(サーバー, ユーザー, 損失)]。"""
+    def short_losscut(self, prices: dict) -> list:
+        """全サーバーの建玉のうち、損失が担保の LOSSCUT に達したものを強制決済する。prices は {銘柄: いまの価格}。[(サーバー, ユーザー, 損失)]。"""
         done = []
         with self._lock, self._conn:
             for r in self._conn.execute(
-                "SELECT guild_id, user_id, units, entry_value, margin FROM crypto_short"
+                "SELECT guild_id, user_id, symbol, units, entry_value, margin FROM crypto_short"
             ).fetchall():
-                if -self.short_pnl(r["units"], r["entry_value"], price) < self.LOSSCUT * r["margin"]:
+                price = prices.get(r["symbol"])
+                if price is None or -self.short_pnl(r["units"], r["entry_value"], price) < self.LOSSCUT * r["margin"]:
                     continue
                 try:
                     view = self.for_guild(r["guild_id"])
                 except ValueError:
                     print(f"出どころ不明の空売りは、ロスカットできません: guild={r['guild_id']} user={r['user_id']}")
                     continue
-                res = view._short_close_locked(r["user_id"], None, price, "空売りロスカット")
+                res = view._short_close_locked(r["user_id"], None, price, "空売りロスカット", r["symbol"])
                 if res.ok:
                     done.append((r["guild_id"], r["user_id"], -res.profit))
         return done
 
-    def swap_chart_post(self, channel_id: int, message_id: int, guild_id: int, period: str, ts: float) -> Optional[int]:
+    def swap_chart_post(
+        self, channel_id: int, message_id: int, guild_id: int, period: str, ts: float, symbol: str = DEFAULT
+    ) -> Optional[int]:
         """そのチャンネルのチャートを新しいものに入れ替え（更新中にする）、前のメッセージID（無ければ None）を返す。"""
         with self._lock, self._conn:
             prev = self._conn.execute("SELECT message_id FROM chart_posts WHERE channel_id=?", (channel_id,)).fetchone()
             self._conn.execute(
-                "INSERT INTO chart_posts (channel_id, message_id, guild_id, period, ts, live) VALUES (?, ?, ?, ?, ?, 1) "
+                "INSERT INTO chart_posts (channel_id, message_id, guild_id, period, ts, live, symbol) VALUES (?, ?, ?, ?, ?, 1, ?) "
                 "ON CONFLICT(channel_id) DO UPDATE SET message_id=excluded.message_id, guild_id=excluded.guild_id, "
-                "period=excluded.period, ts=excluded.ts, live=1",
-                (channel_id, message_id, guild_id, period, ts),
+                "period=excluded.period, ts=excluded.ts, live=1, symbol=excluded.symbol",
+                (channel_id, message_id, guild_id, period, ts, symbol),
             )
             return prev["message_id"] if prev else None
 

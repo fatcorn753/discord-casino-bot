@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from cogs.bond_cog import BondCog, describe_done
+from cogs.market_cog import MarketCog
 from core import bonds
 from core.economy import INITIAL_BALANCE, Economy
 
@@ -121,16 +122,16 @@ def test_cog_run_once_settles_every_guild(eco, monkeypatch):
 
 def test_buy_command_settles_first_and_replies(eco):
     bot = SimpleNamespace(guilds=[], config={}, economy=SimpleNamespace(for_guild=lambda gid: eco))
-    cog = BondCog(bot)
+    cog = MarketCog(bot)
     sent = []
 
     class Resp:
         async def send_message(self, **kw):
             sent.append(kw["embed"].title)
 
-    inter = SimpleNamespace(user=SimpleNamespace(id=1), guild_id=1, response=Resp())
-    asyncio.run(cog.buy.callback(cog, inter, SimpleNamespace(value="junk"), 2000))
-    asyncio.run(cog.buy.callback(cog, inter, SimpleNamespace(value="junk"), 9000))  # 上限超え
+    inter = SimpleNamespace(user=SimpleNamespace(id=1), guild=SimpleNamespace(id=1), guild_id=1, response=Resp())
+    asyncio.run(MarketCog.bond_buy.callback(cog, inter, SimpleNamespace(value="junk"), 2000))
+    asyncio.run(MarketCog.bond_buy.callback(cog, inter, SimpleNamespace(value="junk"), 9000))  # 上限超え
     assert sent == ["✅ 🗑️ ジャンク債を買いました", "❌ 買えません"]
 
 

@@ -463,17 +463,18 @@ class Economy(
     # ランキング・統計・履歴                                              #
     # ------------------------------------------------------------------ #
     def crypto_values(self) -> dict:
-        """このサーバーの {ユーザーID: CSトークンの評価額}。売ったときの手取りで、いまの価格がまだ無ければ空。"""
+        """このサーバーの {ユーザーID: 現物（全銘柄）の評価額}。売ったときの手取りで、価格がまだない銘柄は数えない。"""
         with self._lock:
-            latest = self.market_latest()
-            if latest is None:
-                return {}
-            return {
-                r["user_id"]: market_mod.sell_quote(r["units"], latest[1])[0]
-                for r in self._conn.execute(
-                    "SELECT user_id, units FROM crypto WHERE guild_id=? AND units>0", (self._g(),)
-                )
-            }
+            prices = self.latest_prices()
+            values = {}
+            for r in self._conn.execute(
+                "SELECT user_id, symbol, units FROM crypto WHERE guild_id=? AND units>0", (self._g(),)
+            ):
+                if r["symbol"] in prices:
+                    values[r["user_id"]] = (
+                        values.get(r["user_id"], 0) + market_mod.sell_quote(r["units"], prices[r["symbol"]])[0]
+                    )
+            return values
 
     def _ranked(self, user_ids: Optional[set]) -> list:
         """[(ユーザーID, 総資産)] を多い順に。総資産は、残高にCSトークンの評価額を足し、借金を引いたもの。"""

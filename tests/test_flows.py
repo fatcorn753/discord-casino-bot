@@ -360,9 +360,8 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
         "カジノ",
         "ショップ",
         "help",
-        "暗号",
+        "証券",
         "運営",
-        "債券",
         "クイズ",
         "貸付",
     }

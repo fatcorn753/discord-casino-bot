@@ -119,25 +119,29 @@ def create_tables(conn: sqlite3.Connection) -> None:
             done       INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (guild_id, user_id, day, mission_id)
         );
-        CREATE TABLE IF NOT EXISTS market_prices (     -- CSトークンの価格。全サーバー共通
-            ts    REAL PRIMARY KEY,
-            price INTEGER NOT NULL,
-            event INTEGER NOT NULL DEFAULT 0
+        CREATE TABLE IF NOT EXISTS market_prices (     -- 証券の価格（銘柄ごと）。全サーバー共通
+            symbol TEXT    NOT NULL DEFAULT 'cs',
+            ts     REAL    NOT NULL,
+            price  INTEGER NOT NULL,
+            event  INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (symbol, ts)
         );
-        CREATE TABLE IF NOT EXISTS crypto (
+        CREATE TABLE IF NOT EXISTS crypto (            -- 銘柄ごとの現物の保有
             guild_id INTEGER NOT NULL,
             user_id  INTEGER NOT NULL,
+            symbol   TEXT    NOT NULL DEFAULT 'cs',
             units    INTEGER NOT NULL,        -- 保有する口数（1000口 = 1枚）
             cost     INTEGER NOT NULL,        -- 買うのにかかった総額（損益の表示用）
-            PRIMARY KEY (guild_id, user_id)
+            PRIMARY KEY (guild_id, user_id, symbol)
         );
-        CREATE TABLE IF NOT EXISTS crypto_short (      -- CSトークンの空売り（1人1つの建玉）
+        CREATE TABLE IF NOT EXISTS crypto_short (      -- 銘柄ごとの空売り（1人が、銘柄ごとに1つの建玉）
             guild_id    INTEGER NOT NULL,
             user_id     INTEGER NOT NULL,
+            symbol      TEXT    NOT NULL DEFAULT 'cs',
             units       INTEGER NOT NULL,         -- 売り建てた口数
             entry_value REAL NOT NULL,            -- 建てたときの総額（口数×価格）。損益 = これ − いまの総額
             margin      INTEGER NOT NULL,         -- 預けた担保
-            PRIMARY KEY (guild_id, user_id)
+            PRIMARY KEY (guild_id, user_id, symbol)
         );
         CREATE TABLE IF NOT EXISTS quiz_questions (     -- クイズの問題（全サーバー共通。持ち主が登録する）
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,13 +197,14 @@ def create_tables(conn: sqlite3.Connection) -> None:
             user_id   INTEGER NOT NULL,
             PRIMARY KEY (raffle_id, user_id)
         );
-        CREATE TABLE IF NOT EXISTS chart_posts (       -- /暗号 チャート で出したチャート（1チャンネルに1つ。最後に使ってから一定時間だけ自動で更新）
+        CREATE TABLE IF NOT EXISTS chart_posts (       -- /証券 チャート で出したチャート（1チャンネルに1つ。最後に使ってから一定時間だけ自動で更新）
             channel_id INTEGER PRIMARY KEY,
             message_id INTEGER NOT NULL,
             guild_id   INTEGER NOT NULL DEFAULT 0,
             period     TEXT    NOT NULL DEFAULT '24h',
             ts         REAL    NOT NULL DEFAULT 0,     -- 出した時刻（ここから一定時間、更新する）
-            live       INTEGER NOT NULL DEFAULT 1      -- 1: 更新中 / 0: 更新は終了
+            live       INTEGER NOT NULL DEFAULT 1,     -- 1: 更新中 / 0: 更新は終了
+            symbol     TEXT    NOT NULL DEFAULT 'cs'       -- 出した銘柄のチャート
         );
         CREATE TABLE IF NOT EXISTS chart_boards (
             guild_id   INTEGER PRIMARY KEY,
@@ -359,3 +364,37 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     for col in ("bankrupt_at", "blacklist_until"):
         if col not in users_cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} REAL")
+    _add_symbol_columns(conn)
+
+
+# 銘柄を足す前の表（主キーに symbol がない）。CSトークンだけだった頃の記録は、すべて symbol='cs' として移す
+_SYMBOL_TABLES = {
+    "market_prices": (
+        "CREATE TABLE market_prices (symbol TEXT NOT NULL DEFAULT 'cs', ts REAL NOT NULL, price INTEGER NOT NULL, "
+        "event INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (symbol, ts))",
+        "ts, price, event",
+    ),
+    "crypto": (
+        "CREATE TABLE crypto (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, symbol TEXT NOT NULL DEFAULT 'cs', "
+        "units INTEGER NOT NULL, cost INTEGER NOT NULL, PRIMARY KEY (guild_id, user_id, symbol))",
+        "guild_id, user_id, units, cost",
+    ),
+    "crypto_short": (
+        "CREATE TABLE crypto_short (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, symbol TEXT NOT NULL DEFAULT 'cs', "
+        "units INTEGER NOT NULL, entry_value REAL NOT NULL, margin INTEGER NOT NULL, PRIMARY KEY (guild_id, user_id, symbol))",
+        "guild_id, user_id, units, entry_value, margin",
+    ),
+}
+
+
+def _add_symbol_columns(conn: sqlite3.Connection) -> None:
+    """市場・保有・空売りの表に、銘柄の列を足す（主キーが変わるので、表を作り直して、記録を写す）。チャートの記録は、列を足すだけ。"""
+    for table, (ddl, columns) in _SYMBOL_TABLES.items():
+        if "symbol" in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+            continue
+        conn.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
+        conn.execute(ddl)
+        conn.execute(f"INSERT INTO {table} (symbol, {columns}) SELECT 'cs', {columns} FROM {table}_old")
+        conn.execute(f"DROP TABLE {table}_old")
+    if "symbol" not in {r["name"] for r in conn.execute("PRAGMA table_info(chart_posts)")}:
+        conn.execute("ALTER TABLE chart_posts ADD COLUMN symbol TEXT NOT NULL DEFAULT 'cs'")
