@@ -141,7 +141,14 @@ def test_buying_a_title_then_equipping_and_unequipping_from_the_inventory_screen
 def test_inventory_screen_has_unequip_and_title_toggle_and_back(cog):
     view = ShopView(cog, 1, 0, screen="inv")
     assert not has(view, 0)  # 何も持っていないので「使う」の選択肢は出ない
-    assert [o.value for o in select(view, 1).options] == ["title", "card_color", "card_icon", "role"]
+    assert [o.value for o in select(view, 1).options] == [
+        "title",
+        "card_color",
+        "card_icon",
+        "role",
+        "skin_dice",
+        "skin_table",
+    ]
     labels = [c.label for c in view.children if hasattr(c, "label") and c.label]
     assert "称号を名前の後ろに付ける" in labels and "称号を名前に付けない" in labels and "🛍️ ショップ" in labels
     it = It()

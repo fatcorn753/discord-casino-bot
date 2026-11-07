@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 TITLE, CARD_COLOR, CARD_ICON, CONSUMABLE, COLOR_ROLE = "title", "card_color", "card_icon", "consumable", "color_role"
+SKIN_DICE, SKIN_TABLE, COLLECTION = "skin_dice", "skin_table", "collection"
 
 KIND_LABEL = {
     TITLE: "🏷️ 称号",
@@ -11,6 +12,9 @@ KIND_LABEL = {
     CARD_ICON: "🖼️ カードのアイコン",
     CONSUMABLE: "🎟️ 消耗品",
     COLOR_ROLE: "🌈 名前の色（ロール）",
+    SKIN_DICE: "🎲 演出（チンチロ用）",
+    SKIN_TABLE: "🃏 演出（パチンコ・ブラックジャック用）",
+    COLLECTION: "🏆 コレクション",
 }
 
 # 名前の色ロールの名前の接頭辞。この接頭辞のロールだけを Bot が作って付け外しする
@@ -52,6 +56,9 @@ CATALOG = [
     Item("title_underground", "地下の住人", TITLE, 12_000),
     Item("title_lucky", "強運の持ち主", TITLE, 20_000),
     Item("title_emperor", "地下の帝王", TITLE, 100_000),
+    Item("title_creditor", "債権王", TITLE, 500_000),
+    Item("title_fixer", "フィクサー", TITLE, 2_000_000),
+    Item("title_100oku", "百億の男", TITLE, 10_000_000),
     # 限定称号（買えない）。週間ランキング1位に、次の発表まで贈られる
     Item(WEEKLY_KING, "👑週間王者", TITLE, 0, desc="先週のゲームの稼ぎ1位に贈られる。次の発表まで持てる", limited=True),
     # 残高カードの色・アイコン
@@ -90,6 +97,22 @@ CATALOG = [
         2_000,
         desc=f"次に負けたゲーム1回で、賭け金の半分が戻る（最大{INSURANCE_CAP:,}ペリカ。倍払いの追加分は対象外）",
     ),
+    # ゲーム演出の変更品（装備すると、結果画面のタイトル・飾り・地の文が変わる。勝率と配当は変わらない）。見た目は core/skins.py
+    Item("skin_kuro", "黒服の立会い", SKIN_DICE, 30_000, desc="黒服が立ち会い、実況する"),
+    Item("skin_gold_dice", "黄金の賽", SKIN_DICE, 150_000, desc="黄金の賽の演出になる"),
+    Item("skin_glass_dice", "血のマニキュア / ガラスの賽", SKIN_DICE, 500_000, desc="高レート向けの特別演出"),
+    Item("skin_vip", "VIP黒薔薇シート", SKIN_TABLE, 300_000, desc="黒薔薇のVIP席の演出になる"),
+    Item("skin_numa", "沼（第3クギ突破仕様演出）", SKIN_TABLE, 1_000_000, desc="パチンコが、沼の演出になる"),
+    # コレクション（持っているだけで残高カードに並ぶ。装備はない。資産価値は、買った値段の合計）
+    Item("col_beer", "キンキンに冷えたビール", COLLECTION, 13_500, "🍺"),
+    Item("col_yakitori", "焼き鳥・柿ピー盛り合わせ", COLLECTION, 25_000, "🍢"),
+    Item("col_gaishutsu", "1日外出録（外出許可証レプリカ）", COLLECTION, 50_000, "🎫"),
+    Item("col_sunglasses", "黒服のサングラス", COLLECTION, 100_000, "🕶️"),
+    Item("col_teppan", "焼き土下座用の鉄板・炭火セット", COLLECTION, 250_000, "🔥"),
+    Item("col_megaphone", "利根川の拡声器", COLLECTION, 500_000, "🎙️"),
+    Item("col_gold_bar", "純金の延べ棒（1kg）", COLLECTION, 1_000_000, "🪙"),
+    Item("col_stock", "帝愛グループ特別優待株券（額装）", COLLECTION, 3_000_000, "🏢"),
+    Item("col_throne", "兵藤会長の玉座", COLLECTION, 10_000_000, "👑"),
     # サーバー内の名前の色（Bot がロールを作って付ける）。0x000000 は「色なし」扱いになるため、黒・白は少しずらす
     *_colors(
         "role",
@@ -134,10 +157,16 @@ def find_all(key: str) -> list:
 
 def label(item: Item) -> str:
     """一覧・候補に出す表示名（種類が分かる形）。"""
-    icon = item.value if item.kind == CARD_ICON else ""
+    icon = item.value if item.kind in (CARD_ICON, COLLECTION) else ""
     return f"{KIND_LABEL[item.kind].split(' ', 1)[1]}：{icon}{item.name}"
 
 
 def of_kind(kind: str, include_limited: bool = False) -> list:
     """その種類の商品。限定品は、販売の一覧には出さない（持ち物や称号の判定では include_limited=True）。"""
     return [i for i in CATALOG if i.kind == kind and (include_limited or not i.limited)]
+
+
+def collection_value(inventory: dict) -> tuple:
+    """持っているコレクションの (商品の並び, 資産価値)。資産価値は、買った値段の合計。"""
+    owned = [i for i in of_kind(COLLECTION) if inventory.get(i.id, 0) > 0]
+    return owned, sum(i.price for i in owned)

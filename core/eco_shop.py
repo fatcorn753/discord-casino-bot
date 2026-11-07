@@ -14,7 +14,7 @@ class ShopMixin:
     # ------------------------------------------------------------------ #
     # ショップ（持ち物・装備・消耗品）                                    #
     # ------------------------------------------------------------------ #
-    SLOTS = ("title", "card_color", "card_icon")
+    SLOTS = ("title", "card_color", "card_icon", "skin_dice", "skin_table")
 
     def _ensure_profile(self, user_id: int) -> None:
         self._conn.execute("INSERT OR IGNORE INTO profile (guild_id, user_id) VALUES (?, ?)", (self._g(), user_id))
@@ -76,6 +76,8 @@ class ShopMixin:
                 "title": None,
                 "card_color": None,
                 "card_icon": None,
+                "skin_dice": None,
+                "skin_table": None,
                 "daily_boost": 0,
                 "insurance": 0,
             }

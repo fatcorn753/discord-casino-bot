@@ -38,6 +38,8 @@ PROFILE_DDL = """
         title       TEXT,
         card_color  TEXT,
         card_icon   TEXT,
+        skin_dice   TEXT,     -- 装備中の演出の変更品（チンチロ用）
+        skin_table  TEXT,     -- 装備中の演出の変更品（パチンコ・ブラックジャック用）
         daily_boost INTEGER NOT NULL DEFAULT 0,
         insurance   INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (guild_id, user_id)
@@ -344,3 +346,7 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     answers = {r["name"] for r in conn.execute("PRAGMA table_info(quiz_answers)")}
     if "counted" not in answers:
         conn.execute("ALTER TABLE quiz_answers ADD COLUMN counted INTEGER NOT NULL DEFAULT 1")
+    profile_cols = {r["name"] for r in conn.execute("PRAGMA table_info(profile)")}
+    for col in ("skin_dice", "skin_table"):
+        if col not in profile_cols:
+            conn.execute(f"ALTER TABLE profile ADD COLUMN {col} TEXT")

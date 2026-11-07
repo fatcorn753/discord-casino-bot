@@ -196,6 +196,26 @@ def test_chinchiro_win_pays_by_role(bot):
     assert_clean(bot)
 
 
+def test_chinchiro_skins_change_only_the_look_not_the_payout(bot):
+    from core import skins
+
+    results = {}
+    for name in (None, "skin_gold_dice", "skin_kuro"):
+        bot.economy.credit(1, 100_000, "テスト")
+        before = bot.economy.balance(1)
+        ctx = run(common.start_game(FakeInteraction(), bot, 1000, "チンチロ"))
+        ctx.skin = skins.SKINS.get(name)
+        view = play_ch.ChinchiroView(ctx, FakeInteraction(), [((1, 1, 3), ch.classify((1, 1, 3)))])
+        view.player_rolls = [((1, 1, 1), ch.classify((1, 1, 1)))]  # 子がピンゾロ（5倍）
+        embed = view.final_embed()
+        results[name] = (bot.economy.balance(1) - before, embed.description)
+    assert results[None][0] == results["skin_gold_dice"][0] == results["skin_kuro"][0] == 5000  # 配当は同じ
+    plain, gold, kuro = (results[k][1] for k in (None, "skin_gold_dice", "skin_kuro"))
+    assert "🟡⚀ 🟡⚀ 🟡⚀" in gold and "🟡" not in plain  # サイコロの飾り
+    assert skins.SKINS["skin_gold_dice"].role_win["pinzoro"] in gold and "黄金のピンゾロ" not in plain  # 役ごとの地の文
+    assert "黒服「ピンゾロ…。5倍" in kuro and "⚫⚀ ⚫⚀ ⚫⚀" in kuro and "黒服「…ピンゾロ」" in kuro  # 実況と、役の文
+
+
 def test_chinchiro_loss_beyond_balance_becomes_debt(bot):
     # 全財産を賭けて、親のピンゾロ（5倍払い）で負ける: 残高は0、払い切れない分は借金になる
     ctx, view = make_chinchiro_view(bot, INITIAL_BALANCE, (1, 1, 1), [(2, 2, 3)])
@@ -791,6 +811,30 @@ def test_pachinko_sets_total_has_no_cap_but_needs_the_balance_and_nothing_is_cha
         and bot.economy.balance(1) == INITIAL_BALANCE
         and bot.economy.pachinko_stats()["sets"][0] == 0
     )
+
+
+def test_pachinko_with_a_skin_changes_only_the_look(bot, monkeypatch):
+    from core import shop, skins
+
+    monkeypatch.setattr(play_pa, "STEP", 0)
+    eco = bot.economy
+    eco.credit(1, 2_000_000, "テスト")
+    vip = shop.BY_ID["skin_vip"]
+    assert eco.purchase(1, vip.id, shop.label(vip), vip.price, vip.unique).ok
+    results = {}
+    for equipped in (False, True):
+        eco.equip(1, "skin_table", vip.id if equipped else None)
+        monkeypatch.setattr(play_pa, "RNG", random.Random(3))  # 同じ乱数なら、同じ結果になるはず
+        it = FakeInteraction()
+        run(play_pa.play_pachinko(it, bot, 100, 1))
+        results[equipped] = it
+    plain, skinned = results[False], results[True]
+    title = lambda it: it.edits[-1]["embed"].title  # noqa: E731
+    assert not title(plain).startswith("🥀") and title(skinned).startswith("🥀")  # タイトルに飾りが付く
+    assert title(skinned).split(" — ")[1] == title(plain).split(" — ")[1]  # 損益は同じ（配当は変わらない）
+    body = skinned.edits[-1]["embed"].description
+    assert skins.SKINS["skin_vip"].win_line in body or skins.SKINS["skin_vip"].lose_line in body
+    assert skins.SKINS["skin_vip"].start_line in skinned.sent[0]["embed"].description  # 始まりの地の文
 
 
 def test_pachinko_buttons_again_double_and_extra_sets(bot, monkeypatch):

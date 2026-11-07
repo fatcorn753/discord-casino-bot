@@ -122,6 +122,13 @@ class EconomyCog(commands.Cog):
             e.add_field(name="借金", value=f"{ui.pelica(s['debt'])}（入ったお金から先に返済）", inline=False)
         if rank:
             e.add_field(name="このサーバーでの順位（総資産）", value=f"{rank[0]}位 / {rank[2]}人", inline=True)
+        owned, collection_total = shop.collection_value(self.g(interaction).inventory(member.id))
+        if owned:  # ショップのコレクション。持っているものが、絵文字で並ぶ
+            e.add_field(
+                name=f"🏆 コレクション（資産価値 {ui.pelica(collection_total)}）",
+                value=" ".join(i.value for i in owned),
+                inline=False,
+            )
         held = self.g(interaction).crypto_values().get(member.id, 0)
         if held:
             e.add_field(name="CSトークン評価額", value=ui.pelica(held), inline=True)

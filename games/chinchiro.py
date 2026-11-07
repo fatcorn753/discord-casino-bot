@@ -130,8 +130,9 @@ def payout(bet: int, outcome: Outcome) -> tuple:
     return 0, bet * (outcome.multiplier - 1)
 
 
-def dice_text(dice) -> str:
-    return " ".join(DICE_FACES[d] for d in dice)
+def dice_text(dice, mark: str = "") -> str:
+    """出目の表示。mark は、サイコロごとの飾り（演出の変更品が付ける。出目や配当には関係しない）。"""
+    return " ".join(mark + DICE_FACES[d] for d in dice)
 
 
 def expected_value(trials: int = 200_000, seed: int = 1) -> float:

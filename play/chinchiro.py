@@ -5,6 +5,7 @@
 
 import asyncio
 import random
+from typing import Optional
 
 import discord
 
@@ -42,16 +43,23 @@ LOSE_LINE = {
 }
 
 
-def _rolls_text(rolls: list, who: str) -> str:
+def _rolls_text(rolls: list, who: str, skin=None) -> str:
+    mark = skin.dice_mark if skin else ""
     lines = []
     for i, (dice, hand) in enumerate(rolls, 1):
         again = "　→ 振り直し" if hand.kind == rules.MENASHI and i < rules.MAX_ROLLS else ""
-        lines.append(f"{i}回目: {rules.dice_text(dice)} **{hand.name}**{again}")
+        comment = skin.roll_comment.format(hand=hand.name) if skin and skin.roll_comment else ""  # 演出の変更品の実況
+        lines.append(f"{i}回目: {rules.dice_text(dice, mark)} **{hand.name}**{again}{comment}")
     return f"**{who}**\n" + "\n".join(lines)
 
 
-def _rolling_text() -> str:
-    return rules.dice_text([RNG.randint(1, 6) for _ in range(3)]) + "　カラカラカラ…"
+def _rolling_text(skin=None) -> str:
+    return rules.dice_text([RNG.randint(1, 6) for _ in range(3)], skin.dice_mark if skin else "") + "　カラカラカラ…"
+
+
+def _role_line(table: dict, skin_table: Optional[dict], key: str) -> str:
+    """役ごとの地の文。演出の変更品が、その役の文を持っていれば、そちらを使う。"""
+    return (skin_table or {}).get(key) or table.get(key, table[rules.ME])
 
 
 async def play_chinchiro(interaction: discord.Interaction, bot, bet: int):
@@ -64,7 +72,8 @@ async def play_chinchiro(interaction: discord.Interaction, bot, bet: int):
         await interaction.response.send_message(
             embed=ui.embed(
                 game_title(TITLE, ctx),
-                f"賭け金: **{ui.pelica(bet)}**\n\nざわ… ざわ…\n親（ディーラー）が丼にサイコロを放る…",
+                f"賭け金: **{ui.pelica(bet)}**\n\nざわ… ざわ…\n親（ディーラー）が丼にサイコロを放る…"
+                + (f"\n{ctx.skin.start_line}" if ctx.skin else ""),
                 ui.DARK,
             )
         )
@@ -78,14 +87,14 @@ async def play_chinchiro(interaction: discord.Interaction, bot, bet: int):
             await interaction.edit_original_response(
                 embed=ui.embed(
                     game_title(TITLE, ctx),
-                    ((_rolls_text(shown, "親") + "\n\n") if shown else "") + _rolling_text(),
+                    ((_rolls_text(shown, "親", ctx.skin) + "\n\n") if shown else "") + _rolling_text(ctx.skin),
                     ui.DARK,
                 )
             )
             await asyncio.sleep(STEP)
             shown.append((dice, hand))
             await interaction.edit_original_response(
-                embed=ui.embed(game_title(TITLE, ctx), _rolls_text(shown, "親"), ui.DARK)
+                embed=ui.embed(game_title(TITLE, ctx), _rolls_text(shown, "親", ctx.skin), ui.DARK)
             )
         view = ChinchiroView(ctx, interaction, dealer_rolls)
         await asyncio.sleep(STEP)
@@ -111,11 +120,11 @@ class ChinchiroView(OwnerView):
 
     # --------------------------- 表示 --------------------------- #
     def embed(self, rolling: bool = False) -> discord.Embed:
-        parts = [f"賭け金: **{ui.pelica(self.ctx.bet)}**", _rolls_text(self.dealer_rolls, "親")]
+        parts = [f"賭け金: **{ui.pelica(self.ctx.bet)}**", _rolls_text(self.dealer_rolls, "親", self.ctx.skin)]
         if self.player_rolls:
-            parts.append(_rolls_text(self.player_rolls, "あなた"))
+            parts.append(_rolls_text(self.player_rolls, "あなた", self.ctx.skin))
         if rolling:
-            parts.append(_rolling_text())
+            parts.append(_rolling_text(self.ctx.skin))
         else:
             left = rules.MAX_ROLLS - len(self.player_rolls)
             hint = (
@@ -141,16 +150,17 @@ class ChinchiroView(OwnerView):
         player = self.player_rolls[-1][1] if self.player_rolls else rules.Hand(rules.MENASHI)
         dealer = self.dealer_rolls[-1][1]
         outcome = rules.compare(player, dealer)
+        skin = self.ctx.skin
         payout, extra = rules.payout(self.ctx.bet, outcome)
         # 負けの倍払い（預かり金で足りない分）は、精算と同じ1回の処理で、残高の範囲まで引く
         net = self.ctx.settle(payout, penalty=extra)
         if outcome.result == "win":
-            line, color = WIN_LINE.get(player.kind, WIN_LINE[rules.ME]), ui.OK
+            line, color = _role_line(WIN_LINE, skin.role_win if skin else None, player.kind), ui.OK
             if dealer.kind == rules.HIFUMI:
                 line = "親がヒフミ…！ 倍もらう…！"
         elif outcome.result == "lose":
             key = rules.HIFUMI if player.kind == rules.HIFUMI else dealer.kind
-            line, color = LOSE_LINE.get(key, LOSE_LINE[rules.ME]), ui.ERROR
+            line, color = _role_line(LOSE_LINE, skin.role_lose if skin else None, key), ui.ERROR
             if extra and self.ctx.economy.debt(self.ctx.user_id) > 0:
                 line += "\n払い切れない…！ 残りは借金になった…"
         else:
@@ -158,8 +168,8 @@ class ChinchiroView(OwnerView):
         mult = f"（{outcome.multiplier}倍）" if outcome.result != "draw" and outcome.multiplier > 1 else ""
         body = "\n\n".join(
             [
-                _rolls_text(self.dealer_rolls, "親"),
-                _rolls_text(self.player_rolls, "あなた")
+                _rolls_text(self.dealer_rolls, "親", skin),
+                _rolls_text(self.player_rolls, "あなた", skin)
                 if self.player_rolls
                 else "**あなた**\n時間切れ…（目なし扱い）",
                 f"**{line}**{mult}",

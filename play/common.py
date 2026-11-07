@@ -5,7 +5,7 @@ import time
 
 import discord
 
-from core import approval, events, missions, ui
+from core import approval, events, missions, skins, ui
 from games import rtplevel
 
 MIN_BET = 10
@@ -45,6 +45,7 @@ class GameContext:
         self.event_bonus = 0  # 突発イベントで上乗せされた額
         self.rtp_shift = 0  # 還元率レベルで増減した払い戻し（表示の払い戻しに足す。レベルそのものは見せない）
         self.events = {}  # 連勝・ミッションの結果（演出の表示に使う）
+        self.skin = None  # 装備中の、演出の変更品（core/skins.py）。見た目だけが変わる
 
     @property
     def economy(self):
@@ -153,17 +154,20 @@ async def start_game(
                 ephemeral=True,
             )
             return None
-        return GameContext(
+        ctx = GameContext(
             bot, uid, escrow, game, bet, interaction.guild_id, getattr(interaction.user, "display_name", "") or ""
         )
+        ctx.skin = skins.active_skin(eco.get_profile(uid), game)
+        return ctx
     finally:
         if escrow is None:
             bot.sessions.end(uid)  # 始められなかった場合は、プレイ中のままにしない
 
 
 def game_title(base: str, ctx: GameContext) -> str:
-    """ゲームの見出しに、遊んでいる人の名前を付ける（例: 🃏 ブラックジャック（たろう））。"""
-    return f"{base}（{ctx.name}）" if ctx.name else base
+    """ゲームの見出しに、遊んでいる人の名前を付ける（例: 🃏 ブラックジャック（たろう））。変更品を装備していれば、飾りが先頭に付く。"""
+    prefix = ctx.skin.title_prefix if ctx.skin else ""
+    return prefix + (f"{base}（{ctx.name}）" if ctx.name else base)
 
 
 def signed(n: int) -> str:
@@ -174,6 +178,8 @@ def result_lines(ctx: GameContext, payout: int, net: int, extra: str = "") -> st
     """結果の共通表示。出目や役（extra）が先頭、そのあとに大勝ち・連勝の演出、賭け金・払い戻し・損益・残高、最後にミッション達成。"""
     balance = ctx.economy.balance(ctx.user_id)
     top = [extra] if extra else []
+    if ctx.skin and net != 0:  # 演出の変更品の一言（勝ったとき・負けたとき）
+        top.append(ctx.skin.win_line if net > 0 else ctx.skin.lose_line)
     if ctx.insured_refund:
         top.append(f"🎟️ 保険券を使った！ 賭け金の半分（{ui.pelica(ctx.insured_refund)}）が戻った")
     event = [f"🔥 **突発イベントのボーナス +{ui.pelica(ctx.event_bonus)}**"] if ctx.event_bonus else []

@@ -16,14 +16,27 @@ from core.confirm import confirm_action
 CONFIRM_FROM = 10_000  # この金額以上の購入は、確認ボタンを挟む
 MAX_QTY = 10
 
-SLOT_OF_KIND = {shop.TITLE: "title", shop.CARD_COLOR: "card_color", shop.CARD_ICON: "card_icon"}
+SLOT_OF_KIND = {
+    shop.TITLE: "title",
+    shop.CARD_COLOR: "card_color",
+    shop.CARD_ICON: "card_icon",
+    shop.SKIN_DICE: "skin_dice",
+    shop.SKIN_TABLE: "skin_table",
+}
 EFFECT_OF_ITEM = {shop.DAILY_DOUBLE: "daily_boost", shop.INSURANCE: "insurance"}
 UNEQUIP_NAMES = {
     "title": "称号",
     "card_color": "カードの色",
     "card_icon": "カードのアイコン",
     "role": "名前の色（ロール）",
+    "skin_dice": "演出（チンチロ用）",
+    "skin_table": "演出（パチンコ・ブラックジャック用）",
 }  # 「外す」で選べるもの
+
+
+def shop_slots() -> tuple:
+    """持ち物の画面で「装備中」を判定する、プロフィールの装備の列（色ロールは Discord 側のロールなので入らない）。"""
+    return tuple(dict.fromkeys(SLOT_OF_KIND.values()))
 
 
 class ShopError(Exception):
@@ -208,7 +221,7 @@ class ShopView(discord.ui.View):
     def _build_inventory(self) -> None:
         eco = self.cog.bot.economy.for_guild(self.guild_id)
         inv = eco.inventory(self.user_id)
-        owned = [i for i in (shop.BY_ID.get(item_id) for item_id in inv) if i is not None]
+        owned = [i for i in (shop.BY_ID.get(item_id) for item_id in inv) if i is not None and i.kind != shop.COLLECTION]
         if owned:
             use = discord.ui.Select(
                 placeholder="身につける・使う景品を選ぶ",
@@ -461,7 +474,7 @@ class ShopCog(commands.Cog):
         prof = eco.get_profile(user_id)
         if not inv and not prof["daily_boost"] and not prof["insurance"]:
             return ui.embed("🎒 持ち物", "まだ何も持っていません。「🛍️ ショップ」の画面で、景品を買えます。", ui.INFO)
-        equipped = {prof["title"], prof["card_color"], prof["card_icon"]}
+        equipped = {prof[slot] for slot in shop_slots()}
         e = ui.embed("🎒 持ち物", color=ui.INFO)
         for k in shop.KIND_LABEL:
             lines = []
@@ -469,7 +482,7 @@ class ShopCog(commands.Cog):
                 if it.id in inv:
                     mark = " 【装備中】" if it.id in equipped else ""
                     lines.append(
-                        f"{it.value if k == shop.CARD_ICON else ''}{it.name}"
+                        f"{it.value if k in (shop.CARD_ICON, shop.COLLECTION) else ''}{it.name}"
                         + (f" ×{inv[it.id]}" if not it.unique else "")
                         + mark
                     )
@@ -512,6 +525,14 @@ class ShopCog(commands.Cog):
             active = self.g(interaction).get_profile(uid)[EFFECT_OF_ITEM[it.id]]
             return await interaction.response.send_message(
                 embed=ui.ok_embed("使いました", f"**{it.name}**: {it.desc}\n有効な枚数: **{active}枚**"), ephemeral=True
+            )
+        if it.kind == shop.COLLECTION:
+            return await interaction.response.send_message(
+                embed=ui.ok_embed(
+                    "コレクションです",
+                    f"**{shop.label(it)}** は、持っているだけで `/ペリカ 残高` に飾られます（装備はありません）。",
+                ),
+                ephemeral=True,
             )
         if it.kind == shop.COLOR_ROLE:
             await interaction.response.defer(ephemeral=True)

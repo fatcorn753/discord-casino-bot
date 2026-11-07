@@ -18,6 +18,15 @@ TITLE = "🎰 地下パチンコ"
 STEP = 1.1  # メッセージ編集のレート制限に収まる間隔（秒）
 MOOD_COLOR = {"normal": ui.DARK, "blue": ui.INFO, "red": ui.ERROR, "gold": ui.GOLD}  # 演出の色合い → 色
 BANNER = {2: "", 10: "# 🎊 大当たり！！ 🎊", 30: "# 🔥🔥 激アツ確変！！！ 🔥🔥"}
+
+
+def banner_for(top: int, skin=None) -> str:
+    """当たりの見出し。演出の変更品が見出しを持っていれば、大当たり以上（10倍〜）で、そちらを使う。"""
+    if skin is not None and skin.banner and top >= 10:
+        return skin.banner
+    return BANNER.get(top, "")
+
+
 NUMBER = "①②③④⑤⑥⑦⑧⑨⑩"
 EXTRA_SETS = (5, 10)  # 「×5連続」「×10連続」ボタンのセット数
 
@@ -35,10 +44,13 @@ def rank_of(mult: int) -> str:
     return next(name for floor, name in RANKS if mult >= floor)
 
 
-def reveal_frames(spin: pachinko.SpinInfo, limit: int = SHOWN_ROUNDS) -> list:
+def reveal_frames(spin: pachinko.SpinInfo, limit: int = SHOWN_ROUNDS, skin=None) -> list:
     """演出が終わったあとに出す、当たりの宣言 → 連チャン（数を大きく、5連で節目）→ 終了のまとめ。"""
     n, top = len(spin.rounds), max(spin.rounds)
-    frames, total = [pachinko.Frame(f"{BANNER.get(top) or '# 🎉 当たり！！ 🎉'}\n**{n}連** スタート！", "gold")], 0
+    frames, total = (
+        [pachinko.Frame(f"{banner_for(top, skin) or '# 🎉 当たり！！ 🎉'}\n**{n}連** スタート！", "gold")],
+        0,
+    )
     for k, r in enumerate(spin.rounds[:limit], start=1):
         total += r
         frames.append(
@@ -58,12 +70,12 @@ def reveal_frames(spin: pachinko.SpinInfo, limit: int = SHOWN_ROUNDS) -> list:
     return frames
 
 
-def hit_scene(rng: random.Random, spin: pachinko.SpinInfo, label: str) -> list:
+def hit_scene(rng: random.Random, spin: pachinko.SpinInfo, label: str, skin=None) -> list:
     """当たりの1場面: 演出をじっくり → そのあとに当たりを宣言。"""
-    return pachinko.spin_frames(rng, spin, label) + reveal_frames(spin)
+    return pachinko.spin_frames(rng, spin, label) + reveal_frames(spin, skin=skin)
 
 
-def single_frames(rng: random.Random, result: pachinko.SetResult) -> list:
+def single_frames(rng: random.Random, result: pachinko.SetResult, skin=None) -> list:
     """1セットの演出のコマ。**当たった回転だけ**を、予告・リーチ・リール・連チャンまでじっくり見せる。
     当たりの宣言は演出のあと。ハズレの回転は数字でまとめる。連続する当たりも、上限まではそのまま見せる。"""
     frames = [pachinko.Frame(f, "normal") for f in pachinko.ball_frames(rng, rows=2, balls=pachinko.BALLS_PER_SET)]
@@ -87,7 +99,7 @@ def single_frames(rng: random.Random, result: pachinko.SetResult) -> list:
         return frames
     previous, shown = 0, 0
     for index, spin in hits:
-        scene = hit_scene(rng, spin, f"{index}回転目")
+        scene = hit_scene(rng, spin, f"{index}回転目", skin)
         if shown and len(frames) + len(scene) > FRAME_BUDGET:
             break
         gap = index - 1 - previous
@@ -110,7 +122,7 @@ def set_line(index: int, result: pachinko.SetResult) -> str:
     return f"{mark} 入賞 {result.starts:>2} … 🎉 **{result.chains}連** **+{result.mult}倍**"
 
 
-def multi_frames(rng: random.Random, results: list) -> list:
+def multi_frames(rng: random.Random, results: list, skin=None) -> list:
     """連続投入の演出のコマ。1セットずつ表を伸ばす。**当たったセット**は、表に載せる前に、その当たりの演出をじっくり見せる
     （出玉の大きい順に、コマの上限まで。残りの当たりは表にそのまま載せる）。"""
     frames = [
@@ -122,7 +134,7 @@ def multi_frames(rng: random.Random, results: list) -> list:
     for i in sorted((i for i, r in enumerate(results) if r.mult), key=lambda i: -results[i].mult):
         hit_index, spin = pachinko.hit_spins(results[i].spins)[0]
         label = f"{NUMBER[i] if i < len(NUMBER) else i + 1} セットの {hit_index}回転目"
-        scene = hit_scene(rng, spin, label)
+        scene = hit_scene(rng, spin, label, skin)
         if scenes and used + len(scene) > FRAME_BUDGET:
             continue
         scenes[i] = scene
@@ -159,13 +171,13 @@ def result_body(ctx, results: list, payout: int, net: int) -> str:
             f"大当たり **{r.chains}連**（{round_text(rounds)}）　出玉 **+{r.mult}倍**" if r.mult else "**ハズレ**"
         )
         lines += [
-            BANNER.get(top, ""),
+            banner_for(top, ctx.skin),
             f"スタート入賞 **{r.starts} / {pachinko.BALLS_PER_SET}発**",
             hit_line,
             flavor_text(top),
         ]
     else:
-        lines += [BANNER.get(top, "")]
+        lines += [banner_for(top, ctx.skin)]
         lines += [set_line(i, r) for i, r in enumerate(results)]
         wins = sum(1 for r in results if r.mult)
         lines += [
@@ -220,11 +232,15 @@ async def play_pachinko(interaction: discord.Interaction, bot, bet: int, sets: i
         body = result_body(ctx, results, sum(raw), net)
         color = ui.GOLD if top >= 10 else (ui.OK if net > 0 else ui.ERROR)
         head = f"賭け金: **{ui.pelica(bet)}**" + (f" × {sets}セット" if sets > 1 else "") + "\n"
-        frames = single_frames(RNG, results[0]) if sets == 1 else multi_frames(RNG, results)
+        frames = single_frames(RNG, results[0], ctx.skin) if sets == 1 else multi_frames(RNG, results, ctx.skin)
         step = "最初の表示"
         try:
             await interaction.response.send_message(
-                embed=ui.embed(game_title(TITLE, ctx), head + "玉を弾く…ざわ… ざわ…", ui.DARK)
+                embed=ui.embed(
+                    game_title(TITLE, ctx),
+                    head + "玉を弾く…ざわ… ざわ…" + (f"\n{ctx.skin.start_line}" if ctx.skin else ""),
+                    ui.DARK,
+                )
             )
             for i, frame in enumerate(frames, start=1):
                 await asyncio.sleep(STEP)
