@@ -20,7 +20,9 @@ USERS_DDL = """
         biggest_win  INTEGER NOT NULL DEFAULT 0,
         created_at   REAL NOT NULL,
         last_slot    INTEGER,                 -- 最後にボーナスを受け取った「時間帯」の番号（6時間ごとの受け取り用）
-        debt         INTEGER NOT NULL DEFAULT 0,   -- 借金（チンチロの倍払いが残高を超えた分）。入金のたびに強制で返済する
+        debt         INTEGER NOT NULL DEFAULT 0,   -- 帝愛からの借金（シニア債権）。収入から天引きで返済する（core/teiai.py）
+        bankrupt_at  REAL,                         -- 自己破産した時刻（NULL なら破産者ではない）
+        blacklist_until REAL,                      -- 破産者の身分が終わる時刻（完済のときに、完済から7日後を入れる）
         PRIMARY KEY (guild_id, user_id)
     )"""
 INVENTORY_DDL = """
@@ -290,6 +292,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             user_id  INTEGER NOT NULL,
             original_nick TEXT,          -- 称号を付ける前のニックネーム（NULL はニックネームなし）
             applied_nick  TEXT,          -- Bot が設定したニックネーム（NULL は未適用）
+            enabled INTEGER NOT NULL DEFAULT 1,   -- 1: 称号の表示を、自分で選んだ人。0: 身分の【地下労働者】だけを、Bot が付けている人
             PRIMARY KEY (guild_id, user_id)
         );
         """
@@ -343,6 +346,8 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     for col in ("original_nick", "applied_nick"):
         if col not in cols:
             conn.execute(f"ALTER TABLE nick_prefs ADD COLUMN {col} TEXT")
+    if "enabled" not in cols:  # 既存の行は、称号の表示を自分で選んだ人
+        conn.execute("ALTER TABLE nick_prefs ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
     answers = {r["name"] for r in conn.execute("PRAGMA table_info(quiz_answers)")}
     if "counted" not in answers:
         conn.execute("ALTER TABLE quiz_answers ADD COLUMN counted INTEGER NOT NULL DEFAULT 1")
@@ -350,3 +355,7 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     for col in ("skin_dice", "skin_table"):
         if col not in profile_cols:
             conn.execute(f"ALTER TABLE profile ADD COLUMN {col} TEXT")
+    users_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    for col in ("bankrupt_at", "blacklist_until"):
+        if col not in users_cols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {col} REAL")

@@ -2,6 +2,7 @@ import datetime
 
 import pytest
 
+from core import teiai
 from core.economy import INITIAL_BALANCE, Economy
 from core.session import Sessions
 
@@ -134,17 +135,23 @@ def test_sessions_block_double_play_and_cooldown():
     assert s.try_start(2, now=100.0) is None  # 他の人には影響しない
 
 
-def test_debt_is_collected_from_every_income_and_blocks_spending(eco):
+def test_debt_is_withheld_from_income_only_and_blocks_spending(eco):
     eco.balance(1)
     eid = eco.place_bet(1, INITIAL_BALANCE, "チンチロ")
     assert eco.settle_with_penalty(eid, 0, "チンチロ", 5000)[:2] == (-INITIAL_BALANCE - 5000, 5000)  # 残高0、5000が借金
-    assert (eco.balance(1), eco.debt(1)) == (0, 5000)
+    assert (eco.balance(1), eco.debt(1)) == (
+        teiai.SEED,
+        5000 + teiai.SEED,
+    )  # 手元が空なので、帝愛が種銭を貸す（借金に加わる）
     assert eco.purchase(1, "x", "x", 100, False).ok is False and eco.crypto_buy(1, 100, 10.0).ok is False
     assert eco.transfer(1, 2, 10, 0.0, 10_000, 0).ok is False  # 借金中は、お金を逃がせない
-    eco.claim_daily(1, datetime.date(2026, 11, 1))  # デイリーも先に返済へ
-    assert (eco.balance(1), eco.debt(1)) == (0, 4000)
-    eco.credit(1, 6000, "テスト")
-    assert (eco.balance(1), eco.debt(1)) == (2000, 0)  # 完済して、残りが残高
+    result = eco.claim_daily(1, datetime.date(2026, 11, 1))  # デイリー: 先にピンハネ、残りから天引き
+    assert result.skimmed == 200 and result.repaid == 240 and result.seed == 0  # 1000 の 20% と、残り 800 の 30%
+    assert (eco.balance(1), eco.debt(1)) == (teiai.SEED + 800 - 240, 5000 + teiai.SEED - 240)
+    eco.credit(1, 6000, "テスト")  # 管理者の付与などは、収入ではないので、天引きしない
+    assert eco.debt(1) == 5000 + teiai.SEED - 240
+    ok, paid = eco.repay_debt(1)  # 自分から返す（返せる限り全額）
+    assert ok and eco.debt(1) == 0 and eco.balance(1) == teiai.SEED + 800 - 240 + 6000 - paid
     assert eco.top(5)[0][1] in (1, 2)
 
 

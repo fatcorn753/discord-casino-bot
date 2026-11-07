@@ -5,7 +5,7 @@ import time
 
 import discord
 
-from core import approval, events, missions, skins, ui
+from core import approval, events, missions, skins, teiai, ui
 from games import rtplevel
 
 MIN_BET = 10
@@ -46,6 +46,7 @@ class GameContext:
         self.rtp_shift = 0  # 還元率レベルで増減した払い戻し（表示の払い戻しに足す。レベルそのものは見せない）
         self.events = {}  # 連勝・ミッションの結果（演出の表示に使う）
         self.skin = None  # 装備中の、演出の変更品（core/skins.py）。見た目だけが変わる
+        self.notices = []  # 精算で起きた、強制執行・種銭などの一言（core/eco_debt.py）
 
     @property
     def economy(self):
@@ -91,6 +92,7 @@ class GameContext:
             print(f"警告: 精算済みの預かり金を再度精算しようとしました（{self.game}, escrow={self.escrow_id}）")
             return 0
         net, self.penalty_taken, self.insured_refund = result
+        self.notices = self.economy.take_notices(self.user_id)
         try:  # 連勝・ミッションの記録は演出なので、失敗しても精算の結果は変えない
             self.events = self.economy.record_play(self.user_id, self.game, self.bet, net, local_today(self.bot), tags)
         except Exception as exc:
@@ -191,7 +193,8 @@ def result_lines(ctx: GameContext, payout: int, net: int, extra: str = "") -> st
     ]
     debt = ctx.economy.debt(ctx.user_id)
     if debt:
-        stats.append(f"借金: **{ui.pelica(debt)}**（入ったお金から先に返済されます）")
+        stats.append(f"借金: **{ui.pelica(debt)}**（収入の{int(teiai.REPAY_RATE * 100)}%が天引きで返済されます）")
+    stats += ctx.notices  # 強制執行・種銭の一言
     head, tail = _celebration(ctx, net)
     if top and head:
         top.append("")

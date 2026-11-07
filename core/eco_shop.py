@@ -5,6 +5,7 @@
 
 from typing import Optional
 
+from core import teiai
 from core.eco_types import CONSUMABLE_EFFECTS, PurchaseResult
 
 
@@ -62,26 +63,27 @@ class ShopMixin:
                 )
             }
 
-    def get_profile(self, user_id: int) -> dict:
-        """装備中の称号・カード、消耗品の効果。読み取り専用（口座は作らない）。"""
+    def get_profile(self, user_id: int, raw: bool = False) -> dict:
+        """装備中の称号・カード・演出、消耗品の効果、身分（status）。読み取り専用（口座は作らない）。
+
+        カタギでないとき（借金・延滞・破産者）は、買った称号・カード・演出が「差し押さえ中」なので、装備の欄は None で返り、
+        frozen が True になる（装備の記録は残り、カタギに戻ると使える）。raw=True なら、差し押さえ中でも、記録のとおりに返す。
+        """
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM profile WHERE guild_id=? AND user_id=?", (self._g(), user_id)
             ).fetchone()
-        return (
-            dict(row)
-            if row
-            else {
-                "user_id": user_id,
-                "title": None,
-                "card_color": None,
-                "card_icon": None,
-                "skin_dice": None,
-                "skin_table": None,
-                "daily_boost": 0,
-                "insurance": 0,
-            }
-        )
+            prof = (
+                dict(row)
+                if row
+                else {"user_id": user_id, **dict.fromkeys(self.SLOTS), "daily_boost": 0, "insurance": 0}
+            )
+            prof["status"] = self.status(user_id)
+        prof["frozen"] = prof["status"] != teiai.KATAGI
+        if prof["frozen"] and not raw:
+            for slot in self.SLOTS:
+                prof[slot] = None
+        return prof
 
     def equip(self, user_id: int, slot: str, item_id: Optional[str]) -> bool:
         """称号・カードの色・アイコンを装備（None で外す）。持っていないものは装備できない。"""

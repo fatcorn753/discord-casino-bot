@@ -9,7 +9,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs._amount import balance_choices
-from core import approval, logthrottle, ranking, shop, ui
+from core import approval, logthrottle, ranking, shop, teiai, ui
 from core import history as history_mod
 from core import missions as missions_mod
 from core.confirm import confirm_action
@@ -108,7 +108,7 @@ class EconomyCog(commands.Cog):
             )
         rank = self.g(interaction).rank_of(member.id)
         # ショップで買ったカードの色・アイコン・称号を反映する
-        prof = self.g(interaction).get_profile(member.id)
+        prof = self.g(interaction).get_profile(member.id)  # カタギでないときは、装備が差し押さえ中で、空になって返る
         color_item, icon_item, title_item = (shop.BY_ID.get(prof[k]) for k in ("card_color", "card_icon", "title"))
         icon = icon_item.value if icon_item else "💴"
         title_line = f"## 🏷️ {title_item.name}\n" if title_item else ""
@@ -118,15 +118,35 @@ class EconomyCog(commands.Cog):
             color_item.value if color_item else ui.GOLD,
         )
         e.set_thumbnail(url=member.display_avatar.url)
+        e.add_field(name="身分", value=teiai.STATUS_LABEL[prof["status"]], inline=True)
         if s.get("debt"):
-            e.add_field(name="借金", value=f"{ui.pelica(s['debt'])}（入ったお金から先に返済）", inline=False)
+            e.add_field(
+                name="帝愛への借金",
+                value=f"{ui.pelica(s['debt'])}（収入の{int(teiai.REPAY_RATE * 100)}%が天引きで返済されます。`/ペリカ 返済` で自分から返せます）",
+                inline=False,
+            )
         if rank:
             e.add_field(name="このサーバーでの順位（総資産）", value=f"{rank[0]}位 / {rank[2]}人", inline=True)
         owned, collection_total = shop.collection_value(self.g(interaction).inventory(member.id))
-        if owned:  # ショップのコレクション。持っているものが、絵文字で並ぶ
+        if (
+            owned and prof["frozen"]
+        ):  # 借金中・延滞中・破産者は、ショップの品が差し押さえ中（完済してカタギに戻ると返る）
+            e.add_field(
+                name=f"🏆 コレクション（資産価値 {ui.pelica(collection_total)}）",
+                value="🔒 帝愛により差し押さえ中（借金を完済して、カタギに戻ると返されます）",
+                inline=False,
+            )
+        elif owned:  # ショップのコレクション。持っているものが、絵文字で並ぶ
             e.add_field(
                 name=f"🏆 コレクション（資産価値 {ui.pelica(collection_total)}）",
                 value=" ".join(i.value for i in owned),
+                inline=False,
+            )
+        raw = self.g(interaction).get_profile(member.id, raw=True)
+        if prof["frozen"] and any(raw[slot] for slot in self.g(interaction).SLOTS):
+            e.add_field(
+                name="🔒 称号・カード・演出",
+                value="差し押さえ中です（借金を完済して、カタギに戻ると使えます）",
                 inline=False,
             )
         held = self.g(interaction).crypto_values().get(member.id, 0)
@@ -168,7 +188,16 @@ class EconomyCog(commands.Cog):
             )
         next_bonus = Economy.DAILY_BASE + Economy.DAILY_STREAK_BONUS * min(result.streak, Economy.DAILY_STREAK_CAP)
         boost = "🎟️ デイリー2倍券を使った！\n" if result.boosted else ""
-        debt_line = f"💸 借金の返済に **{ui.pelica(result.repaid)}** 引かれた\n" if result.repaid else ""
+        debt_line = ""
+        if result.skimmed:
+            debt_line += f"🕴️ 帝愛にピンハネされた: **{ui.pelica(result.skimmed)}**（借金は減りません）\n"
+        if result.repaid:
+            debt_line += f"💸 借金の返済に天引きされた: **{ui.pelica(result.repaid)}**\n"
+        if result.seed:
+            debt_line += f"🕴️ 帝愛が種銭を貸し付けた: **{ui.pelica(result.seed)}**（借金に加わります）\n"
+        self.g(interaction).take_notices(
+            interaction.user.id
+        )  # 種銭などの一言は、上の行で出したので、たまらないように取り除く
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "デイリーボーナス",
@@ -176,6 +205,62 @@ class EconomyCog(commands.Cog):
                 f"🕛 次のボーナスは **{next_slot_label(self.bot)}**（<t:{int(next_slot(self.bot).timestamp())}:R>）から。6時間ごと（0・6・12・18時）に受け取れます。",
             )
         )
+
+    @group.command(name="返済", description="帝愛への借金を、手元のペリカから返す（金額を省くと、返せる限り全額）")
+    @app_commands.rename(amount="金額")
+    @app_commands.describe(amount="返す額（省略で全額）")
+    async def repay(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1] = None):
+        ok, result = self.g(interaction).repay_debt(interaction.user.id, amount)
+        if not ok:
+            return await interaction.response.send_message(embed=ui.error_embed("返せません", result), ephemeral=True)
+        eco = self.g(interaction)
+        left = eco.debt(interaction.user.id)
+        text = f"帝愛に **{ui.pelica(result)}** 返しました。" + (
+            f"\n残りの借金: **{ui.pelica(left)}**" if left else "\n**借金を完済しました！**"
+        )
+        await interaction.response.send_message(embed=ui.ok_embed("返済しました", text), ephemeral=True)
+
+    @group.command(
+        name="破産",
+        description="自己破産する（全財産とショップの全品を差し押さえ、貸付は免責・借金は圧縮。元に戻せない）",
+    )
+    async def bankrupt(self, interaction: discord.Interaction):
+        eco = self.g(interaction)
+        uid = interaction.user.id
+        if eco.status(uid) == teiai.BANKRUPT:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("すでに破産者です", "完済して7日たつと、カタギに戻ります。"), ephemeral=True
+            )
+        if eco.debt(uid) <= 0 and not eco.loan_list(uid)["borrowed"]:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("破産できません", "借金も、貸付の借り入れもありません。"), ephemeral=True
+            )
+        warning = (
+            "**全財産（現金・CSトークン・空売り・債券）と、ショップで買った全品（称号・カード・演出・コレクション・消耗品）を差し押さえ**、"
+            f"換金（ショップの品は購入額の{int(teiai.SEIZE_RATE * 100)}%）して、帝愛 → 貸付（古い順）の順に配当します。\n"
+            f"・貸付の残りは**免責**（貸した人の損になります）\n"
+            f"・帝愛の借金は、残っていても **{teiai.BANKRUPT_FLOOR:,}ペリカまで圧縮**\n"
+            f"・身分が🔴**破産者**になり、**完済して{teiai.BLACKLIST_DAYS}日たつまで、貸付を借りられません**\n"
+            "・**元に戻せません。**"
+        )
+        ok = await confirm_action(interaction, "自己破産しますか？", warning, "破産する")
+        if ok is not True:
+            return
+        ok, result = eco.bankrupt(uid)
+        if not ok:
+            return await interaction.followup.send(embed=ui.error_embed("破産できません", result), ephemeral=True)
+        lines = [
+            f"差し押さえた額: **{ui.pelica(result['seized'])}**（うちショップの品の換金 {ui.pelica(result['shop_value'])}）",
+            f"帝愛への配当: **{ui.pelica(result['senior_paid'])}**",
+            f"貸付への配当: **{ui.pelica(result['junior_paid'])}**（免責になった貸付の残り: {ui.pelica(result['forgiven'])}）",
+            f"帝愛の借金: 圧縮のあと **{ui.pelica(result['debt'])}**",
+        ]
+        if result["seed"]:
+            lines.append(f"🕴️ 帝愛が種銭 **{ui.pelica(result['seed'])}** を貸し付けました（借金に加わります）。")
+        await interaction.followup.send(
+            embed=ui.embed("🔴 自己破産しました", "\n".join(lines), ui.ERROR), ephemeral=True
+        )
+        eco.take_notices(uid)
 
     @group.command(name="ミッション", description="今日のミッションと進み具合を見る")
     async def missions(self, interaction: discord.Interaction):

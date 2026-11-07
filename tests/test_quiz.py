@@ -16,6 +16,7 @@ from cogs.quiz_cog import (
     question_embed,
     record_answer,
 )
+from core import teiai
 from core.economy import INITIAL_BALANCE, Economy
 
 NOW = 1_000_000.0
@@ -94,7 +95,9 @@ def test_reward_repays_debt(eco):
     eco.stats(1)
     eco._conn.execute("UPDATE users SET debt=200 WHERE user_id=1")
     eco.quiz_answer(1, qid, "東京", NOW)
-    assert eco._conn.execute("SELECT debt FROM users WHERE user_id=1").fetchone()[0] == 0
+    assert (
+        eco._conn.execute("SELECT debt FROM users WHERE user_id=1").fetchone()[0] == 110
+    )  # 報酬300の3割（90）が、天引きされる
 
 
 def test_parse_choices_rules():
@@ -352,20 +355,31 @@ def test_author_without_balance_pays_winners_by_going_into_debt(eco):
     eco._conn.commit()
     ok, result = eco.quiz_answer(3, qid, "東京", NOW)
     assert ok and result["correct"] and result["reward"] == 1000  # 回答者には、報酬を全額払う
-    assert result["author_debt_added"] == 700 and eco.debt(AUTHOR) == 700  # 残高 300 を払い、足りない 700 は借金になる
+    assert result["author_debt_added"] == 700  # 残高 300 を払い、足りない 700 は借金になる
+    assert (
+        eco.debt(AUTHOR) == 700 + teiai.SEED and eco.balance(AUTHOR) == teiai.SEED
+    )  # 手元が空になったので、帝愛が種銭を貸す
     assert eco.balance(3) == INITIAL_BALANCE + 1000
     assert eco.quiz_next(4, NOW)[0]["id"] == qid  # 出題者の残高が尽きても、問題は出続ける
-    ok, result = eco.quiz_answer(4, qid, "東京", NOW)
-    assert ok and result["reward"] == 1000 and result["author_debt_added"] == 1000 and eco.debt(AUTHOR) > 1000
+    ok, result = eco.quiz_answer(4, qid, "東京", NOW)  # 種銭があるので、次は借金を増やさずに払える
+    assert (
+        ok
+        and result["reward"] == 1000
+        and result["author_debt_added"] == 0
+        and eco.balance(AUTHOR) == teiai.SEED - 1000
+    )
 
 
-def test_debt_from_a_quiz_is_repaid_first_from_the_authors_next_income(eco):
+def test_debt_from_a_quiz_is_withheld_from_the_authors_income_and_blocks_new_questions(eco):
     ok, qid = post(eco, reward=1000)
     eco._conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (AUTHOR,))
     eco._conn.commit()
-    assert eco.quiz_answer(1, qid, "東京", NOW)[1]["author_debt_added"] == 1000 and eco.debt(AUTHOR) == 1000
-    eco.credit(AUTHOR, 400, "入金")  # 入ったお金は、先に借金の返済へ回る
-    assert eco.debt(AUTHOR) == 600 and eco.balance(AUTHOR) == 0
+    assert eco.quiz_answer(1, qid, "東京", NOW)[1]["author_debt_added"] == 1000
+    assert eco.debt(AUTHOR) == 1000 + teiai.SEED
+    eco.credit(AUTHOR, 400, "付与")  # 収入ではない入金は、天引きされない
+    assert eco.debt(AUTHOR) == 1000 + teiai.SEED
+    eco._apply(AUTHOR, 400, "収入", income=400)  # 収入の3割（120）が、天引きされる
+    assert eco.debt(AUTHOR) == 1000 + teiai.SEED - 120
     assert (
         "借金が" in eco.quiz_post(AUTHOR, "問題", ["a", "b", "c", "d"], "", 100, 60, 1, NOW)[1]
     )  # 借金中は出題できない
@@ -693,7 +707,7 @@ def test_public_line_tells_that_the_authors_shortfall_became_debt(eco):
     asyncio.run(PublicButton(qid, right).callback(click))
     assert log[-1] == ("send", "⭕ 正解！")  # 回答者には、いつも通り報酬が入る
     assert f"⚠️ 出題者 <@{AUTHOR}> の残高が足りないため、不足 100ペリカ は出題者の借金になりました。" in public[0]
-    assert eco.balance(1) == INITIAL_BALANCE + 100 and eco.debt(AUTHOR) == 100
+    assert eco.balance(1) == INITIAL_BALANCE + 100 and eco.debt(AUTHOR) == 100 + teiai.SEED
 
 
 # ----------------------------- 正解・不正解の文言（出題者が決める） ----------------------------- #

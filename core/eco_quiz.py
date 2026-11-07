@@ -145,14 +145,10 @@ class QuizMixin:
             if correct and eligible:
                 if author:
                     taken = -self._apply(author, -q["reward"], "クイズ報酬の支払い")
-                    debt_added = q["reward"] - taken  # 残高で払えなかった分は、出題者の借金になる
-                    if debt_added > 0:
-                        self._conn.execute(
-                            "UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?",
-                            (debt_added, self._g(), author),
-                        )
+                    # 残高で払えなかった分は、強制執行したうえで、残りが出題者の借金になる
+                    debt_added = self._owe(author, q["reward"] - taken, "クイズの報酬の支払い")
                 paid = self._apply(
-                    user_id, q["reward"], "クイズ報酬"
+                    user_id, q["reward"], "クイズ報酬", income=q["reward"]
                 )  # 持ち主の問題の報酬は、システムから出る（増える）。みんなの問題は出題者から
             result = {
                 "correct": correct,
@@ -188,7 +184,7 @@ class QuizMixin:
         earned = self._conn.execute("SELECT earned FROM quiz_questions WHERE id=?", (q["id"],)).fetchone()[0]
         diff = entitled - earned
         if diff > 0:
-            self._apply(q["author_id"], diff, "クイズ出題報酬")
+            self._apply(q["author_id"], diff, "クイズ出題報酬", income=diff)
             moved = diff
         elif diff < 0:
             moved = -self.debit_up_to(q["author_id"], -diff, "クイズ出題報酬（調整）")

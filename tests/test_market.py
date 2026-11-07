@@ -536,8 +536,9 @@ def test_short_counts_in_ranking_and_payout_repays_debt(eco):
     set_price(eco, 90.0)
     assert dict((u, v) for _, u, v in a.top(5))[U] == INITIAL_BALANCE + 100
     a._conn.execute("UPDATE users SET debt=300 WHERE user_id=?", (U,))  # 建てたあとに借金ができても
-    a.short_close(U, None, 90.0)  # 決済で戻る額は、先に借金の返済へ回る
-    assert a.debt(U) == 0
+    a.short_close(U, None, 90.0)  # 決済で戻るのは、もともと自分のお金なので、天引きされない
+    assert a.debt(U) == 300
+    assert a.repay_debt(U)[0] and a.debt(U) == 0
 
 
 def test_short_commands(cog):

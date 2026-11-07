@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from cogs.loan_cog import LoanButton, LoanCog, handle_button, offer_embed, who
-from core import loans
+from core import loans, teiai
 from core.economy import INITIAL_BALANCE, Economy
 
 NOW = 1_000_000.0
@@ -84,9 +84,9 @@ def test_accept_guards(eco):
     assert eco.loan_accept(lid, C, NOW + 1) == (False, "この提案を承諾できるのは、借りる本人だけです。")
     assert eco.loan_accept(lid, B, NOW + loans.OFFER_HOURS * 3600) == (False, "承諾の期限が過ぎました。")
     eco.balance(B)
-    eco._conn.execute("UPDATE users SET debt=500 WHERE user_id=?", (B,))
-    assert "借金" in eco.loan_accept(lid, B, NOW + 1)[1]
-    eco._conn.execute("UPDATE users SET debt=0 WHERE user_id=?", (B,))
+    eco._conn.execute("UPDATE users SET bankrupt_at=?, blacklist_until=NULL WHERE user_id=?", (NOW, B))
+    assert "破産者" in eco.loan_accept(lid, B, NOW + 1)[1]  # 破産者のブラックリスト中は、借りられない
+    eco._conn.execute("UPDATE users SET bankrupt_at=NULL WHERE user_id=?", (B,))
     eco._conn.execute("UPDATE users SET balance=10 WHERE user_id=?", (A,))  # 貸す側の残高が減った
     assert "貸す側の残高" in eco.loan_accept(lid, B, NOW + 1)[1]
     eco._conn.execute("UPDATE users SET balance=?", (INITIAL_BALANCE,))
@@ -165,34 +165,46 @@ def test_due_date_collects_automatically(eco):
     assert eco.balance(A) == INITIAL_BALANCE + 200 and eco.loan_collect_due(NOW + 99 * DAY) == []
 
 
-def test_shortfall_becomes_overdue_then_is_collected_from_incoming_money(eco):
+def earn(eco, user_id, amount):
+    """収入（ゲームの利益・デイリーなど）が入ったことにする。借金や延滞があれば、一部が天引きされる。"""
+    eco._apply(user_id, amount, "収入", income=amount)
+
+
+def test_shortfall_becomes_overdue_then_is_collected_from_income(eco):
     lid = active(eco)  # 借りた1000を使い切った想定
     eco._conn.execute("UPDATE users SET balance=300 WHERE user_id=?", (B,))
     out = eco.loan_collect_due(NOW + 1 + 10 * DAY)
     assert out[0]["status"] == "overdue" and out[0]["collected"] == 300 and out[0]["left"] == 900
     assert eco.balance(B) == 0 and eco.loan_get(lid)["status"] == "overdue"
-    eco.credit(B, 500, "入金")  # 入ってきたお金から、回収される
-    assert (
-        eco.balance(B) == 0
-        and eco.loan_remaining(eco.loan_get(lid), NOW + 99 * DAY) == 400
-        and eco.balance(A) == INITIAL_BALANCE - 1000 + 300 + 500
-    )
-    eco.credit(B, 1000, "入金")
-    loan = eco.loan_get(lid)
-    assert (
-        loan["status"] == "repaid" and eco.balance(B) == 600 and eco.balance(A) == INITIAL_BALANCE + 200
-    )  # 完済。残りは手元に残る
+    assert eco.status(B) == teiai.UNDERGROUND  # 延滞で、地下労働者に落ちる
+    earn(eco, B, 500)  # 収入の3割（150）が、天引きで回収される。残りは手元に残る
+    assert eco.balance(B) == 350 and eco.loan_remaining(eco.loan_get(lid), NOW + 99 * DAY) == 750
+    assert eco.balance(A) == INITIAL_BALANCE - 1000 + 300 + 150
+    eco.credit(B, 1000, "付与")  # 収入ではない入金からは、天引きしない
+    assert eco.loan_remaining(eco.loan_get(lid), NOW + 99 * DAY) == 750
+    earn(eco, B, 10_000)  # 天引き3,000で、残り750を回収して完済
+    assert eco.loan_get(lid)["status"] == "repaid" and eco.balance(A) == INITIAL_BALANCE + 200
+    assert eco.status(B) == teiai.KATAGI  # 延滞がなくなれば、カタギに戻る
     ledger_total = eco._conn.execute("SELECT SUM(delta) FROM ledger WHERE user_id IN (?, ?)", (A, B)).fetchone()[0]
     assert ledger_total >= 0
 
 
-def test_game_debt_is_repaid_before_overdue_loans(eco):
+def test_teiai_debt_is_withheld_before_overdue_loans(eco):
     lid = active(eco)
     eco._conn.execute("UPDATE users SET balance=0, debt=200 WHERE user_id=?", (B,))
     eco.loan_collect_due(NOW + 1 + 10 * DAY)
     assert eco.loan_get(lid)["status"] == "overdue"
-    eco.credit(B, 500, "入金")
-    assert eco.debt(B) == 0 and eco.loan_get(lid)["paid"] == 300  # 借金200のあとの300が、貸付へ
+    earn(eco, B, 500)  # 天引き150は、全部が帝愛（シニア債権）へ
+    assert eco.debt(B) == 50 and eco.loan_get(lid)["paid"] == 0
+    earn(eco, B, 500)  # 天引き150: 帝愛の残り50を払い、残りの100が貸付（ジュニア債権）へ
+    assert eco.debt(B) == 0 and eco.loan_get(lid)["paid"] == 100
+
+
+def test_a_debtor_can_still_borrow_from_other_players(eco):
+    eco.balance(B)
+    eco._conn.execute("UPDATE users SET debt=500 WHERE user_id=?", (B,))
+    lid = offer(eco)
+    assert eco.loan_accept(lid, B, NOW + 1) == (True, "")  # 借金中でも借りられる（借り換え）
 
 
 def test_repayment_does_not_chain_into_the_receivers_own_overdue_loans(eco):

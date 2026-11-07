@@ -78,7 +78,7 @@ class BondMixin:
                 else:
                     status, paid = "paid", bonds_mod.maturity_payout(kind, row["principal"])
                     self._ensure(row["user_id"])
-                    self._apply(row["user_id"], paid, f"債券償還:{kind.name}")
+                    self._apply(row["user_id"], paid, f"債券償還:{kind.name}", income=max(0, paid - row["principal"]))
                 self._conn.execute("UPDATE bonds SET status=?, paid=? WHERE id=?", (status, paid, row["id"]))
                 out.append({**dict(row), "status": status, "paid": paid})
         return out
@@ -86,16 +86,20 @@ class BondMixin:
     def bond_cancel(self, user_id: int, bond_id: int) -> tuple:
         """途中解約（通常債だけ）。(成功か, 理由か返した額) を返す。"""
         with self._lock, self._conn:
-            row = self._conn.execute(
-                "SELECT * FROM bonds WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
-                (bond_id, self._g(), user_id),
-            ).fetchone()
-            if row is None:
-                return False, "その番号の債券は持っていません。"
-            kind = bonds_mod.KINDS[row["kind"]]
-            if kind.cancel_penalty is None:
-                return False, f"{kind.name}は解約できません。"
-            refund = bonds_mod.cancel_refund(kind, row["principal"])
-            self._apply(user_id, refund, "返金:債券解約")  # もともと自分のお金なので、借金の徴収はしない
-            self._conn.execute("UPDATE bonds SET status='cancelled', paid=? WHERE id=?", (refund, bond_id))
-            return True, refund
+            return self._bond_cancel_locked(user_id, bond_id)
+
+    def _bond_cancel_locked(self, user_id: int, bond_id: int) -> tuple:
+        """bond_cancel の本体（呼び出し側が、ロックとトランザクションの中で使う）。"""
+        row = self._conn.execute(
+            "SELECT * FROM bonds WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
+            (bond_id, self._g(), user_id),
+        ).fetchone()
+        if row is None:
+            return False, "その番号の債券は持っていません。"
+        kind = bonds_mod.KINDS[row["kind"]]
+        if kind.cancel_penalty is None:
+            return False, f"{kind.name}は解約できません。"
+        refund = bonds_mod.cancel_refund(kind, row["principal"])
+        self._apply(user_id, refund, "返金:債券解約")  # もともと自分のお金なので、借金の徴収はしない
+        self._conn.execute("UPDATE bonds SET status='cancelled', paid=? WHERE id=?", (refund, bond_id))
+        return True, refund

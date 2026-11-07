@@ -15,7 +15,7 @@ from discord.ext import commands, tasks
 
 from cogs._amount import balance_choices
 from cogs.weekly_cog import announce_channel
-from core import approval, loans, logthrottle, ui
+from core import approval, loans, logthrottle, teiai, ui
 from core.duration import format_minutes
 
 
@@ -33,11 +33,23 @@ def terms_lines(loan: dict) -> list:
     ]
 
 
-def offer_embed(loan: dict) -> discord.Embed:
-    lines = terms_lines(loan) + [
-        f"承諾の期限: <t:{int(loan['offer_expires'])}:R>",
-        "借りる人が「承諾」を押すと、お金が移ります。",
-    ]
+def borrower_note(eco, user_id: int) -> str:
+    """貸す人が、貸す相手のリスクを見られるように、借りる人の身分と帝愛への借金を1行で出す。"""
+    debt = eco.debt(user_id)
+    return f"借りる人の身分: {teiai.STATUS_LABEL[eco.status(user_id)]}" + (
+        f"（帝愛への借金 {ui.pelica(debt)}）" if debt else ""
+    )
+
+
+def offer_embed(loan: dict, note: str = "") -> discord.Embed:
+    lines = (
+        terms_lines(loan)
+        + ([note] if note else [])
+        + [
+            f"承諾の期限: <t:{int(loan['offer_expires'])}:R>",
+            "借りる人が「承諾」を押すと、お金が移ります。",
+        ]
+    )
     return ui.embed(f"🤝 貸付の提案 #{loan['id']}", "\n".join(lines), ui.GOLD)
 
 
@@ -153,7 +165,7 @@ class LoanCog(commands.Cog):
         loan = eco.loan_get(result)
         await interaction.response.send_message(
             content=f"<@{member.id}>",
-            embed=offer_embed(loan),
+            embed=offer_embed(loan, borrower_note(eco, member.id)),
             view=offer_view(result),
             allowed_mentions=discord.AllowedMentions(users=[member]),
         )

@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core import teiai
 from core.economy import INITIAL_BALANCE, Economy
 from core.session import Sessions
 from games import blackjack as bj
@@ -220,8 +221,10 @@ def test_chinchiro_loss_beyond_balance_becomes_debt(bot):
     # 全財産を賭けて、親のピンゾロ（5倍払い）で負ける: 残高は0、払い切れない分は借金になる
     ctx, view = make_chinchiro_view(bot, INITIAL_BALANCE, (1, 1, 1), [(2, 2, 3)])
     embed = view.final_embed()
-    assert bot.economy.balance(1) == 0 and bot.economy.debt(1) == INITIAL_BALANCE * 4
-    assert "借金" in embed.description
+    assert (
+        bot.economy.balance(1) == teiai.SEED and bot.economy.debt(1) == INITIAL_BALANCE * 4 + teiai.SEED
+    )  # 手元が空なので、種銭
+    assert "借金" in embed.description and "種銭" in embed.description
     assert_clean(bot) and ledger_matches_balance(bot)
 
 
@@ -415,11 +418,15 @@ def test_chinchiro_all_in_is_allowed_and_debt_is_collected_from_next_income(bot)
     it.edits[-1]["view"].ctx.abort()
     ctx, view = make_chinchiro_view(bot, INITIAL_BALANCE, (1, 1, 1), [(2, 2, 3)])
     view.final_embed()
-    assert bot.economy.debt(1) == INITIAL_BALANCE * 4
-    bot.economy.credit(1, 5000, "テスト")  # 入金は先に借金へ回る
-    assert bot.economy.balance(1) == 0 and bot.economy.debt(1) == INITIAL_BALANCE * 4 - 5000
-    bot.economy.credit(1, 20_000, "テスト")  # 完済して、残りが残高になる
-    assert bot.economy.debt(1) == 0 and bot.economy.balance(1) == 20_000 - (INITIAL_BALANCE * 4 - 5000)
+    debt = INITIAL_BALANCE * 4 + teiai.SEED
+    assert bot.economy.debt(1) == debt and bot.economy.balance(1) == teiai.SEED
+    bot.economy.credit(1, 5000, "テスト")  # 付与などの入金は、天引きされない
+    assert bot.economy.balance(1) == teiai.SEED + 5000 and bot.economy.debt(1) == debt
+    ok, paid = bot.economy.repay_debt(1)  # 自分から返す
+    assert ok and paid == teiai.SEED + 5000 and bot.economy.balance(1) == 0 and bot.economy.debt(1) == debt - paid
+    bot.economy.credit(1, 20_000, "テスト")
+    ok, paid2 = bot.economy.repay_debt(1)  # 完済して、残りが残高になる
+    assert ok and bot.economy.debt(1) == 0 and bot.economy.balance(1) == 20_000 - (debt - paid)
     assert_clean(bot) and ledger_matches_balance(bot)
 
 

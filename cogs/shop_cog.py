@@ -8,13 +8,15 @@ import asyncio
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
-from core import nick, shop, ui
+from core import approval, logthrottle, nick, shop, teiai, ui
 from core.confirm import confirm_action
 
 CONFIRM_FROM = 10_000  # この金額以上の購入は、確認ボタンを挟む
 MAX_QTY = 10
+STATUS_NICK_MINUTES = 2  # 身分のニックネームを付け外しする確認の間隔
+STATUS_NICK_PER_GUILD = 200  # 1回の確認で、1サーバーあたり扱う人数の上限（API を使いすぎない）
 
 SLOT_OF_KIND = {
     shop.TITLE: "title",
@@ -130,7 +132,7 @@ async def apply_title_nick(guild: discord.Guild, member: discord.Member, title: 
     reason = nick_blocker(guild, member)
     if reason:
         raise ShopError(reason)
-    titles = [i.name for i in shop.of_kind(shop.TITLE, include_limited=True)]
+    titles = [i.name for i in shop.of_kind(shop.TITLE, include_limited=True)] + list(teiai.STATUS_NAME.values())
     stored = eco.get_nick_state(guild.id, member.id)
     state = nick.NickState(*stored) if stored else None
     new, new_state = nick.plan(member.nick, state, member.global_name or member.name, titles, title)
@@ -143,7 +145,9 @@ async def apply_title_nick(guild: discord.Guild, member: discord.Member, title: 
             raise ShopError(
                 "Discord 側のエラーで、ニックネームを変えられませんでした。時間をおいて、もう一度お試しください。"
             )
-    if eco.nick_pref(guild.id, member.id):
+    if eco.nick_managed(
+        guild.id, member.id
+    ):  # 称号の表示を選んだ人と、身分を付けている人。元のニックネームを記録しておく
         eco.set_nick_state(
             guild.id, member.id, new_state.original if new_state else None, new_state.applied if new_state else None
         )
@@ -321,6 +325,28 @@ class ShopCog(commands.Cog):
         item = shop.BY_ID.get(self.bot.economy.for_guild(guild_id).get_profile(user_id)["title"])
         return item.name if item else None
 
+    def _nick_tag(self, guild_id: int, user_id: int):
+        """ニックネームの末尾に付ける名前。カタギでなければ身分（装備は差し押さえ中）、カタギで称号の表示を選んでいれば装備中の称号。"""
+        eco = self.bot.economy.for_guild(guild_id)
+        status = eco.status(user_id)
+        if status != teiai.KATAGI:
+            return teiai.STATUS_NAME[status]
+        return self._equipped_title(guild_id, user_id) if eco.nick_pref(guild_id, user_id) else None
+
+    async def sync_status_nick(self, guild: discord.Guild, member: discord.Member) -> None:
+        """身分に合わせて、ニックネームの末尾の【地下労働者】などを付ける・外す（称号の表示を選んだ人は、その称号に戻す）。
+
+        付けられない人（サーバーの持ち主・Bot より上のロールの人・権限がないとき）は、ShopError になる。
+        """
+        eco = self.bot.economy.for_guild(guild.id)
+        tag = self._nick_tag(guild.id, member.id)
+        if tag is None and not eco.nick_managed(guild.id, member.id):
+            return  # 付ける身分も、元に戻すものもない
+        if tag in teiai.STATUS_NAME.values():
+            eco.ensure_nick_row(guild.id, member.id)  # 元のニックネームを記録して、あとで戻せるようにする
+        async with self._nick_locks.setdefault(member.id, asyncio.Lock()):
+            await apply_title_nick(guild, member, self._nick_tag(guild.id, member.id), eco)
+
     async def _sync_title_nick(self, user_id: int, here: discord.Guild = None, member: discord.Member = None) -> tuple:
         """称号の変更を、ニックネーム表示をONにしているサーバーへ反映する。
 
@@ -334,7 +360,7 @@ class ShopCog(commands.Cog):
                 guild = self.bot.get_guild(gid)
                 if guild is None or (here is not None and gid != here.id):
                     continue
-                title = self._equipped_title(gid, user_id)  # そのサーバーで、鍵の中で最新の装備を読む
+                title = self._nick_tag(gid, user_id)  # そのサーバーで、鍵の中で最新の装備と身分を読む
                 is_here = here is not None and gid == here.id
                 try:
                     m = member if is_here else (guild.get_member(user_id) or await guild.fetch_member(user_id))
@@ -353,6 +379,42 @@ class ShopCog(commands.Cog):
                     else:
                         others_failed += 1
             return problem, others_failed
+
+    async def cog_load(self):
+        self.status_nick_tick.start()
+
+    def cog_unload(self):
+        self.status_nick_tick.cancel()
+
+    @tasks.loop(minutes=STATUS_NICK_MINUTES)
+    async def status_nick_tick(self):
+        try:
+            await self.run_status_nick()
+        except Exception as exc:
+            print(f"身分のニックネームの更新に失敗: {exc!r}")
+
+    @status_nick_tick.before_loop
+    async def _before_status_nick(self):
+        await self.bot.wait_until_ready()
+
+    async def run_status_nick(self) -> None:
+        """借金・延滞・破産者の人のニックネームに【地下労働者】などを付け、カタギに戻った人から外す（サーバーごと、人ごとに失敗を切り離す）。"""
+        for guild in list(self.bot.guilds):
+            if not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
+                continue
+            eco = self.bot.economy.for_guild(guild.id)
+            for user_id in eco.status_nick_targets()[:STATUS_NICK_PER_GUILD]:
+                member = guild.get_member(user_id)
+                if member is None:  # キャッシュにいない人は、この回は飛ばす（API を使いすぎない）
+                    continue
+                try:
+                    await self.sync_status_nick(guild, member)
+                except ShopError:
+                    pass  # 付けられない人（持ち主・上位ロール・権限なし）は、そのまま
+                except discord.HTTPException as exc:
+                    logthrottle.warn(
+                        ("status-nick", guild.id), f"身分のニックネームを更新できません: guild={guild.id}: {exc!r}"
+                    )
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):

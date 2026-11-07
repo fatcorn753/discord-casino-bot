@@ -62,14 +62,61 @@ class GuildMixin:
             self._conn.execute("DELETE FROM leaderboards WHERE guild_id=?", (guild_id,))
 
     def set_nick_pref(self, guild_id: int, user_id: int, enabled: bool) -> None:
-        """称号をそのサーバーでのニックネームに付けるか（付けると選んだ人だけ）。"""
+        """称号をそのサーバーでのニックネームに付けるか（付けると選んだ人だけ）。
+
+        外しても、身分の【地下労働者】などが付いている間は、その記録だけ残す（元のニックネームへ戻すため）。
+        """
         with self._lock, self._conn:
             if enabled:
                 self._conn.execute(
-                    "INSERT OR IGNORE INTO nick_prefs (guild_id, user_id) VALUES (?, ?)", (guild_id, user_id)
+                    "INSERT INTO nick_prefs (guild_id, user_id, enabled) VALUES (?, ?, 1) "
+                    "ON CONFLICT(guild_id, user_id) DO UPDATE SET enabled=1",
+                    (guild_id, user_id),
                 )
             else:
-                self._conn.execute("DELETE FROM nick_prefs WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+                self._conn.execute(
+                    "UPDATE nick_prefs SET enabled=0 WHERE guild_id=? AND user_id=?", (guild_id, user_id)
+                )
+                self._drop_idle_nick_row(guild_id, user_id)
+
+    def ensure_nick_row(self, guild_id: int, user_id: int) -> None:
+        """身分のニックネームを付ける人の記録を、なければ作る（称号の表示は、選んだことにしない）。"""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO nick_prefs (guild_id, user_id, enabled) VALUES (?, ?, 0)", (guild_id, user_id)
+            )
+
+    def _drop_idle_nick_row(self, guild_id: int, user_id: int) -> None:
+        """称号の表示も選んでいなくて、Bot が付けたニックネームもなければ、記録を消す。"""
+        self._conn.execute(
+            "DELETE FROM nick_prefs WHERE guild_id=? AND user_id=? AND enabled=0 AND applied_nick IS NULL",
+            (guild_id, user_id),
+        )
+
+    def nick_managed(self, guild_id: int, user_id: int) -> bool:
+        """Bot がこの人のニックネームを扱っているか（称号の表示を選んだ人、または身分が付いている人）。"""
+        with self._lock:
+            return (
+                self._conn.execute(
+                    "SELECT 1 FROM nick_prefs WHERE guild_id=? AND user_id=?", (guild_id, user_id)
+                ).fetchone()
+                is not None
+            )
+
+    def status_nick_targets(self) -> list:
+        """身分のニックネームを、付ける・外す必要があるかもしれない人（このサーバー）。借金・延滞・破産者の人と、身分だけで付けている人。"""
+        now = time.time()
+        with self._lock:
+            return [
+                r[0]
+                for r in self._conn.execute(
+                    "SELECT user_id FROM users WHERE guild_id=? AND (debt > 0 OR (bankrupt_at IS NOT NULL AND "
+                    "(blacklist_until IS NULL OR blacklist_until > ?)) OR EXISTS (SELECT 1 FROM loans l WHERE "
+                    "l.guild_id=users.guild_id AND l.borrower_id=users.user_id AND l.status='overdue')) "
+                    "UNION SELECT user_id FROM nick_prefs WHERE guild_id=? AND enabled=0",
+                    (self._g(), now, self._g()),
+                )
+            ]
 
     def get_nick_state(self, guild_id: int, user_id: int):
         """称号を付けたときの記録 (元のニックネーム, 設定したニックネーム)。未適用なら None。"""
@@ -86,6 +133,7 @@ class GuildMixin:
                 "UPDATE nick_prefs SET original_nick=?, applied_nick=? WHERE guild_id=? AND user_id=?",
                 (original if applied is not None else None, applied, guild_id, user_id),
             )
+            self._drop_idle_nick_row(guild_id, user_id)
 
     def delete_guild_nick_prefs(self, guild_id: int) -> None:
         """Bot がサーバーから外れたときに、そのサーバーの設定を消す。"""
@@ -100,10 +148,11 @@ class GuildMixin:
             ]
 
     def nick_pref(self, guild_id: int, user_id: int) -> bool:
+        """称号をニックネームに付ける設定を、自分で選んでいるか。"""
         with self._lock:
             return (
                 self._conn.execute(
-                    "SELECT 1 FROM nick_prefs WHERE guild_id=? AND user_id=?", (guild_id, user_id)
+                    "SELECT 1 FROM nick_prefs WHERE guild_id=? AND user_id=? AND enabled=1", (guild_id, user_id)
                 ).fetchone()
                 is not None
             )

@@ -99,5 +99,5 @@ class RaffleMixin:
             else:
                 raffle["winner"] = rng.choice(entries)
                 raffle["prize"] = raffle["fee"] * len(entries)  # 手数料なし。集めた参加費の全額
-                self._apply(raffle["winner"], raffle["prize"], "抽選当選")
+                self._apply(raffle["winner"], raffle["prize"], "抽選当選", income=raffle["prize"])
             return raffle

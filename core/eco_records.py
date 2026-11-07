@@ -84,7 +84,7 @@ class RecordMixin:
                     (g, user_id, d, m.id, min(progress, m.target), int(done)),
                 )
                 if done:
-                    self._apply(user_id, m.reward, f"ミッション報酬:{m.name}")
+                    self._apply(user_id, m.reward, f"ミッション報酬:{m.name}", income=m.reward)
                     completed.append((m, m.reward))
             if completed:
                 n = self._conn.execute(
@@ -92,7 +92,7 @@ class RecordMixin:
                 ).fetchone()[0]
                 if n >= missions_mod.PER_DAY:
                     bonus = missions_mod.COMPLETE_BONUS
-                    self._apply(user_id, bonus, "ミッション全達成ボーナス")
+                    self._apply(user_id, bonus, "ミッション全達成ボーナス", income=bonus)
             return {"streak": streak, "new_best": new_best, "completed": completed, "bonus": bonus}
 
     def mission_status(self, user_id: int, day: datetime.date) -> list:

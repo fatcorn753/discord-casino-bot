@@ -16,7 +16,9 @@ class DailyResult:
     streak: int = 0
     balance: int = 0
     boosted: bool = False  # デイリー2倍券を使った
-    repaid: int = 0  # 受け取った額から、借金の返済として引かれた額
+    repaid: int = 0  # 受け取った額から、借金の返済として天引きされた額
+    skimmed: int = 0  # 帝愛が没収した額（借金中のデイリーのピンハネ。借金は減らない）
+    seed: int = 0  # 帝愛が貸し付けた種銭（手元が枠に満たなかったとき）
 
 
 @dataclass(frozen=True)

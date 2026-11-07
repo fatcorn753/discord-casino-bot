@@ -23,9 +23,10 @@ import time
 from typing import Optional
 
 from core import market as market_mod
-from core import schema
+from core import schema, teiai
 from core.eco_bonds import BondMixin
 from core.eco_crypto import CryptoMixin
+from core.eco_debt import DebtMixin
 from core.eco_events import EventMixin
 from core.eco_guild import GuildMixin
 from core.eco_loans import LoanMixin
@@ -58,11 +59,11 @@ class Economy(
     CryptoMixin,
     ShopMixin,
     GuildMixin,
+    DebtMixin,
 ):
     DAILY_BASE = 1000
     DAILY_STREAK_BONUS = 100  # 連続1日ごとの加算
     DAILY_STREAK_CAP = 20  # 加算は20日分まで（最大 +2,000。1回の額は最大 3,000）
-    _loan_guard = False  # 貸付の返済中だけ True。受け取った人の延滞の回収が、連鎖しないようにする
 
     def __init__(self, db_path: str, legacy_guild_id: Optional[int] = None, strict: bool = False):
         """legacy_guild_id: サーバー別になる前の古い記録を引き継ぐサーバー。古い記録があるのに未指定ならエラー。
@@ -78,6 +79,7 @@ class Economy(
         self._conn.execute("PRAGMA journal_mode=WAL")
         self.guild_id = 0
         self._strict = strict
+        self._notices = {}  # 結果の画面に出す一言（core/eco_debt.py）。サーバーごとの見え方（for_guild）の間で、共有する
         self._migrate_to_guild_scope(legacy_guild_id)
         self._init_schema()
         self._retire_autoplay()
@@ -208,30 +210,20 @@ class Economy(
             "SELECT debt FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
         ).fetchone()["debt"]
 
-    def _apply(self, user_id: int, delta: int, reason: str) -> int:
+    def _apply(self, user_id: int, delta: int, reason: str, income: int = 0) -> int:
         """残高に delta を足す（0 未満にはならない）。実際に変化した量を返す。
 
-        借金があるとき、入金（delta > 0）は先に借金の返済へ回す（強制徴収。完済まで）。
-        賭け金の返金は、もともと自分のお金なので徴収しない。
+        income は、delta のうち「収入」の部分（ゲームの純利益・デイリー・ミッション報酬など）。
+        借金があれば、その REPAY_RATE を、借金の返済へ天引きする（core/teiai.py）。賭け金の返金や、借りたお金などは、収入ではない。
         """
         before = self._balance(user_id)
         after = max(0, before + delta)
         self._conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, self._g(), user_id))
         if after != before:
             self._ledger(user_id, after - before, after, reason)
-        if delta > 0 and not reason.startswith("返金"):
-            repay = min(self._debt(user_id), after)
-            if repay > 0:
-                self._conn.execute(
-                    "UPDATE users SET balance=balance-?, debt=debt-? WHERE guild_id=? AND user_id=?",
-                    (repay, repay, self._g(), user_id),
-                )
-                self._ledger(user_id, -repay, after - repay, "借金の返済")
-                after -= repay
-            if not self._loan_guard:  # 延滞中の貸付があれば、入ったお金から回収する（借金の返済のあと）
-                self._collect_overdue_for(user_id)
-                after = self._balance(user_id)
-        return after - before
+        if delta > 0 and income > 0:
+            self._withhold(user_id, min(income, delta))
+        return self._balance(user_id) - before
 
     def debt(self, user_id: int) -> int:
         """借金の残り。口座が無ければ 0（口座は作らない）。"""
@@ -349,15 +341,17 @@ class Economy(
                     )
             total = payout + insured
             if total:
-                self._apply(user_id, total, f"払い戻し:{game}" if payout else f"保険券で半額返金:{game}")
+                # 払い戻しのうち、賭け金を超えた分（純利益）だけが収入。賭け金の返金や、保険券の返金からは天引きしない
+                self._apply(
+                    user_id,
+                    total,
+                    f"払い戻し:{game}" if payout else f"保険券で半額返金:{game}",
+                    income=max(0, payout - amount),
+                )
             self._conn.execute("DELETE FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g()))
             taken = -self._apply(user_id, -penalty, f"追加の支払い:{game}") if penalty > 0 else 0
-            if penalty > taken:  # 残高で足りない分は借金にする
-                self._conn.execute(
-                    "UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?",
-                    (penalty - taken, self._g(), user_id),
-                )
-                self._ledger(user_id, 0, self._balance(user_id), f"借金:{game}（{penalty - taken:,}ペリカ）")
+            if penalty > taken:  # 残高で足りない分は、強制執行したうえで、残りを帝愛の借金にする
+                self._owe(user_id, penalty - taken, f"{game}の倍払い")
             taken = max(penalty, 0)
             net = total - amount - taken
             self._conn.execute(
@@ -436,12 +430,18 @@ class Economy(
                     (self._g(), user_id),
                 )
             debt_before = self._debt(user_id)
-            self._apply(user_id, amount, f"デイリー（{streak}日連続{'・2倍券' if boosted else ''}）")
+            skimmed = teiai.skim(amount) if debt_before > 0 else 0  # 借金中は、帝愛がピンハネ（借金の元本は減らない）
+            if skimmed:
+                self._ledger(user_id, 0, self._balance(user_id), f"帝愛のピンハネ（デイリー {skimmed:,}ペリカ）")
+            credit = amount - skimmed
+            self._apply(user_id, credit, f"デイリー（{streak}日連続{'・2倍券' if boosted else ''}）", income=credit)
+            repaid = debt_before - self._debt(user_id)
+            seed = self._topup_seed(user_id)  # 借金中で、手元が種銭の枠に満たなければ、枠まで貸す
             self._conn.execute(
                 "UPDATE users SET daily_streak=?, last_daily=?, last_slot=? WHERE guild_id=? AND user_id=?",
                 (streak, today.isoformat(), slot, self._g(), user_id),
             )
-            return DailyResult(True, amount, streak, self._balance(user_id), boosted, debt_before - self._debt(user_id))
+            return DailyResult(True, amount, streak, self._balance(user_id), boosted, repaid, skimmed, seed)
 
     # ------------------------------------------------------------------ #
     # サーバー別ランキング用: どのサーバーで遊んだか                      #
@@ -585,7 +585,7 @@ class Economy(
             )  # 手数料は別の行にする（1日の上限は、送った額だけで数えるため）
             if fee:
                 self._apply(sender, -fee, "送金手数料")
-            self._apply(receiver, amount, f"送金（受）←{sender}")
+            self._apply(receiver, amount, f"送金（受）←{sender}", income=amount)
             return TransferResult(True, received=amount, fee=fee, sender_balance=self._balance(sender))
 
     def close(self):

@@ -95,30 +95,34 @@ class CryptoMixin:
     def crypto_sell(self, user_id: int, units: Optional[int], price: float) -> "CryptoResult":
         """units 口を売る（None なら全部）。受け取る額は手数料を引いたもの。"""
         with self._lock, self._conn:
-            have, cost = self.crypto_holding(user_id)
-            if have <= 0:
-                return CryptoResult(False, f"{market_mod.NAME}を持っていません。")
-            units = have if units is None else units
-            if units < 1 or units > have:
-                return CryptoResult(False, f"売れるのは 0.001〜{market_mod.lots(have)} です（持っている分）。")
-            proceeds, fee = market_mod.sell_quote(units, price)
-            if proceeds < 1 and units != have:
-                return CryptoResult(False, "その数量では受け取れる額が 1ペリカ未満です。もう少し多く売ってください。")
-            removed = (
-                cost if units == have else round(cost * units / have)
-            )  # 端数の按分は四捨五入（切り捨てだと取得額が少しずつ残る）
-            self._ensure(user_id)
-            self._apply(user_id, proceeds, f"{market_mod.NAME}売却:{market_mod.lots(units)}@{market_mod.fmt(price)}")
-            if units == have:
-                self._conn.execute("DELETE FROM crypto WHERE guild_id=? AND user_id=?", (self._g(), user_id))
-            else:
-                self._conn.execute(
-                    "UPDATE crypto SET units=units-?, cost=cost-? WHERE guild_id=? AND user_id=?",
-                    (units, removed, self._g(), user_id),
-                )
-            return CryptoResult(
-                True, units=units, money=proceeds, fee=fee, balance=self._balance(user_id), profit=proceeds - removed
+            return self._crypto_sell_locked(user_id, units, price)
+
+    def _crypto_sell_locked(self, user_id: int, units: Optional[int], price: float) -> "CryptoResult":
+        """crypto_sell の本体（呼び出し側が、ロックとトランザクションの中で使う）。"""
+        have, cost = self.crypto_holding(user_id)
+        if have <= 0:
+            return CryptoResult(False, f"{market_mod.NAME}を持っていません。")
+        units = have if units is None else units
+        if units < 1 or units > have:
+            return CryptoResult(False, f"売れるのは 0.001〜{market_mod.lots(have)} です（持っている分）。")
+        proceeds, fee = market_mod.sell_quote(units, price)
+        if proceeds < 1 and units != have:
+            return CryptoResult(False, "その数量では受け取れる額が 1ペリカ未満です。もう少し多く売ってください。")
+        removed = (
+            cost if units == have else round(cost * units / have)
+        )  # 端数の按分は四捨五入（切り捨てだと取得額が少しずつ残る）
+        self._ensure(user_id)
+        self._apply(user_id, proceeds, f"{market_mod.NAME}売却:{market_mod.lots(units)}@{market_mod.fmt(price)}")
+        if units == have:
+            self._conn.execute("DELETE FROM crypto WHERE guild_id=? AND user_id=?", (self._g(), user_id))
+        else:
+            self._conn.execute(
+                "UPDATE crypto SET units=units-?, cost=cost-? WHERE guild_id=? AND user_id=?",
+                (units, removed, self._g(), user_id),
             )
+        return CryptoResult(
+            True, units=units, money=proceeds, fee=fee, balance=self._balance(user_id), profit=proceeds - removed
+        )
 
     # ------------------------------------------------------------------ #
     # CSトークンの空売り                                                  #

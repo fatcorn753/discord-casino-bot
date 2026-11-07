@@ -9,6 +9,7 @@
 from typing import Optional
 
 from core import loans as loans_mod
+from core import teiai
 
 
 class LoanMixin:
@@ -30,29 +31,31 @@ class LoanMixin:
 
     def _loan_pay(self, loan: dict, amount: int) -> None:
         """借りた人 → 貸した人へ amount を動かす（借りた人の残高は、呼び出し側が確かめておく）。"""
-        self._loan_guard = True  # 回収の連鎖（受け取った人の延滞の回収）を止める
-        try:
-            self._apply(loan["borrower_id"], -amount, f"貸付の返済→{loan['lender_id']}（#{loan['id']}）")
-            self._ensure(loan["lender_id"])
-            self._apply(loan["lender_id"], amount, f"貸付の回収←{loan['borrower_id']}（#{loan['id']}）")
-        finally:
-            self._loan_guard = False
+        self._apply(loan["borrower_id"], -amount, f"貸付の返済→{loan['lender_id']}（#{loan['id']}）")
+        self._ensure(loan["lender_id"])
+        self._apply(loan["lender_id"], amount, f"貸付の回収←{loan['borrower_id']}（#{loan['id']}）")
         loan["paid"] += amount
         self._conn.execute("UPDATE loans SET paid=? WHERE id=?", (loan["paid"], loan["id"]))
 
-    def _collect_overdue_for(self, user_id: int) -> None:
-        """延滞中の貸付があれば、この人の残高から古い順に回収する（_apply から、入金のあとに呼ばれる）。"""
+    def _collect_overdue_for(self, user_id: int, budget: int) -> int:
+        """延滞中の貸付（ジュニア債権）を、この人の残高から、古い順に最大 budget まで回収する。回収した合計を返す。
+
+        帝愛への返済のあとの、天引きの残りで呼ばれる（core/eco_debt.py の _withhold）。
+        """
+        total = 0
         rows = self._conn.execute(
             "SELECT * FROM loans WHERE guild_id=? AND borrower_id=? AND status='overdue' ORDER BY id",
             (self._g(), user_id),
         ).fetchall()
         for row in rows:
             loan = dict(row)
-            take = min(self._balance(user_id), self.loan_remaining(loan, loan["due"]))
+            take = min(self._balance(user_id), self.loan_remaining(loan, loan["due"]), budget - total)
             if take > 0:
                 self._loan_pay(loan, take)
+                total += take
             if self.loan_remaining(loan, loan["due"]) <= 0:
                 self._conn.execute("UPDATE loans SET status='repaid' WHERE id=?", (loan["id"],))
+        return total
 
     # ---- 提案・承諾・辞退・取り下げ ---- #
     def loan_offer(
@@ -130,8 +133,10 @@ class LoanMixin:
             if now >= loan["offer_expires"]:
                 return False, "承諾の期限が過ぎました。"
             self._ensure(user_id)
-            if self._debt(user_id) > 0:
-                return False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、借りられません。"
+            if (
+                self.status(user_id) == teiai.BANKRUPT
+            ):  # 借金があっても借りられる（借り換え）。破産者のブラックリスト中は借りられない
+                return False, "破産者のブラックリストの間は、借りられません（完済して7日たつと解除されます）。"
             row = self._conn.execute(
                 "SELECT COALESCE(SUM(status='overdue'), 0) AS late FROM loans WHERE guild_id=? AND borrower_id=? AND status IN ('active','overdue')",
                 (self._g(), user_id),
@@ -219,6 +224,8 @@ class LoanMixin:
                 left = self.loan_remaining(loan, loan["due"])
                 status = "repaid" if left <= 0 else "overdue"
                 self._conn.execute("UPDATE loans SET status=? WHERE id=?", (status, loan["id"]))
+                if status == "overdue":
+                    self._go_underground(loan["borrower_id"])  # 延滞で、地下労働者に落ちる（連続ログインは 0 に戻る）
                 out.append({**loan, "status": status, "collected": take, "left": left})
         return out
 

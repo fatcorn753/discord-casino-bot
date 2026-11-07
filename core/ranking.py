@@ -4,7 +4,7 @@ from typing import Optional
 
 import discord
 
-from core import ui
+from core import teiai, ui
 
 MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
 TOP_N = 10
@@ -36,7 +36,11 @@ def build_embed(
                 parts.append(f"債券 {bonds[uid]:,}")
             return f"**{ui.pelica(total)}**" + (f"（うち{'・'.join(parts)}）" if parts else "")
 
-        lines = [f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>　{worth(uid, bal)}" for r, uid, bal in top]
+        marks = {teiai.UNDERGROUND: "🟡", teiai.BANKRUPT: "🔴"}  # カタギでない人は、名前の横に身分の印
+        lines = [
+            f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>{marks.get(eco.status(uid), '')}　{worth(uid, bal)}"
+            for r, uid, bal in top
+        ]
         me = eco.rank_of(viewer_id, guild_ids) if viewer_id else None
         if me and me[0] > TOP_N:
             lines.append(f"…\n`{me[0]:>2}` <@{viewer_id}>　{worth(viewer_id, me[1])}")
