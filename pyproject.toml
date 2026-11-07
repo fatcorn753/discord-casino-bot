@@ -1,0 +1,18 @@
+[project]
+name = "discord-casino-bot"
+version = "0.1.0"
+description = "A Discord casino bot with Pelica currency system"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "discord.py>=2.4.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

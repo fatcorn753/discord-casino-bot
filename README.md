@@ -266,6 +266,15 @@ Bot の持ち主（`owner_ids`）が、Bot とのDMで `/運営 抽選 開催` �
 3. **特権インテントは不要です**（メッセージの内容もメンバー一覧も読みません）。
 
 ### 2. 設定と起動
+
+**uv を使う場合（推奨）:**
+```bash
+uv sync
+cp config.example.json config.json      # Windows: copy config.example.json config.json
+uv run main.py
+```
+
+**pip / venv を使う場合:**
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
@@ -308,9 +317,9 @@ https://discord.com/oauth2/authorize?client_id=CLIENT_ID&scope=bot+applications.
 
 ## テスト
 ```bash
-.venv/bin/pip install pytest
-.venv/bin/python -m pytest tests
+uv run pytest
 ```
+※ 従来の pip / venv 環境の場合は `.venv/bin/pip install pytest` 後に `.venv/bin/python -m pytest tests` で実行できます。
 
 ## ディレクトリ構成
 ```
@@ -347,9 +356,10 @@ casino-bot/
 サーバーの端末から行う `manage.py` も、そのまま使えます（Bot の起動中でも安全です）。
 
 ```bash
-.venv/bin/python manage.py grant サーバーID ユーザーID 金額 [理由]   # ペリカを付与（1〜10,000,000）
-.venv/bin/python manage.py servers                               # サーバーの許可状況
+uv run manage.py grant サーバーID ユーザーID 金額 [理由]   # ペリカを付与（1〜10,000,000）
+uv run manage.py servers                               # サーバーの許可状況
 ```
+※ pip / venv 環境の場合は `uv run` を `.venv/bin/python` に置き換えてください。
 
 ## ライセンス
 [MIT License](LICENSE)。自由に使えて、改変・再配布もできます（著作権表示を残してください）。
