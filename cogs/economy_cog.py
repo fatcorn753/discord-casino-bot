@@ -14,11 +14,11 @@ from core import missions as missions_mod
 from core.confirm import confirm_action
 from core.economy import Economy
 
-TRANSFER_FEE_RATE = 0.10        # 送る側が、送金額の10%を手数料として払う
-TRANSFER_DAILY_LIMIT = 20_000   # 1日に送れる合計（送る金額だけで数える。手数料は含まない）
-TRANSFER_CONFIRM_FROM = 5_000   # この額以上は確認ボタンを挟む
-BOARD_INTERVAL_MINUTES = 1       # ランキング掲示板を更新する間隔
-TRANSFER_MIN_GAMES = 3          # 送金できるのは、ゲームで3回以上遊んだ人（複数アカウントで稼ぐのを防ぐ）
+TRANSFER_FEE_RATE = 0.10  # 送る側が、送金額の10%を手数料として払う
+TRANSFER_DAILY_LIMIT = 20_000  # 1日に送れる合計（送る金額だけで数える。手数料は含まない）
+TRANSFER_CONFIRM_FROM = 5_000  # この額以上は確認ボタンを挟む
+BOARD_INTERVAL_MINUTES = 1  # ランキング掲示板を更新する間隔
+TRANSFER_MIN_GAMES = 3  # 送金できるのは、ゲームで3回以上遊んだ人（複数アカウントで稼ぐのを防ぐ）
 
 
 def reset_label(bot) -> str:
@@ -27,7 +27,7 @@ def reset_label(bot) -> str:
     return "日本時間 0:00" if offset == 9 else f"UTC{offset:+g} の 0:00"
 
 
-DAILY_SLOT_HOURS = 6            # デイリーボーナスを受け取れる間隔（0・6・12・18時に切り替わる）
+DAILY_SLOT_HOURS = 6  # デイリーボーナスを受け取れる間隔（0・6・12・18時に切り替わる）
 
 
 def tz_label(bot) -> str:
@@ -64,6 +64,7 @@ def local_now(bot) -> datetime.datetime:
 
 def manage_guild_or_owner():
     """サーバー管理権限を持つ人、または Bot の持ち主（owner_ids）だけが使える。"""
+
     def predicate(interaction: discord.Interaction) -> bool:
         if interaction.user.id in approval.owner_ids(interaction.client.config):
             return True
@@ -71,6 +72,7 @@ def manage_guild_or_owner():
         if perms.manage_guild:
             return True
         raise app_commands.MissingPermissions(["manage_guild"])
+
     return app_commands.check(predicate)
 
 
@@ -94,17 +96,26 @@ class EconomyCog(commands.Cog):
     async def balance(self, interaction: discord.Interaction, member: discord.Member = None):
         member = member or interaction.user
         # 他の人を見るだけで、その人の口座（初期支給つき）が作られないよう、読み取り専用で調べる
-        s = self.g(interaction).stats(member.id) if member.id == interaction.user.id else self.g(interaction).peek_stats(member.id)
+        s = (
+            self.g(interaction).stats(member.id)
+            if member.id == interaction.user.id
+            else self.g(interaction).peek_stats(member.id)
+        )
         if s is None:
-            return await interaction.response.send_message(embed=ui.embed(
-                f"💴 {member.display_name} の残高", "まだ遊んでいません（口座がありません）。", ui.INFO))
+            return await interaction.response.send_message(
+                embed=ui.embed(f"💴 {member.display_name} の残高", "まだ遊んでいません（口座がありません）。", ui.INFO)
+            )
         rank = self.g(interaction).rank_of(member.id)
         # ショップで買ったカードの色・アイコン・称号を反映する
         prof = self.g(interaction).get_profile(member.id)
         color_item, icon_item, title_item = (shop.BY_ID.get(prof[k]) for k in ("card_color", "card_icon", "title"))
         icon = icon_item.value if icon_item else "💴"
         title_line = f"## 🏷️ {title_item.name}\n" if title_item else ""
-        e = ui.embed(f"{icon} {member.display_name} の残高", f"{title_line}# {ui.pelica(s['balance'])}", color_item.value if color_item else ui.GOLD)
+        e = ui.embed(
+            f"{icon} {member.display_name} の残高",
+            f"{title_line}# {ui.pelica(s['balance'])}",
+            color_item.value if color_item else ui.GOLD,
+        )
         e.set_thumbnail(url=member.display_avatar.url)
         if s.get("debt"):
             e.add_field(name="借金", value=f"{ui.pelica(s['debt'])}（入ったお金から先に返済）", inline=False)
@@ -118,10 +129,16 @@ class EconomyCog(commands.Cog):
             e.add_field(name="債券（預けている元本）", value=ui.pelica(bonds), inline=True)
         e.add_field(name="遊んだ回数", value=f"{s['games_played']:,}回", inline=True)
         e.add_field(name="最大の勝ち", value=ui.pelica(s["biggest_win"]), inline=True)
-        e.add_field(name="連続ログイン", value=f"{s['daily_streak']}日" if s["daily_streak"] else "まだ受け取っていません", inline=True)
+        e.add_field(
+            name="連続ログイン",
+            value=f"{s['daily_streak']}日" if s["daily_streak"] else "まだ受け取っていません",
+            inline=True,
+        )
         play = self.g(interaction).play_summary(member.id)
         if play["plays"]:
-            e.add_field(name="勝率", value=f"{play['wins'] * 100 // play['plays']}%（{play['plays']:,}戦）", inline=True)
+            e.add_field(
+                name="勝率", value=f"{play['wins'] * 100 // play['plays']}%（{play['plays']:,}戦）", inline=True
+            )
             e.add_field(name="ゲームの損益", value=f"{play['net_total']:+,}ペリカ", inline=True)
         if play["best_streak"] >= 2:
             e.add_field(name="最大連勝", value=f"{play['best_streak']}連勝", inline=True)
@@ -133,17 +150,24 @@ class EconomyCog(commands.Cog):
         now = local_now(self.bot)
         result = self.g(interaction).claim_daily(interaction.user.id, now.date(), slot_of(now))
         if not result.ok:
-            return await interaction.response.send_message(embed=ui.warn_embed(
-                "まだ受け取れません",
-                f"次は **{next_slot_label(self.bot)}**（<t:{int(next_slot(self.bot).timestamp())}:R>）から受け取れます。\n"
-                f"ボーナスは6時間ごと（0・6・12・18時）です。\n連続ログイン: **{result.streak}日**"), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.warn_embed(
+                    "まだ受け取れません",
+                    f"次は **{next_slot_label(self.bot)}**（<t:{int(next_slot(self.bot).timestamp())}:R>）から受け取れます。\n"
+                    f"ボーナスは6時間ごと（0・6・12・18時）です。\n連続ログイン: **{result.streak}日**",
+                ),
+                ephemeral=True,
+            )
         next_bonus = Economy.DAILY_BASE + Economy.DAILY_STREAK_BONUS * min(result.streak, Economy.DAILY_STREAK_CAP)
         boost = "🎟️ デイリー2倍券を使った！\n" if result.boosted else ""
         debt_line = f"💸 借金の返済に **{ui.pelica(result.repaid)}** 引かれた\n" if result.repaid else ""
-        await interaction.response.send_message(embed=ui.ok_embed(
-            "デイリーボーナス",
-            f"{boost}**+{ui.pelica(result.amount)}**\n{debt_line}連続ログイン: **{result.streak}日**（明日は {ui.pelica(next_bonus)}）\n残高: **{ui.pelica(result.balance)}**\n\n"
-            f"🕛 次のボーナスは **{next_slot_label(self.bot)}**（<t:{int(next_slot(self.bot).timestamp())}:R>）から。6時間ごと（0・6・12・18時）に受け取れます。"))
+        await interaction.response.send_message(
+            embed=ui.ok_embed(
+                "デイリーボーナス",
+                f"{boost}**+{ui.pelica(result.amount)}**\n{debt_line}連続ログイン: **{result.streak}日**（明日は {ui.pelica(next_bonus)}）\n残高: **{ui.pelica(result.balance)}**\n\n"
+                f"🕛 次のボーナスは **{next_slot_label(self.bot)}**（<t:{int(next_slot(self.bot).timestamp())}:R>）から。6時間ごと（0・6・12・18時）に受け取れます。",
+            )
+        )
 
     @group.command(name="ミッション", description="今日のミッションと進み具合を見る")
     async def missions(self, interaction: discord.Interaction):
@@ -151,53 +175,71 @@ class EconomyCog(commands.Cog):
         status = self.g(interaction).mission_status(interaction.user.id, now.date())
         lines = []
         for m, progress, done in status:
-            bar = "🟩" * (10 * min(progress, m.target) // m.target) + "⬜" * (10 - 10 * min(progress, m.target) // m.target)
+            bar = "🟩" * (10 * min(progress, m.target) // m.target) + "⬜" * (
+                10 - 10 * min(progress, m.target) // m.target
+            )
             mark = "✅" if done else "🔸"
             shown = m.target if done else progress
             lines.append(f"{mark} **{m.name}**　報酬 {ui.pelica(m.reward)}\n{bar} {shown:,} / {m.target:,}")
         tomorrow = next_reset(self.bot)
         streak, best = self.g(interaction).win_streak(interaction.user.id)
-        lines.append(f"\n※ 賭け金 {ui.pelica(missions_mod.MIN_BET)} 以上のゲームだけが数えられます。連勝はその日の分だけです。")
+        lines.append(
+            f"\n※ 賭け金 {ui.pelica(missions_mod.MIN_BET)} 以上のゲームだけが数えられます。連勝はその日の分だけです。"
+        )
         lines.append(f"🎁 3つ全部で、さらに **+{ui.pelica(missions_mod.COMPLETE_BONUS)}**")
         lines.append(f"🔥 いまの連勝: **{streak}** ／ 自己ベスト: **{best}**")
         lines.append(f"🕛 次の更新: **{reset_label(self.bot)}**（<t:{int(tomorrow.timestamp())}:R>）")
-        await interaction.response.send_message(embed=ui.embed("📜 今日のミッション", "\n".join(lines), ui.GOLD), ephemeral=True)
+        await interaction.response.send_message(
+            embed=ui.embed("📜 今日のミッション", "\n".join(lines), ui.GOLD), ephemeral=True
+        )
 
     @group.command(name="ランキング", description="このサーバーで、ペリカの多い順に並べる")
     async def ranking(self, interaction: discord.Interaction):
-        e = ranking.build_embed(self.g(interaction), None, "🏆 このサーバーのランキング（総資産）", interaction.user.id,
-                                footer="総資産 = 残高 + CSトークンの評価額 ｜ ペリカはサーバーごとに別々です")
+        e = ranking.build_embed(
+            self.g(interaction),
+            None,
+            "🏆 このサーバーのランキング（総資産）",
+            interaction.user.id,
+            footer="総資産 = 残高 + CSトークンの評価額 ｜ ペリカはサーバーごとに別々です",
+        )
         await interaction.response.send_message(embed=e, allowed_mentions=discord.AllowedMentions.none())
 
     # ------------------- 自動で更新されるランキング掲示板 ------------------- #
     def _board_embed(self, guild_id: int) -> discord.Embed:
         ts = int(datetime.datetime.now().timestamp())
         return ranking.build_embed(
-            self.bot.economy.for_guild(guild_id), None, "🏆 ペリカランキング（総資産）",
+            self.bot.economy.for_guild(guild_id),
+            None,
+            "🏆 ペリカランキング（総資産）",
             header=f"最終更新: <t:{ts}:R>\n\n",
-            footer=f"{BOARD_INTERVAL_MINUTES}分ごとに自動で更新されます")
+            footer=f"{BOARD_INTERVAL_MINUTES}分ごとに自動で更新されます",
+        )
 
     async def _refresh_board(self, board: dict) -> None:
         """掲示板のメッセージを最新の順位に書き換える。消されていたら投稿し直す。"""
         guild = self.bot.get_guild(board["guild_id"])
         if guild is None:
-            return                      # 一時的に見えないだけかもしれないので、記録は残す
+            return  # 一時的に見えないだけかもしれないので、記録は残す
         channel = guild.get_channel(board["channel_id"])
         if channel is None:
-            self.eco.delete_leaderboard(guild.id)       # チャンネルが消えた
+            self.eco.delete_leaderboard(guild.id)  # チャンネルが消えた
             return
         embed = self._board_embed(guild.id)
         try:
             # fetch_message は「メッセージ履歴を読む」権限が要る。自分の投稿の書き換えには要らないので、読まずに直接書き換える
             await channel.get_partial_message(board["message_id"]).edit(embed=embed)
         except discord.NotFound:
-            try:       # メッセージが消された: 投稿し直して、新しいIDを記録する
+            try:  # メッセージが消された: 投稿し直して、新しいIDを記録する
                 new = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
                 self.eco.set_leaderboard(guild.id, channel.id, new.id)
             except discord.HTTPException as exc:
-                logthrottle.warn(("board-repost", guild.id), f"ランキング掲示板を投稿し直せません: guild={guild.id}: {exc!r}")
+                logthrottle.warn(
+                    ("board-repost", guild.id), f"ランキング掲示板を投稿し直せません: guild={guild.id}: {exc!r}"
+                )
         except discord.HTTPException as exc:
-            logthrottle.warn(("board", guild.id), f"ランキング掲示板を更新できません: guild={guild.id}: {exc!r}")      # 権限不足など。次の周期で再試行（ログは30分に1回）
+            logthrottle.warn(
+                ("board", guild.id), f"ランキング掲示板を更新できません: guild={guild.id}: {exc!r}"
+            )  # 権限不足など。次の周期で再試行（ログは30分に1回）
 
     async def cog_load(self):
         self.refresh_boards.start()
@@ -210,7 +252,7 @@ class EconomyCog(commands.Cog):
         for board in self.eco.list_leaderboards():
             try:
                 await self._refresh_board(board)
-            except Exception as exc:       # 1つのサーバーの失敗で、他のサーバーの更新を止めない
+            except Exception as exc:  # 1つのサーバーの失敗で、他のサーバーの更新を止めない
                 print(f"ランキング掲示板の更新に失敗: {board}: {exc!r}")
 
     @refresh_boards.before_loop
@@ -231,59 +273,101 @@ class EconomyCog(commands.Cog):
             except discord.HTTPException:
                 pass
 
-    @group.command(name="ランキング掲示", description="[管理者] ランキングを投稿して自動で更新する／止める（サーバー管理）")
+    @group.command(
+        name="ランキング掲示", description="[管理者] ランキングを投稿して自動で更新する／止める（サーバー管理）"
+    )
     @app_commands.rename(channel="チャンネル", stop="止める")
-    @app_commands.describe(channel=f"ランキングを置くチャンネル（{BOARD_INTERVAL_MINUTES}分ごとに自動で更新。1サーバーに1つ）",
-                           stop="掲示を止めて、投稿を削除する（このときチャンネルは不要）")
+    @app_commands.describe(
+        channel=f"ランキングを置くチャンネル（{BOARD_INTERVAL_MINUTES}分ごとに自動で更新。1サーバーに1つ）",
+        stop="掲示を止めて、投稿を削除する（このときチャンネルは不要）",
+    )
     @manage_guild_or_owner()
-    async def board_set(self, interaction: discord.Interaction, channel: discord.TextChannel = None, stop: bool = False):
+    async def board_set(
+        self, interaction: discord.Interaction, channel: discord.TextChannel = None, stop: bool = False
+    ):
         if stop:
             return await self._board_unset(interaction)
         if channel is None:
-            return await interaction.response.send_message(embed=ui.error_embed(
-                "チャンネルを指定してください", "掲示するチャンネルを指定します。止めるときは「止める」を True にしてください。"), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.error_embed(
+                    "チャンネルを指定してください",
+                    "掲示するチャンネルを指定します。止めるときは「止める」を True にしてください。",
+                ),
+                ephemeral=True,
+            )
         perms = channel.permissions_for(interaction.guild.me)
         if not (perms.view_channel and perms.send_messages and perms.embed_links):
-            return await interaction.response.send_message(embed=ui.error_embed(
-                "掲示できません", f"Bot が {channel.mention} に埋め込みを投稿できません。チャンネルの権限を確認してください。"), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.error_embed(
+                    "掲示できません",
+                    f"Bot が {channel.mention} に埋め込みを投稿できません。チャンネルの権限を確認してください。",
+                ),
+                ephemeral=True,
+            )
         await interaction.response.defer(ephemeral=True)
         old = self.eco.get_leaderboard(interaction.guild.id)
-        message = await channel.send(embed=self._board_embed(interaction.guild.id), allowed_mentions=discord.AllowedMentions.none())
+        message = await channel.send(
+            embed=self._board_embed(interaction.guild.id), allowed_mentions=discord.AllowedMentions.none()
+        )
         self.eco.set_leaderboard(interaction.guild.id, channel.id, message.id)
-        await self._delete_board_message(interaction.guild, old)        # 前の掲示板があれば、新しいものと入れ替える
-        await interaction.followup.send(embed=ui.ok_embed(
-            "ランキングを掲示しました",
-            f"{message.jump_url}\n{BOARD_INTERVAL_MINUTES}分ごとに、この投稿を自動で書き換えます。止めるときは `/ペリカ ランキング掲示` の「止める」を True にしてください。"), ephemeral=True)
+        await self._delete_board_message(interaction.guild, old)  # 前の掲示板があれば、新しいものと入れ替える
+        await interaction.followup.send(
+            embed=ui.ok_embed(
+                "ランキングを掲示しました",
+                f"{message.jump_url}\n{BOARD_INTERVAL_MINUTES}分ごとに、この投稿を自動で書き換えます。止めるときは `/ペリカ ランキング掲示` の「止める」を True にしてください。",
+            ),
+            ephemeral=True,
+        )
 
     async def _board_unset(self, interaction: discord.Interaction):
         board = self.eco.get_leaderboard(interaction.guild.id)
         if board is None:
-            return await interaction.response.send_message(embed=ui.warn_embed("掲示していません", "このサーバーには、ランキングの掲示がありません。"), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.warn_embed("掲示していません", "このサーバーには、ランキングの掲示がありません。"),
+                ephemeral=True,
+            )
         await interaction.response.defer(ephemeral=True)
         await self._delete_board_message(interaction.guild, board)
         self.eco.delete_leaderboard(interaction.guild.id)
-        await interaction.followup.send(embed=ui.ok_embed("掲示を止めました", "自動の更新をやめて、ランキングの投稿を削除しました。"), ephemeral=True)
+        await interaction.followup.send(
+            embed=ui.ok_embed("掲示を止めました", "自動の更新をやめて、ランキングの投稿を削除しました。"),
+            ephemeral=True,
+        )
 
     @group.command(name="送金", description="ほかの人にペリカを送る（手数料10%）")
     @app_commands.rename(member="相手", amount="金額")
     @app_commands.describe(member="送る相手", amount="送る金額")
-    async def transfer(self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 1_000_000]):
+    async def transfer(
+        self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 1_000_000]
+    ):
         if member.bot:
-            return await interaction.response.send_message(embed=ui.error_embed("送れません", "Bot には送金できません。"), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.error_embed("送れません", "Bot には送金できません。"), ephemeral=True
+            )
         # 送金の間は「プレイ中」にする。ゲーム中に残高を逃がして負けや倍払いを避ける／確認待ちの間にゲームを始める、を防ぐ
         uid = interaction.user.id
         reason = self.bot.sessions.try_start(uid)
         if reason:
-            return await interaction.response.send_message(embed=ui.error_embed("いまは送れません", reason), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.error_embed("いまは送れません", reason), ephemeral=True
+            )
         try:
             fee = math.ceil(round(amount * TRANSFER_FEE_RATE, 6))
             # 確認ボタンを出す前に、残高を先に調べる（足りないのに確認だけさせない）
             if self.g(interaction).balance(uid) < amount + fee:
-                return await interaction.response.send_message(embed=ui.error_embed(
-                    "送金できません", f"残高が足りません（送金額 {amount:,} + 手数料 {fee:,} が必要です）。"), ephemeral=True)
+                return await interaction.response.send_message(
+                    embed=ui.error_embed(
+                        "送金できません", f"残高が足りません（送金額 {amount:,} + 手数料 {fee:,} が必要です）。"
+                    ),
+                    ephemeral=True,
+                )
             if amount >= TRANSFER_CONFIRM_FROM:
-                ok = await confirm_action(interaction, "送金しますか？",
-                                          f"{member.mention} に **{ui.pelica(amount)}** を送ります。\n手数料: {ui.pelica(fee)}（合計 {ui.pelica(amount + fee)} が引かれます）", "送金する")
+                ok = await confirm_action(
+                    interaction,
+                    "送金しますか？",
+                    f"{member.mention} に **{ui.pelica(amount)}** を送ります。\n手数料: {ui.pelica(fee)}（合計 {ui.pelica(amount + fee)} が引かれます）",
+                    "送金する",
+                )
                 if ok is not True:
                     return
                 reply = interaction.followup.send
@@ -291,21 +375,31 @@ class EconomyCog(commands.Cog):
                 reply = interaction.response.send_message
             now = local_now(self.bot)
             day_start = datetime.datetime.combine(now.date(), datetime.time(), tzinfo=now.tzinfo).timestamp()
-            res = self.g(interaction).transfer(uid, member.id, amount, TRANSFER_FEE_RATE, TRANSFER_DAILY_LIMIT, day_start, TRANSFER_MIN_GAMES)
+            res = self.g(interaction).transfer(
+                uid, member.id, amount, TRANSFER_FEE_RATE, TRANSFER_DAILY_LIMIT, day_start, TRANSFER_MIN_GAMES
+            )
             if not res.ok:
                 return await reply(embed=ui.error_embed("送金できません", res.reason), ephemeral=True)
-            await reply(embed=ui.ok_embed("送金しました", f"{member.mention} に **{ui.pelica(res.received)}** を送りました。\n"
-                                          f"手数料: {ui.pelica(res.fee)}　あなたの残高: **{ui.pelica(res.sender_balance)}**"),
-                        allowed_mentions=discord.AllowedMentions(users=[member]))
+            await reply(
+                embed=ui.ok_embed(
+                    "送金しました",
+                    f"{member.mention} に **{ui.pelica(res.received)}** を送りました。\n"
+                    f"手数料: {ui.pelica(res.fee)}　あなたの残高: **{ui.pelica(res.sender_balance)}**",
+                ),
+                allowed_mentions=discord.AllowedMentions(users=[member]),
+            )
         finally:
             self.bot.sessions.end(uid)
 
     @group.command(name="履歴", description="最近の増減を表示（自分だけに見えます）")
     async def history(self, interaction: discord.Interaction):
-        rows = self.g(interaction).history(interaction.user.id, 60)       # 1ゲームは複数の行なので、多めに読んでまとめる
+        rows = self.g(interaction).history(interaction.user.id, 60)  # 1ゲームは複数の行なので、多めに読んでまとめる
         lines = history_mod.format_history(rows, 12)
-        await interaction.response.send_message(embed=ui.embed("🧾 最近の増減", "\n".join(lines) or "まだ記録がありません。", ui.INFO),
-                                                ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+        await interaction.response.send_message(
+            embed=ui.embed("🧾 最近の増減", "\n".join(lines) or "まだ記録がありません。", ui.INFO),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
 
 
 async def setup(bot):

@@ -8,7 +8,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-NICK_LIMIT = 32          # Discord のニックネームの最大文字数
+NICK_LIMIT = 32  # Discord のニックネームの最大文字数
 
 
 def ulen(text: str) -> int:
@@ -43,12 +43,11 @@ def build(base: str, title: str) -> str:
 
 @dataclass(frozen=True)
 class NickState:
-    original: Optional[str]      # 付ける前のニックネーム（None はニックネームなし）
-    applied: str                 # Bot が実際に設定したニックネーム
+    original: Optional[str]  # 付ける前のニックネーム（None はニックネームなし）
+    applied: str  # Bot が実際に設定したニックネーム
 
 
-def plan(current: Optional[str], state: Optional[NickState], default_name: str, titles,
-         title: Optional[str]) -> tuple:
+def plan(current: Optional[str], state: Optional[NickState], default_name: str, titles, title: Optional[str]) -> tuple:
     """(設定すべきニックネーム, 記録しておく状態) を返す。title=None は、称号を外して元に戻す。
 
     - 前回 Bot が設定したままなら、記録した元のニックネームを使う（長い名前が切り詰められていても戻せる）
@@ -62,7 +61,7 @@ def plan(current: Optional[str], state: Optional[NickState], default_name: str, 
     if title:
         new = build(original or default_name, title)
         return new, NickState(original, new)
-    target = original if (original and original != default_name) else None      # 表示名と同じなら、ニックネームを消す
+    target = original if (original and original != default_name) else None  # 表示名と同じなら、ニックネームを消す
     if state is not None and current == state.applied:
         target = state.original
     return target, None

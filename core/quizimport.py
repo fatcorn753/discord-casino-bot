@@ -27,10 +27,20 @@ MAX_QUESTION_LEN = 500
 MAX_CHOICE_LEN = 80
 MAX_EXPLANATION_LEN = 800
 MAX_REWARD = 10_000
-MAX_MINUTES = 365 * 1440      # 有効期間の上限（1年）
+MAX_MINUTES = 365 * 1440  # 有効期間の上限（1年）
 DEFAULT_REWARD = 100
 
-KEYS = {"問題": "question", "正解": "answer", "不正解": "wrong", "解説": "explanation", "報酬": "reward", "期間": "duration", "時間": "hours", "日数": "days", "分": "mins"}
+KEYS = {
+    "問題": "question",
+    "正解": "answer",
+    "不正解": "wrong",
+    "解説": "explanation",
+    "報酬": "reward",
+    "期間": "duration",
+    "時間": "hours",
+    "日数": "days",
+    "分": "mins",
+}
 KEY_LINE = re.compile(r"^\s*(問題|正解|不正解|解説|報酬|期間|時間|日数|分)\s*[:：]\s*(.*)$")
 SEPARATOR = re.compile(r"^\s*-{3,}\s*$")
 
@@ -65,13 +75,20 @@ def _parse_block(lines: list, number: int, errors: list) -> Optional[dict]:
                 fields[key] = value
         elif line.strip():
             if current in ("question", "explanation"):
-                fields[current] += "\n" + line.strip()            # 問題文と解説は、次の行に続けられる
+                fields[current] += "\n" + line.strip()  # 問題文と解説は、次の行に続けられる
             elif current is None:
                 problems.append(f"{lineno}行目: 「問題:」「正解:」などの見出しで始めてください。")
             else:
-                problems.append(f"{lineno}行目: 「{[k for k, v in KEYS.items() if v == current][0]}」は1行で書いてください。")
-    if not fields.get("question") and not problems and not any(fields.get(k) for k in ("answer", "explanation")) and not fields["wrong"]:
-        return None                                                # 空のブロック（`---` が続いたときなど）
+                problems.append(
+                    f"{lineno}行目: 「{[k for k, v in KEYS.items() if v == current][0]}」は1行で書いてください。"
+                )
+    if (
+        not fields.get("question")
+        and not problems
+        and not any(fields.get(k) for k in ("answer", "explanation"))
+        and not fields["wrong"]
+    ):
+        return None  # 空のブロック（`---` が続いたときなど）
     head = f"{number}問目: "
     errors.extend(head + p for p in problems)
     question = fields.get("question", "")
@@ -108,7 +125,9 @@ def _parse_block(lines: list, number: int, errors: list) -> Optional[dict]:
     elif given:
         key = given[0]
         try:
-            minutes = parse_duration(fields[key], {"duration": "時間", "hours": "時間", "days": "日", "mins": "分"}[key])
+            minutes = parse_duration(
+                fields[key], {"duration": "時間", "hours": "時間", "days": "日", "mins": "分"}[key]
+            )
             if not 1 <= minutes <= MAX_MINUTES:
                 raise ValueError("期間は 1分〜365日 の範囲で書いてください。")
         except ValueError as exc:
@@ -129,7 +148,7 @@ def parse_bulk(text: str) -> tuple:
     blocks.append(current)
     quizzes, errors = [], []
     for lines in blocks:
-        if not any(l.strip() and not l.lstrip().startswith("#") for _, l in lines):
+        if not any(text.strip() and not text.lstrip().startswith("#") for _, text in lines):
             continue
         quiz = _parse_block(lines, len(quizzes) + 1, errors)
         if quiz is not None:

@@ -15,11 +15,11 @@ class Kind:
     key: str
     name: str
     emoji: str
-    hours: int            # 満期までの時間
-    rate: int             # 利息（元本に対する％）
-    default_pct: int      # 倒産する確率（％）
-    max_total: int        # 1人が持てる元本の合計の上限（保有中のもの）
-    cancel_penalty: int   # 途中解約で引かれる元本の％。None なら解約できない
+    hours: int  # 満期までの時間
+    rate: int  # 利息（元本に対する％）
+    default_pct: int  # 倒産する確率（％）
+    max_total: int  # 1人が持てる元本の合計の上限（保有中のもの）
+    cancel_penalty: int  # 途中解約で引かれる元本の％。None なら解約できない
 
 
 NORMAL = Kind("normal", "通常債", "🏦", 72, 4, 0, 30_000, 10)

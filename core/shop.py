@@ -29,9 +29,9 @@ class Item:
     name: str
     kind: str
     price: int
-    value: object = None        # 色(16進)・絵文字など
+    value: object = None  # 色(16進)・絵文字など
     desc: str = ""
-    limited: bool = False       # 買えない限定品（ランキングなどで贈られる）。販売の一覧・購入の候補には出ない
+    limited: bool = False  # 買えない限定品（ランキングなどで贈られる）。販売の一覧・購入の候補には出ない
 
     @property
     def unique(self) -> bool:
@@ -55,22 +55,61 @@ CATALOG = [
     # 限定称号（買えない）。週間ランキング1位に、次の発表まで贈られる
     Item(WEEKLY_KING, "👑週間王者", TITLE, 0, desc="先週のゲームの稼ぎ1位に贈られる。次の発表まで持てる", limited=True),
     # 残高カードの色・アイコン
-    *_colors("cardcolor", CARD_COLOR, 3_000, [
-        ("red", "赤", 0xE74C3C), ("blue", "青", 0x3498DB), ("green", "緑", 0x2ECC71),
-        ("gold", "金", 0xF1C40F), ("purple", "紫", 0x9B59B6), ("dark", "黒", 0x2C2F33)]),
-    *_colors("cardicon", CARD_ICON, 3_000, [
-        ("slot", "スロット", "🎰"), ("gem", "宝石", "💎"), ("fire", "炎", "🔥"),
-        ("moon", "月", "🌙"), ("dragon", "龍", "🐉")]),
+    *_colors(
+        "cardcolor",
+        CARD_COLOR,
+        3_000,
+        [
+            ("red", "赤", 0xE74C3C),
+            ("blue", "青", 0x3498DB),
+            ("green", "緑", 0x2ECC71),
+            ("gold", "金", 0xF1C40F),
+            ("purple", "紫", 0x9B59B6),
+            ("dark", "黒", 0x2C2F33),
+        ],
+    ),
+    *_colors(
+        "cardicon",
+        CARD_ICON,
+        3_000,
+        [
+            ("slot", "スロット", "🎰"),
+            ("gem", "宝石", "💎"),
+            ("fire", "炎", "🔥"),
+            ("moon", "月", "🌙"),
+            ("dragon", "龍", "🐉"),
+        ],
+    ),
     Item("cardicon_crown", "王冠", CARD_ICON, 5_000, "👑"),
     # 消耗品（使うとなくなる）
     Item(DAILY_DOUBLE, "デイリー2倍券", CONSUMABLE, 3_000, desc="次に受け取るデイリーボーナスが2倍になる"),
-    Item(INSURANCE, "保険券", CONSUMABLE, 2_000, desc=f"次に負けたゲーム1回で、賭け金の半分が戻る（最大{INSURANCE_CAP:,}ペリカ。倍払いの追加分は対象外）"),
+    Item(
+        INSURANCE,
+        "保険券",
+        CONSUMABLE,
+        2_000,
+        desc=f"次に負けたゲーム1回で、賭け金の半分が戻る（最大{INSURANCE_CAP:,}ペリカ。倍払いの追加分は対象外）",
+    ),
     # サーバー内の名前の色（Bot がロールを作って付ける）。0x000000 は「色なし」扱いになるため、黒・白は少しずらす
-    *_colors("role", COLOR_ROLE, 20_000, [
-        ("red", "赤", 0xE74C3C), ("orange", "橙", 0xE67E22), ("yellow", "黄", 0xF1C40F),
-        ("green", "緑", 0x2ECC71), ("cyan", "水色", 0x1ABC9C), ("blue", "青", 0x3498DB),
-        ("purple", "紫", 0x9B59B6), ("pink", "桃", 0xFF69B4), ("gold", "金", 0xD4AF37),
-        ("silver", "銀", 0xBDC3C7), ("black", "黒", 0x010101), ("white", "白", 0xFEFEFE)]),
+    *_colors(
+        "role",
+        COLOR_ROLE,
+        20_000,
+        [
+            ("red", "赤", 0xE74C3C),
+            ("orange", "橙", 0xE67E22),
+            ("yellow", "黄", 0xF1C40F),
+            ("green", "緑", 0x2ECC71),
+            ("cyan", "水色", 0x1ABC9C),
+            ("blue", "青", 0x3498DB),
+            ("purple", "紫", 0x9B59B6),
+            ("pink", "桃", 0xFF69B4),
+            ("gold", "金", 0xD4AF37),
+            ("silver", "銀", 0xBDC3C7),
+            ("black", "黒", 0x010101),
+            ("white", "白", 0xFEFEFE),
+        ],
+    ),
 ]
 
 BY_ID = {i.id: i for i in CATALOG}

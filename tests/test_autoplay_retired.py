@@ -19,8 +19,8 @@ def test_leftover_pots_are_refunded_and_the_table_is_dropped(tmp_path):
         INSERT INTO autoplay VALUES (5, 7, 1150), (5, 8, 0);""")
     c.commit()
     c.close()
-    again = Economy(path)                                            # bot を再起動した想定
+    again = Economy(path)  # bot を再起動した想定
     assert again.for_guild(5).balance(7) == INITIAL_BALANCE + 1150
     names = {r[0] for r in again._conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "autoplay" not in names
-    assert Economy(path).for_guild(5).balance(7) == INITIAL_BALANCE + 1150     # 二重に戻らない
+    assert Economy(path).for_guild(5).balance(7) == INITIAL_BALANCE + 1150  # 二重に戻らない

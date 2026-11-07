@@ -13,21 +13,21 @@ def eco(tmp_path):
 
 def test_new_user_gets_initial_balance_once(eco):
     assert eco.balance(1) == INITIAL_BALANCE
-    assert eco.balance(1) == INITIAL_BALANCE          # 2回目に増えない
+    assert eco.balance(1) == INITIAL_BALANCE  # 2回目に増えない
     assert len(eco.history(1)) == 1
 
 
 def test_bet_is_escrowed_and_settled(eco):
     eid = eco.place_bet(1, 1000, "テスト")
-    assert eco.balance(1) == INITIAL_BALANCE - 1000    # 賭け金は先に預かる
-    assert eco.settle(eid, 2500, "テスト") == 1500     # 損益 = 払い戻し − 賭け金
+    assert eco.balance(1) == INITIAL_BALANCE - 1000  # 賭け金は先に預かる
+    assert eco.settle(eid, 2500, "テスト") == 1500  # 損益 = 払い戻し − 賭け金
     assert eco.balance(1) == INITIAL_BALANCE + 1500
 
 
 def test_settle_twice_pays_only_once(eco):
     eid = eco.place_bet(1, 500, "テスト")
     assert eco.settle(eid, 1000, "テスト") == 500
-    assert eco.settle(eid, 1000, "テスト") is None     # 二重精算は無視
+    assert eco.settle(eid, 1000, "テスト") is None  # 二重精算は無視
     assert eco.balance(1) == INITIAL_BALANCE + 500
 
 
@@ -41,7 +41,7 @@ def test_loss_pays_zero_and_balance_never_negative(eco):
     eid = eco.place_bet(1, INITIAL_BALANCE, "テスト")
     assert eco.settle(eid, 0, "テスト") == -INITIAL_BALANCE
     assert eco.balance(1) == 0
-    assert eco.debit_up_to(1, 500, "倍払い") == 0       # 0 から先は引けない
+    assert eco.debit_up_to(1, 500, "倍払い") == 0  # 0 から先は引けない
     assert eco.balance(1) == 0
 
 
@@ -63,7 +63,7 @@ def test_add_to_escrow_for_double_down(eco):
     eid = eco.place_bet(1, 1000, "ブラックジャック")
     assert eco.add_to_escrow(eid, 1000)
     assert eco.escrow_amount(eid) == 2000 and eco.balance(1) == INITIAL_BALANCE - 2000
-    assert not eco.add_to_escrow(eid, INITIAL_BALANCE)    # 足りないときは追加できない
+    assert not eco.add_to_escrow(eid, INITIAL_BALANCE)  # 足りないときは追加できない
     assert eco.escrow_amount(eid) == 2000
 
 
@@ -71,10 +71,10 @@ def test_daily_streak_and_once_per_day(eco):
     d1 = datetime.date(2026, 10, 20)
     r1 = eco.claim_daily(1, d1)
     assert r1.ok and r1.amount == Economy.DAILY_BASE and r1.streak == 1
-    assert not eco.claim_daily(1, d1).ok                  # 同じ日は2回受け取れない
+    assert not eco.claim_daily(1, d1).ok  # 同じ日は2回受け取れない
     r2 = eco.claim_daily(1, d1 + datetime.timedelta(days=1))
     assert r2.streak == 2 and r2.amount == Economy.DAILY_BASE + Economy.DAILY_STREAK_BONUS
-    r3 = eco.claim_daily(1, d1 + datetime.timedelta(days=5))   # 間が空くと連続は1に戻る
+    r3 = eco.claim_daily(1, d1 + datetime.timedelta(days=5))  # 間が空くと連続は1に戻る
     assert r3.streak == 1 and r3.amount == Economy.DAILY_BASE
 
 
@@ -94,18 +94,18 @@ def test_ranking_global_and_per_guild(eco):
     eco.touch_guild_user(10, 1)
     eco.touch_guild_user(10, 2)
     ids = eco.guild_user_ids(10)
-    assert [uid for _, uid, _ in eco.top(10, ids)] == [1, 2]           # サーバー内だけで並べる
+    assert [uid for _, uid, _ in eco.top(10, ids)] == [1, 2]  # サーバー内だけで並べる
     assert eco.rank_of(2, ids) == (2, INITIAL_BALANCE + 100, 2)
     assert eco.rank_of(99) is None
 
 
 def test_transfer_rules(eco):
     day = 0.0
-    assert not eco.transfer(1, 1, 100, 0.1, 20_000, day).ok                    # 自分には送れない
+    assert not eco.transfer(1, 1, 100, 0.1, 20_000, day).ok  # 自分には送れない
     r = eco.transfer(1, 2, 1000, 0.1, 20_000, day)
     assert r.ok and r.received == 1000 and r.fee == 100
-    assert eco.balance(1) == INITIAL_BALANCE - 1100 and eco.balance(2) == INITIAL_BALANCE + 1000   # 手数料は消える
-    assert not eco.transfer(1, 2, INITIAL_BALANCE, 0.1, 20_000, day).ok        # 手数料込みで足りない
+    assert eco.balance(1) == INITIAL_BALANCE - 1100 and eco.balance(2) == INITIAL_BALANCE + 1000  # 手数料は消える
+    assert not eco.transfer(1, 2, INITIAL_BALANCE, 0.1, 20_000, day).ok  # 手数料込みで足りない
     assert not eco.transfer(1, 2, 0, 0.1, 20_000, day).ok
 
 
@@ -114,7 +114,7 @@ def test_transfer_daily_limit(eco):
     assert eco.transfer(1, 2, 1000, 0.0, 1500, 0.0).ok
     blocked = eco.transfer(1, 2, 1000, 0.0, 1500, 0.0)
     assert not blocked.ok and "1日の送金" in blocked.reason
-    assert eco.transfer(1, 2, 1000, 0.0, 1500, 1e12).ok                         # 日付が変われば集計が戻る
+    assert eco.transfer(1, 2, 1000, 0.0, 1500, 1e12).ok  # 日付が変われば集計が戻る
 
 
 def test_stats_tracking(eco):
@@ -127,24 +127,24 @@ def test_stats_tracking(eco):
 def test_sessions_block_double_play_and_cooldown():
     s = Sessions(cooldown=2.0)
     assert s.try_start(1, now=100.0) is None
-    assert "遊んでいる" in s.try_start(1, now=100.5)    # 同時に2つは始められない
+    assert "遊んでいる" in s.try_start(1, now=100.5)  # 同時に2つは始められない
     s.end(1, now=101.0)
-    assert "少し待って" in s.try_start(1, now=102.0)    # 終了直後は待つ
+    assert "少し待って" in s.try_start(1, now=102.0)  # 終了直後は待つ
     assert s.try_start(1, now=103.5) is None
-    assert s.try_start(2, now=100.0) is None            # 他の人には影響しない
+    assert s.try_start(2, now=100.0) is None  # 他の人には影響しない
 
 
 def test_debt_is_collected_from_every_income_and_blocks_spending(eco):
     eco.balance(1)
     eid = eco.place_bet(1, INITIAL_BALANCE, "チンチロ")
-    assert eco.settle_with_penalty(eid, 0, "チンチロ", 5000)[:2] == (-INITIAL_BALANCE - 5000, 5000)     # 残高0、5000が借金
+    assert eco.settle_with_penalty(eid, 0, "チンチロ", 5000)[:2] == (-INITIAL_BALANCE - 5000, 5000)  # 残高0、5000が借金
     assert (eco.balance(1), eco.debt(1)) == (0, 5000)
     assert eco.purchase(1, "x", "x", 100, False).ok is False and eco.crypto_buy(1, 100, 10.0).ok is False
-    assert eco.transfer(1, 2, 10, 0.0, 10_000, 0).ok is False                 # 借金中は、お金を逃がせない
-    eco.claim_daily(1, datetime.date(2026, 11, 1))               # デイリーも先に返済へ
+    assert eco.transfer(1, 2, 10, 0.0, 10_000, 0).ok is False  # 借金中は、お金を逃がせない
+    eco.claim_daily(1, datetime.date(2026, 11, 1))  # デイリーも先に返済へ
     assert (eco.balance(1), eco.debt(1)) == (0, 4000)
     eco.credit(1, 6000, "テスト")
-    assert (eco.balance(1), eco.debt(1)) == (2000, 0)                          # 完済して、残りが残高
+    assert (eco.balance(1), eco.debt(1)) == (2000, 0)  # 完済して、残りが残高
     assert eco.top(5)[0][1] in (1, 2)
 
 
@@ -154,22 +154,23 @@ def test_refund_is_not_taken_for_debt_and_ranking_subtracts_debt(eco):
     eid = eco.place_bet(1, 1000, "コイン")
     eco._conn.execute("UPDATE users SET debt=500 WHERE user_id=1")
     eco.refund(eid)
-    assert eco.balance(1) == INITIAL_BALANCE and eco.debt(1) == 500            # 返金は徴収しない
+    assert eco.balance(1) == INITIAL_BALANCE and eco.debt(1) == 500  # 返金は徴収しない
     assert dict((u, a) for _, u, a in eco.top(5)) == {1: INITIAL_BALANCE - 500, 2: INITIAL_BALANCE}
 
 
 def test_transfer_daily_limit_counts_only_the_amount_not_the_fee(eco):
     eco.credit(1, 100_000, "テスト")
-    ok = eco.transfer(1, 2, 20_000, 0.1, 20_000, 0.0)                           # 上限ちょうどの金額を、手数料つきで送れる
+    ok = eco.transfer(1, 2, 20_000, 0.1, 20_000, 0.0)  # 上限ちょうどの金額を、手数料つきで送れる
     assert ok.ok and ok.fee == 2_000 and eco.balance(2) == INITIAL_BALANCE + 20_000
     assert eco.balance(1) == INITIAL_BALANCE + 100_000 - 22_000
     blocked = eco.transfer(1, 2, 1, 0.1, 20_000, 0.0)
-    assert not blocked.ok and "1日の送金" in blocked.reason                      # 上限に達したあとは、1ペリカも送れない
+    assert not blocked.ok and "1日の送金" in blocked.reason  # 上限に達したあとは、1ペリカも送れない
     assert eco.transfer(1, 2, 100, 0.1, 20_000, 1e12).ok
 
 
 def test_history_shows_transfer_and_fee_as_one_line(eco):
     from core import history
+
     eco.credit(1, 5_000, "テスト")
     eco.transfer(1, 2, 1_000, 0.1, 20_000, 0.0)
     lines = history.format_history(eco.history(1, 10), 3)

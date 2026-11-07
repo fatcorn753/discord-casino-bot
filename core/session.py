@@ -25,7 +25,7 @@ class Sessions:
         now = time.monotonic() if now is None else now
         self._active.discard(user_id)
         self._last_end[user_id] = now
-        if len(self._last_end) > 1000:     # 古い記録を捨てて、メモリが増え続けないようにする
+        if len(self._last_end) > 1000:  # 古い記録を捨てて、メモリが増え続けないようにする
             self._last_end = {u: t for u, t in self._last_end.items() if now - t < self.cooldown}
 
     def is_active(self, user_id: int) -> bool:

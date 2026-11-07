@@ -10,10 +10,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 DURATION_MIN = 30
-EARLIEST_MIN = 12 * 60                 # 開始の最も早い時刻（12:00）
-LATEST_MIN = 24 * 60 - DURATION_MIN    # 開始の最も遅い時刻（23:30。0時をまたがない）
-BOOST = 0.5                            # 勝ち分（払い戻し - 賭け金）に上乗せする割合
-BONUS_CAP = 10_000                     # 1回で上乗せできる上限
+EARLIEST_MIN = 12 * 60  # 開始の最も早い時刻（12:00）
+LATEST_MIN = 24 * 60 - DURATION_MIN  # 開始の最も遅い時刻（23:30。0時をまたがない）
+BOOST = 0.5  # 勝ち分（払い戻し - 賭け金）に上乗せする割合
+BONUS_CAP = 10_000  # 1回で上乗せできる上限
 
 # ゲームごとの名前と、告知の一言
 GAMES = {
@@ -28,7 +28,7 @@ GAMES = {
 @dataclass(frozen=True)
 class Event:
     game: str
-    start_min: int         # その日の0時からの分
+    start_min: int  # その日の0時からの分
     day: datetime.date
 
     @property

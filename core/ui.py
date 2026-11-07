@@ -9,7 +9,7 @@ INFO = 0x3498DB
 WARN = 0xF1C40F
 ERROR = 0xE74C3C
 GOLD = 0xF39C12
-DARK = 0x2C2F33   # 地下カジノ用の暗い色
+DARK = 0x2C2F33  # 地下カジノ用の暗い色
 
 UNIT = "ペリカ"
 

@@ -39,8 +39,9 @@ def validate_token(token: str) -> str:
         raise SystemExit(
             "config.json の token が未設定、または Bot トークンの形式ではありません。\n"
             "  1. Discord Developer Portal → アプリ → 「Bot」→「トークンをリセット」で表示される値をコピー\n"
-            "  2. config.json の \"token\" に貼り付けて保存\n"
-            "  （トークンは他人に見せないでください）")
+            '  2. config.json の "token" に貼り付けて保存\n'
+            "  （トークンは他人に見せないでください）"
+        )
     return token
 
 
@@ -51,15 +52,18 @@ class BotTree(app_commands.CommandTree):
         # Discord は3秒以内に応答しないと「応答しませんでした」と表示する。届くのが遅れていないかを記録しておく
         late = (discord.utils.utcnow() - interaction.created_at).total_seconds()
         if late > 1.5:
-            print(f"⚠ コマンドの受信が {late:.1f} 秒遅れました（{getattr(interaction.command, 'qualified_name', '?')}）。"
-                  f"Bot のネットワークや、PC のスリープ・負荷を確認してください。ゲートウェイ遅延: {interaction.client.latency * 1000:.0f}ms")
-        if approval.is_owner_dm_command(interaction):       # 持ち主の「運営」コマンドは、Bot とのDMで使える
+            print(
+                f"⚠ コマンドの受信が {late:.1f} 秒遅れました（{getattr(interaction.command, 'qualified_name', '?')}）。"
+                f"Bot のネットワークや、PC のスリープ・負荷を確認してください。ゲートウェイ遅延: {interaction.client.latency * 1000:.0f}ms"
+            )
+        if approval.is_owner_dm_command(interaction):  # 持ち主の「運営」コマンドは、Bot とのDMで使える
             return True
         if interaction.guild is None:
             await interaction.response.send_message(
-                embed=ui.error_embed("利用できません", "このコマンドはサーバー内でのみ使えます。"), ephemeral=True)
+                embed=ui.error_embed("利用できません", "このコマンドはサーバー内でのみ使えます。"), ephemeral=True
+            )
             return False
-        if not await approval.guard(interaction):          # 許可リスト・持ち主の承認
+        if not await approval.guard(interaction):  # 許可リスト・持ち主の承認
             return False
         return True
 
@@ -75,7 +79,11 @@ class BotTree(app_commands.CommandTree):
             text = "Discord 側のエラーで失敗しました。時間をおいてもう一度お試しください。"
         else:
             traceback.print_exception(type(error), error, error.__traceback__)
-            text = "予期しないエラーが発生しました。精算の前なら賭けたペリカは返しています（`/ペリカ 履歴` で確認できます）。"
+            root = getattr(interaction.command, "root_parent", None)
+            is_game = root is not None and root.name == "カジノ"
+            text = "予期しないエラーが発生しました。" + (
+                "精算の前なら賭けたペリカは返しています（`/ペリカ 履歴` で確認できます）。" if is_game else ""
+            )
         embed = ui.error_embed("実行できませんでした", text)
         try:
             if interaction.response.is_done():
@@ -89,7 +97,7 @@ class BotTree(app_commands.CommandTree):
 
 config = load_config()
 
-intents = discord.Intents.default()       # 特権インテントは不要（メッセージの内容もメンバー一覧も読まない）
+intents = discord.Intents.default()  # 特権インテントは不要（メッセージの内容もメンバー一覧も読まない）
 
 bot = commands.Bot(
     command_prefix=commands.when_mentioned,
@@ -131,8 +139,10 @@ async def sync_test_guild(guild_id: int) -> bool:
     try:
         await bot.tree.sync(guild=guild_obj)
     except discord.Forbidden:
-        print(f"⚠ サーバー {guild_id} にコマンドを登録できませんでした。Bot がそのサーバーに招待されていないか、"
-              "招待URLに applications.commands が含まれていません。招待すると、自動で登録されます。")
+        print(
+            f"⚠ サーバー {guild_id} にコマンドを登録できませんでした。Bot がそのサーバーに招待されていないか、"
+            "招待URLに applications.commands が含まれていません。招待すると、自動で登録されます。"
+        )
         return False
     print(f"✓ テストギルド {guild_id} にコマンド同期")
     return True
@@ -160,7 +170,9 @@ async def setup_hook():
     test_guild = bot.config.get("test_guild_id")
     if test_guild:
         await sync_test_guild(int(test_guild))
-        print("⚠ test_guild_id は開発用です。グローバルのコマンドも登録されていると、同じコマンドが2つ表示されます。本番では null にしてください。")
+        print(
+            "⚠ test_guild_id は開発用です。グローバルのコマンドも登録されていると、同じコマンドが2つ表示されます。本番では null にしてください。"
+        )
     else:
         await bot.tree.sync()
         print("✓ グローバルにコマンド同期（反映まで最大1時間）")
@@ -176,7 +188,7 @@ async def on_ready():
     print("=" * 50)
 
 
-_lock_file = None      # 起動中ずっと保持する（閉じるとロックが外れる）
+_lock_file = None  # 起動中ずっと保持する（閉じるとロックが外れる）
 
 
 def acquire_single_instance_lock() -> None:
@@ -188,15 +200,17 @@ def acquire_single_instance_lock() -> None:
     global _lock_file
     try:
         import fcntl
-    except ImportError:          # Windows など: ロックなしで続ける
+    except ImportError:  # Windows など: ロックなしで続ける
         return
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     _lock_file = open(os.path.join(os.path.dirname(DB_PATH), "bot.lock"), "w")
     try:
         fcntl.flock(_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        raise SystemExit("すでにこの Bot が起動しています。二重に起動すると、コマンドを取り合ってエラーになります。\n"
-                         "動いているものを止めてから、起動し直してください。")
+        raise SystemExit(
+            "すでにこの Bot が起動しています。二重に起動すると、コマンドを取り合ってエラーになります。\n"
+            "動いているものを止めてから、起動し直してください。"
+        )
 
 
 def main():
@@ -208,7 +222,9 @@ def main():
     try:
         bot.run(token)
     except discord.LoginFailure:
-        raise SystemExit("ログインに失敗しました。config.json の token が正しいか、再発行されていないか確認してください。")
+        raise SystemExit(
+            "ログインに失敗しました。config.json の token が正しいか、再発行されていないか確認してください。"
+        )
 
 
 if __name__ == "__main__":

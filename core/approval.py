@@ -33,18 +33,21 @@ def is_allowed(eco, config: dict, guild_id: int, user_id: int) -> bool:
     if requires_approval(config):
         row = eco.get_guild_status(guild_id)
         return bool(row) and row["status"] == APPROVED
-    return not preapproved(config)          # 承認制でなければ、リストが空のときだけ全サーバー可
+    return not preapproved(config)  # 承認制でなければ、リストが空のときだけ全サーバー可
 
 
-DM_GROUP = "運営"         # Bot とのDMでだけ使える、持ち主向けのコマンドの名前
+DM_GROUP = "運営"  # Bot とのDMでだけ使える、持ち主向けのコマンドの名前
 
 
 def is_owner_dm_command(interaction: discord.Interaction) -> bool:
     """Bot の持ち主が、DM で「運営」のコマンド（サーバーの許可の管理）を使うとき。サーバーの外で使える、ただ1つの場合。"""
     cmd = interaction.command
     root = (cmd.root_parent or cmd) if cmd is not None else None
-    return (interaction.guild is None and getattr(root, "name", None) == DM_GROUP
-            and interaction.user.id in owner_ids(interaction.client.config))
+    return (
+        interaction.guild is None
+        and getattr(root, "name", None) == DM_GROUP
+        and interaction.user.id in owner_ids(interaction.client.config)
+    )
 
 
 async def guard(interaction: discord.Interaction) -> bool:
@@ -54,12 +57,14 @@ async def guard(interaction: discord.Interaction) -> bool:
         return True
     if not requires_approval(bot.config):
         await interaction.response.send_message(
-            embed=ui.error_embed("このサーバーでは使えません", "この Bot は、許可されたサーバーでだけ遊べます。"), ephemeral=True)
+            embed=ui.error_embed("このサーバーでは使えません", "この Bot は、許可されたサーバーでだけ遊べます。"),
+            ephemeral=True,
+        )
         return False
     row = bot.economy.get_guild_status(interaction.guild_id)
     cog = bot.get_cog("ApprovalCog")
     if cog is not None:
-        await cog.ensure_requested(interaction.guild)        # 未登録なら承認を依頼する／しばらくたっていれば催促する
+        await cog.ensure_requested(interaction.guild)  # 未登録なら承認を依頼する／しばらくたっていれば催促する
     if row and row["status"] == DENIED:
         msg = "このサーバーでの利用は、Bot の持ち主に許可されていません。"
     else:

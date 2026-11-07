@@ -34,24 +34,32 @@ class GameContext:
 
     def __init__(self, bot, user_id: int, escrow_id: int, game: str, bet: int, guild_id: int, name: str = ""):
         self.bot = bot
-        self.name = name            # 遊んでいる人の表示名（タイトルに付けて、誰のゲームか分かるようにする）
+        self.name = name  # 遊んでいる人の表示名（タイトルに付けて、誰のゲームか分かるようにする）
         self.guild_id = guild_id
         self.user_id = user_id
         self.escrow_id = escrow_id
         self.game = game
         self.bet = bet
         self.done = False
-        self.penalty_taken = 0       # チンチロの倍払いなどで、預かり金のほかに引いた額
-        self.insured_refund = 0      # 保険券で戻った額
-        self.event_bonus = 0         # 突発イベントで上乗せされた額
-        self.rtp_shift = 0           # 還元率レベルで増減した払い戻し（表示の払い戻しに足す。レベルそのものは見せない）
-        self.events = {}             # 連勝・ミッションの結果（演出の表示に使う）
+        self.penalty_taken = 0  # チンチロの倍払いなどで、預かり金のほかに引いた額
+        self.insured_refund = 0  # 保険券で戻った額
+        self.event_bonus = 0  # 突発イベントで上乗せされた額
+        self.rtp_shift = 0  # 還元率レベルで増減した払い戻し（表示の払い戻しに足す。レベルそのものは見せない）
+        self.events = {}  # 連勝・ミッションの結果（演出の表示に使う）
 
     @property
     def economy(self):
-        return self.bot.economy.for_guild(self.guild_id)      # ペリカはサーバーごとに別々
+        return self.bot.economy.for_guild(self.guild_id)  # ペリカはサーバーごとに別々
 
-    def settle(self, payout: int, penalty: int = 0, keep_session: bool = False, tags=(), rtp_kind: str = None, rtp_done: bool = False) -> int:
+    def settle(
+        self,
+        payout: int,
+        penalty: int = 0,
+        keep_session: bool = False,
+        tags=(),
+        rtp_kind: str = None,
+        rtp_done: bool = False,
+    ) -> int:
         """払い戻し総額で精算し、損益を返す。二重に呼んでも一度しか払わない。
 
         penalty は倍払いなどの追加の支払い（残高の範囲まで）。精算と同じ1回の処理で行う。
@@ -60,17 +68,21 @@ class GameContext:
         if self.done:
             return 0
         level = self.economy.rtp_level_get(self.game)
-        if level != rtplevel.DEFAULT_LEVEL and not rtp_done:    # 持ち主が決めた還元率レベル（勝ち分だけを増減する）。rtp_done なら、呼び出し側が済ませている（rtp_shift も設定済み）
+        if (
+            level != rtplevel.DEFAULT_LEVEL and not rtp_done
+        ):  # 持ち主が決めた還元率レベル（勝ち分だけを増減する）。rtp_done なら、呼び出し側が済ませている（rtp_shift も設定済み）
             adjusted = rtplevel.adjust(self.game, level, self.economy.escrow_amount(self.escrow_id), payout, rtp_kind)
             self.rtp_shift, payout = adjusted - payout, adjusted
-        boost = events.best_boost(self.game, events.active(self.guild_id, local_now(self.bot)), self.economy.manual_event_get(time.time()))
+        boost = events.best_boost(
+            self.game, events.active(self.guild_id, local_now(self.bot)), self.economy.manual_event_get(time.time())
+        )
         if boost:
             self.event_bonus = events.bonus(self.bet, payout, boost)
             payout += self.event_bonus
         try:
             result = self.economy.settle_with_penalty(self.escrow_id, payout, self.game, penalty)
         except Exception:
-            self.bot.sessions.end(self.user_id)       # 精算に失敗してもロックしたままにしない（返金は起動時に行われる）
+            self.bot.sessions.end(self.user_id)  # 精算に失敗してもロックしたままにしない（返金は起動時に行われる）
             raise
         self.done = True
         if not keep_session:
@@ -79,7 +91,7 @@ class GameContext:
             print(f"警告: 精算済みの預かり金を再度精算しようとしました（{self.game}, escrow={self.escrow_id}）")
             return 0
         net, self.penalty_taken, self.insured_refund = result
-        try:       # 連勝・ミッションの記録は演出なので、失敗しても精算の結果は変えない
+        try:  # 連勝・ミッションの記録は演出なので、失敗しても精算の結果は変えない
             self.events = self.economy.record_play(self.user_id, self.game, self.bet, net, local_today(self.bot), tags)
         except Exception as exc:
             print(f"連勝・ミッションの記録に失敗: {self.game}: {exc!r}")
@@ -100,14 +112,15 @@ class GameContext:
             self.bot.sessions.end(self.user_id)
 
 
-async def start_game(interaction: discord.Interaction, bot, bet: int, game: str, balance_factor: int = 1,
-                     factor_reason: str = ""):
+async def start_game(
+    interaction: discord.Interaction, bot, bet: int, game: str, balance_factor: int = 1, factor_reason: str = ""
+):
     """賭け金を検証して預かる。成功すれば GameContext、失敗すれば理由を返信して None。
 
     balance_factor: 開始時に「賭け金の何倍の残高」が必要か（チンチロの倍払いに備える）。
     """
     uid = interaction.user.id
-    eco = bot.economy.for_guild(interaction.guild_id)         # このサーバーの口座を使う
+    eco = bot.economy.for_guild(interaction.guild_id)  # このサーバーの口座を使う
     reason = bot.sessions.try_start(uid)
     if reason:
         await interaction.response.send_message(embed=ui.error_embed("まだ始められません", reason), ephemeral=True)
@@ -116,13 +129,19 @@ async def start_game(interaction: discord.Interaction, bot, bet: int, game: str,
     try:
         if not MIN_BET <= bet <= MAX_BET:
             await interaction.response.send_message(
-                embed=ui.error_embed("賭け金が範囲外です", f"{ui.pelica(MIN_BET)} 〜 {ui.pelica(MAX_BET)} の間で指定してください。"), ephemeral=True)
+                embed=ui.error_embed(
+                    "賭け金が範囲外です", f"{ui.pelica(MIN_BET)} 〜 {ui.pelica(MAX_BET)} の間で指定してください。"
+                ),
+                ephemeral=True,
+            )
             return None
         balance = eco.balance(uid)
         if balance < bet * balance_factor:
             if balance_factor > 1 and balance >= bet:
-                msg = (f"{factor_reason}賭け金の **{balance_factor}倍**（{ui.pelica(bet * balance_factor)}）以上の残高が必要です（いまの残高: {ui.pelica(balance)}）。\n"
-                       f"いまの残高なら、**{ui.pelica(balance // balance_factor)}** まで賭けられます。")
+                msg = (
+                    f"{factor_reason}賭け金の **{balance_factor}倍**（{ui.pelica(bet * balance_factor)}）以上の残高が必要です（いまの残高: {ui.pelica(balance)}）。\n"
+                    f"いまの残高なら、**{ui.pelica(balance // balance_factor)}** まで賭けられます。"
+                )
             else:
                 msg = f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(balance)} です。\n`/ペリカ デイリー` で6時間ごとにもらえます。"
             await interaction.response.send_message(embed=ui.error_embed("ペリカが足りません", msg), ephemeral=True)
@@ -130,12 +149,19 @@ async def start_game(interaction: discord.Interaction, bot, bet: int, game: str,
         escrow = eco.place_bet(uid, bet, game)
         if escrow is None:
             await interaction.response.send_message(
-                embed=ui.error_embed("ペリカが足りません", f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(eco.balance(uid))} です。"), ephemeral=True)
+                embed=ui.error_embed(
+                    "ペリカが足りません",
+                    f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(eco.balance(uid))} です。",
+                ),
+                ephemeral=True,
+            )
             return None
-        return GameContext(bot, uid, escrow, game, bet, interaction.guild_id, getattr(interaction.user, "display_name", "") or "")
+        return GameContext(
+            bot, uid, escrow, game, bet, interaction.guild_id, getattr(interaction.user, "display_name", "") or ""
+        )
     finally:
         if escrow is None:
-            bot.sessions.end(uid)       # 始められなかった場合は、プレイ中のままにしない
+            bot.sessions.end(uid)  # 始められなかった場合は、プレイ中のままにしない
 
 
 def game_title(base: str, ctx: GameContext) -> str:
@@ -154,8 +180,12 @@ def result_lines(ctx: GameContext, payout: int, net: int, extra: str = "") -> st
     if ctx.insured_refund:
         top.append(f"🎟️ 保険券を使った！ 賭け金の半分（{ui.pelica(ctx.insured_refund)}）が戻った")
     event = [f"🔥 **突発イベントのボーナス +{ui.pelica(ctx.event_bonus)}**"] if ctx.event_bonus else []
-    stats = event + [f"賭け金: **{ui.pelica(ctx.bet)}**", f"払い戻し: **{ui.pelica(payout + ctx.rtp_shift + ctx.insured_refund)}**",
-             f"損益: **{signed(net)}ペリカ**", f"残高: **{ui.pelica(balance)}**"]
+    stats = event + [
+        f"賭け金: **{ui.pelica(ctx.bet)}**",
+        f"払い戻し: **{ui.pelica(payout + ctx.rtp_shift + ctx.insured_refund)}**",
+        f"損益: **{signed(net)}ペリカ**",
+        f"残高: **{ui.pelica(balance)}**",
+    ]
     debt = ctx.economy.debt(ctx.user_id)
     if debt:
         stats.append(f"借金: **{ui.pelica(debt)}**（入ったお金から先に返済されます）")
@@ -181,7 +211,7 @@ def _celebration(ctx: GameContext, net: int) -> tuple:
         head.append(line)
     if head:
         head.append("")
-    for m, reward in (ev.get("completed", []) if ev else []):
+    for m, reward in ev.get("completed", []) if ev else []:
         tail.append(f"📜 ミッション達成！ 「{m.name}」 **+{ui.pelica(reward)}**")
     if ev and ev.get("bonus"):
         tail.append(f"🎁 **今日のミッションを全部達成！** ボーナス **+{ui.pelica(ev['bonus'])}**")
@@ -196,7 +226,7 @@ class ReplayView(discord.ui.View):
     def __init__(self, bot, user_id: int, bet: int, replay, timeout: float = 90):
         super().__init__(timeout=timeout)
         self.bot, self.user_id, self.bet, self.replay = bot, user_id, bet, replay
-        self.origin = None          # この結果を出したメッセージの元になった interaction（時間切れでボタンを消すのに使う）
+        self.origin = None  # この結果を出したメッセージの元になった interaction（時間切れでボタンを消すのに使う）
         self.again.label = f"🔁 同じ額でもう一度（{bet:,}）"
         if bet * 2 > MAX_BET:
             self.remove_item(self.double)
@@ -205,10 +235,14 @@ class ReplayView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("これは他の人のゲームです。`/カジノ` で自分も遊べます。", ephemeral=True)
+            await interaction.response.send_message(
+                "これは他の人のゲームです。`/カジノ` で自分も遊べます。", ephemeral=True
+            )
             return False
         if not approval.is_allowed(self.bot.economy, self.bot.config, interaction.guild_id, interaction.user.id):
-            await interaction.response.send_message(embed=ui.error_embed("使えません", "このサーバーでは、いまは遊べません。"), ephemeral=True)
+            await interaction.response.send_message(
+                embed=ui.error_embed("使えません", "このサーバーでは、いまは遊べません。"), ephemeral=True
+            )
             return False
         return True
 
@@ -224,8 +258,8 @@ class ReplayView(discord.ui.View):
         if self.origin is not None:
             try:
                 await self.origin.edit_original_response(view=None)
-            except discord.HTTPException:
-                pass
+            except discord.HTTPException as exc:
+                log_display_failure("ボタンの片付け", "時間切れ", exc)
 
 
 class OwnerView(discord.ui.View):
@@ -237,15 +271,22 @@ class OwnerView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.ctx.user_id:
-            await interaction.response.send_message("これは他の人のゲームです。`/カジノ` で自分も遊べます。", ephemeral=True)
+            await interaction.response.send_message(
+                "これは他の人のゲームです。`/カジノ` で自分も遊べます。", ephemeral=True
+            )
             return False
         return True
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item) -> None:
         print(f"ゲーム中のエラー: {self.ctx.game}: {error!r}")
-        self.ctx.abort()   # 賭け金を返す
+        self.ctx.abort()  # 賭け金を返す
         try:
-            await interaction.channel.send(embed=ui.error_embed("エラーが発生しました", "ゲームを中止しました。精算前なら賭け金はお返ししています（`/ペリカ 履歴` で確認できます）。"))
+            await interaction.channel.send(
+                embed=ui.error_embed(
+                    "エラーが発生しました",
+                    "ゲームを中止しました。精算前なら賭け金はお返ししています（`/ペリカ 履歴` で確認できます）。",
+                )
+            )
         except discord.HTTPException:
             pass
         self.stop()

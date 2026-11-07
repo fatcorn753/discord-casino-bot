@@ -12,11 +12,11 @@ NAME = "CSトークン"
 START_PRICE = 1_000.0
 MIN_PRICE = 20
 MAX_PRICE = 50_000
-SIGMA = 0.004                # 1分あたりの値動きの大きさ（約±0.4%。1日で±15〜20%ほど）
-EVENT_PROB = 1 / 720         # 1日に2回ほど、急騰・急落が起こる
-EVENT_RANGE = (0.03, 0.08)   # 急騰・急落の大きさ（±3〜8%）
-UNIT = 1_000                 # 1枚 = 1000口。小数で買えるよう、保有は口で数える
-FEE_RATE = 0.0               # 買うときと売るときに、それぞれ取引額にかかる割合（今は無料）
+SIGMA = 0.004  # 1分あたりの値動きの大きさ（約±0.4%。1日で±15〜20%ほど）
+EVENT_PROB = 1 / 720  # 1日に2回ほど、急騰・急落が起こる
+EVENT_RANGE = (0.03, 0.08)  # 急騰・急落の大きさ（±3〜8%）
+UNIT = 1_000  # 1枚 = 1000口。小数で買えるよう、保有は口で数える
+FEE_RATE = 0.0  # 買うときと売るときに、それぞれ取引額にかかる割合（今は無料）
 
 
 def next_price(price: float, rng: random.Random) -> tuple:
@@ -31,7 +31,7 @@ def next_price(price: float, rng: random.Random) -> tuple:
     if rng.random() < EVENT_PROB:
         event = 1 if rng.random() < 0.5 else -1
         factor *= 1 + event * rng.uniform(*EVENT_RANGE)
-    new = round(price * factor, 2)                    # 低い価格でも動きが止まらないよう、小数2桁まで持つ
+    new = round(price * factor, 2)  # 低い価格でも動きが止まらないよう、小数2桁まで持つ
     return min(MAX_PRICE, max(MIN_PRICE, new)), event
 
 
@@ -58,7 +58,7 @@ def buy_quote(amount: int, price: float) -> tuple:
 
 def sell_quote(units: int, price: float) -> tuple:
     """units 口を売ったときの (受け取る額, 手数料)。"""
-    gross = int(round(units * price / UNIT, 6) // 1)         # 小数の誤差で1ペリカずれないよう丸めてから切り捨てる
+    gross = int(round(units * price / UNIT, 6) // 1)  # 小数の誤差で1ペリカずれないよう丸めてから切り捨てる
     fee = _fee(gross)
     return max(0, gross - fee), fee
 
@@ -108,7 +108,7 @@ def render_chart(prices: list, width: int = 32, height: int = 8) -> str:
     levels = [total // 2 if span == 0 else 1 + round((p - lo) / span * (total - 1)) for p in pts]
     label_w = max(len(fmt(hi)), len(fmt(lo)))
     rows = []
-    for r in range(height):               # r=0 が一番上
+    for r in range(height):  # r=0 が一番上
         floor = (height - 1 - r) * 8
         cells = "".join(LEVELS[max(0, min(8, lv - floor))] for lv in levels)
         label = fmt(hi) if r == 0 else (fmt(lo) if r == height - 1 else "")
@@ -121,4 +121,9 @@ def summary(prices: list) -> Optional[dict]:
     if not prices:
         return None
     first, last = prices[0], prices[-1]
-    return {"last": last, "change": (last - first) / first * 100 if first else 0.0, "high": max(prices), "low": min(prices)}
+    return {
+        "last": last,
+        "change": (last - first) / first * 100 if first else 0.0,
+        "high": max(prices),
+        "low": min(prices),
+    }

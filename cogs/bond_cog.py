@@ -15,8 +15,14 @@ from discord.ext import commands, tasks
 from core import approval, bonds, ui
 
 RNG = random.SystemRandom()
-KIND_CHOICES = [app_commands.Choice(name=f"{k.emoji} {k.name}（{k.hours // 24}日・利息+{k.rate}%" + (f"・倒産{k.default_pct}%）" if k.default_pct else "・元本保証）"), value=k.key)
-                for k in bonds.KINDS.values()]
+KIND_CHOICES = [
+    app_commands.Choice(
+        name=f"{k.emoji} {k.name}（{k.hours // 24}日・利息+{k.rate}%"
+        + (f"・倒産{k.default_pct}%）" if k.default_pct else "・元本保証）"),
+        value=k.key,
+    )
+    for k in bonds.KINDS.values()
+]
 
 
 def due_text(due: float) -> str:
@@ -46,21 +52,30 @@ class BondCog(commands.Cog):
     def g(self, interaction: discord.Interaction):
         return self.bot.economy.for_guild(interaction.guild_id)
 
-    group = app_commands.Group(name="債券", description="🏦 ペリカを預けて満期に受け取る（ゲーム内の通貨・現実のお金とは無関係）")
+    group = app_commands.Group(
+        name="債券", description="🏦 ペリカを預けて満期に受け取る（ゲーム内の通貨・現実のお金とは無関係）"
+    )
 
     @group.command(name="買う", description=f"債券を買う（{bonds.MIN_AMOUNT:,}ペリカ以上）")
     @app_commands.rename(kind="種類", amount="金額")
     @app_commands.describe(kind="通常債かジャンク債", amount=f"預ける元本（{bonds.MIN_AMOUNT:,}ペリカ以上）")
     @app_commands.choices(kind=KIND_CHOICES)
-    async def buy(self, interaction: discord.Interaction, kind: app_commands.Choice[str], amount: app_commands.Range[int, bonds.MIN_AMOUNT, 1_000_000]):
+    async def buy(
+        self,
+        interaction: discord.Interaction,
+        kind: app_commands.Choice[str],
+        amount: app_commands.Range[int, bonds.MIN_AMOUNT, 1_000_000],
+    ):
         eco = self.g(interaction)
-        eco.bond_settle(time.time(), RNG)            # 満期の分を先に入金して、買える額を正しくする
+        eco.bond_settle(time.time(), RNG)  # 満期の分を先に入金して、買える額を正しくする
         ok, reason = eco.bond_buy(interaction.user.id, kind.value, amount, time.time())
         if not ok:
             return await interaction.response.send_message(embed=ui.error_embed("買えません", reason), ephemeral=True)
         k = bonds.KINDS[kind.value]
-        lines = [f"元本: **{ui.pelica(amount)}**　満期: {k.hours // 24}日後（{due_text(time.time() + k.hours * 3600)}）",
-                 f"満期に受け取る額: **{ui.pelica(bonds.maturity_payout(k, amount))}**（利息 +{k.rate}%）"]
+        lines = [
+            f"元本: **{ui.pelica(amount)}**　満期: {k.hours // 24}日後（{due_text(time.time() + k.hours * 3600)}）",
+            f"満期に受け取る額: **{ui.pelica(bonds.maturity_payout(k, amount))}**（利息 +{k.rate}%）",
+        ]
         if k.default_pct:
             lines.append(f"⚠️ **{k.default_pct}%の確率で倒産**して、元本が戻りません。途中で解約もできません。")
         else:
@@ -75,7 +90,9 @@ class BondCog(commands.Cog):
         lines = []
         for r in data["active"]:
             k = bonds.KINDS[r["kind"]]
-            lines.append(f"`#{r['id']}` {k.emoji} {k.name} 元本 {ui.pelica(r['principal'])} → 満期 {due_text(r['due'])}（受取 {ui.pelica(bonds.maturity_payout(k, r['principal']))}）")
+            lines.append(
+                f"`#{r['id']}` {k.emoji} {k.name} 元本 {ui.pelica(r['principal'])} → 満期 {due_text(r['due'])}（受取 {ui.pelica(bonds.maturity_payout(k, r['principal']))}）"
+            )
         e = ui.embed("🏦 保有中の債券", "\n".join(lines) or "債券は持っていません。`/債券 買う` で買えます。", ui.INFO)
         if data["done"]:
             e.add_field(name="最近の決着", value="\n".join(describe_done(r) for r in data["done"]), inline=False)
@@ -88,8 +105,12 @@ class BondCog(commands.Cog):
     async def cancel(self, interaction: discord.Interaction, bond_id: int):
         ok, result = self.g(interaction).bond_cancel(interaction.user.id, bond_id)
         if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("解約できません", result), ephemeral=True)
-        await interaction.response.send_message(embed=ui.ok_embed("解約しました", f"{ui.pelica(result)}を残高に戻しました。"), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.error_embed("解約できません", result), ephemeral=True
+            )
+        await interaction.response.send_message(
+            embed=ui.ok_embed("解約しました", f"{ui.pelica(result)}を残高に戻しました。"), ephemeral=True
+        )
 
     # ------------------------------ 満期の入金 ------------------------------ #
     @tasks.loop(minutes=1)
@@ -110,7 +131,7 @@ class BondCog(commands.Cog):
                 continue
             try:
                 self.bot.economy.for_guild(guild.id).bond_settle(now, RNG)
-            except Exception as exc:       # 1サーバーの失敗で、ほかを止めない
+            except Exception as exc:  # 1サーバーの失敗で、ほかを止めない
                 print(f"債券を決着できません: guild={guild.id}: {exc!r}")
 
 

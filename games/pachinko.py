@@ -3,9 +3,9 @@
 流れ（1セット）:
   ① 100発を打ち出す → 1発ごとに、約7%がスタートに入る（残りは釘やハズレの穴に落ちる）。入った数だけ回転する。
   ② 回転ごとに、予告の色とリーチの格を抽選し、当たる確率 = 基本 + 予告ぶん + リーチぶん で当落を決める。
-  ③ 当たると大当たり。出玉は賭け金の2倍（70%）・10倍（25%）・30倍（5%）のどれかで、確変の連チャンが50%で続く。
+  ③ 当たると大当たり。出玉は ROUNDS の表のどれか（2倍・10倍・30倍。割合は表のとおり）で、確変の連チャンが CONTINUE の確率で続く。
   ④ セット全体の払い戻しは、出玉の合計（賭け金の倍数）。上限は CAP_MULT 倍。
-還元率は 100% を超えないこと（超えると、連打するだけでペリカが増えてしまう）。数字はすべてこのファイルの表に集めてある。
+還元率は 100% を超えないこと（超えると、連打するだけでペリカが増えてしまう）。いまは約97%。数字はすべてこのファイルの表に集めてある。
 
 演出は Discord のメッセージを何度も編集して見せる。ここでは「何コマ目に何を表示するか」だけを作る。
 """
@@ -20,30 +20,36 @@ MEDIUM = ["4️⃣", "5️⃣", "6️⃣"]
 
 NORMAL, SUPER, PREMIUM = "normal", "super", "premium"
 
-BALLS_PER_SET = 100          # 1セットで打ち出す玉の数（賭け金 ÷ この数 が、玉1発の値段）
-P_START = 0.07               # 玉1発が、スタートに入る確率
-MAX_SETS = 10                # 連続投入できるセット数
-CAP_MULT = 200               # 1セットの払い戻しの上限（賭け金の倍数）
+BALLS_PER_SET = 100  # 1セットで打ち出す玉の数（賭け金 ÷ この数 が、玉1発の値段）
+P_START = 0.07  # 玉1発が、スタートに入る確率
+MAX_SETS = 10  # 連続投入できるセット数
+CAP_MULT = 200  # 1セットの払い戻しの上限（賭け金の倍数）
 
 # 大当たり1回の出玉（名前, 賭け金の倍数, 確率）と、確変が続く確率
-ROUNDS = [("小当たり", 2, 0.695), ("大当たり", 10, 0.265), ("激アツ確変", 30, 0.04)]      # 還元率は約97%（当たりやすさは変えず、出玉の配分で調整）
+ROUNDS = [
+    ("小当たり", 2, 0.695),
+    ("大当たり", 10, 0.265),
+    ("激アツ確変", 30, 0.04),
+]  # 還元率は約97%（当たりやすさは変えず、出玉の配分で調整）
 CONTINUE = 0.50
 ROUND_NAME = {m: name for name, m, _ in ROUNDS}
 
 # 演出ごとの（出る確率, 当たる確率に足す分）。足した合計が 1 を超えたら 1（確定）
-OMEN_TABLE = {           # 予告の色（リーチの前に出る）。"" は予告なし
+OMEN_TABLE = {  # 予告の色（リーチの前に出る）。"" は予告なし
     "": (0.75, 0.00),
     "blue": (0.15, 0.002),
     "red": (0.08, 0.01),
     "gold": (0.02, 0.08),
 }
-TIER_TABLE = {           # リーチの格。"" はリーチなし（当たっても、リーチ演出なしで突然揃う「サプライズ当たり」になる）
+TIER_TABLE = {  # リーチの格。"" はリーチなし（当たっても、リーチ演出なしで突然揃う「サプライズ当たり」になる）
     "": (0.85, 0.00),
     NORMAL: (0.10, 0.01),
     SUPER: (0.04, 0.12),
     PREMIUM: (0.01, 0.45),
 }
-HIT_TARGET = 0.01322         # 1回転あたりの、当たる確率の平均。基本の確率は、これに合うよう下で決める（還元率が100%を超えない値）
+HIT_TARGET = (
+    0.01322  # 1回転あたりの、当たる確率の平均。基本の確率は、これに合うよう下で決める（還元率が100%を超えない値）
+)
 OMEN_TEXT = {"blue": "（青）ざわ…", "red": "（赤）ゾワッ…！ 予告だ…！", "gold": "（金）⚡ 激アツ予告 ⚡ これは来る…！"}
 
 
@@ -52,23 +58,24 @@ def _base_hit() -> float:
     return HIT_TARGET - extra
 
 
-BASE_HIT = _base_hit()       # 演出に関係なく足される、当たる確率の土台
+BASE_HIT = _base_hit()  # 演出に関係なく足される、当たる確率の土台
 
 
 @dataclass(frozen=True)
 class Frame:
     text: str
-    mood: str = "normal"      # 表示の色合い（normal / blue / red / gold）
+    mood: str = "normal"  # 表示の色合い（normal / blue / red / gold）
 
 
 @dataclass(frozen=True)
 class SpinInfo:
     """1回転。"""
-    omen: str                # 予告の色（予告なしなら ""）
-    tier: str                # リーチの格（リーチなしなら ""）
+
+    omen: str  # 予告の色（予告なしなら ""）
+    tier: str  # リーチの格（リーチなしなら ""）
     hit: bool
-    rounds: tuple            # 当たったときの、ラウンドごとの出玉（賭け金の倍数）。連チャンの数だけ並ぶ
-    hit_prob: float          # この演出での、当たる確率（統計用）
+    rounds: tuple  # 当たったときの、ラウンドごとの出玉（賭け金の倍数）。連チャンの数だけ並ぶ
+    hit_prob: float  # この演出での、当たる確率（統計用）
 
     @property
     def raw(self) -> int:
@@ -78,10 +85,11 @@ class SpinInfo:
 @dataclass(frozen=True)
 class SetResult:
     """1セット（100発）の結果。"""
-    starts: int              # スタートに入った玉の数 = 回転数
-    spins: tuple             # SpinInfo の並び
-    raw: int                 # 出玉の合計（上限をかける前）
-    mult: int                # 払い戻しの倍数（上限をかけたあと。0 ならハズレ）
+
+    starts: int  # スタートに入った玉の数 = 回転数
+    spins: tuple  # SpinInfo の並び
+    raw: int  # 出玉の合計（上限をかける前）
+    mult: int  # 払い戻しの倍数（上限をかけたあと。0 ならハズレ）
 
     @property
     def hits(self) -> int:
@@ -133,7 +141,9 @@ def roll_set(rng: random.Random) -> SetResult:
 
 # ----------------------------- 設計上の数字（厳密な計算） ----------------------------- #
 def mean_hit_prob() -> float:
-    return sum(po * pt * hit_probability(o, t) for o, (po, _) in OMEN_TABLE.items() for t, (pt, _) in TIER_TABLE.items())
+    return sum(
+        po * pt * hit_probability(o, t) for o, (po, _) in OMEN_TABLE.items() for t, (pt, _) in TIER_TABLE.items()
+    )
 
 
 def hit_rate_by_omen() -> dict:
@@ -161,19 +171,19 @@ def _set_distribution() -> tuple:
     one = [0.0] * (CAP_MULT + 1)
     for _, m, p in ROUNDS:
         one[m] += p
-    chain = list(one)                                    # 連チャン1回ぶんの合計の分布: f = (1-c)R + c (R * f)
+    chain = list(one)  # 連チャン1回ぶんの合計の分布: f = (1-c)R + c (R * f)
     for _ in range(CAP_MULT):
         step = _convolve(one, chain)
         new = [(1 - CONTINUE) * one[a] + CONTINUE * step[a] for a in range(CAP_MULT + 1)]
         if max(abs(x - y) for x, y in zip(new, chain)) < 1e-15:
             break
         chain = new
-    q = P_START * mean_hit_prob()                        # 玉1発が、大当たりの始まりになる確率
+    q = P_START * mean_hit_prob()  # 玉1発が、大当たりの始まりになる確率
     total = [1.0] + [0.0] * CAP_MULT
     result = [0.0] * (CAP_MULT + 1)
-    comb = 1.0                                           # 二項分布 P(M = m) を、漸化式で求める
+    comb = 1.0  # 二項分布 P(M = m) を、漸化式で求める
     for m in range(0, 31):
-        p_m = comb * q ** m * (1 - q) ** (BALLS_PER_SET - m) if m <= BALLS_PER_SET else 0.0
+        p_m = comb * q**m * (1 - q) ** (BALLS_PER_SET - m) if m <= BALLS_PER_SET else 0.0
         result = [r + p_m * t for r, t in zip(result, total)]
         total = _convolve(total, chain)
         comb = comb * (BALLS_PER_SET - m) / (m + 1) if m < BALLS_PER_SET else 0.0
@@ -203,7 +213,7 @@ def pick_reels(round_mult: int, tier: str, rng: random.Random) -> tuple:
         s = rng.choice(REEL_SYMBOLS)
         other = rng.choice([x for x in REEL_SYMBOLS if x != s])
         return (s, s, other)
-    return tuple(rng.sample(REEL_SYMBOLS, 3))       # 3つとも違う
+    return tuple(rng.sample(REEL_SYMBOLS, 3))  # 3つとも違う
 
 
 def ball_frames(rng: random.Random, rows: int = 3, width: int = 9, balls: int = 100) -> list:
@@ -226,9 +236,9 @@ def reel_line(a: str, b: str, c: str) -> str:
     return f"┃ {a} ┃ {b} ┃ {c} ┃"
 
 
-STEP_TEXT = ["ざわ…", "ゾワッ…！", "⚡ 激アツ ⚡"]            # 予告のステップアップ（1段目→2段目→3段目）
+STEP_TEXT = ["ざわ…", "ゾワッ…！", "⚡ 激アツ ⚡"]  # 予告のステップアップ（1段目→2段目→3段目）
 STEP_ICON = ["🔵", "🔴", "🟡"]
-STEPS_OF = {"blue": 1, "red": 2, "gold": 3}                # 予告の色ごとの、ステップの数（色が高いほど長い）
+STEPS_OF = {"blue": 1, "red": 2, "gold": 3}  # 予告の色ごとの、ステップの数（色が高いほど長い）
 
 
 def hold_row(icon: str) -> str:
@@ -236,8 +246,10 @@ def hold_row(icon: str) -> str:
     return "保留: ⚪⚪" + icon + "⚪"
 
 
-CUTIN = {SUPER: ["「チャンスだ！！」", "「いけるぞ！！」", "「ここからが本番だ！」", "「見せてやる！！」"],
-         PREMIUM: ["「これで終わりだ！！」", "「全部まとめて持っていけ！！」", "「運命を変えろ！！」", "「勝負だ！！」"]}
+CUTIN = {
+    SUPER: ["「チャンスだ！！」", "「いけるぞ！！」", "「ここからが本番だ！」", "「見せてやる！！」"],
+    PREMIUM: ["「これで終わりだ！！」", "「全部まとめて持っていけ！！」", "「運命を変えろ！！」", "「勝負だ！！」"],
+}
 
 
 def _pseudo(rng, r0, r1, sp, n: int) -> list:
@@ -252,81 +264,109 @@ def _pseudo(rng, r0, r1, sp, n: int) -> list:
 
 
 def _normal_a(rng, r0, r1, sp):
-    return [Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！** ざわ… ざわ…", "blue"),
-            Frame("🎞️ **ロングリーチ** 🎞️\n" + reel_line(r0, r1, sp()[2]) + "\nゆっくり回っている…", "blue"),
-            Frame(reel_line(r0, r1, "🌀") + "\nざわ… ざわ… ざわ…", "blue")]
+    return [
+        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！** ざわ… ざわ…", "blue"),
+        Frame("🎞️ **ロングリーチ** 🎞️\n" + reel_line(r0, r1, sp()[2]) + "\nゆっくり回っている…", "blue"),
+        Frame(reel_line(r0, r1, "🌀") + "\nざわ… ざわ… ざわ…", "blue"),
+    ]
 
 
 def _normal_b(rng, r0, r1, sp):
-    return [Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-            Frame("🌊 **波の予告** 🌊\n" + reel_line(r0, r1, sp()[2]) + "\n画面が揺れている…", "blue"),
-            Frame(reel_line(r0, r1, "🌀") + "\nじわ… じわ…", "blue")]
+    return [
+        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
+        Frame("🌊 **波の予告** 🌊\n" + reel_line(r0, r1, sp()[2]) + "\n画面が揺れている…", "blue"),
+        Frame(reel_line(r0, r1, "🌀") + "\nじわ… じわ…", "blue"),
+    ]
 
 
 def _normal_c(rng, r0, r1, sp):
-    return [Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-            Frame("🐟 **魚群が横切った** 🐟\n" + reel_line(r0, r1, sp()[2]) + "\nなにか起きる…？", "blue"),
-            Frame(reel_line(r0, r1, "🌀") + "\n…どっちだ…", "blue")]
+    return [
+        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
+        Frame("🐟 **魚群が横切った** 🐟\n" + reel_line(r0, r1, sp()[2]) + "\nなにか起きる…？", "blue"),
+        Frame(reel_line(r0, r1, "🌀") + "\n…どっちだ…", "blue"),
+    ]
 
 
 def _super_a(rng, r0, r1, sp):
-    return [Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-            Frame("⚡ **スーパーリーチ** ⚡\n" + reel_line(r0, r1, "🌀") + "\n背景が変わった…！", "red"),
-            Frame("🗯️ **カットイン！** 🗯️\n" + rng.choice(CUTIN[SUPER]) + "\n" + reel_line(r0, r1, sp()[2]), "red"),
-            *_pseudo(rng, r0, r1, sp, rng.choice([1, 2, 3])),
-            Frame("⚡⚡ **チャンス！！** ⚡⚡\n" + reel_line(r0, r1, sp()[2]) + "\nざわ… ざわ… ざわ…", "red"),
-            Frame("⚡ スローになった… ⚡\n" + reel_line(r0, r1, "🌀") + "\n…ここで決まる…！", "red")]
+    return [
+        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
+        Frame("⚡ **スーパーリーチ** ⚡\n" + reel_line(r0, r1, "🌀") + "\n背景が変わった…！", "red"),
+        Frame("🗯️ **カットイン！** 🗯️\n" + rng.choice(CUTIN[SUPER]) + "\n" + reel_line(r0, r1, sp()[2]), "red"),
+        *_pseudo(rng, r0, r1, sp, rng.choice([1, 2, 3])),
+        Frame("⚡⚡ **チャンス！！** ⚡⚡\n" + reel_line(r0, r1, sp()[2]) + "\nざわ… ざわ… ざわ…", "red"),
+        Frame("⚡ スローになった… ⚡\n" + reel_line(r0, r1, "🌀") + "\n…ここで決まる…！", "red"),
+    ]
 
 
 def _super_b(rng, r0, r1, sp):
-    return [Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-            Frame("🎬 **ストーリーリーチ** 🎬\n" + reel_line(r0, r1, "🌀") + "\n主人公が立ち上がる…！", "red"),
-            Frame("🗯️ **セリフ** 🗯️\n" + rng.choice(CUTIN[SUPER]) + "\n" + reel_line(r0, r1, sp()[2]), "red"),
-            *_pseudo(rng, r0, r1, sp, rng.choice([1, 2, 3])),
-            Frame("🔥 **逆転のチャンス！** 🔥\n" + reel_line(r0, r1, sp()[2]) + "\n音楽が盛り上がる…！", "red"),
-            Frame("…… **溜め** ……\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！", "red")]
+    return [
+        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
+        Frame("🎬 **ストーリーリーチ** 🎬\n" + reel_line(r0, r1, "🌀") + "\n主人公が立ち上がる…！", "red"),
+        Frame("🗯️ **セリフ** 🗯️\n" + rng.choice(CUTIN[SUPER]) + "\n" + reel_line(r0, r1, sp()[2]), "red"),
+        *_pseudo(rng, r0, r1, sp, rng.choice([1, 2, 3])),
+        Frame("🔥 **逆転のチャンス！** 🔥\n" + reel_line(r0, r1, sp()[2]) + "\n音楽が盛り上がる…！", "red"),
+        Frame("…… **溜め** ……\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！", "red"),
+    ]
 
 
 def _super_c(rng, r0, r1, sp):
-    return [Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-            Frame("🚃 **ダッシュリーチ** 🚃\n" + reel_line(r0, r1, sp()[2]) + "\n絵柄が走り出した…！", "red"),
-            Frame("🗯️ **カットイン！** 🗯️\n" + rng.choice(CUTIN[SUPER]) + "\n" + reel_line(r0, r1, sp()[2]), "red"),
-            *_pseudo(rng, r0, r1, sp, rng.choice([1, 2, 3])),
-            Frame("⚡⚡ **加速！！** ⚡⚡\n" + reel_line(r0, r1, sp()[2]) + "\n止まらない…！", "red"),
-            Frame("⚡ ブレーキ… ⚡\n" + reel_line(r0, r1, "🌀") + "\n…止まるか…！", "red")]
+    return [
+        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
+        Frame("🚃 **ダッシュリーチ** 🚃\n" + reel_line(r0, r1, sp()[2]) + "\n絵柄が走り出した…！", "red"),
+        Frame("🗯️ **カットイン！** 🗯️\n" + rng.choice(CUTIN[SUPER]) + "\n" + reel_line(r0, r1, sp()[2]), "red"),
+        *_pseudo(rng, r0, r1, sp, rng.choice([1, 2, 3])),
+        Frame("⚡⚡ **加速！！** ⚡⚡\n" + reel_line(r0, r1, sp()[2]) + "\n止まらない…！", "red"),
+        Frame("⚡ ブレーキ… ⚡\n" + reel_line(r0, r1, "🌀") + "\n…止まるか…！", "red"),
+    ]
 
 
 def _premium_a(rng, r0, r1, sp):
-    return [Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-            *_pseudo(rng, r0, r1, sp, rng.choice([2, 3, 4])),
-            Frame("🔥 **プレミアムリーチ** 🔥\n" + reel_line(r0, r1, "🌀") + "\n画面が燃えている…！！", "red"),
-            Frame("🔥🔥 **全回転！！** 🔥🔥\n" + reel_line(*sp()) + "\nどよめき…！", "gold"),
-            Frame("🗯️ **プレミアムカットイン** 🗯️\n" + rng.choice(CUTIN[PREMIUM]) + "\n" + reel_line(r0, r1, sp()[2]), "gold"),
-            Frame("🔥🔥🔥 **運命の瞬間** 🔥🔥🔥\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！！", "gold")]
+    return [
+        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
+        *_pseudo(rng, r0, r1, sp, rng.choice([2, 3, 4])),
+        Frame("🔥 **プレミアムリーチ** 🔥\n" + reel_line(r0, r1, "🌀") + "\n画面が燃えている…！！", "red"),
+        Frame("🔥🔥 **全回転！！** 🔥🔥\n" + reel_line(*sp()) + "\nどよめき…！", "gold"),
+        Frame(
+            "🗯️ **プレミアムカットイン** 🗯️\n" + rng.choice(CUTIN[PREMIUM]) + "\n" + reel_line(r0, r1, sp()[2]), "gold"
+        ),
+        Frame("🔥🔥🔥 **運命の瞬間** 🔥🔥🔥\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！！", "gold"),
+    ]
 
 
 def _premium_b(rng, r0, r1, sp):
-    return [Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-            Frame("🌌 **空間が歪む** 🌌\n" + reel_line(*sp()) + "\n何かが来る…！", "red"),
-            Frame("⚡ **ボタン連打チャンス** ⚡\n" + reel_line(r0, r1, sp()[2]) + "\n連打連打連打…！", "red"),
-            Frame("🐉 **龍が現れた！！** 🐉\n" + reel_line(*sp()) + "\n地鳴りがする…！！", "gold"),
-            Frame("🔥 **プレミアムリーチ** 🔥\n" + reel_line(r0, r1, "🌀") + "\n画面が燃えている…！！", "red"),
-            Frame("🔥🔥 **全回転！！** 🔥🔥\n" + reel_line(*sp()) + "\nすべての絵柄が光る…！", "gold"),
-            Frame("🗯️ **プレミアムカットイン** 🗯️\n" + rng.choice(CUTIN[PREMIUM]) + "\n" + reel_line(r0, r1, sp()[2]), "gold"),
-            Frame("🔥🔥🔥 **運命の瞬間** 🔥🔥🔥\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！！", "gold")]
+    return [
+        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
+        Frame("🌌 **空間が歪む** 🌌\n" + reel_line(*sp()) + "\n何かが来る…！", "red"),
+        Frame("⚡ **ボタン連打チャンス** ⚡\n" + reel_line(r0, r1, sp()[2]) + "\n連打連打連打…！", "red"),
+        Frame("🐉 **龍が現れた！！** 🐉\n" + reel_line(*sp()) + "\n地鳴りがする…！！", "gold"),
+        Frame("🔥 **プレミアムリーチ** 🔥\n" + reel_line(r0, r1, "🌀") + "\n画面が燃えている…！！", "red"),
+        Frame("🔥🔥 **全回転！！** 🔥🔥\n" + reel_line(*sp()) + "\nすべての絵柄が光る…！", "gold"),
+        Frame(
+            "🗯️ **プレミアムカットイン** 🗯️\n" + rng.choice(CUTIN[PREMIUM]) + "\n" + reel_line(r0, r1, sp()[2]), "gold"
+        ),
+        Frame("🔥🔥🔥 **運命の瞬間** 🔥🔥🔥\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！！", "gold"),
+    ]
 
 
 def _premium_c(rng, r0, r1, sp):
-    return [Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-            Frame("🌠 **流星群** 🌠\n" + reel_line(r0, r1, sp()[2]) + "\n夜空が光る…！", "red"),
-            *_pseudo(rng, r0, r1, sp, rng.choice([2, 3, 4])),
-            Frame("🔥 **プレミアムリーチ** 🔥\n" + reel_line(r0, r1, "🌀") + "\n金色に輝いている…！！", "gold"),
-            Frame("👑 **覚醒！！** 👑\n" + reel_line(*sp()) + "\n全リールが金色に…！", "gold"),
-            Frame("🗯️ **プレミアムカットイン** 🗯️\n" + rng.choice(CUTIN[PREMIUM]) + "\n" + reel_line(r0, r1, sp()[2]), "gold"),
-            Frame("🔥🔥🔥 **運命の瞬間** 🔥🔥🔥\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！！", "gold")]
+    return [
+        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
+        Frame("🌠 **流星群** 🌠\n" + reel_line(r0, r1, sp()[2]) + "\n夜空が光る…！", "red"),
+        *_pseudo(rng, r0, r1, sp, rng.choice([2, 3, 4])),
+        Frame("🔥 **プレミアムリーチ** 🔥\n" + reel_line(r0, r1, "🌀") + "\n金色に輝いている…！！", "gold"),
+        Frame("👑 **覚醒！！** 👑\n" + reel_line(*sp()) + "\n全リールが金色に…！", "gold"),
+        Frame(
+            "🗯️ **プレミアムカットイン** 🗯️\n" + rng.choice(CUTIN[PREMIUM]) + "\n" + reel_line(r0, r1, sp()[2]), "gold"
+        ),
+        Frame("🔥🔥🔥 **運命の瞬間** 🔥🔥🔥\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！！", "gold"),
+    ]
 
 
-REACH_PATTERNS = {NORMAL: [_normal_a, _normal_b, _normal_c], SUPER: [_super_a, _super_b, _super_c], PREMIUM: [_premium_a, _premium_b, _premium_c]}
+REACH_PATTERNS = {
+    NORMAL: [_normal_a, _normal_b, _normal_c],
+    SUPER: [_super_a, _super_b, _super_c],
+    PREMIUM: [_premium_a, _premium_b, _premium_c],
+}
 
 
 def spin_frames(rng: random.Random, spin: SpinInfo, label: str = "") -> list:
@@ -340,21 +380,26 @@ def spin_frames(rng: random.Random, spin: SpinInfo, label: str = "") -> list:
     omen, tier = spin.omen, spin.tier
     head = f"**{label}**\n" if label else ""
     r0, r1 = reels[0], reels[1]
-    spinning = lambda: tuple(rng.choice(REEL_SYMBOLS) for _ in range(3))     # noqa: E731
+
+    def spinning() -> tuple:
+        return tuple(rng.choice(REEL_SYMBOLS) for _ in range(3))
+
     frames = []
-    for k in range(STEPS_OF.get(omen, 0)):                   # ① 予告のステップアップ: 色が高いほど、段が多い
+    for k in range(STEPS_OF.get(omen, 0)):  # ① 予告のステップアップ: 色が高いほど、段が多い
         last = k + 1 == STEPS_OF[omen]
         mood = ("blue", "red", "gold")[k]
         text = f"**【予告】** {OMEN_TEXT[omen]}" if last else f"**【予告】** {STEP_TEXT[k]}"
         frames.append(Frame((head if k == 0 else "") + hold_row(STEP_ICON[k]) + "\n" + text, mood))
-    frames.append(Frame((head if not omen else "") + reel_line("🌀", "🌀", "🌀") + "\n回転中…"))      # ② 回転
+    frames.append(Frame((head if not omen else "") + reel_line("🌀", "🌀", "🌀") + "\n回転中…"))  # ② 回転
     frames.append(Frame(reel_line(r0, "🌀", "🌀")))
-    if not reach:                                              # ③ リーチなし: 突然揃うサプライズ
-        frames += [Frame(reel_line(r0, r1, "🌀") + "\n…！？ **まさか…**", omen or "normal"),
-                   Frame("💫 **フリーズ！！** 💫\n" + reel_line(r0, r1, "🌀") + "\n画面が固まった…！！", "gold")]
+    if not reach:  # ③ リーチなし: 突然揃うサプライズ
+        frames += [
+            Frame(reel_line(r0, r1, "🌀") + "\n…！？ **まさか…**", omen or "normal"),
+            Frame("💫 **フリーズ！！** 💫\n" + reel_line(r0, r1, "🌀") + "\n画面が固まった…！！", "gold"),
+        ]
     else:
         frames += rng.choice(REACH_PATTERNS[tier])(rng, r0, r1, spinning)
-    frames.append(Frame(head + reel_line(*reels), "normal"))   # ④ 出目
+    frames.append(Frame(head + reel_line(*reels), "normal"))  # ④ 出目
     return frames
 
 

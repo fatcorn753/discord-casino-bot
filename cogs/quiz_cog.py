@@ -12,6 +12,8 @@
 
 import re
 import time
+from dataclasses import dataclass
+from typing import Optional
 
 import discord
 from discord import app_commands
@@ -23,7 +25,7 @@ from core.duration import format_minutes, parse_duration
 
 MAX_CHOICE_LEN = 80
 MAX_REWARD = 10_000
-MAX_VERDICT_LEN = 20          # 正解・不正解の見出しの文言の最大文字数
+MAX_VERDICT_LEN = 20  # 正解・不正解の見出しの文言の最大文字数
 DEFAULT_RIGHT, DEFAULT_WRONG = "正解！", "不正解…"
 DEFAULT_REWARD = 100
 LETTERS = "ABCD"
@@ -84,13 +86,18 @@ def verdict(q: dict, correct: bool) -> str:
 
 
 def question_embed(q: dict, order: list, remaining: int) -> discord.Embed:
-    body = q["question"] + "\n\n" + "\n".join(f"**{LETTERS[i]}.** {c}" for i, c in enumerate(order)) + f"\n\n出題: **{creator_label(q)}**"
+    body = (
+        q["question"]
+        + "\n\n"
+        + "\n".join(f"**{LETTERS[i]}.** {c}" for i, c in enumerate(order))
+        + f"\n\n出題: **{creator_label(q)}**"
+    )
     e = ui.embed(f"📰 クイズ #{q['id']}", body, ui.INFO)
     e.set_footer(text=f"正解で {q['reward']:,}ペリカ ｜ 1問1回だけ ｜ あと{remaining}問")
     return e
 
 
-def result_embed(result: dict, reward: int, more: int, quiz: dict = None) -> discord.Embed:
+def result_embed(result: dict, more: int, quiz: dict = None) -> discord.Embed:
     if result["correct"]:
         e = ui.embed(f"⭕ {verdict(quiz, True)}", f"**+{ui.pelica(result['reward'])}**", ui.OK)
     else:
@@ -104,7 +111,9 @@ def result_embed(result: dict, reward: int, more: int, quiz: dict = None) -> dis
 
 def public_embed(q: dict) -> discord.Embed:
     body = q["question"] + "\n\n" + "\n".join(f"**{LETTERS[i]}.** {c}" for i, c in enumerate(q["order"]))
-    body += f"\n\n出題: **{creator_label(q)}**" + ("（出題者は答えられません。正解の報酬は出題者が払います）" if q["author_id"] else "")
+    body += f"\n\n出題: **{creator_label(q)}**" + (
+        "（出題者は答えられません。正解の報酬は出題者が払います）" if q["author_id"] else ""
+    )
     if q["expires"] is not None:
         body += f"\n⏳ 期限 <t:{int(q['expires'])}:R>"
     e = ui.embed(f"📰 {'みんなのクイズ' if q['author_id'] else '新しいクイズ'} #{q['id']}", body, ui.GOLD)
@@ -138,9 +147,11 @@ def settle_text(q: dict) -> str:
     total = q["base"] + q["bonus"] + q["part"]
     if total == 0:
         return f"回答者が{quizpay.MIN_PARTICIPANTS}人に満たなかった（{n}人）ので、出題報酬はありません。"
-    return (f"参加 **{n}人** ／ 正解 **{c}人**（正答率 **{c / n:.0%}**）\n"
-            f"出題報酬: 基本 {ui.pelica(q['base'])} ＋ 正答率ボーナス {ui.pelica(q['bonus'])} ＋ 参加報酬 {ui.pelica(q['part'])}"
-            f" ＝ **{ui.pelica(total)}**（回答のたびに受け取り済み）\n（正答率{quizpay.TARGET_RATE:.0%}に近いほど、ボーナスと参加報酬が大きくなります）")
+    return (
+        f"参加 **{n}人** ／ 正解 **{c}人**（正答率 **{c / n:.0%}**）\n"
+        f"出題報酬: 基本 {ui.pelica(q['base'])} ＋ 正答率ボーナス {ui.pelica(q['bonus'])} ＋ 参加報酬 {ui.pelica(q['part'])}"
+        f" ＝ **{ui.pelica(total)}**（回答のたびに受け取り済み）\n（正答率{quizpay.TARGET_RATE:.0%}に近いほど、ボーナスと参加報酬が大きくなります）"
+    )
 
 
 async def record_answer(bot, interaction: discord.Interaction, quiz_id: int, pos: int) -> None:
@@ -154,24 +165,33 @@ async def record_answer(bot, interaction: discord.Interaction, quiz_id: int, pos
     ok, result = eco.quiz_answer(interaction.user.id, quiz_id, quiz["order"][pos], time.time())
     if not ok:
         return await interaction.response.send_message(embed=ui.error_embed("答えられません", result), ephemeral=True)
-    await interaction.response.send_message(embed=result_embed(result, quiz["reward"], eco.quiz_next(interaction.user.id, time.time())[1], quiz), ephemeral=True)
+    await interaction.response.send_message(
+        embed=result_embed(result, eco.quiz_next(interaction.user.id, time.time())[1], quiz), ephemeral=True
+    )
     # 結果（正解か不正解か）だけを、みんなに見える形で出す。選んだ答えと正解は出さない（まだ答えていない人のため）
-    line = (f"⭕ <@{interaction.user.id}> が #{quiz_id} に **{verdict(quiz, True)}**（+{ui.pelica(result['reward'])}）" if result["correct"]
-            else f"❌ <@{interaction.user.id}> が #{quiz_id} に **{verdict(quiz, False)}**")
-    if result["author_delta"]:      # 出題者の受け取りも、その場で見せる（正答率が40%から離れると減ることがある）
+    line = (
+        f"⭕ <@{interaction.user.id}> が #{quiz_id} に **{verdict(quiz, True)}**（+{ui.pelica(result['reward'])}）"
+        if result["correct"]
+        else f"❌ <@{interaction.user.id}> が #{quiz_id} に **{verdict(quiz, False)}**"
+    )
+    if result["author_delta"]:  # 出題者の受け取りも、その場で見せる（正答率が40%から離れると減ることがある）
         sign = "+" if result["author_delta"] > 0 else "−"
         line += f"\n💰 出題者 <@{result['author_id']}> {sign}{ui.pelica(abs(result['author_delta']))}（累計 {ui.pelica(result['author_total'])}）"
     try:
         await interaction.followup.send(line, allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException as exc:
-        logthrottle.warn(("quiz-public", interaction.guild_id), f"回答の結果を投稿できません: guild={interaction.guild_id}: {exc!r}")
+        logthrottle.warn(
+            ("quiz-public", interaction.guild_id), f"回答の結果を投稿できません: guild={interaction.guild_id}: {exc!r}"
+        )
 
 
 class PublicButton(discord.ui.DynamicItem[discord.ui.Button], template=r"quiz:(?P<qid>\d+):(?P<pos>[0-3])"):
     """公開された問題の選択肢ボタン。再起動しても動くように、問題の番号と位置を custom_id に入れている。"""
 
     def __init__(self, qid: int, pos: int):
-        super().__init__(discord.ui.Button(label=LETTERS[pos], style=discord.ButtonStyle.primary, custom_id=f"quiz:{qid}:{pos}"))
+        super().__init__(
+            discord.ui.Button(label=LETTERS[pos], style=discord.ButtonStyle.primary, custom_id=f"quiz:{qid}:{pos}")
+        )
         self.qid, self.pos = qid, pos
 
     @classmethod
@@ -202,7 +222,9 @@ class AnswerView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message(embed=ui.error_embed("挑戦者本人だけが答えられます"), ephemeral=True)
+            await interaction.response.send_message(
+                embed=ui.error_embed("挑戦者本人だけが答えられます"), ephemeral=True
+            )
             return False
         return True
 
@@ -212,21 +234,71 @@ class AnswerView(discord.ui.View):
             ok, result = eco.quiz_answer(self.user_id, self.quiz["id"], self.order[index], time.time())
             if not ok:
                 self.stop()
-                return await interaction.response.edit_message(embed=ui.error_embed("答えられません", result), view=None)
+                return await interaction.response.edit_message(
+                    embed=ui.error_embed("答えられません", result), view=None
+                )
             _, more = eco.quiz_next(self.user_id, time.time())
             self.stop()
-            await interaction.response.edit_message(embed=result_embed(result, self.quiz["reward"], more, self.quiz), view=None)
+            await interaction.response.edit_message(embed=result_embed(result, more, self.quiz), view=None)
+
         return callback
 
 
-class AddModal(discord.ui.Modal, title="クイズを追加"):
+@dataclass
+class FormValues:
+    """出題フォームの入力を、検証したあとの値。minutes が None なら無期限。"""
+
+    choices: list
+    reward: int
+    minutes: Optional[int]
+    msg_right: str
+    msg_wrong: str
+
+
+def verdicts_input() -> discord.ui.TextInput:
+    return discord.ui.TextInput(
+        label="正解・不正解の文言（2行。省略可）",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=45,
+        placeholder="1行目: 正解のとき（例: お見事！）\n2行目: 不正解のとき（例: おしい！）",
+    )
+
+
+class QuizForm(discord.ui.Modal):
+    """持ち主の登録フォームと、みんなの出題フォームに共通の入力欄と検証。「報酬 / 期間」と「文言」は、子が足す（欄は5つまで）。"""
+
     question = discord.ui.TextInput(label="問題文", style=discord.TextStyle.paragraph, max_length=500)
-    choices = discord.ui.TextInput(label="選択肢（4行。1行目が正解）", style=discord.TextStyle.paragraph, max_length=400)
-    explanation = discord.ui.TextInput(label="解説（なくてもよい）", style=discord.TextStyle.paragraph, required=False, max_length=800)
-    terms = discord.ui.TextInput(label="報酬 / 期間（例: 100 / 3日。期間は省略可）", default=str(DEFAULT_REWARD), max_length=30,
-                                 placeholder=f"報酬は 1〜{MAX_REWARD:,}。期間は 90分・2時間・3日 など（省略で無期限）")
-    verdicts = discord.ui.TextInput(label="正解・不正解の文言（2行。省略可）", style=discord.TextStyle.paragraph, required=False, max_length=45,
-                                    placeholder="1行目: 正解のとき（例: お見事！）\n2行目: 不正解のとき（例: おしい！）")
+    choices = discord.ui.TextInput(
+        label="選択肢（4行。1行目が正解）", style=discord.TextStyle.paragraph, max_length=400
+    )
+    explanation = discord.ui.TextInput(
+        label="解説（なくてもよい）", style=discord.TextStyle.paragraph, required=False, max_length=800
+    )
+
+    def read(self, max_reward: int, default_minutes: Optional[int], min_minutes: int, max_minutes: int) -> FormValues:
+        """入力を検証して返す。問題があれば ValueError（文面はそのまま利用者に見せる）。"""
+        choices = parse_choices(self.choices.value)
+        reward, duration = parse_terms(self.terms.value)
+        if not 1 <= reward <= max_reward:
+            raise ValueError(f"報酬は 1〜{max_reward:,} で入力してください。")
+        msg_right, msg_wrong = parse_verdicts(self.verdicts.value)
+        minutes = parse_duration(duration) if duration else default_minutes
+        if minutes is not None and not min_minutes <= minutes <= max_minutes:
+            raise ValueError(
+                f"有効な期間は {format_minutes(min_minutes)}〜{format_minutes(max_minutes)} の範囲で入力してください。"
+            )
+        return FormValues(choices, reward, minutes, msg_right, msg_wrong)
+
+
+class AddModal(QuizForm, title="クイズを追加"):
+    terms = discord.ui.TextInput(
+        label="報酬 / 期間（例: 100 / 3日。期間は省略可）",
+        default=str(DEFAULT_REWARD),
+        max_length=30,
+        placeholder=f"報酬は 1〜{MAX_REWARD:,}。期間は 90分・2時間・3日 など（省略で無期限）",
+    )
+    verdicts = verdicts_input()
 
     def __init__(self, cog: "QuizCog", announce: bool = True, guild=None, channel=None):
         super().__init__()
@@ -234,33 +306,45 @@ class AddModal(discord.ui.Modal, title="クイズを追加"):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            choices = parse_choices(self.choices.value)
-            reward, duration = parse_terms(self.terms.value)
-            if not 1 <= reward <= MAX_REWARD:
-                raise ValueError(f"報酬は 1〜{MAX_REWARD:,} で入力してください。")
-            msg_right, msg_wrong = parse_verdicts(self.verdicts.value)
-            minutes = parse_duration(duration) if duration else None
-            if minutes is not None and not 1 <= minutes <= 365 * 1440:
-                raise ValueError("有効な期間は 1分〜365日 の範囲で入力してください。")
+            form = self.read(MAX_REWARD, None, 1, 365 * 1440)
         except ValueError as exc:
             return await interaction.response.send_message(embed=ui.error_embed("入力エラー", str(exc)), ephemeral=True)
         now = time.time()
-        qid = self.cog.bot.economy.quiz_add(self.question.value.strip(), choices, self.explanation.value.strip(), reward,
-                                            now + minutes * 60 if minutes else None, now, interaction.user.display_name, msg_right, msg_wrong)
+        expires = now + form.minutes * 60 if form.minutes else None
+        qid = self.cog.bot.economy.quiz_add(
+            self.question.value.strip(),
+            form.choices,
+            self.explanation.value.strip(),
+            form.reward,
+            expires,
+            now,
+            interaction.user.display_name,
+            form.msg_right,
+            form.msg_wrong,
+        )
         await interaction.response.defer(ephemeral=True)
         posted = await self.cog.broadcast(qid, self.guild, self.channel) if self.announce else None
-        note = "告知はしていません。`/クイズ 挑戦` で出ます。" if posted is None else f"{posted}サーバーに告知しました。"
-        await interaction.followup.send(embed=ui.ok_embed(f"クイズ #{qid} を登録しました", f"正解: **{choices[0]}**　報酬: {ui.pelica(reward)}　" + (f"期間: {format_minutes(minutes)}" if minutes else "期間: 無期限") + f"\n{note}"), ephemeral=True)
+        note = (
+            "告知はしていません。`/クイズ 挑戦` で出ます。" if posted is None else f"{posted}サーバーに告知しました。"
+        )
+        period = f"期間: {format_minutes(form.minutes)}" if form.minutes else "期間: 無期限"
+        await interaction.followup.send(
+            embed=ui.ok_embed(
+                f"クイズ #{qid} を登録しました",
+                f"正解: **{form.choices[0]}**　報酬: {ui.pelica(form.reward)}　{period}\n{note}",
+            ),
+            ephemeral=True,
+        )
 
 
-class UserModal(discord.ui.Modal, title="クイズを出題"):
-    question = discord.ui.TextInput(label="問題文", style=discord.TextStyle.paragraph, max_length=500)
-    choices = discord.ui.TextInput(label="選択肢（4行。1行目が正解）", style=discord.TextStyle.paragraph, max_length=400)
-    explanation = discord.ui.TextInput(label="解説（なくてもよい）", style=discord.TextStyle.paragraph, required=False, max_length=800)
-    terms = discord.ui.TextInput(label="報酬 / 期間（例: 100 / 2日。期間は省略可）", default="100", max_length=30,
-                                 placeholder=f"報酬は正解1人あたり 1〜{quizpay.USER_MAX_REWARD:,}（あなたのペリカ）。期間は最長7日、省略で{format_minutes(quizpay.USER_DEFAULT_MINUTES)}")
-    verdicts = discord.ui.TextInput(label="正解・不正解の文言（2行。省略可）", style=discord.TextStyle.paragraph, required=False, max_length=45,
-                                    placeholder="1行目: 正解のとき（例: お見事！）\n2行目: 不正解のとき（例: おしい！）")
+class UserModal(QuizForm, title="クイズを出題"):
+    terms = discord.ui.TextInput(
+        label="報酬 / 期間（例: 100 / 2日。期間は省略可）",
+        default="100",
+        max_length=30,
+        placeholder=f"報酬は正解1人あたり 1〜{quizpay.USER_MAX_REWARD:,}（あなたのペリカ）。期間は最長7日、省略で{format_minutes(quizpay.USER_DEFAULT_MINUTES)}",
+    )
+    verdicts = verdicts_input()
 
     def __init__(self, cog: "QuizCog"):
         super().__init__()
@@ -268,21 +352,37 @@ class UserModal(discord.ui.Modal, title="クイズを出題"):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            choices = parse_choices(self.choices.value)
-            reward, duration = parse_terms(self.terms.value)
-            if not 1 <= reward <= quizpay.USER_MAX_REWARD:
-                raise ValueError(f"報酬は 1〜{quizpay.USER_MAX_REWARD:,} で入力してください。")
-            msg_right, msg_wrong = parse_verdicts(self.verdicts.value)
-            minutes = parse_duration(duration) if duration else quizpay.USER_DEFAULT_MINUTES
-            if not quizpay.USER_MIN_MINUTES <= minutes <= quizpay.USER_MAX_MINUTES:
-                raise ValueError(f"有効な期間は 1分〜{format_minutes(quizpay.USER_MAX_MINUTES)} の範囲で入力してください。")
+            form = self.read(
+                quizpay.USER_MAX_REWARD,
+                quizpay.USER_DEFAULT_MINUTES,
+                quizpay.USER_MIN_MINUTES,
+                quizpay.USER_MAX_MINUTES,
+            )
         except ValueError as exc:
             return await interaction.response.send_message(embed=ui.error_embed("入力エラー", str(exc)), ephemeral=True)
         eco = self.cog.bot.economy.for_guild(interaction.guild_id)
-        ok, result = eco.quiz_post(interaction.user.id, self.question.value.strip(), choices, self.explanation.value.strip(), reward, minutes, interaction.channel_id, time.time(), interaction.user.display_name, msg_right, msg_wrong)
+        ok, result = eco.quiz_post(
+            interaction.user.id,
+            self.question.value.strip(),
+            form.choices,
+            self.explanation.value.strip(),
+            form.reward,
+            form.minutes,
+            interaction.channel_id,
+            time.time(),
+            interaction.user.display_name,
+            form.msg_right,
+            form.msg_wrong,
+        )
         if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("出題できません", result), ephemeral=True)
-        await interaction.response.send_message(embed=public_embed(eco.quiz_get(result)), view=public_view(result), allowed_mentions=discord.AllowedMentions.none())
+            return await interaction.response.send_message(
+                embed=ui.error_embed("出題できません", result), ephemeral=True
+            )
+        await interaction.response.send_message(
+            embed=public_embed(eco.quiz_get(result)),
+            view=public_view(result),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
         eco.quiz_set_message(result, (await interaction.original_response()).id)
 
 
@@ -317,7 +417,7 @@ class QuizCog(commands.Cog):
             try:
                 for q in self.bot.economy.for_guild(guild.id).quiz_settle(now):
                     await self.announce_settle(guild, q)
-            except Exception as exc:       # 1サーバーの失敗で、ほかを止めない
+            except Exception as exc:  # 1サーバーの失敗で、ほかを止めない
                 print(f"クイズを精算できません: guild={guild.id}: {exc!r}")
 
     async def announce_settle(self, guild: discord.Guild, q: dict) -> None:
@@ -331,7 +431,13 @@ class QuizCog(commands.Cog):
         try:
             if q["message_id"]:
                 await channel.get_partial_message(q["message_id"]).edit(embed=closed, view=None)
-            await channel.send(content=f"<@{q['author_id']}>", embed=result, allowed_mentions=discord.AllowedMentions(users=[discord.Object(id=q["author_id"])], roles=False, everyone=False))
+            await channel.send(
+                content=f"<@{q['author_id']}>",
+                embed=result,
+                allowed_mentions=discord.AllowedMentions(
+                    users=[discord.Object(id=q["author_id"])], roles=False, everyone=False
+                ),
+            )
         except discord.HTTPException as exc:
             logthrottle.warn(("quiz-settle", guild.id), f"クイズの結果を投稿できません: guild={guild.id}: {exc!r}")
 
@@ -343,14 +449,16 @@ class QuizCog(commands.Cog):
         """
         quiz = self.bot.economy.quiz_get(quiz_id)
         count = 0
-        for guild in ([only_guild] if only_guild is not None else list(self.bot.guilds)):
+        for guild in [only_guild] if only_guild is not None else list(self.bot.guilds):
             if only_guild is None and not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
                 continue
             channel = only_channel or announce_channel(guild, self.bot.economy.for_guild(guild.id))
             if channel is None:
                 continue
             try:
-                await channel.send(embed=public_embed(quiz), view=public_view(quiz_id), allowed_mentions=discord.AllowedMentions.none())
+                await channel.send(
+                    embed=public_embed(quiz), view=public_view(quiz_id), allowed_mentions=discord.AllowedMentions.none()
+                )
                 count += 1
             except discord.HTTPException as exc:
                 logthrottle.warn(("quiz", guild.id), f"クイズを投稿できません: guild={guild.id}: {exc!r}")
@@ -363,8 +471,15 @@ class QuizCog(commands.Cog):
         eco = self.bot.economy.for_guild(interaction.guild_id)
         quiz, remaining = eco.quiz_next(interaction.user.id, time.time())
         if quiz is None:
-            return await interaction.response.send_message(embed=ui.embed("📰 クイズ", "いま挑戦できる問題はありません。新しい問題を待ってください。", ui.INFO), ephemeral=True)
-        await interaction.response.send_message(embed=question_embed(quiz, quiz["order"], remaining), view=AnswerView(self, interaction.user.id, quiz, quiz["order"]), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.embed("📰 クイズ", "いま挑戦できる問題はありません。新しい問題を待ってください。", ui.INFO),
+                ephemeral=True,
+            )
+        await interaction.response.send_message(
+            embed=question_embed(quiz, quiz["order"], remaining),
+            view=AnswerView(self, interaction.user.id, quiz, quiz["order"]),
+            ephemeral=True,
+        )
 
     @group.command(name="出題", description="自分のクイズを出す（報酬は自分のペリカから払う）")
     async def post(self, interaction: discord.Interaction):
@@ -376,8 +491,15 @@ class QuizCog(commands.Cog):
     async def withdraw(self, interaction: discord.Interaction, quiz_id: int):
         done = self.bot.economy.for_guild(interaction.guild_id).quiz_withdraw(interaction.user.id, quiz_id, time.time())
         if done is None:
-            return await interaction.response.send_message(embed=ui.error_embed("取り下げられません", "あなたがこのサーバーで出した、終了前の問題の番号を指定してください。"), ephemeral=True)
-        await interaction.response.send_message(embed=ui.ok_embed(f"クイズ #{quiz_id} を取り下げました", settle_text(done)), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.error_embed(
+                    "取り下げられません", "あなたがこのサーバーで出した、終了前の問題の番号を指定してください。"
+                ),
+                ephemeral=True,
+            )
+        await interaction.response.send_message(
+            embed=ui.ok_embed(f"クイズ #{quiz_id} を取り下げました", settle_text(done)), ephemeral=True
+        )
         await self.announce_settle(interaction.guild, done)
 
     @withdraw.autocomplete("quiz_id")
@@ -404,8 +526,14 @@ class QuizCog(commands.Cog):
         for q in self.bot.economy.quiz_list()[:15]:
             state = "⌛" if q["expires"] is not None and now >= q["expires"] else "🟢"
             until = "" if q["expires"] is None else f" 〜<t:{int(q['expires'])}:d>"
-            lines.append(f"{state}{'👤' if q['author_id'] else ''} `#{q['id']}` {q['question'][:40].replace(chr(10), ' ')}　正解「{q['choices'][0][:20]}」　{q['reward']:,}ペリカ{until}　{q['right_count']}/{q['answered']}人正解")
-        return ui.embed("📰 クイズ一覧（新しい順・15件まで）", "\n".join(lines) or "まだありません。`/運営 クイズ 追加` で登録できます。", ui.INFO)
+            lines.append(
+                f"{state}{'👤' if q['author_id'] else ''} `#{q['id']}` {q['question'][:40].replace(chr(10), ' ')}　正解「{q['choices'][0][:20]}」　{q['reward']:,}ペリカ{until}　{q['right_count']}/{q['answered']}人正解"
+            )
+        return ui.embed(
+            "📰 クイズ一覧（新しい順・15件まで）",
+            "\n".join(lines) or "まだありません。`/運営 クイズ 追加` で登録できます。",
+            ui.INFO,
+        )
 
     def remove(self, quiz_id: int) -> bool:
         return self.bot.economy.quiz_delete(quiz_id)

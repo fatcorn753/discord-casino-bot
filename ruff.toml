@@ -1,0 +1,11 @@
+# 開発用の整形・検査の設定（実行に必要な依存ではない。requirements-dev.txt で入れる）
+line-length = 120
+target-version = "py312"
+extend-exclude = [".venv"]
+
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]      # 長い行は ruff format で整える。折り返せない文字列は、そのままにする
+
+[format]
+quote-style = "double"

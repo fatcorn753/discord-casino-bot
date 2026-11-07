@@ -16,11 +16,11 @@ from games import pachinko, slot
 GAMES = ("スロット", "ルーレット", "パチンコ", "チンチロ", "ブラックジャック")
 LEVELS = (1, 2, 3, 4, 5, 6)
 DEFAULT_LEVEL = 3
-STEP = 0.04                 # 1レベルあたりの還元率の動き（4ポイント）
+STEP = 0.04  # 1レベルあたりの還元率の動き（4ポイント）
 
 # シミュレーションで求めた目安（tests/test_rtplevel.py で再計算して、近いことを確かめている）
 CHINCHIRO_RTP, CHINCHIRO_W = 0.985, 0.653
-BLACKJACK_RTP, BLACKJACK_W = 0.918, 0.412      # 「17まで引く」打ち方の場合
+BLACKJACK_RTP, BLACKJACK_W = 0.918, 0.412  # 「17まで引く」打ち方の場合
 ROULETTE_DEFAULT_KIND = "red"
 
 
@@ -42,6 +42,7 @@ SLOT_RTP, SLOT_W = _slot_stats()
 
 def _roulette_stats(kind: str) -> tuple:
     from games import roulette
+
     mult = roulette.BETS[kind][1]
     p = sum(1 for n in range(37) if roulette.wins(kind, n, 17)) / 37
     return p * mult, p * (mult - 1)

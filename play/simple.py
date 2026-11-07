@@ -13,12 +13,18 @@ from core import ui
 from games import roulette, slot
 from play.common import ReplayView, game_title, log_display_failure, result_color, result_lines, signed, start_game
 
-RNG = random.SystemRandom()      # OS の乱数。結果を予測・再現できない
-STEP = 0.9                       # 演出のコマ送り間隔（秒）
+RNG = random.SystemRandom()  # OS の乱数。結果を予測・再現できない
+STEP = 0.9  # 演出のコマ送り間隔（秒）
 
 
-async def show(interaction: discord.Interaction, first: discord.Embed, frames: list, final: discord.Embed,
-               view: discord.ui.View = None, game: str = "") -> None:
+async def show(
+    interaction: discord.Interaction,
+    first: discord.Embed,
+    frames: list,
+    final: discord.Embed,
+    view: discord.ui.View = None,
+    game: str = "",
+) -> None:
     """演出を見せる。表示の失敗（メッセージ削除・通信エラー）は結果に影響しない（精算は済んでいる）ので続行するが、記録は残す。"""
     step = "最初の表示"
     try:
@@ -45,17 +51,26 @@ async def play_slot(interaction: discord.Interaction, bot, bet: int):
         return
     try:
         reels = slot.spin(RNG)
-        payout = int(bet * slot.multiplier(reels))        # 端数は切り捨て
+        payout = int(bet * slot.multiplier(reels))  # 端数は切り捨て
         net = ctx.settle(payout, keep_session=True)
         spin, title = "🌀", game_title("🎰 スロット", ctx)
         line = f"┃ {reels[0]} ┃ {reels[1]} ┃ {reels[2]} ┃\n**{slot.label(reels)}**"
-        final = ui.embed(f"{title} — {signed(net)}ペリカ", result_lines(ctx, payout, net, line),
-                         result_color(bet, net, ui.OK if net > 0 else (ui.INFO if net == 0 else ui.ERROR)))
-        await show(interaction,
-                   ui.embed(title, f"┃ {spin} ┃ {spin} ┃ {spin} ┃", ui.GOLD),
-                   [ui.embed(title, f"┃ {reels[0]} ┃ {spin} ┃ {spin} ┃", ui.GOLD),
-                    ui.embed(title, f"┃ {reels[0]} ┃ {reels[1]} ┃ {spin} ┃", ui.GOLD)], final,
-                   ReplayView(bot, ctx.user_id, bet, lambda it, b: play_slot(it, bot, b)), game="スロット")
+        final = ui.embed(
+            f"{title} — {signed(net)}ペリカ",
+            result_lines(ctx, payout, net, line),
+            result_color(bet, net, ui.OK if net > 0 else (ui.INFO if net == 0 else ui.ERROR)),
+        )
+        await show(
+            interaction,
+            ui.embed(title, f"┃ {spin} ┃ {spin} ┃ {spin} ┃", ui.GOLD),
+            [
+                ui.embed(title, f"┃ {reels[0]} ┃ {spin} ┃ {spin} ┃", ui.GOLD),
+                ui.embed(title, f"┃ {reels[0]} ┃ {reels[1]} ┃ {spin} ┃", ui.GOLD),
+            ],
+            final,
+            ReplayView(bot, ctx.user_id, bet, lambda it, b: play_slot(it, bot, b)),
+            game="スロット",
+        )
     except Exception:
         ctx.abort()
         raise
@@ -67,9 +82,17 @@ async def play_slot(interaction: discord.Interaction, bot, bet: int):
 async def play_roulette(interaction: discord.Interaction, bot, bet: int, kind: str, number: int = None):
     # 賭け方の指定ミスは、賭け金を預かる前に弾く
     if kind == "number" and number is None:
-        return await interaction.response.send_message(embed=ui.error_embed("数字が必要です", "「ストレート（数字）」を選んだときは、0〜36 の数字も指定してください。"), ephemeral=True)
+        return await interaction.response.send_message(
+            embed=ui.error_embed(
+                "数字が必要です", "「ストレート（数字）」を選んだときは、0〜36 の数字も指定してください。"
+            ),
+            ephemeral=True,
+        )
     if kind != "number" and number is not None:
-        return await interaction.response.send_message(embed=ui.error_embed("数字は不要です", "数字を指定するのは「ストレート（数字）」のときだけです。"), ephemeral=True)
+        return await interaction.response.send_message(
+            embed=ui.error_embed("数字は不要です", "数字を指定するのは「ストレート（数字）」のときだけです。"),
+            ephemeral=True,
+        )
     ctx = await start_game(interaction, bot, bet, "ルーレット")
     if ctx is None:
         return
@@ -80,13 +103,22 @@ async def play_roulette(interaction: discord.Interaction, bot, bet: int, kind: s
         net = ctx.settle(payout, keep_session=True, rtp_kind=kind)
         title, head = game_title("🎡 ルーレット", ctx), f"あなたの賭け: **{name}**\n"
         verdict = "当たり🎉" if payout else "ハズレ"
-        final = ui.embed(f"{title} — {roulette.color_emoji(result)} **{result}**（{roulette.color_of(result)}） {verdict}　{signed(net)}ペリカ",
-                         result_lines(ctx, payout, net, head.rstrip()), result_color(bet, net, ui.OK if payout else ui.ERROR))
-        await show(interaction,
-                   ui.embed(title, head + "ボールが回り出した…", ui.GOLD),
-                   [ui.embed(title, head + f"ボールが跳ねている… `{RNG.randint(0, 36)}`", ui.GOLD),
-                    ui.embed(title, head + f"もうすぐ止まる… `{RNG.randint(0, 36)}`", ui.GOLD)], final,
-                   ReplayView(bot, ctx.user_id, bet, lambda it, b: play_roulette(it, bot, b, kind, number)), game="ルーレット")
+        final = ui.embed(
+            f"{title} — {roulette.color_emoji(result)} **{result}**（{roulette.color_of(result)}） {verdict}　{signed(net)}ペリカ",
+            result_lines(ctx, payout, net, head.rstrip()),
+            result_color(bet, net, ui.OK if payout else ui.ERROR),
+        )
+        await show(
+            interaction,
+            ui.embed(title, head + "ボールが回り出した…", ui.GOLD),
+            [
+                ui.embed(title, head + f"ボールが跳ねている… `{RNG.randint(0, 36)}`", ui.GOLD),
+                ui.embed(title, head + f"もうすぐ止まる… `{RNG.randint(0, 36)}`", ui.GOLD),
+            ],
+            final,
+            ReplayView(bot, ctx.user_id, bet, lambda it, b: play_roulette(it, bot, b, kind, number)),
+            game="ルーレット",
+        )
     except Exception:
         ctx.abort()
         raise

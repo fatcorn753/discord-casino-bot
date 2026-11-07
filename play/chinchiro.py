@@ -10,7 +10,16 @@ import discord
 
 from core import ui
 from games import chinchiro as rules
-from play.common import GameContext, OwnerView, ReplayView, game_title, result_lines, signed, start_game
+from play.common import (
+    GameContext,
+    OwnerView,
+    ReplayView,
+    game_title,
+    log_display_failure,
+    result_lines,
+    signed,
+    start_game,
+)
 
 RNG = random.SystemRandom()
 TITLE = "🎲 地下チンチロ"
@@ -52,8 +61,13 @@ async def play_chinchiro(interaction: discord.Interaction, bot, bet: int):
         return
     try:
         dealer_rolls = rules.play_hand(RNG)
-        await interaction.response.send_message(embed=ui.embed(
-            game_title(TITLE, ctx), f"賭け金: **{ui.pelica(bet)}**\n\nざわ… ざわ…\n親（ディーラー）が丼にサイコロを放る…", ui.DARK))
+        await interaction.response.send_message(
+            embed=ui.embed(
+                game_title(TITLE, ctx),
+                f"賭け金: **{ui.pelica(bet)}**\n\nざわ… ざわ…\n親（ディーラー）が丼にサイコロを放る…",
+                ui.DARK,
+            )
+        )
     except Exception:
         ctx.abort()
         raise
@@ -61,11 +75,18 @@ async def play_chinchiro(interaction: discord.Interaction, bot, bet: int):
         shown = []
         for dice, hand in dealer_rolls:
             await asyncio.sleep(STEP)
-            await interaction.edit_original_response(embed=ui.embed(
-                game_title(TITLE, ctx), ((_rolls_text(shown, "親") + "\n\n") if shown else "") + _rolling_text(), ui.DARK))
+            await interaction.edit_original_response(
+                embed=ui.embed(
+                    game_title(TITLE, ctx),
+                    ((_rolls_text(shown, "親") + "\n\n") if shown else "") + _rolling_text(),
+                    ui.DARK,
+                )
+            )
             await asyncio.sleep(STEP)
             shown.append((dice, hand))
-            await interaction.edit_original_response(embed=ui.embed(game_title(TITLE, ctx), _rolls_text(shown, "親"), ui.DARK))
+            await interaction.edit_original_response(
+                embed=ui.embed(game_title(TITLE, ctx), _rolls_text(shown, "親"), ui.DARK)
+            )
         view = ChinchiroView(ctx, interaction, dealer_rolls)
         await asyncio.sleep(STEP)
         await interaction.edit_original_response(embed=view.embed(), view=view)
@@ -86,7 +107,7 @@ class ChinchiroView(OwnerView):
         self.dealer_rolls = dealer_rolls
         self.player_rolls = []
         self._busy = False
-        self._final = None      # 精算した結果の表示。精算は一度きりなので、2回目以降はこれを返す
+        self._final = None  # 精算した結果の表示。精算は一度きりなので、2回目以降はこれを返す
 
     # --------------------------- 表示 --------------------------- #
     def embed(self, rolling: bool = False) -> discord.Embed:
@@ -97,13 +118,19 @@ class ChinchiroView(OwnerView):
             parts.append(_rolling_text())
         else:
             left = rules.MAX_ROLLS - len(self.player_rolls)
-            hint = "あなたの番。ボタンで振る（目が出なければ振り直せる）" if not self.player_rolls else f"目なし…！ あと **{left}回** 振れる"
+            hint = (
+                "あなたの番。ボタンで振る（目が出なければ振り直せる）"
+                if not self.player_rolls
+                else f"目なし…！ あと **{left}回** 振れる"
+            )
             parts.append(f"ざわ…ざわ…\n{hint}")
         return ui.embed(game_title(TITLE, self.ctx), "\n\n".join(parts), ui.DARK)
 
     def replay_view(self) -> ReplayView:
         """結果の下に付ける「もう一度」ボタン。"""
-        view = ReplayView(self.ctx.bot, self.ctx.user_id, self.base_bet, lambda it, b: play_chinchiro(it, self.ctx.bot, b))
+        view = ReplayView(
+            self.ctx.bot, self.ctx.user_id, self.base_bet, lambda it, b: play_chinchiro(it, self.ctx.bot, b)
+        )
         view.origin = self.origin
         return view
 
@@ -129,12 +156,16 @@ class ChinchiroView(OwnerView):
         else:
             line, color = "引き分け…。ざわ……何も動かない…", ui.INFO
         mult = f"（{outcome.multiplier}倍）" if outcome.result != "draw" and outcome.multiplier > 1 else ""
-        body = "\n\n".join([
-            _rolls_text(self.dealer_rolls, "親"),
-            _rolls_text(self.player_rolls, "あなた") if self.player_rolls else "**あなた**\n時間切れ…（目なし扱い）",
-            f"**{line}**{mult}",
-            result_lines(self.ctx, payout, net),
-        ])
+        body = "\n\n".join(
+            [
+                _rolls_text(self.dealer_rolls, "親"),
+                _rolls_text(self.player_rolls, "あなた")
+                if self.player_rolls
+                else "**あなた**\n時間切れ…（目なし扱い）",
+                f"**{line}**{mult}",
+                result_lines(self.ctx, payout, net),
+            ]
+        )
         self._final = ui.embed(f"{game_title(TITLE, self.ctx)} — {signed(net)}ペリカ", body, color)
         return self._final
 
@@ -158,7 +189,7 @@ class ChinchiroView(OwnerView):
         hand = rules.classify(dice)
         await interaction.response.edit_message(embed=self.embed(rolling=True), view=None)
         await asyncio.sleep(STEP)
-        if self.ctx.done:        # 振っている間に時間切れで精算された
+        if self.ctx.done:  # 振っている間に時間切れで精算された
             return await interaction.edit_original_response(embed=self.final_embed(), view=self.replay_view())
         self.player_rolls.append((dice, hand))
         if hand.kind == rules.MENASHI and len(self.player_rolls) < rules.MAX_ROLLS:
@@ -173,5 +204,7 @@ class ChinchiroView(OwnerView):
             return
         try:
             await self.origin.edit_original_response(embed=self.final_embed(), view=self.replay_view())
-        except discord.HTTPException:
-            pass   # 表示の更新に失敗しても、精算は final_embed の中で済んでいる
+        except discord.HTTPException as exc:
+            log_display_failure(
+                "チンチロ", "時間切れの表示", exc
+            )  # 表示の更新に失敗しても、精算は final_embed の中で済んでいる

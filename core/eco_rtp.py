@@ -13,13 +13,18 @@ class RtpMixin:
 
     def rtp_level_get(self, game: str) -> int:
         with self._lock:
-            row = self._conn.execute("SELECT level FROM rtp_level WHERE guild_id=? AND game=?", (self._g(), game)).fetchone()
+            row = self._conn.execute(
+                "SELECT level FROM rtp_level WHERE guild_id=? AND game=?", (self._g(), game)
+            ).fetchone()
         return row["level"] if row else rtplevel.DEFAULT_LEVEL
 
     def rtp_levels(self) -> dict:
         """{ゲーム: レベル}（設定していないゲームはレベル3）。"""
         with self._lock:
-            saved = {r["game"]: r["level"] for r in self._conn.execute("SELECT game, level FROM rtp_level WHERE guild_id=?", (self._g(),))}
+            saved = {
+                r["game"]: r["level"]
+                for r in self._conn.execute("SELECT game, level FROM rtp_level WHERE guild_id=?", (self._g(),))
+            }
         return {g: saved.get(g, rtplevel.DEFAULT_LEVEL) for g in rtplevel.GAMES}
 
     def rtp_level_set(self, game: Optional[str], level: int) -> list:
@@ -32,8 +37,12 @@ class RtpMixin:
         with self._lock, self._conn:
             for g in games:
                 if level == rtplevel.DEFAULT_LEVEL:
-                    self._conn.execute("DELETE FROM rtp_level WHERE guild_id=? AND game=?", (self._g(), g))      # 3 は「いまの設定」＝何も保存しない
+                    self._conn.execute(
+                        "DELETE FROM rtp_level WHERE guild_id=? AND game=?", (self._g(), g)
+                    )  # 3 は「いまの設定」＝何も保存しない
                 else:
-                    self._conn.execute("INSERT INTO rtp_level (guild_id, game, level) VALUES (?, ?, ?) ON CONFLICT(guild_id, game) DO UPDATE SET level=excluded.level",
-                                       (self._g(), g, level))
+                    self._conn.execute(
+                        "INSERT INTO rtp_level (guild_id, game, level) VALUES (?, ?, ?) ON CONFLICT(guild_id, game) DO UPDATE SET level=excluded.level",
+                        (self._g(), g, level),
+                    )
         return games

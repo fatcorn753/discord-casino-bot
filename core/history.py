@@ -18,7 +18,11 @@ def _lines_oldest_first(rows: list) -> list:
         if reason.startswith("賭け:"):
             game = reason.split(":", 1)[1]
             bet, net, last, j = -r["delta"], r["delta"], r, i + 1
-            while j < len(rows) and rows[j]["reason"].endswith(":" + game) and any(rows[j]["reason"].startswith(p) for p in _GAME_ROWS):
+            while (
+                j < len(rows)
+                and rows[j]["reason"].endswith(":" + game)
+                and any(rows[j]["reason"].startswith(p) for p in _GAME_ROWS)
+            ):
                 if rows[j]["reason"].startswith("追加の賭け:"):
                     bet += -rows[j]["delta"]
                 net += rows[j]["delta"]
@@ -30,7 +34,9 @@ def _lines_oldest_first(rows: list) -> list:
         m = _TRANSFER.match(reason)
         if m:
             delta, bal = r["delta"], r["balance_after"]
-            if m.group(1) == "送" and i + 1 < len(rows) and rows[i + 1]["reason"] == "送金手数料":       # 手数料の行は、送金の行にまとめて見せる
+            if (
+                m.group(1) == "送" and i + 1 < len(rows) and rows[i + 1]["reason"] == "送金手数料"
+            ):  # 手数料の行は、送金の行にまとめて見せる
                 delta, bal = delta + rows[i + 1]["delta"], rows[i + 1]["balance_after"]
                 i += 1
             out.append((r["ts"], f"送金 {'→' if m.group(1) == '送' else '←'} <@{m.group(2)}>", delta, bal, None))
@@ -43,7 +49,9 @@ def _lines_oldest_first(rows: list) -> list:
 def format_history(rows_newest_first: list, limit: int = 12) -> list:
     """新しい順の台帳の行から、1ゲーム1行にまとめた表示行（新しい順）を作る。"""
     grouped = _lines_oldest_first(list(reversed(rows_newest_first)))
-    lines = [f"<t:{int(ts)}:t> {text}　**{delta:+,}**　→ {bal:,}ペリカ" for ts, text, delta, bal, _game in reversed(grouped)]
+    lines = [
+        f"<t:{int(ts)}:t> {text}　**{delta:+,}**　→ {bal:,}ペリカ" for ts, text, delta, bal, _game in reversed(grouped)
+    ]
     return lines[:limit]
 
 

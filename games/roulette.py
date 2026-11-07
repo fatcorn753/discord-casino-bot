@@ -6,10 +6,15 @@ RED = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
 
 # 賭け方 → (表示名, 払い戻し倍率: 当たったときの受け取り総額/賭け金)
 BETS = {
-    "red": ("赤", 2), "black": ("黒", 2),
-    "even": ("偶数", 2), "odd": ("奇数", 2),
-    "low": ("1〜18", 2), "high": ("19〜36", 2),
-    "dozen1": ("1〜12", 3), "dozen2": ("13〜24", 3), "dozen3": ("25〜36", 3),
+    "red": ("赤", 2),
+    "black": ("黒", 2),
+    "even": ("偶数", 2),
+    "odd": ("奇数", 2),
+    "low": ("1〜18", 2),
+    "high": ("19〜36", 2),
+    "dozen1": ("1〜12", 3),
+    "dozen2": ("13〜24", 3),
+    "dozen3": ("25〜36", 3),
     "number": ("ストレート（数字）", 36),
 }
 
@@ -35,10 +40,15 @@ def wins(kind: str, result: int, number: int = None) -> bool:
     if result == 0:
         return False
     return {
-        "red": result in RED, "black": result not in RED,
-        "even": result % 2 == 0, "odd": result % 2 == 1,
-        "low": result <= 18, "high": result >= 19,
-        "dozen1": result <= 12, "dozen2": 13 <= result <= 24, "dozen3": result >= 25,
+        "red": result in RED,
+        "black": result not in RED,
+        "even": result % 2 == 0,
+        "odd": result % 2 == 1,
+        "low": result <= 18,
+        "high": result >= 19,
+        "dozen1": result <= 12,
+        "dozen2": 13 <= result <= 24,
+        "dozen3": result >= 25,
     }[kind]
 
 

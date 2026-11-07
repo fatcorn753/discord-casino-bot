@@ -316,14 +316,14 @@ https://discord.com/oauth2/authorize?client_id=CLIENT_ID&scope=bot+applications.
 ```
 casino-bot/
 ├── main.py              # エントリポイント
-├── core/                # economy.py（ペリカ・持ち物の記録の本体と、表の定義）, shop.py（景品の一覧）, session.py, ui.py, confirm.py ほか
-│   ├── eco_quiz.py      #   クイズの記録（Economy に混ぜ込む部品。債券・抽選・イベントも同じ形）
-│   ├── eco_bonds.py / eco_raffle.py / eco_events.py
-│   └── bonds.py / quizpay.py / events.py   # 利率・報酬・イベントの数字と計算
+├── core/                # economy.py（残高・預かり金・デイリー・送金・ランキングと、起動処理）, schema.py（表の定義と列の追加）, shop.py（景品の一覧）, session.py, ui.py, confirm.py ほか
+│   ├── eco_*.py         #   Economy に混ぜ込む部品。quiz / bonds / raffle / events / loans / pachinko / rtp、records（連勝・ミッション・週間）、crypto（CSトークン）、shop（持ち物）、guild（サーバーの承認・掲示・ニックネーム）。型と定数は eco_types.py
+│   └── bonds.py / quizpay.py / loans.py / events.py   # 利率・報酬・イベントの数字と計算
 ├── games/               # ルールと確率（Discord に依存しない）
 ├── play/                # Discord 上のゲームの流れ（ボタン・演出）
-├── cogs/                # /ペリカ /カジノ /ショップ /債券 /クイズ /運営(DM) /help ほか
+├── cogs/                # /ペリカ /カジノ /ショップ /債券 /クイズ /運営(DM) /help ほか。`_` で始まるファイル（_admin_views.py など）は部品で、Bot は読み込まない
 ├── tests/
+├── ruff.toml / requirements-dev.txt   # 整形・検査（開発用）: `pip install -r requirements-dev.txt` → `ruff check .` / `ruff format .`
 └── data/                # 実行時データ（自動生成・gitignore済）
 ```
 

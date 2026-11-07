@@ -76,7 +76,7 @@ class Game:
         self.finished = True
 
     def result(self) -> str:
-        """"blackjack" / "win" / "push" / "lose" / "bust"。"""
+        """ "blackjack" / "win" / "push" / "lose" / "bust"。"""
         p, d = value(self.player), value(self.dealer)
         if is_blackjack(self.player):
             return "push" if is_blackjack(self.dealer) else "blackjack"

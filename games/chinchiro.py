@@ -18,16 +18,23 @@ MAX_ROLLS = 3
 DICE_FACES = {1: "⚀", 2: "⚁", 3: "⚂", 4: "⚃", 5: "⚄", 6: "⚅"}
 
 # 役ごとの表示名と、役の倍率
-ROLE_NAME = {PINZORO: "ピンゾロ", ARASHI: "嵐（アラシ）", SHIGORO: "シゴロ", ME: "目", MENASHI: "目なし", HIFUMI: "ヒフミ"}
+ROLE_NAME = {
+    PINZORO: "ピンゾロ",
+    ARASHI: "嵐（アラシ）",
+    SHIGORO: "シゴロ",
+    ME: "目",
+    MENASHI: "目なし",
+    HIFUMI: "ヒフミ",
+}
 ROLE_MULT = {PINZORO: 5, ARASHI: 3, SHIGORO: 2, ME: 1, MENASHI: 1, HIFUMI: 1}
-HIFUMI_FACTOR = 2                       # ヒフミが負けたとき、相手の役の倍率にかかる倍率
-MAX_MULT = ROLE_MULT[PINZORO] * HIFUMI_FACTOR     # 1回で負ける最大の倍率（ピンゾロ対ヒフミ）
+HIFUMI_FACTOR = 2  # ヒフミが負けたとき、相手の役の倍率にかかる倍率
+MAX_MULT = ROLE_MULT[PINZORO] * HIFUMI_FACTOR  # 1回で負ける最大の倍率（ピンゾロ対ヒフミ）
 
 
 @dataclass(frozen=True)
 class Hand:
     kind: str
-    value: int = 0       # 目の数（kind が me のとき）／嵐の数字
+    value: int = 0  # 目の数（kind が me のとき）／嵐の数字
 
     @property
     def strength(self) -> int:
@@ -87,8 +94,8 @@ def play_hand(rng: random.Random) -> list:
 
 @dataclass(frozen=True)
 class Outcome:
-    result: str          # "win" / "lose" / "draw"
-    multiplier: int      # 賭け金に対する倍率（勝ち・負けの大きさ）。引き分けは 0
+    result: str  # "win" / "lose" / "draw"
+    multiplier: int  # 賭け金に対する倍率（勝ち・負けの大きさ）。引き分けは 0
 
 
 def compare(player: Hand, dealer: Hand) -> Outcome:

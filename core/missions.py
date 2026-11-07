@@ -10,8 +10,8 @@ from typing import Optional
 
 BLACKJACK = "ブラックジャック"
 GAMES = ["スロット", "ルーレット", "チンチロ", BLACKJACK, "パチンコ"]
-MIN_BET = 100                # これ未満の賭けは、ミッションの進み具合に数えない（小さい賭けの量産で報酬を稼がせない）
-COMPLETE_BONUS = 500         # 3つ全部達成したときの追加ボーナス
+MIN_BET = 100  # これ未満の賭けは、ミッションの進み具合に数えない（小さい賭けの量産で報酬を稼がせない）
+COMPLETE_BONUS = 500  # 3つ全部達成したときの追加ボーナス
 PER_DAY = 3
 
 
@@ -19,14 +19,14 @@ PER_DAY = 3
 class Mission:
     id: str
     name: str
-    kind: str        # play / win / wager / streak / big_win / play_game / game_win / tag
+    kind: str  # play / win / wager / streak / big_win / play_game / game_win / tag
     target: int
     reward: int
     game: Optional[str] = None
-    tag: Optional[str] = None      # kind が tag のとき、ゲームが付ける印（例: ブラックジャックのダブル勝ち）
+    tag: Optional[str] = None  # kind が tag のとき、ゲームが付ける印（例: ブラックジャックのダブル勝ち）
 
 
-UNIVERSAL = [        # どのゲームでも進む
+UNIVERSAL = [  # どのゲームでも進む
     Mission("play5", "ゲームを5回遊ぶ", "play", 5, 300),
     Mission("play10", "ゲームを10回遊ぶ", "play", 10, 500),
     Mission("win3", "3回勝つ", "win", 3, 400),
@@ -36,15 +36,18 @@ UNIVERSAL = [        # どのゲームでも進む
     Mission("streak2", "2連勝する", "streak", 2, 400),
     Mission("streak3", "3連勝する", "streak", 3, 700),
 ]
-OTHER_GAMES = ([Mission(f"game_{g}", f"{g}を3回遊ぶ", "play_game", 3, 400, g) for g in GAMES if g != BLACKJACK]
-               + [Mission(f"gwin_{g}", f"{g}で2回勝つ", "game_win", 2, 600, g) for g in GAMES if g != BLACKJACK])      # 特定のゲーム向け
-BLACKJACK_MISSIONS = [        # ブラックジャック向け
+OTHER_GAMES = [Mission(f"game_{g}", f"{g}を3回遊ぶ", "play_game", 3, 400, g) for g in GAMES if g != BLACKJACK] + [
+    Mission(f"gwin_{g}", f"{g}で2回勝つ", "game_win", 2, 600, g) for g in GAMES if g != BLACKJACK
+]  # 特定のゲーム向け
+BLACKJACK_MISSIONS = [  # ブラックジャック向け
     Mission(f"game_{BLACKJACK}", f"{BLACKJACK}を3回遊ぶ", "play_game", 3, 300, BLACKJACK),
     Mission(f"gwin_{BLACKJACK}", f"{BLACKJACK}で2回勝つ", "game_win", 2, 400, BLACKJACK),
     Mission("bj_double", "ブラックジャックでダブルダウンに成功する", "tag", 1, 600, BLACKJACK, "double_win"),
     Mission("bj_natural", "ナチュラルブラックジャックを出す", "tag", 1, 700, BLACKJACK, "natural"),
 ]
-BIG_WIN = Mission("big3x", "賭け金の3倍以上の利益を1回で出す", "big_win", 3, 600)      # ブラックジャックでは出ない（最大でも1.5倍）
+BIG_WIN = Mission(
+    "big3x", "賭け金の3倍以上の利益を1回で出す", "big_win", 3, 600
+)  # ブラックジャックでは出ない（最大でも1.5倍）
 
 POOL = UNIVERSAL + OTHER_GAMES + BLACKJACK_MISSIONS + [BIG_WIN]
 BY_ID = {m.id: m for m in POOL}

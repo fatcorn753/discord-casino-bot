@@ -17,7 +17,9 @@ class ConfirmView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
-            await interaction.response.send_message("この操作を実行できるのはコマンドを使った本人だけです。", ephemeral=True)
+            await interaction.response.send_message(
+                "この操作を実行できるのはコマンドを使った本人だけです。", ephemeral=True
+            )
             return False
         return True
 
@@ -39,9 +41,11 @@ async def confirm_action(interaction: discord.Interaction, title: str, descripti
     view = ConfirmView(interaction.user.id, label)
     await interaction.response.send_message(embed=ui.warn_embed(title, description), view=view, ephemeral=True)
     await view.wait()
-    outcome = {True: ui.embed("実行します", "処理中です…", ui.INFO),
-               False: ui.embed("中止", "キャンセルしました。", ui.INFO),
-               None: ui.embed("中止", "30秒以内に操作がなかったため、中止しました。", ui.INFO)}[view.value]
+    outcome = {
+        True: ui.embed("実行します", "処理中です…", ui.INFO),
+        False: ui.embed("中止", "キャンセルしました。", ui.INFO),
+        None: ui.embed("中止", "30秒以内に操作がなかったため、中止しました。", ui.INFO),
+    }[view.value]
     try:
         await interaction.edit_original_response(embed=outcome, view=None)
     except discord.HTTPException:

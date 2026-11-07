@@ -12,8 +12,13 @@ from core.economy import Economy
 
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "real_missions: 日付で決まる本物のミッションを使うテスト（既定ではミッションを空にして、日付で結果が変わらないようにする）")
-    config.addinivalue_line("markers", "real_events: 日付と時刻で決まる本物の突発イベントを使うテスト（既定ではイベントなしにする）")
+    config.addinivalue_line(
+        "markers",
+        "real_missions: 日付で決まる本物のミッションを使うテスト（既定ではミッションを空にして、日付で結果が変わらないようにする）",
+    )
+    config.addinivalue_line(
+        "markers", "real_events: 日付と時刻で決まる本物の突発イベントを使うテスト（既定ではイベントなしにする）"
+    )
     config.addinivalue_line("markers", "real_scope: サーバーごとの記録の分離を、本物の for_guild で確かめるテスト")
 
 
