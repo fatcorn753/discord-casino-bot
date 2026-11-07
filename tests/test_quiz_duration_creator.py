@@ -75,7 +75,9 @@ def make_cog(tmp_path):
 
 
 def fill(modal, **fields):
-    for name, value in dict(question="問題", choices="a\nb\nc\nd", explanation="", reward="100", duration="").items():
+    reward, duration = fields.pop("reward", "100"), fields.pop("duration", "")
+    modal.terms._value = f"{reward} / {duration}" if duration else reward           # 「報酬 / 期間」は1つの欄
+    for name, value in dict(question="問題", choices="a\nb\nc\nd", explanation="", verdicts="").items():
         getattr(modal, name)._value = fields.get(name, value)
     return modal
 

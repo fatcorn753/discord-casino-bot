@@ -156,7 +156,7 @@ def test_modal_validates_and_saves(eco):
 
     def modal(choices, reward="150", days="3日"):
         m = AddModal(cog, announce=False)
-        for field, value in ((m.question, "問題"), (m.choices, choices), (m.explanation, "解説"), (m.reward, reward), (m.duration, days)):
+        for field, value in ((m.question, "問題"), (m.choices, choices), (m.explanation, "解説"), (m.terms, f"{reward} / {days}"), (m.verdicts, "")):
             field._value = value
         return m
 
@@ -419,7 +419,7 @@ def test_user_modal_posts_publicly_and_saves_the_message(eco):
     from cogs.quiz_cog import UserModal
     cog, log = make_cog(eco), []
     m = UserModal(cog)
-    for field, value in ((m.question, "問題"), (m.choices, "a\nb\nc\nd"), (m.explanation, ""), (m.reward, "250"), (m.duration, "")):
+    for field, value in ((m.question, "問題"), (m.choices, "a\nb\nc\nd"), (m.explanation, ""), (m.terms, "250"), (m.verdicts, "")):
         field._value = value
     inter, sent = user_inter(log)
     asyncio.run(m.on_submit(inter))
@@ -427,7 +427,7 @@ def test_user_modal_posts_publicly_and_saves_the_message(eco):
     assert log == [("send", "📰 みんなのクイズ #1")] and len(sent["kw"]["view"].children) == 4
     assert (q["author_id"], q["reward"], q["message_id"], q["channel_id"]) == (AUTHOR, 250, 9090, 777)
     assert abs(q["expires"] - q["created"] - 3 * DAY) < 1                       # 日数の既定は3日
-    m.reward._value = "1001"                                                    # 上限超え
+    m.terms._value = "1001"                                                    # 上限超え
     log.clear()
     asyncio.run(m.on_submit(inter))
     assert log == [("send", "❌ 入力エラー")] and len(eco.quiz_list()) == 1
@@ -547,3 +547,73 @@ def test_public_line_shows_the_authors_earnings_right_away(eco):
     assert "💰" not in public[0]                                              # 1人目は出題者の受け取りがまだない
     asyncio.run(PublicButton(qid, wrong).callback(click(2)))
     assert public[1] == f"❌ <@2> が #{qid} に **不正解…**\n💰 出題者 <@{AUTHOR}> +400ペリカ（累計 400ペリカ）"
+
+
+# ----------------------------- 正解・不正解の文言（出題者が決める） ----------------------------- #
+def test_parse_terms_and_verdicts():
+    from cogs.quiz_cog import parse_terms, parse_verdicts
+    assert parse_terms("100") == (100, "") and parse_terms("100 / 3日") == (100, "3日") and parse_terms("１００／90分") == (100, "90分") and parse_terms("100 /") == (100, "")
+    with pytest.raises(ValueError):
+        parse_terms("abc / 3日")
+    assert parse_verdicts("") == ("", "") and parse_verdicts("お見事！") == ("お見事！", "") and parse_verdicts("お見事！\nおしい！") == ("お見事！", "おしい！")
+    assert parse_verdicts("\nおしい！") == ("", "おしい！") and parse_verdicts("a\nb\n") == ("a", "b")                  # 片方だけでもよい
+    for bad in ("a\nb\nc", "a\n\nb", "あ" * 21):
+        with pytest.raises(ValueError):
+            parse_verdicts(bad)
+
+
+def test_default_wording_is_used_when_the_author_leaves_it_blank(eco):
+    from cogs.quiz_cog import verdict, result_embed
+    qid = eco.quiz_add("問題", ["東京", "大阪", "京都", "名古屋"], "", 100, None, time.time())
+    q = eco.quiz_get(qid)
+    assert (q["msg_right"], q["msg_wrong"]) == ("", "") and verdict(q, True) == "正解！" and verdict(q, False) == "不正解…"
+    assert result_embed({"correct": True, "reward": 100, "explanation": ""}, 100, 0, q).title == "⭕ 正解！"
+    assert result_embed({"correct": False, "answer": "東京", "explanation": ""}, 100, 0, q).title == "❌ 不正解…"
+    assert result_embed({"correct": True, "reward": 100, "explanation": ""}, 100, 0).title == "⭕ 正解！"            # 問題を渡さなくても既定
+
+
+def test_custom_wording_replaces_only_the_headline_everywhere(eco):
+    from cogs.quiz_cog import verdict, result_embed
+    qid = eco.quiz_add("問題", ["東京", "大阪", "京都", "名古屋"], "解説", 100, None, time.time(), "作者", "お見事！", "")
+    q = eco.quiz_get(qid)
+    assert verdict(q, True) == "お見事！" and verdict(q, False) == "不正解…"                                       # 片方だけ決めたら、もう片方は既定
+    e = result_embed({"correct": True, "reward": 100, "explanation": "解説"}, 100, 0, q)
+    assert e.title == "⭕ お見事！" and "+100" in e.description                                                  # 報酬の表示は残る
+    e = result_embed({"correct": False, "answer": "東京", "explanation": "解説"}, 100, 0, q)
+    assert e.title == "❌ 不正解…" and "東京" in e.description
+
+
+def test_user_modal_saves_the_wording_and_public_answer_line_uses_it(eco):
+    from cogs.quiz_cog import UserModal
+    cog, log = make_cog(eco), []
+    m = UserModal(cog)
+    for field, value in ((m.question, "問題"), (m.choices, "a\nb\nc\nd"), (m.explanation, ""), (m.terms, "100 / 1日"), (m.verdicts, "さすが！\nざんねん…")):
+        field._value = value
+    inter, _ = user_inter(log)
+    asyncio.run(m.on_submit(inter))
+    q = eco.quiz_list()[0]
+    assert (q["msg_right"], q["msg_wrong"]) == ("さすが！", "ざんねん…")
+    m2 = UserModal(cog)
+    for field, value in ((m2.question, "問題2"), (m2.choices, "a\nb\nc\nd"), (m2.explanation, ""), (m2.terms, "100"), (m2.verdicts, "")):
+        field._value = value
+    asyncio.run(m2.on_submit(inter))
+    assert all((x["msg_right"], x["msg_wrong"]) == ("", "") for x in eco.quiz_list() if x["id"] != q["id"])         # 省略なら空（既定）
+
+
+def test_public_answer_line_and_result_use_the_custom_wording(eco):
+    cog, log = make_cog(eco), []
+    qid = eco.quiz_add("問題", ["東京", "大阪", "京都", "名古屋"], "", 100, 9e12, time.time(), "作者", "お見事！", "おしい！")
+    q = eco.quiz_get(qid)
+    pos = q["order"].index("東京")
+    public = []
+
+    class Follow:
+        async def send(self, text, **kw):
+            public.append(text)
+
+    def click(uid):
+        return SimpleNamespace(user=SimpleNamespace(id=uid), guild_id=1, client=cog.bot, response=Resp(log), followup=Follow())
+    asyncio.run(PublicButton(qid, pos).callback(click(1)))
+    assert log[-1] == ("send", "⭕ お見事！") and public[-1] == f"⭕ <@1> が #{qid} に **お見事！**（+100ペリカ）"
+    asyncio.run(PublicButton(qid, (pos + 1) % 4).callback(click(2)))
+    assert log[-1] == ("send", "❌ おしい！") and public[-1] == f"❌ <@2> が #{qid} に **おしい！**"

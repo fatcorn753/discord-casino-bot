@@ -31,11 +31,11 @@ class QuizMixin:
         random.SystemRandom().shuffle(order)
         return order
 
-    def quiz_add(self, question: str, choices: list, explanation: str, reward: int, expires: Optional[float], now: float, creator_name: str = "") -> int:
-        """問題を登録する（choices の先頭が正解）。登録した問題の番号を返す。creator_name は問題に出す制作者の名前。"""
+    def quiz_add(self, question: str, choices: list, explanation: str, reward: int, expires: Optional[float], now: float, creator_name: str = "", msg_right: str = "", msg_wrong: str = "") -> int:
+        """問題を登録する（choices の先頭が正解）。登録した問題の番号を返す。creator_name は問題に出す制作者の名前。msg_right / msg_wrong は、正解・不正解の見出しの文言（空なら既定）。"""
         with self._lock, self._conn:
-            cur = self._conn.execute("INSERT INTO quiz_questions (question, choices, explanation, shown_order, reward, expires, created, creator_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                                     (question, json.dumps(choices, ensure_ascii=False), explanation, json.dumps(self._new_quiz_order()), reward, expires, now, creator_name))
+            cur = self._conn.execute("INSERT INTO quiz_questions (question, choices, explanation, shown_order, reward, expires, created, creator_name, msg_right, msg_wrong) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                     (question, json.dumps(choices, ensure_ascii=False), explanation, json.dumps(self._new_quiz_order()), reward, expires, now, creator_name, msg_right, msg_wrong))
             return cur.lastrowid
 
     def quiz_add_many(self, items: list, now: float, creator_name: str = "") -> list:
@@ -132,7 +132,7 @@ class QuizMixin:
         return moved, earned + moved
 
     # ---- ユーザーが出す問題 ---- #
-    def quiz_post(self, author_id: int, question: str, choices: list, explanation: str, reward: int, minutes: int, channel_id: int, now: float, creator_name: str = "") -> tuple:
+    def quiz_post(self, author_id: int, question: str, choices: list, explanation: str, reward: int, minutes: int, channel_id: int, now: float, creator_name: str = "", msg_right: str = "", msg_wrong: str = "") -> tuple:
         """ユーザーが問題を出す。(成功か, 理由か問題の番号) を返す。"""
         with self._lock, self._conn:
             self._ensure(author_id)
@@ -146,8 +146,8 @@ class QuizMixin:
             if self._balance(author_id) < reward:
                 return False, f"残高が報酬（{reward:,}ペリカ）に足りません。正解者への報酬は、あなたの残高から払われます。"
             cur = self._conn.execute(
-                "INSERT INTO quiz_questions (question, choices, explanation, shown_order, reward, expires, created, author_id, guild_id, channel_id, creator_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (question, json.dumps(choices, ensure_ascii=False), explanation, json.dumps(self._new_quiz_order()), reward, now + minutes * 60, now, author_id, self._g(), channel_id, creator_name))
+                "INSERT INTO quiz_questions (question, choices, explanation, shown_order, reward, expires, created, author_id, guild_id, channel_id, creator_name, msg_right, msg_wrong) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (question, json.dumps(choices, ensure_ascii=False), explanation, json.dumps(self._new_quiz_order()), reward, now + minutes * 60, now, author_id, self._g(), channel_id, creator_name, msg_right, msg_wrong))
             return True, cur.lastrowid
 
     def quiz_own_open(self, user_id: int, now: float) -> list:

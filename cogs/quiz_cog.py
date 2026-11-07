@@ -23,6 +23,8 @@ from core.duration import format_minutes, parse_duration
 
 MAX_CHOICE_LEN = 80
 MAX_REWARD = 10_000
+MAX_VERDICT_LEN = 20          # 正解・不正解の見出しの文言の最大文字数
+DEFAULT_RIGHT, DEFAULT_WRONG = "正解！", "不正解…"
 DEFAULT_REWARD = 100
 LETTERS = "ABCD"
 
@@ -53,6 +55,34 @@ def creator_label(q: dict) -> str:
     return f"<@{q['author_id']}>" if q.get("author_id") else "運営"
 
 
+def parse_terms(text: str) -> tuple:
+    """「報酬 / 期間」の入力欄を、(報酬, 期間の文字列) に分ける。期間は省略できる（空文字を返す）。"""
+    parts = re.split(r"[/／]", text, maxsplit=1)
+    return parse_int(parts[0], "報酬"), (parts[1].strip() if len(parts) > 1 else "")
+
+
+def parse_verdicts(text: str) -> tuple:
+    """「正解・不正解の文言」の入力欄を、(正解のとき, 不正解のとき) にする。1行目が正解、2行目が不正解。省略した方は空文字（既定になる）。"""
+    lines = [ln.strip() for ln in text.splitlines()]
+    while lines and not lines[-1]:
+        lines.pop()
+    if len(lines) > 2:
+        raise ValueError("文言は2行まで（1行目: 正解のとき、2行目: 不正解のとき）です。")
+    right, wrong = (lines + ["", ""])[:2]
+    if len(right) > MAX_VERDICT_LEN or len(wrong) > MAX_VERDICT_LEN:
+        raise ValueError(f"文言は1つ{MAX_VERDICT_LEN}文字までです。")
+    return right, wrong
+
+
+def verdict(q: dict, correct: bool) -> str:
+    """正解・不正解の見出しの言葉。出題者が決めていなければ既定。"""
+    if q:
+        text = (q.get("msg_right") if correct else q.get("msg_wrong")) or ""
+        if text:
+            return text
+    return DEFAULT_RIGHT if correct else DEFAULT_WRONG
+
+
 def question_embed(q: dict, order: list, remaining: int) -> discord.Embed:
     body = q["question"] + "\n\n" + "\n".join(f"**{LETTERS[i]}.** {c}" for i, c in enumerate(order)) + f"\n\n出題: **{creator_label(q)}**"
     e = ui.embed(f"📰 クイズ #{q['id']}", body, ui.INFO)
@@ -60,11 +90,11 @@ def question_embed(q: dict, order: list, remaining: int) -> discord.Embed:
     return e
 
 
-def result_embed(result: dict, reward: int, more: int) -> discord.Embed:
+def result_embed(result: dict, reward: int, more: int, quiz: dict = None) -> discord.Embed:
     if result["correct"]:
-        e = ui.embed("⭕ 正解！", f"**+{ui.pelica(result['reward'])}**", ui.OK)
+        e = ui.embed(f"⭕ {verdict(quiz, True)}", f"**+{ui.pelica(result['reward'])}**", ui.OK)
     else:
-        e = ui.embed("❌ 不正解…", f"正解は **{result['answer']}** でした。", ui.ERROR)
+        e = ui.embed(f"❌ {verdict(quiz, False)}", f"正解は **{result['answer']}** でした。", ui.ERROR)
     if result["explanation"]:
         e.add_field(name="解説", value=result["explanation"][:1000], inline=False)
     if more:
@@ -124,10 +154,10 @@ async def record_answer(bot, interaction: discord.Interaction, quiz_id: int, pos
     ok, result = eco.quiz_answer(interaction.user.id, quiz_id, quiz["order"][pos], time.time())
     if not ok:
         return await interaction.response.send_message(embed=ui.error_embed("答えられません", result), ephemeral=True)
-    await interaction.response.send_message(embed=result_embed(result, quiz["reward"], eco.quiz_next(interaction.user.id, time.time())[1]), ephemeral=True)
+    await interaction.response.send_message(embed=result_embed(result, quiz["reward"], eco.quiz_next(interaction.user.id, time.time())[1], quiz), ephemeral=True)
     # 結果（正解か不正解か）だけを、みんなに見える形で出す。選んだ答えと正解は出さない（まだ答えていない人のため）
-    line = (f"⭕ <@{interaction.user.id}> が #{quiz_id} に **正解！**（+{ui.pelica(result['reward'])}）" if result["correct"]
-            else f"❌ <@{interaction.user.id}> が #{quiz_id} に **不正解…**")
+    line = (f"⭕ <@{interaction.user.id}> が #{quiz_id} に **{verdict(quiz, True)}**（+{ui.pelica(result['reward'])}）" if result["correct"]
+            else f"❌ <@{interaction.user.id}> が #{quiz_id} に **{verdict(quiz, False)}**")
     if result["author_delta"]:      # 出題者の受け取りも、その場で見せる（正答率が40%から離れると減ることがある）
         sign = "+" if result["author_delta"] > 0 else "−"
         line += f"\n💰 出題者 <@{result['author_id']}> {sign}{ui.pelica(abs(result['author_delta']))}（累計 {ui.pelica(result['author_total'])}）"
@@ -185,7 +215,7 @@ class AnswerView(discord.ui.View):
                 return await interaction.response.edit_message(embed=ui.error_embed("答えられません", result), view=None)
             _, more = eco.quiz_next(self.user_id, time.time())
             self.stop()
-            await interaction.response.edit_message(embed=result_embed(result, self.quiz["reward"], more), view=None)
+            await interaction.response.edit_message(embed=result_embed(result, self.quiz["reward"], more, self.quiz), view=None)
         return callback
 
 
@@ -193,8 +223,10 @@ class AddModal(discord.ui.Modal, title="クイズを追加"):
     question = discord.ui.TextInput(label="問題文", style=discord.TextStyle.paragraph, max_length=500)
     choices = discord.ui.TextInput(label="選択肢（4行。1行目が正解）", style=discord.TextStyle.paragraph, max_length=400)
     explanation = discord.ui.TextInput(label="解説（なくてもよい）", style=discord.TextStyle.paragraph, required=False, max_length=800)
-    reward = discord.ui.TextInput(label=f"報酬（ペリカ。1〜{MAX_REWARD:,}）", default=str(DEFAULT_REWARD), max_length=6)
-    duration = discord.ui.TextInput(label="有効な期間（例: 90分 / 2時間 / 3日。空欄なら無期限）", required=False, max_length=20)
+    terms = discord.ui.TextInput(label="報酬 / 期間（例: 100 / 3日。期間は省略可）", default=str(DEFAULT_REWARD), max_length=30,
+                                 placeholder=f"報酬は 1〜{MAX_REWARD:,}。期間は 90分・2時間・3日 など（省略で無期限）")
+    verdicts = discord.ui.TextInput(label="正解・不正解の文言（2行。省略可）", style=discord.TextStyle.paragraph, required=False, max_length=45,
+                                    placeholder="1行目: 正解のとき（例: お見事！）\n2行目: 不正解のとき（例: おしい！）")
 
     def __init__(self, cog: "QuizCog", announce: bool = True, guild=None, channel=None):
         super().__init__()
@@ -203,17 +235,18 @@ class AddModal(discord.ui.Modal, title="クイズを追加"):
     async def on_submit(self, interaction: discord.Interaction):
         try:
             choices = parse_choices(self.choices.value)
-            reward = parse_int(self.reward.value, "報酬")
+            reward, duration = parse_terms(self.terms.value)
             if not 1 <= reward <= MAX_REWARD:
                 raise ValueError(f"報酬は 1〜{MAX_REWARD:,} で入力してください。")
-            minutes = parse_duration(self.duration.value) if self.duration.value.strip() else None
+            msg_right, msg_wrong = parse_verdicts(self.verdicts.value)
+            minutes = parse_duration(duration) if duration else None
             if minutes is not None and not 1 <= minutes <= 365 * 1440:
                 raise ValueError("有効な期間は 1分〜365日 の範囲で入力してください。")
         except ValueError as exc:
             return await interaction.response.send_message(embed=ui.error_embed("入力エラー", str(exc)), ephemeral=True)
         now = time.time()
         qid = self.cog.bot.economy.quiz_add(self.question.value.strip(), choices, self.explanation.value.strip(), reward,
-                                            now + minutes * 60 if minutes else None, now, interaction.user.display_name)
+                                            now + minutes * 60 if minutes else None, now, interaction.user.display_name, msg_right, msg_wrong)
         await interaction.response.defer(ephemeral=True)
         posted = await self.cog.broadcast(qid, self.guild, self.channel) if self.announce else None
         note = "告知はしていません。`/クイズ 挑戦` で出ます。" if posted is None else f"{posted}サーバーに告知しました。"
@@ -224,8 +257,10 @@ class UserModal(discord.ui.Modal, title="クイズを出題"):
     question = discord.ui.TextInput(label="問題文", style=discord.TextStyle.paragraph, max_length=500)
     choices = discord.ui.TextInput(label="選択肢（4行。1行目が正解）", style=discord.TextStyle.paragraph, max_length=400)
     explanation = discord.ui.TextInput(label="解説（なくてもよい）", style=discord.TextStyle.paragraph, required=False, max_length=800)
-    reward = discord.ui.TextInput(label=f"正解1人への報酬（あなたのペリカ。1〜{quizpay.USER_MAX_REWARD:,}）", default="100", max_length=5)
-    duration = discord.ui.TextInput(label=f"有効な期間（例: 90分 / 6時間 / 2日。最長7日。空欄なら{format_minutes(quizpay.USER_DEFAULT_MINUTES)}）", required=False, max_length=20)
+    terms = discord.ui.TextInput(label="報酬 / 期間（例: 100 / 2日。期間は省略可）", default="100", max_length=30,
+                                 placeholder=f"報酬は正解1人あたり 1〜{quizpay.USER_MAX_REWARD:,}（あなたのペリカ）。期間は最長7日、省略で{format_minutes(quizpay.USER_DEFAULT_MINUTES)}")
+    verdicts = discord.ui.TextInput(label="正解・不正解の文言（2行。省略可）", style=discord.TextStyle.paragraph, required=False, max_length=45,
+                                    placeholder="1行目: 正解のとき（例: お見事！）\n2行目: 不正解のとき（例: おしい！）")
 
     def __init__(self, cog: "QuizCog"):
         super().__init__()
@@ -234,16 +269,17 @@ class UserModal(discord.ui.Modal, title="クイズを出題"):
     async def on_submit(self, interaction: discord.Interaction):
         try:
             choices = parse_choices(self.choices.value)
-            reward = parse_int(self.reward.value, "報酬")
+            reward, duration = parse_terms(self.terms.value)
             if not 1 <= reward <= quizpay.USER_MAX_REWARD:
                 raise ValueError(f"報酬は 1〜{quizpay.USER_MAX_REWARD:,} で入力してください。")
-            minutes = parse_duration(self.duration.value) if self.duration.value.strip() else quizpay.USER_DEFAULT_MINUTES
+            msg_right, msg_wrong = parse_verdicts(self.verdicts.value)
+            minutes = parse_duration(duration) if duration else quizpay.USER_DEFAULT_MINUTES
             if not quizpay.USER_MIN_MINUTES <= minutes <= quizpay.USER_MAX_MINUTES:
                 raise ValueError(f"有効な期間は 1分〜{format_minutes(quizpay.USER_MAX_MINUTES)} の範囲で入力してください。")
         except ValueError as exc:
             return await interaction.response.send_message(embed=ui.error_embed("入力エラー", str(exc)), ephemeral=True)
         eco = self.cog.bot.economy.for_guild(interaction.guild_id)
-        ok, result = eco.quiz_post(interaction.user.id, self.question.value.strip(), choices, self.explanation.value.strip(), reward, minutes, interaction.channel_id, time.time(), interaction.user.display_name)
+        ok, result = eco.quiz_post(interaction.user.id, self.question.value.strip(), choices, self.explanation.value.strip(), reward, minutes, interaction.channel_id, time.time(), interaction.user.display_name, msg_right, msg_wrong)
         if not ok:
             return await interaction.response.send_message(embed=ui.error_embed("出題できません", result), ephemeral=True)
         await interaction.response.send_message(embed=public_embed(eco.quiz_get(result)), view=public_view(result), allowed_mentions=discord.AllowedMentions.none())

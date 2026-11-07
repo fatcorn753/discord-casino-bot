@@ -321,6 +321,8 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, RtpM
                     settled     INTEGER NOT NULL DEFAULT 0,    -- 出題者への報酬を決着させたか
                     earned      INTEGER NOT NULL DEFAULT 0,    -- 出題者が、回答のたびにここまで受け取った累計
                     creator_name TEXT   NOT NULL DEFAULT '',   -- 制作者の表示名（登録したときの名前。問題に出す）
+                    msg_right   TEXT    NOT NULL DEFAULT '',   -- 正解のときの見出しの文言（出題者が決める。空なら既定の「正解！」）
+                    msg_wrong   TEXT    NOT NULL DEFAULT '',   -- 不正解のときの見出しの文言（空なら既定の「不正解…」）
                     reward      INTEGER NOT NULL,
                     expires     REAL,                     -- 期限（epoch秒）。NULL なら無期限
                     created     REAL    NOT NULL
@@ -477,8 +479,9 @@ class Economy(QuizMixin, BondMixin, RaffleMixin, EventMixin, PachinkoMixin, RtpM
             for col in ("author_id", "guild_id", "channel_id", "message_id", "settled", "earned"):
                 if col not in qq:
                     self._conn.execute(f"ALTER TABLE quiz_questions ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
-            if "creator_name" not in qq:
-                self._conn.execute("ALTER TABLE quiz_questions ADD COLUMN creator_name TEXT NOT NULL DEFAULT ''")
+            for col in ("creator_name", "msg_right", "msg_wrong"):
+                if col not in qq:
+                    self._conn.execute(f"ALTER TABLE quiz_questions ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
             for r in self._conn.execute("SELECT id FROM quiz_questions WHERE shown_order=''").fetchall():       # 並びが未設定の古い問題に、1回だけ決めて固定する
                 self._conn.execute("UPDATE quiz_questions SET shown_order=? WHERE id=?", (json.dumps(self._new_quiz_order()), r["id"]))
             us = {r["name"] for r in self._conn.execute("PRAGMA table_info(users)")}
