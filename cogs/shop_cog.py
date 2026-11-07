@@ -397,6 +397,20 @@ class ShopCog(commands.Cog):
     async def _before_status_nick(self):
         await self.bot.wait_until_ready()
 
+    async def after_bankruptcy(self, guild: discord.Guild, member: discord.Member) -> None:
+        """自己破産の直後に、名前の色ロールを外し、【破産者】を付ける（2分周期の更新を待たない）。失敗しても破産は有効（次の周期で再試行）。"""
+        try:
+            async with self._role_lock(guild.id):
+                await set_color_role(guild, member, None)
+        except (ShopError, discord.HTTPException) as exc:
+            logthrottle.warn(("bankrupt-role", guild.id), f"破産後の色ロールを外せません: guild={guild.id}: {exc!r}")
+        try:
+            await self.sync_status_nick(guild, member)
+        except (ShopError, discord.HTTPException) as exc:
+            logthrottle.warn(
+                ("bankrupt-nick", guild.id), f"破産後のニックネームを更新できません: guild={guild.id}: {exc!r}"
+            )
+
     async def run_status_nick(self) -> None:
         """借金・延滞・破産者の人のニックネームに【地下労働者】などを付け、カタギに戻った人から外す（サーバーごと、人ごとに失敗を切り離す）。"""
         for guild in list(self.bot.guilds):

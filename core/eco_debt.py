@@ -91,6 +91,21 @@ class DebtMixin:
             self._after_debt_change(user_id)
         return pay + self._collect_overdue_for(user_id, amount - pay)
 
+    def _repay_all_of(self, user_id: int, amount: int, label: str) -> int:
+        """入ってきた amount（元本など、収入ではないお金）を、借金があれば全額、返済に充てる（天引きの3割ではなく）。返済した合計を返す。
+
+        解約できないジャンク債などの満期で、元本が手元に入ってくる抜け道を塞ぐために使う。借金がなければ何もしない。
+        """
+        pay = min(self._debt(user_id), amount, self._balance(user_id))
+        if pay > 0:
+            self._conn.execute(
+                "UPDATE users SET balance=balance-?, debt=debt-? WHERE guild_id=? AND user_id=?",
+                (pay, pay, self._g(), user_id),
+            )
+            self._ledger(user_id, -pay, self._balance(user_id), label)
+            self._after_debt_change(user_id)
+        return pay + self._collect_overdue_for(user_id, min(amount - pay, self._balance(user_id)))
+
     # ------------------------------------------------------------------ #
     # 強制執行と、借金の発生
     # ------------------------------------------------------------------ #

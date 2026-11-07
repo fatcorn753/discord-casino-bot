@@ -261,6 +261,10 @@ class EconomyCog(commands.Cog):
             embed=ui.embed("🔴 自己破産しました", "\n".join(lines), ui.ERROR), ephemeral=True
         )
         eco.take_notices(uid)
+        shop_cog = interaction.client.get_cog("ShopCog")
+        member = interaction.guild.get_member(uid) or interaction.user
+        if shop_cog is not None and isinstance(member, discord.Member):
+            await shop_cog.after_bankruptcy(interaction.guild, member)  # 色ロールとニックネームを、すぐに反映する
 
     @group.command(name="ミッション", description="今日のミッションと進み具合を見る")
     async def missions(self, interaction: discord.Interaction):

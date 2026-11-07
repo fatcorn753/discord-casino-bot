@@ -79,6 +79,7 @@ class BondMixin:
                     status, paid = "paid", bonds_mod.maturity_payout(kind, row["principal"])
                     self._ensure(row["user_id"])
                     self._apply(row["user_id"], paid, f"債券償還:{kind.name}", income=max(0, paid - row["principal"]))
+                    self._repay_all_of(row["user_id"], row["principal"], f"帝愛への返済（債券の元本:{kind.name}）")
                 self._conn.execute("UPDATE bonds SET status=?, paid=? WHERE id=?", (status, paid, row["id"]))
                 out.append({**dict(row), "status": status, "paid": paid})
         return out

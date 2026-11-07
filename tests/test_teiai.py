@@ -443,3 +443,99 @@ def test_old_users_table_without_the_new_columns_is_upgraded(tmp_path):
     assert again.debt(1) == 700 and again.balance(1) == 500  # 既存の借金は、そのまま帝愛の借金
     assert again.status(1) == teiai.UNDERGROUND
     assert again.repay_debt(1, 500) == (True, 500)
+
+
+# ----------------------------- 債券の満期と借金 ----------------------------- #
+def test_junk_bond_principal_goes_to_the_debt_when_it_matures_while_indebted(eco):
+    eco.balance(U)
+    assert eco.bond_buy(U, "junk", 1_000, 1.0)[0]  # 元本1,000・利息+20%
+    eco._conn.execute("UPDATE users SET debt=5_000, balance=0 WHERE user_id=?", (U,))
+    eco._conn.commit()
+
+    class Never:
+        def random(self):
+            return 1.0  # 倒産しない
+
+    eco.bond_settle(1e12, Never())
+    # 償還 1,200 = 元本1,000 + 利息200。利息の3割（60）を天引き、元本は全額（1,000）を返済に充てる
+    assert eco.debt(U) == 5_000 - 60 - 1_000 and eco.balance(U) == 1_200 - 60 - 1_000
+
+
+def test_bond_maturity_without_debt_pays_out_whole(eco):
+    eco.balance(U)
+    assert eco.bond_buy(U, "junk", 1_000, 1.0)[0]
+    before = eco.balance(U)
+
+    class Never:
+        def random(self):
+            return 1.0
+
+    eco.bond_settle(1e12, Never())
+    assert eco.balance(U) == before + 1_200 and eco.debt(U) == 0
+
+
+def test_bond_principal_pays_the_overdue_loan_when_there_is_no_senior_debt(eco):
+    eco.balance(U)
+    assert eco.bond_buy(U, "junk", 1_000, 1.0)[0]
+    eco.balance(A)
+    eco._conn.execute(
+        "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires, accepted_at, due, paid) "
+        "VALUES (0, ?, ?, 500, 0, 5, 'overdue', 0, 0, 1000, 1000 + 86400, 0)",
+        (A, U),
+    )
+    eco._conn.commit()
+    a_before = eco.balance(A)
+
+    class Never:
+        def random(self):
+            return 1.0
+
+    eco.bond_settle(1e12, Never())
+    assert eco.balance(A) == a_before + 500  # 満期の元本から、延滞中の貸付が回収される
+
+
+# ----------------------------- 破産の直後の反映 ----------------------------- #
+def test_after_bankruptcy_removes_the_color_role_and_tags_the_nick(tmp_path):
+    eco = Economy(str(tmp_path / "t.db"))
+    bot = SimpleNamespace(economy=eco, sessions=Sessions(cooldown=0), config={}, guilds=[])
+    cog = shop_cog.ShopCog(bot)
+    calls = []
+
+    async def fake_role(guild, member, item):
+        calls.append(("role", item))
+
+    async def fake_nick(guild, member):
+        calls.append(("nick", member.id))
+
+    import cogs.shop_cog as sc
+
+    orig = sc.set_color_role
+    sc.set_color_role = fake_role
+    cog.sync_status_nick = fake_nick
+    try:
+        asyncio.run(cog.after_bankruptcy(SimpleNamespace(id=7), SimpleNamespace(id=U)))
+    finally:
+        sc.set_color_role = orig
+    assert calls == [("role", None), ("nick", U)]
+
+
+def test_after_bankruptcy_never_raises_on_discord_failures(tmp_path):
+    eco = Economy(str(tmp_path / "t.db"))
+    bot = SimpleNamespace(economy=eco, sessions=Sessions(cooldown=0), config={}, guilds=[])
+    cog = shop_cog.ShopCog(bot)
+
+    async def fail_nick(guild, member):
+        raise shop_cog.ShopError("権限なし")
+
+    import cogs.shop_cog as sc
+
+    async def fail_role(guild, member, item):
+        raise shop_cog.ShopError("権限なし")
+
+    orig = sc.set_color_role
+    sc.set_color_role = fail_role
+    cog.sync_status_nick = fail_nick
+    try:
+        asyncio.run(cog.after_bankruptcy(SimpleNamespace(id=7), SimpleNamespace(id=U)))  # 例外にならない
+    finally:
+        sc.set_color_role = orig
