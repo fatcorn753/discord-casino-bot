@@ -12,6 +12,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from cogs._amount import balance_choices
 from core import approval, bonds, ui
 
 RNG = random.SystemRandom()
@@ -56,10 +57,15 @@ class BondCog(commands.Cog):
         name="債券", description="🏦 ペリカを預けて満期に受け取る（ゲーム内の通貨・現実のお金とは無関係）"
     )
 
+    async def _amount_autocomplete(self, interaction: discord.Interaction, current: str):
+        """預ける元本の欄に、残高を見せる。"""
+        return balance_choices(self.bot, interaction, current, bonds.MIN_AMOUNT, 1_000_000)
+
     @group.command(name="買う", description=f"債券を買う（{bonds.MIN_AMOUNT:,}ペリカ以上）")
     @app_commands.rename(kind="種類", amount="金額")
     @app_commands.describe(kind="通常債かジャンク債", amount=f"預ける元本（{bonds.MIN_AMOUNT:,}ペリカ以上）")
     @app_commands.choices(kind=KIND_CHOICES)
+    @app_commands.autocomplete(amount=_amount_autocomplete)
     async def buy(
         self,
         interaction: discord.Interaction,

@@ -9,6 +9,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from cogs._amount import balance_choices
 from core import logthrottle, market, ui
 from core.confirm import confirm_action
 from core.economy import Economy
@@ -232,9 +233,14 @@ class MarketCog(commands.Cog):
         """売買する分（units が None なら全部）の、いまの価格での金額。確認を挟むかの判定に使う。"""
         return (have if units is None else min(units, have)) * price // market.UNIT
 
+    async def _buy_amount_autocomplete(self, interaction: discord.Interaction, current: str):
+        """買うのに使う金額の欄に、残高を見せる。"""
+        return balance_choices(self.bot, interaction, current, 10, 1_000_000)
+
     @group.command(name="買う", description=f"ペリカで{market.NAME}を買う（手数料なし・小数で買えます）")
     @app_commands.rename(amount="金額")
     @app_commands.describe(amount="使うペリカ（この範囲で買えるだけ買います）")
+    @app_commands.autocomplete(amount=_buy_amount_autocomplete)
     async def buy(self, interaction: discord.Interaction, amount: app_commands.Range[int, 10, 1_000_000]):
         async def run(uid):
             price = self._price()

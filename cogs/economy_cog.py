@@ -8,6 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from cogs._amount import balance_choices
 from core import approval, logthrottle, ranking, shop, ui
 from core import history as history_mod
 from core import missions as missions_mod
@@ -334,9 +335,14 @@ class EconomyCog(commands.Cog):
             ephemeral=True,
         )
 
+    async def _transfer_autocomplete(self, interaction: discord.Interaction, current: str):
+        """送る金額の欄に、残高を見せる。"""
+        return balance_choices(self.bot, interaction, current, 1, 1_000_000)
+
     @group.command(name="送金", description="ほかの人にペリカを送る（手数料10%）")
     @app_commands.rename(member="相手", amount="金額")
     @app_commands.describe(member="送る相手", amount="送る金額")
+    @app_commands.autocomplete(amount=_transfer_autocomplete)
     async def transfer(
         self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 1_000_000]
     ):

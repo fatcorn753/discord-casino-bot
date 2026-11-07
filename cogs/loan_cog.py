@@ -13,6 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+from cogs._amount import balance_choices
 from cogs.weekly_cog import announce_channel
 from core import approval, loans, logthrottle, ui
 from core.duration import format_minutes
@@ -118,6 +119,10 @@ class LoanCog(commands.Cog):
         return self.bot.economy.for_guild(interaction.guild_id)
 
     # ------------------------------ 提案 ------------------------------ #
+    async def _principal_autocomplete(self, interaction: discord.Interaction, current: str):
+        """貸す額の欄に、残高を見せる。"""
+        return balance_choices(self.bot, interaction, current, loans.USER_MIN_PRINCIPAL, loans.USER_MAX_PRINCIPAL)
+
     @group.command(name="提案", description="相手にペリカを貸す提案を出す")
     @app_commands.rename(member="相手", principal="金額", rate="日利", days="期間")
     @app_commands.describe(
@@ -126,6 +131,7 @@ class LoanCog(commands.Cog):
         rate=f"1日の利息（％。0〜{loans.MAX_RATE_TENTHS // 10}、0.1刻み）",
         days=f"返済の期限（日。{loans.MIN_TERM_DAYS}〜{loans.MAX_TERM_DAYS}）",
     )
+    @app_commands.autocomplete(principal=_principal_autocomplete)
     async def offer(
         self,
         interaction: discord.Interaction,
