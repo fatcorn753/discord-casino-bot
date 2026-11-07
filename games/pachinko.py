@@ -243,6 +243,7 @@ def reel_line(a: str, b: str, c: str) -> str:
 STEP_TEXT = ["ざわ…", "ゾワッ…！", "⚡ 激アツ ⚡"]  # 予告のステップアップ（1段目→2段目→3段目）
 STEP_ICON = ["🔵", "🔴", "🟡"]
 STEPS_OF = {"blue": 1, "red": 2, "gold": 3}  # 予告の色ごとの、ステップの数（色が高いほど長い）
+SPINNING = "🌀"  # 回っているリール
 
 
 def hold_row(icon: str) -> str:
@@ -250,160 +251,104 @@ def hold_row(icon: str) -> str:
     return "保留: ⚪⚪" + icon + "⚪"
 
 
+# ----------------------------- 演出の台本 ----------------------------- #
+# 演出は「台本」を1本選んで流す。リールは「回っている／止まっている」の状態を持ち、次のきまりを守る。
+#   ① 左右が同じ絵柄で止まったら「リーチ」。そのあと出目が決まるまで、左右の絵柄は変えない（真ん中は回り続ける）
+#   ② 3つ揃って止まるのは、最後の1コマだけ。揃ったら演出は終わり、すぐ当たりの宣言になる
+#   ③ 途中のコマの絵柄は乱数で出さない（たまたま揃って見えるのを防ぐ）。例外は、擬似連の「止まったように見えるコマ」で、
+#      3つとも違う絵柄にする（リーチにも揃いにも見えない）
+#   ④ 左右が戻るのは、再回転する演出（擬似連・全回転）のときだけ
 CUTIN = {
     SUPER: ["「チャンスだ！！」", "「いけるぞ！！」", "「ここからが本番だ！」", "「見せてやる！！」"],
     PREMIUM: ["「これで終わりだ！！」", "「全部まとめて持っていけ！！」", "「運命を変えろ！！」", "「勝負だ！！」"],
 }
+# 発展の演出の種類。1回の当たりで、この中から1つだけ選ぶ（毎回、全部が流れるわけではない）
+STORIES = {
+    NORMAL: [
+        ("🌊 **波の予告**", "画面が揺れている…"),
+        ("🐟 **魚群が横切った**", "なにか起きる…？"),
+        ("🎞️ **ロングリーチ**", "ゆっくり回っている…"),
+    ],
+    SUPER: [
+        ("🎬 **ストーリーリーチ**", "主人公が立ち上がる…！"),
+        ("🚃 **ダッシュリーチ**", "絵柄が走り出した…！"),
+        ("⚡ **スーパーリーチ**", "背景が変わった…！"),
+    ],
+    PREMIUM: [
+        ("🐉 **龍が現れた**", "地鳴りがする…！！"),
+        ("🌠 **流星群**", "夜空が光る…！"),
+        ("🔥 **プレミアムリーチ**", "画面が燃えている…！！"),
+    ],
+}
+PSEUDO_COUNTS = {SUPER: [0, 0, 1, 2], PREMIUM: [2, 3, 3, 4]}  # 擬似連の回数の候補（格ごと。当たり外れとは無関係に選ぶ）
 
 
-def _pseudo(rng, r0, r1, sp, n: int) -> list:
-    """擬似連: n 回の回転コマ。回数は当たりとは無関係に選ぶ（回数で結果が分からないように）。最後の回は金色。"""
-    tail = {1: "もう1回転する…！", 2: "さらにもう1回…！！"}
+def _text_frame(head: str, reels: tuple, text: str = "", mood: str = "normal") -> Frame:
+    return Frame(head + reel_line(*reels) + (f"\n{text}" if text else ""), mood)
+
+
+def _pseudo_cycles(rng: random.Random, count: int) -> list:
+    """擬似連: 止まったように見えて、揺れて、再び回り出す。count 回ぶん。止まったように見えるコマは、3つとも違う絵柄にする。"""
     frames = []
-    for k in range(1, n + 1):
-        label = "💥 **擬似連！** 💥" if n == 1 else f"💥 **擬似連 {k}/{n}** 💥"
-        text = tail.get(k, "もう1回…！") if k < n else ("ついに最後の回転…！！" if n > 1 else tail[1])
-        frames.append(Frame(label + "\n" + reel_line(*sp()) + "\n" + text, "gold" if n > 1 and k == n else "red"))
+    for k in range(1, count + 1):
+        label = "**擬似連！**" if count == 1 else f"**擬似連 {k}/{count}**"
+        mood = "gold" if count > 1 and k == count else "red"
+        frames.append(
+            _text_frame("", tuple(rng.sample(REEL_SYMBOLS, 3)), f"…止まった…？ いや、揺れている…！ {label}", mood)
+        )
+        frames.append(_text_frame("", (SPINNING,) * 3, "再回転！", mood))
     return frames
 
 
-def _normal_a(rng, r0, r1, sp):
-    return [
-        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！** ざわ… ざわ…", "blue"),
-        Frame("🎞️ **ロングリーチ** 🎞️\n" + reel_line(r0, r1, sp()[2]) + "\nゆっくり回っている…", "blue"),
-        Frame(reel_line(r0, r1, "🌀") + "\nざわ… ざわ… ざわ…", "blue"),
-    ]
-
-
-def _normal_b(rng, r0, r1, sp):
-    return [
-        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-        Frame("🌊 **波の予告** 🌊\n" + reel_line(r0, r1, sp()[2]) + "\n画面が揺れている…", "blue"),
-        Frame(reel_line(r0, r1, "🌀") + "\nじわ… じわ…", "blue"),
-    ]
-
-
-def _normal_c(rng, r0, r1, sp):
-    return [
-        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-        Frame("🐟 **魚群が横切った** 🐟\n" + reel_line(r0, r1, sp()[2]) + "\nなにか起きる…？", "blue"),
-        Frame(reel_line(r0, r1, "🌀") + "\n…どっちだ…", "blue"),
-    ]
-
-
-def _super_a(rng, r0, r1, sp):
-    return [
-        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-        Frame("⚡ **スーパーリーチ** ⚡\n" + reel_line(r0, r1, "🌀") + "\n背景が変わった…！", "red"),
-        Frame("🗯️ **カットイン！** 🗯️\n" + rng.choice(CUTIN[SUPER]) + "\n" + reel_line(r0, r1, sp()[2]), "red"),
-        *_pseudo(rng, r0, r1, sp, rng.choice([1, 2, 3])),
-        Frame("⚡⚡ **チャンス！！** ⚡⚡\n" + reel_line(r0, r1, sp()[2]) + "\nざわ… ざわ… ざわ…", "red"),
-        Frame("⚡ スローになった… ⚡\n" + reel_line(r0, r1, "🌀") + "\n…ここで決まる…！", "red"),
-    ]
-
-
-def _super_b(rng, r0, r1, sp):
-    return [
-        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-        Frame("🎬 **ストーリーリーチ** 🎬\n" + reel_line(r0, r1, "🌀") + "\n主人公が立ち上がる…！", "red"),
-        Frame("🗯️ **セリフ** 🗯️\n" + rng.choice(CUTIN[SUPER]) + "\n" + reel_line(r0, r1, sp()[2]), "red"),
-        *_pseudo(rng, r0, r1, sp, rng.choice([1, 2, 3])),
-        Frame("🔥 **逆転のチャンス！** 🔥\n" + reel_line(r0, r1, sp()[2]) + "\n音楽が盛り上がる…！", "red"),
-        Frame("…… **溜め** ……\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！", "red"),
-    ]
-
-
-def _super_c(rng, r0, r1, sp):
-    return [
-        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-        Frame("🚃 **ダッシュリーチ** 🚃\n" + reel_line(r0, r1, sp()[2]) + "\n絵柄が走り出した…！", "red"),
-        Frame("🗯️ **カットイン！** 🗯️\n" + rng.choice(CUTIN[SUPER]) + "\n" + reel_line(r0, r1, sp()[2]), "red"),
-        *_pseudo(rng, r0, r1, sp, rng.choice([1, 2, 3])),
-        Frame("⚡⚡ **加速！！** ⚡⚡\n" + reel_line(r0, r1, sp()[2]) + "\n止まらない…！", "red"),
-        Frame("⚡ ブレーキ… ⚡\n" + reel_line(r0, r1, "🌀") + "\n…止まるか…！", "red"),
-    ]
-
-
-def _premium_a(rng, r0, r1, sp):
-    return [
-        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-        *_pseudo(rng, r0, r1, sp, rng.choice([2, 3, 4])),
-        Frame("🔥 **プレミアムリーチ** 🔥\n" + reel_line(r0, r1, "🌀") + "\n画面が燃えている…！！", "red"),
-        Frame("🔥🔥 **全回転！！** 🔥🔥\n" + reel_line(*sp()) + "\nどよめき…！", "gold"),
-        Frame(
-            "🗯️ **プレミアムカットイン** 🗯️\n" + rng.choice(CUTIN[PREMIUM]) + "\n" + reel_line(r0, r1, sp()[2]), "gold"
-        ),
-        Frame("🔥🔥🔥 **運命の瞬間** 🔥🔥🔥\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！！", "gold"),
-    ]
-
-
-def _premium_b(rng, r0, r1, sp):
-    return [
-        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-        Frame("🌌 **空間が歪む** 🌌\n" + reel_line(*sp()) + "\n何かが来る…！", "red"),
-        Frame("⚡ **ボタン連打チャンス** ⚡\n" + reel_line(r0, r1, sp()[2]) + "\n連打連打連打…！", "red"),
-        Frame("🐉 **龍が現れた！！** 🐉\n" + reel_line(*sp()) + "\n地鳴りがする…！！", "gold"),
-        Frame("🔥 **プレミアムリーチ** 🔥\n" + reel_line(r0, r1, "🌀") + "\n画面が燃えている…！！", "red"),
-        Frame("🔥🔥 **全回転！！** 🔥🔥\n" + reel_line(*sp()) + "\nすべての絵柄が光る…！", "gold"),
-        Frame(
-            "🗯️ **プレミアムカットイン** 🗯️\n" + rng.choice(CUTIN[PREMIUM]) + "\n" + reel_line(r0, r1, sp()[2]), "gold"
-        ),
-        Frame("🔥🔥🔥 **運命の瞬間** 🔥🔥🔥\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！！", "gold"),
-    ]
-
-
-def _premium_c(rng, r0, r1, sp):
-    return [
-        Frame(reel_line(r0, r1, "🌀") + "\n**リーチ！**", "blue"),
-        Frame("🌠 **流星群** 🌠\n" + reel_line(r0, r1, sp()[2]) + "\n夜空が光る…！", "red"),
-        *_pseudo(rng, r0, r1, sp, rng.choice([2, 3, 4])),
-        Frame("🔥 **プレミアムリーチ** 🔥\n" + reel_line(r0, r1, "🌀") + "\n金色に輝いている…！！", "gold"),
-        Frame("👑 **覚醒！！** 👑\n" + reel_line(*sp()) + "\n全リールが金色に…！", "gold"),
-        Frame(
-            "🗯️ **プレミアムカットイン** 🗯️\n" + rng.choice(CUTIN[PREMIUM]) + "\n" + reel_line(r0, r1, sp()[2]), "gold"
-        ),
-        Frame("🔥🔥🔥 **運命の瞬間** 🔥🔥🔥\n" + reel_line(r0, r1, "🌀") + "\n…頼む…！！", "gold"),
-    ]
-
-
-REACH_PATTERNS = {
-    NORMAL: [_normal_a, _normal_b, _normal_c],
-    SUPER: [_super_a, _super_b, _super_c],
-    PREMIUM: [_premium_a, _premium_b, _premium_c],
-}
-
-
 def spin_frames(rng: random.Random, spin: SpinInfo, label: str = "") -> list:
-    """1回転の演出のコマ。保留変化・予告（ステップアップ）→ 回転 → リーチ（格つき・豪華な演出）→ 出目の順。
+    """当たった1回転の演出のコマ。予告 → 回転 →（擬似連）→ 左右が止まってリーチ → 発展 → 出目（3つ揃い）の順。
 
     label は先頭に付ける見出し（例: 「3回転目」）。当たりの宣言は、この演出が終わったあとに、呼び出し側が出す。
+    台本は格（リーチなし・ノーマル・スーパー・プレミアム）ごとに違い、擬似連・カットイン・発展の種類は、回ごとに選ぶ。
     """
     first = spin.rounds[0] if spin.rounds else 0
     reels = pick_reels(first, spin.tier, rng)
-    reach = bool(spin.tier)
+    sym = reels[0]
     omen, tier = spin.omen, spin.tier
     head = f"**{label}**\n" if label else ""
-    r0, r1 = reels[0], reels[1]
-
-    def spinning() -> tuple:
-        return tuple(rng.choice(REEL_SYMBOLS) for _ in range(3))
-
     frames = []
     for k in range(STEPS_OF.get(omen, 0)):  # ① 予告のステップアップ: 色が高いほど、段が多い
-        last = k + 1 == STEPS_OF[omen]
         mood = ("blue", "red", "gold")[k]
-        text = f"**【予告】** {OMEN_TEXT[omen]}" if last else f"**【予告】** {STEP_TEXT[k]}"
+        text = f"**【予告】** {OMEN_TEXT[omen]}" if k + 1 == STEPS_OF[omen] else f"**【予告】** {STEP_TEXT[k]}"
         frames.append(Frame((head if k == 0 else "") + hold_row(STEP_ICON[k]) + "\n" + text, mood))
-    frames.append(Frame((head if not omen else "") + reel_line("🌀", "🌀", "🌀") + "\n回転中…"))  # ② 回転
-    frames.append(Frame(reel_line(r0, "🌀", "🌀")))
-    if not reach:  # ③ リーチなし: 突然揃うサプライズ
-        frames += [
-            Frame(reel_line(r0, r1, "🌀") + "\n…！？ **まさか…**", omen or "normal"),
-            Frame("💫 **フリーズ！！** 💫\n" + reel_line(r0, r1, "🌀") + "\n画面が固まった…！！", "gold"),
-        ]
+    frames.append(_text_frame(head if not omen else "", (SPINNING,) * 3, "回転中…"))  # ② 回転
+    if not tier:  # リーチなしで、突然3つ揃う「サプライズ当たり」。揃う直前まで、3つとも回っている
+        frames.append(_text_frame("", (SPINNING,) * 3, "…！？ **まさか…**", omen or "normal"))
+        frames.append(_text_frame("💫 **フリーズ！！** 💫\n", (SPINNING,) * 3, "画面が固まった…！！", "gold"))
+        frames.append(_text_frame(head, reels))
+        return frames
+    mood = {NORMAL: "blue", SUPER: "red", PREMIUM: "gold"}[tier]
+    pseudo = rng.choice(PSEUDO_COUNTS.get(tier, [0]))
+    frames += _pseudo_cycles(rng, pseudo)  # ③ 擬似連（あれば）。そのあと、あらためて左右が止まる
+    frames.append(_text_frame("", (sym, SPINNING, SPINNING)))
+    frames.append(
+        _text_frame("", (sym, sym, SPINNING), "**リーチ！**", "blue")
+    )  # ④ リーチ。ここから出目が決まるまで、左右は変えない
+    title, sub = rng.choice(STORIES[tier])
+    if tier == NORMAL:
+        frames.append(_text_frame(f"{title}\n", (sym, sym, SPINNING), sub, mood))
+        if rng.random() < 0.5:
+            frames.append(
+                _text_frame("", (sym, sym, SPINNING), rng.choice(["ざわ… ざわ…", "じわ… じわ…", "…どっちだ…"]), mood)
+            )
     else:
-        frames += rng.choice(REACH_PATTERNS[tier])(rng, r0, r1, spinning)
-    frames.append(Frame(head + reel_line(*reels), "normal"))  # ④ 出目
+        frames.append(_text_frame(f"{title}\n", (sym, sym, SPINNING), sub, "red"))  # 発展
+        if rng.random() < 0.7:  # カットインは、ある回とない回がある
+            frames.append(
+                _text_frame("🗯️ **カットイン！** 🗯️\n" + rng.choice(CUTIN[tier]) + "\n", (sym, sym, SPINNING), "", mood)
+            )
+        if tier == PREMIUM:
+            frames.append(
+                _text_frame("🔥🔥 **全回転！！** 🔥🔥\n", (SPINNING,) * 3, "すべての絵柄が光る…！！", "gold")
+            )  # 全回転のあとは、すぐ出目
+        else:
+            frames.append(_text_frame("⚡ スローになった… ⚡\n", (sym, sym, SPINNING), "…ここで決まる…！", mood))
+    frames.append(_text_frame(head, reels))  # ⑤ 出目（3つ揃い）。揃ったら、演出はここで終わる
     return frames
 
 
