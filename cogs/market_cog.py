@@ -1,4 +1,4 @@
-"""/証券 — 4銘柄（CSトークン・TEIO重工・NUMAバイオ・GOLD地金）と債券の売買、価格のチャート。価格は全サーバー共通で、1分ごとに、相関をもって動く。"""
+"""/証券（注文・保有・市況・決済）— 4銘柄（CSトークン・TEIO重工・NUMAバイオ・GOLD地金）と債券の売買、価格のチャート。価格は全サーバー共通で、1分ごとに、相関をもって動く。"""
 
 import math
 import random
@@ -24,7 +24,77 @@ CONFIRM_FROM = 5_000  # この額以上の売買は確認ボタンを挟む
 EVENT_TEXT = {1: "📈 急騰！", -1: "📉 急落！"}
 PERIOD_CHOICES = [app_commands.Choice(name=label, value=key) for key, (label, _) in market.PERIODS.items()]
 SYMBOL_CHOICES = [app_commands.Choice(name=f"{s.emoji} {s.name}", value=s.key) for s in market.SYMBOLS]
+BOND_PREFIX = "bond_"
+ORDER_CHOICES = SYMBOL_CHOICES + [
+    app_commands.Choice(name=f"債券: {c.name}", value=BOND_PREFIX + c.value) for c in KIND_CHOICES
+]
 CORRELATION_MINUTES = 24 * 60  # 銘柄どうしの連動を調べる、直近の長さ（分）
+
+
+class HoldingsView(discord.ui.View):
+    """/証券 保有 の、ボタンで決済する画面（開いた本人だけが操作できる）。"""
+
+    def __init__(self, cog, user_id: int, guild_id: int):
+        super().__init__(timeout=300)
+        self.cog, self.user_id = cog, user_id
+        for code, label in cog.positions(user_id, guild_id)[:20]:
+            button = discord.ui.Button(label=label[:80], style=discord.ButtonStyle.secondary)
+            button.callback = self._make(code)
+            self.add_item(button)
+
+    def _make(self, code: str):
+        async def callback(interaction: discord.Interaction):
+            await self.cog.settle_position(interaction, code)
+
+        return callback
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("自分の `/証券 保有` で操作してください。", ephemeral=True)
+            return False
+        return True
+
+
+class MarketView(discord.ui.View):
+    """/証券 市況 の、銘柄と期間のチャートを切り替える画面（自動更新はしない。開いた本人だけが操作できる）。"""
+
+    def __init__(self, cog, user_id: int, guild_id: int, period: str = "24h"):
+        super().__init__(timeout=300)
+        self.cog, self.user_id, self.guild_id = cog, user_id, guild_id
+        self.symbol, self.period = None, period
+        self.symbol_select = discord.ui.Select(
+            placeholder="銘柄を選ぶ",
+            options=[discord.SelectOption(label="📋 全銘柄の一覧", value="all")]
+            + [discord.SelectOption(label=f"{s.emoji} {s.name}", value=s.key) for s in market.SYMBOLS],
+        )
+        self.period_select = discord.ui.Select(
+            placeholder="期間を選ぶ",
+            options=[discord.SelectOption(label=label, value=key) for key, (label, _) in market.PERIODS.items()],
+        )
+        self.symbol_select.callback = self._on_symbol
+        self.period_select.callback = self._on_period
+        self.add_item(self.symbol_select)
+        self.add_item(self.period_select)
+
+    def _embed(self) -> discord.Embed:
+        if self.symbol is None:
+            return self.cog.summary_embed()
+        return self.cog.chart_embed(self.period, guild_id=self.guild_id, symbol=self.symbol)
+
+    async def _on_symbol(self, interaction: discord.Interaction):
+        value = self.symbol_select.values[0]
+        self.symbol = None if value == "all" else value
+        await interaction.response.edit_message(embed=self._embed(), view=self)
+
+    async def _on_period(self, interaction: discord.Interaction):
+        self.period = self.period_select.values[0]
+        await interaction.response.edit_message(embed=self._embed(), view=self)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("自分の `/証券 市況` で操作してください。", ephemeral=True)
+            return False
+        return True
 
 
 class MarketCog(commands.Cog):
@@ -39,10 +109,7 @@ class MarketCog(commands.Cog):
         return self.bot.economy
 
     group = app_commands.Group(
-        name="証券", description="📈 4銘柄と債券の売買・チャート（ゲーム内の通貨・現実のお金とは無関係）"
-    )
-    bond_group = app_commands.Group(
-        name="債券", description="🏦 ペリカを預けて満期に受け取る（通常債・ジャンク債）", parent=group
+        name="証券", description="📈 注文・保有・市況・決済（4銘柄と債券。ゲーム内の通貨・現実のお金とは無関係）"
     )
 
     # ------------------------------ 価格の更新 ------------------------------ #
@@ -164,7 +231,7 @@ class MarketCog(commands.Cog):
                     name=f"📉 空売り中（このサーバー・上位{HOLDER_ROWS}人）", value="\n".join(lines), inline=False
                 )
         if ended:
-            note = "更新は終了しました。最新は /証券 チャート で"
+            note = "更新は終了しました。最新は /証券 市況 で"
         elif live_until is not None:
             note = f"{TICK_MINUTES}分ごとに自動で更新（あと{max(1, int((live_until - time.time()) // 60))}分）"
         else:
@@ -186,8 +253,8 @@ class MarketCog(commands.Cog):
             rows.append(f"{a.emoji} {a.key:<5} " + " ".join(f"{c:^5}" for c in cells))
         return "```\n" + "\n".join(rows) + "\n```"
 
-    @group.command(name="価格", description="全銘柄のいまの価格と、銘柄どうしの連動")
-    async def price(self, interaction: discord.Interaction):
+    def summary_embed(self) -> discord.Embed:
+        """全銘柄のいまの価格と、銘柄どうしの連動。"""
         lines = []
         for sym in market.SYMBOLS:
             hist = self.eco.market_history(time.time() - 86400, sym.key)
@@ -198,22 +265,29 @@ class MarketCog(commands.Cog):
                 f"{sym.emoji} **{sym.name}**　**{market.pel(s['last'])}**（1枚）　{arrow} {s['change']:+.1f}%（24時間）　高値 {market.fmt(s['high'])} 安値 {market.fmt(s['low'])}"
             )
         body = "\n".join(lines) + "\n\n**銘柄どうしの連動（直近24時間の1分ごとの値動き）**\n" + self.correlation_table()
-        await interaction.response.send_message(
-            embed=ui.embed("📈 証券（全銘柄）", body + "\n`/証券 チャート` で値動きを見られます。", ui.GOLD),
-            ephemeral=True,
-        )
+        return ui.embed("📈 市況（全銘柄）", body + "\n下のメニューで、銘柄と期間のチャートを見られます。", ui.GOLD)
 
-    @group.command(name="チャート", description=f"銘柄の値動きをチャートで表示（{LIVE_MINUTES}分間、自動で更新）")
+    @group.command(
+        name="市況", description=f"価格・連動・チャート。銘柄を選ぶと、{LIVE_MINUTES}分間、自動で更新するチャートを出す"
+    )
     @app_commands.rename(symbol="銘柄", period="期間")
-    @app_commands.describe(symbol="見る銘柄（省略時: CSトークン）", period="どの期間を見るか（省略時: 24時間）")
+    @app_commands.describe(
+        symbol="チャートを出す銘柄（省略すると、全銘柄の価格と連動の一覧）", period="どの期間を見るか（省略時: 24時間）"
+    )
     @app_commands.choices(symbol=SYMBOL_CHOICES, period=PERIOD_CHOICES)
-    async def chart(
+    async def board(
         self,
         interaction: discord.Interaction,
         symbol: Optional[app_commands.Choice[str]] = None,
         period: Optional[app_commands.Choice[str]] = None,
     ):
-        key, now, sym = (period.value if period else "24h"), time.time(), (symbol.value if symbol else market.DEFAULT)
+        if symbol is None:
+            view = MarketView(self, interaction.user.id, interaction.guild.id, period.value if period else "24h")
+            return await interaction.response.send_message(embed=self.summary_embed(), view=view, ephemeral=True)
+        await self._post_chart(interaction, symbol.value, period.value if period else "24h")
+
+    async def _post_chart(self, interaction: discord.Interaction, sym: str, key: str) -> None:
+        now = time.time()
         await interaction.response.send_message(
             embed=self.chart_embed(key, guild_id=interaction.guild.id, live_until=now + LIVE_MINUTES * 60, symbol=sym),
             allowed_mentions=discord.AllowedMentions.none(),
@@ -281,18 +355,9 @@ class MarketCog(commands.Cog):
         """買うのに使う金額の欄に、残高を見せる。"""
         return balance_choices(self.bot, interaction, current, 10, 1_000_000)
 
-    @group.command(name="買う", description="ペリカで銘柄を買う（手数料なし・小数で買えます）")
-    @app_commands.rename(symbol="銘柄", amount="金額")
-    @app_commands.describe(symbol="買う銘柄", amount="使うペリカ（この範囲で買えるだけ買います）")
-    @app_commands.choices(symbol=SYMBOL_CHOICES)
-    @app_commands.autocomplete(amount=_buy_amount_autocomplete)
-    async def buy(
-        self,
-        interaction: discord.Interaction,
-        symbol: app_commands.Choice[str],
-        amount: app_commands.Range[int, 10, 1_000_000],
-    ):
-        sym = market.BY_KEY[symbol.value]
+    async def _buy(self, interaction: discord.Interaction, symbol: str, amount: int) -> None:
+        """現物の購入（手数料なし・小数で買える）。amount ペリカの範囲で買えるだけ買う。"""
+        sym = market.BY_KEY[symbol]
 
         async def run(uid):
             price = self._price(sym.key)
@@ -328,24 +393,6 @@ class MarketCog(commands.Cog):
 
         await self._trade(interaction, run)
 
-    @group.command(name="買い戻し", description="空売りした銘柄を買い戻して、建玉を閉じる")
-    @app_commands.rename(symbol="銘柄", lots="枚数", ratio="割合")
-    @app_commands.describe(
-        symbol="買い戻す銘柄", lots="買い戻す枚数（小数も可）", ratio="半分か全部（枚数のかわりに指定。省略で全部）"
-    )
-    @app_commands.choices(
-        symbol=SYMBOL_CHOICES,
-        ratio=[app_commands.Choice(name="半分", value="half"), app_commands.Choice(name="全部", value="all")],
-    )
-    async def cover(
-        self,
-        interaction: discord.Interaction,
-        symbol: app_commands.Choice[str],
-        lots: Optional[app_commands.Range[float, 0.001, 1_000_000.0]] = None,
-        ratio: Optional[app_commands.Choice[str]] = None,
-    ):
-        await self._cover(interaction, symbol.value, lots, ratio)
-
     async def _cover(self, interaction, symbol: str, lots, ratio) -> None:
         """空売りの買い戻し（決済）。枚数か割合で指定する。どちらも省略すると全部。"""
         if await self._reject_lots_and_ratio(interaction, lots, ratio):
@@ -358,7 +405,7 @@ class MarketCog(commands.Cog):
             if have <= 0:
                 return await interaction.response.send_message(
                     embed=ui.error_embed(
-                        "買い戻せません", f"{sym.name}の空売りを建てていません。`/証券 空売り` で建てられます。"
+                        "買い戻せません", f"{sym.name}の空売りを建てていません。`/証券 注文` で建てられます。"
                     ),
                     ephemeral=True,
                 )
@@ -418,31 +465,17 @@ class MarketCog(commands.Cog):
             f"{'🔺' if pct >= 0 else '🔻'}**{pct:+.1f}%**\n評価損益: **{diff:+,}ペリカ**（売ったときの手取り {ui.pelica(value)}）"
         )
 
-    @group.command(name="売る", description="持っている銘柄を売る")
-    @app_commands.rename(symbol="銘柄", lots="枚数", ratio="割合")
-    @app_commands.describe(
-        symbol="売る銘柄", lots="売る枚数（小数も可）", ratio="半分か全部（枚数のかわりに指定。省略で全部）"
-    )
-    @app_commands.choices(
-        symbol=SYMBOL_CHOICES,
-        ratio=[app_commands.Choice(name="半分", value="half"), app_commands.Choice(name="全部", value="all")],
-    )
-    async def sell(
-        self,
-        interaction: discord.Interaction,
-        symbol: app_commands.Choice[str],
-        lots: Optional[app_commands.Range[float, 0.001, 1_000_000.0]] = None,
-        ratio: Optional[app_commands.Choice[str]] = None,
-    ):
+    async def _sell(self, interaction: discord.Interaction, symbol: str, lots, ratio) -> None:
+        """現物の売却。枚数か割合（半分・全部）で指定する。どちらも省略すると全部。"""
         if await self._reject_lots_and_ratio(interaction, lots, ratio):
             return
-        sym = market.BY_KEY[symbol.value]
+        sym = market.BY_KEY[symbol]
 
         async def run(uid):
             have, cost = self.g(interaction).crypto_holding(uid, sym.key)
             if have <= 0:
                 return await interaction.response.send_message(
-                    embed=ui.error_embed("売れません", f"{sym.name}を持っていません。`/証券 買う` で買えます。"),
+                    embed=ui.error_embed("売れません", f"{sym.name}を持っていません。`/証券 注文` で買えます。"),
                     ephemeral=True,
                 )
             units = self._units_from(have, lots, ratio)
@@ -477,25 +510,9 @@ class MarketCog(commands.Cog):
 
         await self._trade(interaction, run)
 
-    @group.command(name="空売り", description="銘柄を空売り。価格が下がると儲かる（担保が必要）")
-    @app_commands.rename(symbol="銘柄", lots="枚数", amount="金額", leverage="レバレッジ")
-    @app_commands.describe(
-        symbol="空売りする銘柄",
-        lots="空売りする枚数（小数も可）",
-        amount="空売りする額（枚数のかわりに指定）",
-        leverage="倍率（大きいほど損益が大きく、強制決済されやすい。省略で1倍）",
-    )
-    @app_commands.choices(
-        symbol=SYMBOL_CHOICES, leverage=[app_commands.Choice(name=f"{n}倍", value=n) for n in Economy.SHORT_LEVERAGES]
-    )
-    async def short(
-        self,
-        interaction: discord.Interaction,
-        symbol: app_commands.Choice[str],
-        lots: Optional[app_commands.Range[float, 0.001, 1_000_000.0]] = None,
-        amount: Optional[app_commands.Range[int, 10, 10_000_000]] = None,
-        leverage: Optional[app_commands.Choice[int]] = None,
-    ):
+    async def _short(
+        self, interaction: discord.Interaction, symbol: str, lots=None, amount: Optional[int] = None, leverage: int = 1
+    ) -> None:
         """空売り（売り建て）。担保 = 総額 ÷ レバレッジ を預ける。枚数か金額（売り建てる総額）で指定する。"""
         if (lots is None) == (amount is None):
             return await interaction.response.send_message(
@@ -504,8 +521,7 @@ class MarketCog(commands.Cog):
                 ),
                 ephemeral=True,
             )
-        leverage = leverage.value if leverage else 1
-        sym = market.BY_KEY[symbol.value]
+        sym = market.BY_KEY[symbol]
 
         def units_at(price: float) -> int:
             return (
@@ -546,21 +562,95 @@ class MarketCog(commands.Cog):
                     f"{sym.name}を空売りしました",
                     f"**{market.lots(res.units)}**（価格 {market.pel(price)}・{leverage}倍）\n"
                     f"預けた担保: {ui.pelica(res.money)}\n残高: **{ui.pelica(res.balance)}**\n\n{self._short_position(have, entry_value, margin_all, price)}\n\n"
-                    "閉じるには `/証券 買い戻し` を使います。",
+                    "閉じるには `/証券 保有` のボタンか、`/証券 決済` を使います。",
                 )
             )
 
         await self._trade(interaction, run)
 
-    @group.command(name="保有", description="持っている銘柄と、空売りの建玉・いまの評価額（全銘柄）")
-    async def holdings(self, interaction: discord.Interaction):
-        eco, uid = self.g(interaction), interaction.user.id
+    # ------------------------------ 注文 ------------------------------ #
+    @group.command(name="注文", description="買う・空売り・債券を買う（銘柄と金額を選ぶだけ）")
+    @app_commands.rename(symbol="銘柄", amount="金額", order_type="注文種別", leverage="レバレッジ")
+    @app_commands.describe(
+        symbol="買う銘柄か債券",
+        amount="使うペリカ（空売りは、売り建てる額）",
+        order_type="省略すると現物買い（債券は現物買いのみ）",
+        leverage="空売りの倍率（省略で1倍。大きいほど損益が大きく、強制決済されやすい）",
+    )
+    @app_commands.choices(
+        symbol=ORDER_CHOICES,
+        order_type=[
+            app_commands.Choice(name="現物買い", value="spot"),
+            app_commands.Choice(name="空売り", value="short"),
+        ],
+        leverage=[app_commands.Choice(name=f"{n}倍", value=n) for n in Economy.SHORT_LEVERAGES],
+    )
+    @app_commands.autocomplete(amount=_buy_amount_autocomplete)
+    async def order(
+        self,
+        interaction: discord.Interaction,
+        symbol: app_commands.Choice[str],
+        amount: app_commands.Range[int, 10, 10_000_000],
+        order_type: Optional[app_commands.Choice[str]] = None,
+        leverage: Optional[app_commands.Choice[int]] = None,
+    ):
+        kind = order_type.value if order_type else "spot"
+        lev = leverage.value if leverage else 1
+        if symbol.value.startswith(BOND_PREFIX):
+            if kind != "spot" or lev != 1:
+                return await interaction.response.send_message(
+                    embed=ui.error_embed("債券は現物買いだけです", "債券には、空売りもレバレッジもありません。"),
+                    ephemeral=True,
+                )
+            return await self._bond_buy(interaction, symbol.value[len(BOND_PREFIX) :], amount)
+        if kind == "short":
+            return await self._short(interaction, symbol.value, amount=amount, leverage=lev)
+        if lev != 1:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("現物買いにレバレッジはありません", "レバレッジは、空売りのときだけ選べます。"),
+                ephemeral=True,
+            )
+        if amount > 1_000_000:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("金額が大きすぎます", "現物は、1回に1,000,000ペリカまで買えます。"), ephemeral=True
+            )
+        await self._buy(interaction, symbol.value, amount)
+
+    # ------------------------------ 保有 ------------------------------ #
+    def positions(self, uid: int, guild_id: int) -> list:
+        """決済できる持ち物 [(コード, ボタンの名前), ...]。コードは spot:銘柄 / short:銘柄 / bond:番号。"""
+        eco, out = self.bot.economy.for_guild(guild_id), []
+        for symbol, _units, _cost in eco.holdings(uid):
+            out.append((f"spot:{symbol}", f"{market.BY_KEY[symbol].emoji} {market.BY_KEY[symbol].name} 全売却"))
+        for symbol, *_ in eco.short_positions(uid):
+            out.append((f"short:{symbol}", f"{market.BY_KEY[symbol].emoji} {market.BY_KEY[symbol].name} 空売り全決済"))
+        for r in eco.bond_list(uid)["active"]:
+            k = bonds.KINDS[r["kind"]]
+            if k.cancel_penalty is not None:
+                out.append((f"bond:{r['id']}", f"{k.emoji} {k.name} #{r['id']} 解約"))
+        return out
+
+    async def settle_position(self, interaction: discord.Interaction, code: str, ratio=None) -> None:
+        """positions のコードで指す持ち物を決済する（現物は売る・空売りは買い戻す・債券は解約）。ratio は半分か全部。"""
+        kind, _, target = code.partition(":")
+        if kind == "spot" and target in market.BY_KEY:
+            return await self._sell(interaction, target, None, ratio)
+        if kind == "short" and target in market.BY_KEY:
+            return await self._cover(interaction, target, None, ratio)
+        if kind == "bond" and target.isdigit():
+            return await self._bond_cancel(interaction, int(target))
+        await interaction.response.send_message(
+            embed=ui.error_embed("決済できません", "決済する持ち物を、候補から選んでください。"), ephemeral=True
+        )
+
+    def holdings_embed(self, uid: int, guild_id: int) -> discord.Embed:
+        eco = self.bot.economy.for_guild(guild_id)
+        eco.bond_settle(time.time(), RNG)  # 満期の分を先に入金する
         spots = {symbol: (units, cost) for symbol, units, cost in eco.holdings(uid)}
         shorts = {symbol: (units, entry, margin) for symbol, units, entry, margin in eco.short_positions(uid)}
-        if not spots and not shorts:
-            return await interaction.response.send_message(
-                embed=ui.embed("💼 証券", "まだ持っていません。`/証券 買う` で買えます。", ui.INFO), ephemeral=True
-            )
+        data = eco.bond_list(uid)
+        if not spots and not shorts and not data["active"] and not data["done"]:
+            return ui.embed("💼 証券", "まだ持っていません。`/証券 注文` で買えます。", ui.INFO)
         parts, total = [], 0
         for sym in market.SYMBOLS:
             if sym.key not in spots and sym.key not in shorts:
@@ -581,32 +671,65 @@ class MarketCog(commands.Cog):
                 lines.append(f"📉 **空売り**\n{self._short_position(units, entry, margin, price)}")
                 total += Economy.short_pnl(units, entry, price)
             parts.append("\n".join(lines))
-        await interaction.response.send_message(
-            embed=ui.embed("💼 証券", "\n\n".join(parts), ui.OK if total >= 0 else ui.ERROR), ephemeral=True
+        if data["active"]:
+            lines = []
+            for r in data["active"]:
+                k = bonds.KINDS[r["kind"]]
+                lines.append(
+                    f"`#{r['id']}` {k.emoji} {k.name} 元本 {ui.pelica(r['principal'])} → 満期 {due_text(r['due'])}（受取 {ui.pelica(bonds.maturity_payout(k, r['principal']))}）"
+                )
+            parts.append("🏦 **債券**\n" + "\n".join(lines))
+        e = ui.embed(
+            "💼 証券", "\n\n".join(parts) or "いま持っている銘柄はありません。", ui.OK if total >= 0 else ui.ERROR
         )
+        if data["done"]:
+            e.add_field(name="債券の最近の決着", value="\n".join(describe_done(r) for r in data["done"]), inline=False)
+        e.set_footer(
+            text="下のボタンで、その持ち物を全部決済します（一部だけなら /証券 決済）。ランキングの総資産には債券の元本も含まれます"
+        )
+        return e
 
-    # ------------------------------ 債券（/証券 債券 …） ------------------------------ #
-    async def _bond_amount_autocomplete(self, interaction: discord.Interaction, current: str):
-        """預ける元本の欄に、残高を見せる。"""
-        return balance_choices(self.bot, interaction, current, bonds.MIN_AMOUNT, 1_000_000)
+    @group.command(name="保有", description="現物・空売り・債券をまとめて見る（ボタンで、すぐ決済できる）")
+    async def holdings(self, interaction: discord.Interaction):
+        uid, gid = interaction.user.id, interaction.guild.id
+        embed = self.holdings_embed(uid, gid)
+        view = HoldingsView(self, uid, gid)
+        await interaction.response.send_message(embed=embed, view=view if view.children else None, ephemeral=True)
 
-    @bond_group.command(name="買う", description=f"債券を買う（{bonds.MIN_AMOUNT:,}ペリカ以上）")
-    @app_commands.rename(kind="種類", amount="金額")
-    @app_commands.describe(kind="通常債かジャンク債", amount=f"預ける元本（{bonds.MIN_AMOUNT:,}ペリカ以上）")
-    @app_commands.choices(kind=KIND_CHOICES)
-    @app_commands.autocomplete(amount=_bond_amount_autocomplete)
-    async def bond_buy(
-        self,
-        interaction: discord.Interaction,
-        kind: app_commands.Choice[str],
-        amount: app_commands.Range[int, bonds.MIN_AMOUNT, 1_000_000],
+    # ------------------------------ 決済 ------------------------------ #
+    async def _position_autocomplete(self, interaction: discord.Interaction, current: str):
+        found = [
+            app_commands.Choice(name=label, value=code)
+            for code, label in self.positions(interaction.user.id, interaction.guild.id)
+            if current.lower() in label.lower()
+        ]
+        return found[:25]
+
+    @group.command(name="決済", description="持っている現物・空売り・債券を、半分か全部、手放す")
+    @app_commands.rename(position="ポジション", ratio="数量")
+    @app_commands.describe(position="決済する持ち物（候補から選ぶ）", ratio="半分か全部（省略で全部。債券は全部だけ）")
+    @app_commands.choices(
+        ratio=[app_commands.Choice(name="半分", value="half"), app_commands.Choice(name="全部", value="all")]
+    )
+    @app_commands.autocomplete(position=_position_autocomplete)
+    async def settle(
+        self, interaction: discord.Interaction, position: str, ratio: Optional[app_commands.Choice[str]] = None
     ):
+        await self.settle_position(interaction, position, ratio)
+
+    # ------------------------------ 債券 ------------------------------ #
+    async def _bond_buy(self, interaction: discord.Interaction, kind_key: str, amount: int) -> None:
         eco = self.g(interaction)
         eco.bond_settle(time.time(), RNG)  # 満期の分を先に入金して、買える額を正しくする
-        ok, reason = eco.bond_buy(interaction.user.id, kind.value, amount, time.time())
+        if amount < bonds.MIN_AMOUNT:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("買えません", f"債券は {bonds.MIN_AMOUNT:,}ペリカ以上から買えます。"),
+                ephemeral=True,
+            )
+        ok, reason = eco.bond_buy(interaction.user.id, kind_key, amount, time.time())
         if not ok:
             return await interaction.response.send_message(embed=ui.error_embed("買えません", reason), ephemeral=True)
-        k = bonds.KINDS[kind.value]
+        k = bonds.KINDS[kind_key]
         lines = [
             f"元本: **{ui.pelica(amount)}**　満期: {k.hours // 24}日後（{due_text(time.time() + k.hours * 3600)}）",
             f"満期に受け取る額: **{ui.pelica(bonds.maturity_payout(k, amount))}**（利息 +{k.rate}%）",
@@ -614,32 +737,10 @@ class MarketCog(commands.Cog):
         if k.default_pct:
             lines.append(f"⚠️ **{k.default_pct}%の確率で倒産**して、元本が戻りません。途中で解約もできません。")
         else:
-            lines.append(f"元本保証です。途中解約は元本の{k.cancel_penalty}%が引かれます（`/証券 債券 解約`）。")
+            lines.append(f"元本保証です。途中解約は元本の{k.cancel_penalty}%が引かれます（`/証券 決済`）。")
         await interaction.response.send_message(embed=ui.ok_embed(f"{k.emoji} {k.name}を買いました", "\n".join(lines)))
 
-    @bond_group.command(name="保有", description="持っている債券と最近の結果を見る")
-    async def bond_holdings(self, interaction: discord.Interaction):
-        eco = self.g(interaction)
-        eco.bond_settle(time.time(), RNG)
-        data = eco.bond_list(interaction.user.id)
-        lines = []
-        for r in data["active"]:
-            k = bonds.KINDS[r["kind"]]
-            lines.append(
-                f"`#{r['id']}` {k.emoji} {k.name} 元本 {ui.pelica(r['principal'])} → 満期 {due_text(r['due'])}（受取 {ui.pelica(bonds.maturity_payout(k, r['principal']))}）"
-            )
-        e = ui.embed(
-            "🏦 保有中の債券", "\n".join(lines) or "債券は持っていません。`/証券 債券 買う` で買えます。", ui.INFO
-        )
-        if data["done"]:
-            e.add_field(name="最近の決着", value="\n".join(describe_done(r) for r in data["done"]), inline=False)
-        e.set_footer(text="ランキングの総資産には、預けている元本も含まれます")
-        await interaction.response.send_message(embed=e, ephemeral=True)
-
-    @bond_group.command(name="解約", description="通常債を途中で解約する（違約金あり）")
-    @app_commands.rename(bond_id="番号")
-    @app_commands.describe(bond_id="`/証券 債券 保有` に出ている # の番号")
-    async def bond_cancel(self, interaction: discord.Interaction, bond_id: int):
+    async def _bond_cancel(self, interaction: discord.Interaction, bond_id: int) -> None:
         ok, result = self.g(interaction).bond_cancel(interaction.user.id, bond_id)
         if not ok:
             return await interaction.response.send_message(

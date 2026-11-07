@@ -232,13 +232,13 @@ def cog(eco):
 
 def test_buy_sell_holdings_commands(cog):
     it = It()
-    run(MarketCog.buy.callback(cog, it, SimpleNamespace(value="cs"), 1_000))
+    run(cog._buy(it, "cs", 1_000))
     assert "買いました" in it.sent[-1]["embed"].title
     it = It()
     run(MarketCog.holdings.callback(cog, it))
     assert "保有" in it.sent[-1]["embed"].description
     it = It()
-    run(MarketCog.sell.callback(cog, it, SimpleNamespace(value="cs"), None, None))
+    run(cog._sell(it, "cs", None, None))
     assert "売りました" in it.sent[-1]["embed"].title
     assert cog.bot.sessions.try_start(U) is None  # 取引のあと、プレイ中のままにならない
 
@@ -246,7 +246,7 @@ def test_buy_sell_holdings_commands(cog):
 def test_trading_is_refused_during_a_game(cog):
     assert cog.bot.sessions.try_start(U) is None
     it = It()
-    run(MarketCog.buy.callback(cog, it, SimpleNamespace(value="cs"), 1_000))
+    run(cog._buy(it, "cs", 1_000))
     assert "取引できません" in it.sent[-1]["embed"].title
     assert cog.eco.for_guild(G).crypto_holding(U) == (0, 0)
 
@@ -254,10 +254,10 @@ def test_trading_is_refused_during_a_game(cog):
 def test_price_chart_and_step(cog):
     it = It()
     cog.step_prices()
-    run(MarketCog.price.callback(cog, it))
+    run(MarketCog.board.callback(cog, it, None, None))
     assert "1枚" in it.sent[-1]["embed"].description and "TEIO重工" in it.sent[-1]["embed"].description
     it = It()
-    run(MarketCog.chart.callback(cog, it, None, None))
+    run(MarketCog.board.callback(cog, it, SimpleNamespace(value="cs"), None))
     assert "```" in it.sent[-1]["embed"].description and "24時間" in it.sent[-1]["embed"].title
 
 
@@ -299,15 +299,15 @@ def time_now():
 
 
 def test_sell_shows_position_change_and_remaining(cog):
-    run(MarketCog.buy.callback(cog, It(), SimpleNamespace(value="cs"), 2_000))
+    run(cog._buy(It(), "cs", 2_000))
     have, _ = cog.eco.for_guild(G).crypto_holding(U)
     cog.eco.market_set(time_now() + 1, int(cog._price() * 1.2), 0)
     it = It()
-    run(MarketCog.sell.callback(cog, it, SimpleNamespace(value="cs"), have / 2000))  # 半分売る
+    run(cog._sell(it, "cs", have / 2000, None))  # 半分売る
     text = it.sent[-1]["embed"].description
     assert "+" in text and "%" in text and "取得" in text and "残りの持ち分" in text and "評価損益" in text
     it = It()
-    run(MarketCog.sell.callback(cog, it, SimpleNamespace(value="cs"), None, None))
+    run(cog._sell(it, "cs", None, None))
     assert "全部売りました" in it.sent[-1]["embed"].description
 
 
@@ -357,20 +357,20 @@ def test_new_chart_replaces_the_previous_one_in_the_same_channel_only(cog):
     FakeChannel.shared.clear()
     a1, a2, b1 = It(), It(), It()
     b1.channel = FakeChannel(6)
-    run(MarketCog.chart.callback(cog, a1, None, None))
+    run(MarketCog.board.callback(cog, a1, SimpleNamespace(value="cs"), None))
     assert FakeChannel.shared[5] == []  # 最初のチャートは、何も消さない
-    run(MarketCog.chart.callback(cog, b1, None, None))  # 別のチャンネルのチャートは、触らない
+    run(MarketCog.board.callback(cog, b1, SimpleNamespace(value="cs"), None))  # 別のチャンネルのチャートは、触らない
     assert FakeChannel.shared[5] == [] and FakeChannel.shared[6] == []
-    run(MarketCog.chart.callback(cog, a2, None, None))  # 同じチャンネルで、もう一度
+    run(MarketCog.board.callback(cog, a2, SimpleNamespace(value="cs"), None))  # 同じチャンネルで、もう一度
     assert FakeChannel.shared[5] == [a1._next_id]  # 前のチャートだけが消える（別チャンネルのは残る）
 
 
 def test_chart_command_still_works_when_the_old_chart_is_already_gone(cog):
     FakeChannel.shared.clear()
     it1, it2 = It(), It()
-    run(MarketCog.chart.callback(cog, it1, None, None))
+    run(MarketCog.board.callback(cog, it1, SimpleNamespace(value="cs"), None))
     it2.channel.fail = True  # 前のチャートはすでに消えている
-    run(MarketCog.chart.callback(cog, it2, None, None))
+    run(MarketCog.board.callback(cog, it2, SimpleNamespace(value="cs"), None))
     assert "```" in it2.sent[-1]["embed"].description  # 失敗しても、チャート自体は出る
 
 
@@ -405,7 +405,7 @@ def test_chart_command_registers_a_live_chart_that_updates_then_ends(cog):
     ch = EditChan(5)
     live_env(cog, ch)
     it = It()
-    run(MarketCog.chart.callback(cog, it, None, None))
+    run(MarketCog.board.callback(cog, it, SimpleNamespace(value="cs"), None))
     first = it.sent[-1]["embed"]
     assert "自動で更新（あと" in first.footer.text
     post = cog.eco.live_chart_posts()[0]
@@ -466,8 +466,8 @@ def test_new_chart_in_the_same_channel_replaces_the_live_one(cog):
     FakeChannel.shared.clear()
     live_env(cog, EditChan(5))
     a, b = It(), It()
-    run(MarketCog.chart.callback(cog, a, None, None))
-    run(MarketCog.chart.callback(cog, b, None, None))
+    run(MarketCog.board.callback(cog, a, SimpleNamespace(value="cs"), None))
+    run(MarketCog.board.callback(cog, b, SimpleNamespace(value="cs"), None))
     live = cog.eco.live_chart_posts()
     assert len(live) == 1 and live[0]["message_id"] == b._next_id  # 更新の対象は、新しいチャートだけ
     assert FakeChannel.shared[5] == [a._next_id]  # 前のチャートは消える
@@ -561,28 +561,20 @@ def test_short_counts_in_ranking_and_payout_repays_debt(eco):
 
 def test_short_commands(cog):
     it = It()
-    run(
-        MarketCog.short.callback(
-            cog, it, SimpleNamespace(value="cs"), 1.0, None, discord.app_commands.Choice(name="2倍", value=2)
-        )
-    )
+    run(cog._short(it, "cs", 1.0, None, 2))
     assert "空売りしました" in it.sent[-1]["embed"].title
     assert cog.eco.for_guild(G).short_position(U)[0] == 1_000
     it = It()
     run(MarketCog.holdings.callback(cog, it))
     assert "空売り" in it.sent[-1]["embed"].description and "ロスカット" in it.sent[-1]["embed"].description
     it = It()
-    run(MarketCog.cover.callback(cog, it, SimpleNamespace(value="cs"), None, None))
+    run(cog._cover(it, "cs", None, None))
     assert "買い戻しました" in it.sent[-1]["embed"].title and cog.eco.for_guild(G).short_position(U)[0] == 0
     it = It()
-    run(MarketCog.cover.callback(cog, it, SimpleNamespace(value="cs"), None, None))
+    run(cog._cover(it, "cs", None, None))
     assert "買い戻せません" in it.sent[-1]["embed"].title  # 建てていない
     it = It()
-    run(
-        MarketCog.cover.callback(
-            cog, it, SimpleNamespace(value="cs"), 1.0, discord.app_commands.Choice(name="半分", value="half")
-        )
-    )
+    run(cog._cover(it, "cs", 1.0, discord.app_commands.Choice(name="半分", value="half")))
     assert "どちらか1つ" in it.sent[-1]["embed"].title
 
 
@@ -599,16 +591,12 @@ def test_chart_lists_short_sellers_with_profit_when_price_falls(cog):
 def test_short_can_be_sized_by_amount_or_lots_but_not_both(cog):
     price = cog._price()
     it = It()
-    run(
-        MarketCog.short.callback(
-            cog, it, SimpleNamespace(value="cs"), None, 1_000, discord.app_commands.Choice(name="2倍", value=2)
-        )
-    )  # 金額1,000ペリカ分
+    run(cog._short(it, "cs", None, 1_000, 2))  # 金額1,000ペリカ分
     units = cog.eco.for_guild(G).short_position(U)[0]
     assert "空売りしました" in it.sent[-1]["embed"].title and units == int(1_000 * 1_000 // price)
     it = It()
-    run(MarketCog.short.callback(cog, it, SimpleNamespace(value="cs"), 1.0, 1_000, None))
+    run(cog._short(it, "cs", 1.0, 1_000, None))
     assert "どちらか1つ" in it.sent[-1]["embed"].title
     it = It()
-    run(MarketCog.short.callback(cog, it, SimpleNamespace(value="cs"), None, None, None))
+    run(cog._short(it, "cs", None, None, None))
     assert "どちらか1つ" in it.sent[-1]["embed"].title

@@ -197,7 +197,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             user_id   INTEGER NOT NULL,
             PRIMARY KEY (raffle_id, user_id)
         );
-        CREATE TABLE IF NOT EXISTS chart_posts (       -- /証券 チャート で出したチャート（1チャンネルに1つ。最後に使ってから一定時間だけ自動で更新）
+        CREATE TABLE IF NOT EXISTS chart_posts (       -- /証券 市況 で出したチャート（1チャンネルに1つ。最後に使ってから一定時間だけ自動で更新）
             channel_id INTEGER PRIMARY KEY,
             message_id INTEGER NOT NULL,
             guild_id   INTEGER NOT NULL DEFAULT 0,

@@ -3,6 +3,7 @@
 import asyncio
 import math
 import random
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -178,20 +179,11 @@ def test_old_single_symbol_tables_become_cs_without_losing_rows(tmp_path):
 
 
 # ----------------------------- コマンド ----------------------------- #
-def test_old_commands_are_gone_and_securities_group_has_the_expected_commands():
-    assert {c.name for c in MarketCog.group.commands} == {
-        "価格",
-        "チャート",
-        "買う",
-        "売る",
-        "空売り",
-        "買い戻し",
-        "保有",
-        "債券",
-    }
-    assert {c.name for c in MarketCog.bond_group.commands} == {"買う", "保有", "解約"}
-    for cmd in (MarketCog.buy, MarketCog.sell, MarketCog.short, MarketCog.cover):
-        assert [c.value for c in cmd._params["symbol"].choices] == prices_keys()
+def test_securities_group_has_four_commands_and_order_offers_every_symbol_and_bond():
+    assert {c.name for c in MarketCog.group.commands} == {"注文", "保有", "市況", "決済"}
+    values = [c.value for c in MarketCog.order._params["symbol"].choices]
+    assert values == prices_keys() + ["bond_normal", "bond_junk"]
+    assert [c.value for c in MarketCog.board._params["symbol"].choices] == prices_keys()
 
 
 def test_buy_other_symbol_via_command_and_holdings_list_it(eco):
@@ -201,7 +193,7 @@ def test_buy_other_symbol_via_command_and_holdings_list_it(eco):
     cog = MarketCog(bot)
     cog._prices()
     it = It()
-    asyncio.run(MarketCog.buy.callback(cog, it, SimpleNamespace(value="gold"), 2_000))
+    asyncio.run(cog._buy(it, "gold", 2_000))
     assert "GOLD地金" in it.sent[-1]["embed"].title
     assert eco.for_guild(G).crypto_holding(U, "gold")[0] > 0 and eco.for_guild(G).crypto_holding(U, "cs") == (0, 0)
     it = It()
@@ -217,3 +209,168 @@ def test_step_prices_records_every_symbol_at_the_same_time(eco):
     assert set(new) == set(prices_keys())
     stamps = {eco.market_latest(k)[0] for k in new}
     assert len(stamps) == 1 and eco.latest_prices() == new
+
+
+# ----------------------------- 注文・保有・市況・決済 ----------------------------- #
+def make_cog(eco):
+    bot = SimpleNamespace(economy=eco, sessions=Sessions(cooldown=0), config={})
+    cog = MarketCog(bot)
+    cog._prices()
+    return cog
+
+
+def choice(value):
+    return SimpleNamespace(value=value)
+
+
+def test_order_command_dispatches_spot_short_and_bond(eco):
+    from tests.test_market import It
+
+    cog = make_cog(eco)
+    eco.for_guild(G).credit(U, 20_000, "テスト")
+    it = It()
+    asyncio.run(MarketCog.order.callback(cog, it, choice("teio"), 2_000, None, None))  # 現物買い
+    assert eco.for_guild(G).crypto_holding(U, "teio")[0] > 0
+    it = It()
+    asyncio.run(MarketCog.order.callback(cog, it, choice("gold"), 1_000, choice("short"), choice(2)))
+    assert eco.for_guild(G).short_position(U, "gold")[0] > 0 and "空売り" in it.sent[-1]["embed"].title
+    it = It()
+    asyncio.run(MarketCog.order.callback(cog, it, choice("bond_normal"), 1_000, None, None))
+    assert len(eco.for_guild(G).bond_list(U)["active"]) == 1 and "通常債" in it.sent[-1]["embed"].title
+
+
+def test_order_command_refuses_nonsense_combinations(eco):
+    from tests.test_market import It
+
+    cog = make_cog(eco)
+    for args in (
+        (choice("bond_junk"), 1_000, choice("short"), None),  # 債券は空売りできない
+        (choice("bond_junk"), 1_000, None, choice(3)),  # 債券にレバレッジなし
+        (choice("cs"), 1_000, None, choice(2)),  # 現物買いにレバレッジなし
+    ):
+        it = It()
+        asyncio.run(MarketCog.order.callback(cog, it, *args))
+        assert it.sent[-1]["ephemeral"] and "❌" in it.sent[-1]["embed"].title
+    assert eco.for_guild(G).holdings(U) == [] and eco.for_guild(G).bond_list(U)["active"] == []
+    assert eco.for_guild(G).balance(U) == INITIAL_BALANCE  # 何も買われていない
+
+
+def test_bond_below_minimum_is_refused(eco):
+    from tests.test_market import It
+
+    cog = make_cog(eco)
+    it = It()
+    asyncio.run(MarketCog.order.callback(cog, it, choice("bond_normal"), 500, None, None))
+    assert "買えません" in it.sent[-1]["embed"].title and eco.for_guild(G).balance(U) == INITIAL_BALANCE
+
+
+def test_positions_and_settle_command_close_each_kind(eco):
+    from tests.test_market import It
+
+    cog = make_cog(eco)
+    a = eco.for_guild(G)
+    a.credit(U, 20_000, "テスト")
+    a.crypto_buy(U, 1_000, cog._price("cs"), "cs")
+    a.short_open(U, 2_000, cog._price("teio"), 1, "teio")  # 確認ボタンが出ない小さい額
+    a.bond_buy(U, "normal", 1_000, time.time())
+    a.bond_buy(U, "junk", 1_000, time.time())  # ジャンク債は解約できない: 候補に出ない
+    codes = [c for c, _ in cog.positions(U, G)]
+    bond_id = next(c for c in codes if c.startswith("bond:"))
+    assert codes[:2] == ["spot:cs", "short:teio"] and len(codes) == 3
+    for code in ("spot:cs", "short:teio", bond_id):
+        it = It()
+        asyncio.run(MarketCog.settle.callback(cog, it, code, None))
+        assert "❌" not in it.sent[-1]["embed"].title, code
+    assert a.holdings(U) == [] and a.short_positions(U) == []
+    assert [r["kind"] for r in a.bond_list(U)["active"]] == ["junk"]
+    it = It()
+    asyncio.run(MarketCog.settle.callback(cog, it, "bond:99999", None))  # 無い番号
+    assert "解約できません" in it.sent[-1]["embed"].title
+    it = It()
+    asyncio.run(MarketCog.settle.callback(cog, it, "なにか", None))
+    assert "決済できません" in it.sent[-1]["embed"].title
+
+
+def test_settle_half_of_a_spot_position(eco):
+    from tests.test_market import It
+
+    cog = make_cog(eco)
+    a = eco.for_guild(G)
+    a.crypto_buy(U, 2_000, cog._price("cs"), "cs")
+    have = a.crypto_holding(U, "cs")[0]
+    asyncio.run(MarketCog.settle.callback(cog, It(), "spot:cs", choice("half")))
+    assert a.crypto_holding(U, "cs")[0] == have - have // 2
+
+
+def test_holdings_screen_lists_everything_with_a_button_per_position(eco):
+    from tests.test_market import It
+
+    cog = make_cog(eco)
+    a = eco.for_guild(G)
+    a.crypto_buy(U, 1_000, cog._price("gold"), "gold")
+    a.bond_buy(U, "normal", 1_000, time.time())
+    it = It()
+    asyncio.run(MarketCog.holdings.callback(cog, it))
+    text = it.sent[-1]["embed"].description
+    assert "GOLD地金" in text and "債券" in text and "通常債" in text
+    view = it.sent[-1]["view"]
+    assert [b.label for b in view.children] == [
+        "🥇 GOLD地金 全売却",
+        f"🏦 通常債 #{a.bond_list(U)['active'][0]['id']} 解約",
+    ]
+    it = It()
+    asyncio.run(view.children[0].callback(it))  # ボタンで、全部売る
+    assert a.holdings(U) == [] and "売りました" in it.sent[-1]["embed"].title
+
+
+def test_holdings_view_only_works_for_the_owner(eco):
+    from cogs.market_cog import HoldingsView, MarketView
+
+    cog = make_cog(eco)
+    sent = []
+
+    class Resp:
+        async def send_message(self, *a, **kw):
+            sent.append((a, kw))
+
+    stranger = SimpleNamespace(user=SimpleNamespace(id=999), response=Resp())
+    for view in (HoldingsView(cog, U, G), MarketView(cog, U, G)):
+        assert asyncio.run(view.interaction_check(stranger)) is False
+        assert asyncio.run(view.interaction_check(SimpleNamespace(user=SimpleNamespace(id=U), response=Resp()))) is True
+    assert len(sent) == 2
+
+
+def test_empty_holdings_has_no_buttons(eco):
+    from tests.test_market import It
+
+    cog = make_cog(eco)
+    it = It()
+    asyncio.run(MarketCog.holdings.callback(cog, it))
+    assert "まだ持っていません" in it.sent[-1]["embed"].description and it.sent[-1]["view"] is None
+
+
+def test_board_without_symbol_shows_summary_with_switcher_and_with_symbol_posts_a_live_chart(eco):
+    from tests.test_market import It
+
+    cog = make_cog(eco)
+    it = It()
+    asyncio.run(MarketCog.board.callback(cog, it, None, None))
+    assert "全銘柄" in it.sent[-1]["embed"].title and it.sent[-1]["ephemeral"] and it.sent[-1]["view"]
+    view = it.sent[-1]["view"]
+    assert [len(s.options) for s in view.children] == [5, len(market.PERIODS)]
+    swap = []
+
+    class Resp:
+        async def edit_message(self, **kw):
+            swap.append(kw["embed"].title)
+
+    view.symbol_select._values = ["teio"]
+    asyncio.run(view._on_symbol(SimpleNamespace(response=Resp())))
+    view.period_select._values = ["1h"] if "1h" in market.PERIODS else [next(iter(market.PERIODS))]
+    asyncio.run(view._on_period(SimpleNamespace(response=Resp())))
+    view.symbol_select._values = ["all"]
+    asyncio.run(view._on_symbol(SimpleNamespace(response=Resp())))
+    assert "TEIO重工" in swap[0] and "TEIO重工" in swap[1] and "全銘柄" in swap[2]
+    it = It()
+    asyncio.run(MarketCog.board.callback(cog, it, choice("numa"), None))
+    assert "NUMAバイオ" in it.sent[-1]["embed"].title and "view" not in it.sent[-1]

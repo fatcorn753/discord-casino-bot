@@ -130,8 +130,8 @@ def test_buy_command_settles_first_and_replies(eco):
             sent.append(kw["embed"].title)
 
     inter = SimpleNamespace(user=SimpleNamespace(id=1), guild=SimpleNamespace(id=1), guild_id=1, response=Resp())
-    asyncio.run(MarketCog.bond_buy.callback(cog, inter, SimpleNamespace(value="junk"), 2000))
-    asyncio.run(MarketCog.bond_buy.callback(cog, inter, SimpleNamespace(value="junk"), 9000))  # 上限超え
+    asyncio.run(cog._bond_buy(inter, "junk", 2000))
+    asyncio.run(cog._bond_buy(inter, "junk", 9000))  # 上限超え
     assert sent == ["✅ 🗑️ ジャンク債を買いました", "❌ 買えません"]
 
 
