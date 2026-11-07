@@ -100,12 +100,12 @@ class QuizMixin:
     def quiz_next(self, user_id: int, now: float) -> tuple:
         """まだ答えていない、期限内の一番古い問題と、その残り数（その問題を含む）を返す。無ければ (None, 0)。
 
-        ユーザーの問題は、このサーバーのもので、自分の問題ではなく、出題者がまだ報酬を払える間だけ出る。
+        ユーザーの問題は、このサーバーのもので、自分の問題ではないものだけ出る（出題者の残高が尽きても、借金で報酬を払うので出続ける）。
         """
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM quiz_questions q WHERE (q.expires IS NULL OR q.expires > ?) "
-                "AND (q.author_id=0 OR (q.guild_id=? AND q.author_id!=? AND COALESCE((SELECT u.balance FROM users u WHERE u.guild_id=q.guild_id AND u.user_id=q.author_id), 0) >= q.reward)) "
+                "AND (q.author_id=0 OR (q.guild_id=? AND q.author_id!=?)) "
                 "AND NOT EXISTS (SELECT 1 FROM quiz_answers a WHERE a.question_id=q.id AND a.guild_id=? AND a.user_id=?) ORDER BY q.id",
                 (now, self._g(), user_id, self._g(), user_id),
             ).fetchall()
@@ -114,7 +114,8 @@ class QuizMixin:
     def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> tuple:
         """答えを記録する。(成功か, 理由か結果) を返す。結果は correct / reward（実際に入った額）/ answer / explanation。
 
-        ユーザーの問題の報酬は、出題者の残高から引いて渡す（出題者の残高が報酬に足りなければ、その問題は終了）。
+        ユーザーの問題の報酬は、出題者の残高から引いて渡す。残高が報酬に足りないときは、足りない分を出題者の借金にして、
+        回答者には報酬を全額払う（借金は、出題者に入るお金から、先に自動で返済される）。結果の author_debt_added が、増えた借金。
         """
         with self._lock, self._conn:
             q = self._quiz_row(self._conn.execute("SELECT * FROM quiz_questions WHERE id=?", (quiz_id,)).fetchone())
@@ -126,8 +127,6 @@ class QuizMixin:
                     return False, "この問題は、出題されたサーバーでだけ答えられます。"
                 if user_id == author:
                     return False, "自分が出した問題には答えられません。"
-                if self._balance(author) < q["reward"]:
-                    return False, "出題者の残高が尽きたので、この問題は終了しました。"
             self._ensure(user_id)
             if self._conn.execute(
                 "SELECT 1 FROM quiz_answers WHERE question_id=? AND guild_id=? AND user_id=?",
@@ -140,9 +139,16 @@ class QuizMixin:
                 (quiz_id, self._g(), user_id, int(correct), now),
             )
             paid = 0
+            debt_added = 0
             if correct:
                 if author:
-                    self._apply(author, -q["reward"], "クイズ報酬の支払い")
+                    taken = -self._apply(author, -q["reward"], "クイズ報酬の支払い")
+                    debt_added = q["reward"] - taken  # 残高で払えなかった分は、出題者の借金になる
+                    if debt_added > 0:
+                        self._conn.execute(
+                            "UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?",
+                            (debt_added, self._g(), author),
+                        )
                 paid = self._apply(
                     user_id, q["reward"], "クイズ報酬"
                 )  # 持ち主の問題の報酬は、システムから出る（増える）。みんなの問題は出題者から
@@ -154,6 +160,7 @@ class QuizMixin:
                 "author_id": author,
                 "author_delta": 0,
                 "author_total": 0,
+                "author_debt_added": debt_added,
             }
             if author:
                 result["author_delta"], result["author_total"] = self._quiz_pay_author(q)
@@ -215,7 +222,7 @@ class QuizMixin:
             if self._balance(author_id) < reward:
                 return (
                     False,
-                    f"残高が報酬（{reward:,}ペリカ）に足りません。正解者への報酬は、あなたの残高から払われます。",
+                    f"残高が報酬（{reward:,}ペリカ）に足りません。出題するには、正解1人ぶんの報酬が残高に必要です。",
                 )
             cur = self._conn.execute(
                 "INSERT INTO quiz_questions (question, choices, explanation, shown_order, reward, expires, created, author_id, guild_id, channel_id, creator_name, msg_right, msg_wrong) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

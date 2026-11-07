@@ -174,6 +174,11 @@ async def record_answer(bot, interaction: discord.Interaction, quiz_id: int, pos
         if result["correct"]
         else f"❌ <@{interaction.user.id}> が #{quiz_id} に **{verdict(quiz, False)}**"
     )
+    if result["author_debt_added"]:  # 出題者の残高で払いきれなかった分は、出題者の借金になる
+        line += (
+            f"\n⚠️ 出題者 <@{result['author_id']}> の残高が足りないため、不足 "
+            f"{ui.pelica(result['author_debt_added'])} は出題者の借金になりました。"
+        )
     if result["author_delta"]:  # 出題者の受け取りも、その場で見せる（正答率が40%から離れると減ることがある）
         sign = "+" if result["author_delta"] > 0 else "−"
         line += f"\n💰 出題者 <@{result['author_id']}> {sign}{ui.pelica(abs(result['author_delta']))}（累計 {ui.pelica(result['author_total'])}）"

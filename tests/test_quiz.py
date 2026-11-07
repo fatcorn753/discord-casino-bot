@@ -333,16 +333,42 @@ def test_author_cannot_answer_and_does_not_see_it_in_next(eco):
     assert eco.quiz_next(AUTHOR, NOW) == (None, 0) and eco.quiz_next(1, NOW)[0]["id"] == qid
 
 
-def test_question_closes_when_the_author_can_no_longer_pay(eco):
+def test_author_without_balance_pays_winners_by_going_into_debt(eco):
     ok, qid = post(eco, reward=1000)
-    for uid in (1, 2, 3):
+    for uid in (1, 2):
         assert eco.quiz_answer(uid, qid, "東京", NOW)[0]
-    assert eco.balance(AUTHOR) == quizpay.base_reward(1000)  # 3,000 から 3,000 払い、出題報酬(基本316)を受け取った
-    assert eco.quiz_next(4, NOW) == (None, 0)  # 出なくなる
-    assert eco.quiz_answer(4, qid, "東京", NOW) == (False, "出題者の残高が尽きたので、この問題は終了しました。")
-    assert eco.balance(4) == INITIAL_BALANCE and eco.balance(AUTHOR) == quizpay.base_reward(
-        1000
-    )  # マイナスにはならない
+    assert eco.debt(AUTHOR) == 0 and eco.balance(AUTHOR) == INITIAL_BALANCE - 2000 + sum(
+        quizpay.author_payout(2, 2, 1000)
+    )
+    eco._conn.execute("UPDATE users SET balance=300 WHERE user_id=?", (AUTHOR,))
+    eco._conn.commit()
+    ok, result = eco.quiz_answer(3, qid, "東京", NOW)
+    assert ok and result["correct"] and result["reward"] == 1000  # 回答者には、報酬を全額払う
+    assert result["author_debt_added"] == 700 and eco.debt(AUTHOR) == 700  # 残高 300 を払い、足りない 700 は借金になる
+    assert eco.balance(3) == INITIAL_BALANCE + 1000
+    assert eco.quiz_next(4, NOW)[0]["id"] == qid  # 出題者の残高が尽きても、問題は出続ける
+    ok, result = eco.quiz_answer(4, qid, "東京", NOW)
+    assert ok and result["reward"] == 1000 and result["author_debt_added"] == 1000 and eco.debt(AUTHOR) > 1000
+
+
+def test_debt_from_a_quiz_is_repaid_first_from_the_authors_next_income(eco):
+    ok, qid = post(eco, reward=1000)
+    eco._conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (AUTHOR,))
+    eco._conn.commit()
+    assert eco.quiz_answer(1, qid, "東京", NOW)[1]["author_debt_added"] == 1000 and eco.debt(AUTHOR) == 1000
+    eco.credit(AUTHOR, 400, "入金")  # 入ったお金は、先に借金の返済へ回る
+    assert eco.debt(AUTHOR) == 600 and eco.balance(AUTHOR) == 0
+    assert (
+        "借金が" in eco.quiz_post(AUTHOR, "問題", ["a", "b", "c", "d"], "", 100, 60, 1, NOW)[1]
+    )  # 借金中は出題できない
+
+
+def test_wrong_answers_never_create_debt(eco):
+    ok, qid = post(eco, reward=1000)
+    eco._conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (AUTHOR,))
+    eco._conn.commit()
+    ok, result = eco.quiz_answer(1, qid, "大阪", NOW)
+    assert ok and not result["correct"] and result["author_debt_added"] == 0 and eco.debt(AUTHOR) == 0
 
 
 def test_post_limits(eco):
@@ -639,6 +665,27 @@ def test_public_line_shows_the_authors_earnings_right_away(eco):
     assert "💰" not in public[0]  # 1人目は出題者の受け取りがまだない
     asyncio.run(PublicButton(qid, wrong).callback(click(2)))
     assert public[1] == f"❌ <@2> が #{qid} に **不正解…**\n💰 出題者 <@{AUTHOR}> +400ペリカ（累計 400ペリカ）"
+
+
+def test_public_line_tells_that_the_authors_shortfall_became_debt(eco):
+    cog = make_cog(eco)
+    ok, qid = post(eco, reward=100, days=3, now=time.time())
+    eco._conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (AUTHOR,))
+    eco._conn.commit()
+    right = eco.quiz_get(qid)["order"].index("東京")
+    public, log = [], []
+
+    class Follow:
+        async def send(self, text, **kw):
+            public.append(text)
+
+    click = SimpleNamespace(
+        user=SimpleNamespace(id=1), guild_id=1, client=cog.bot, response=Resp(log), followup=Follow()
+    )
+    asyncio.run(PublicButton(qid, right).callback(click))
+    assert log[-1] == ("send", "⭕ 正解！")  # 回答者には、いつも通り報酬が入る
+    assert f"⚠️ 出題者 <@{AUTHOR}> の残高が足りないため、不足 100ペリカ は出題者の借金になりました。" in public[0]
+    assert eco.balance(1) == INITIAL_BALANCE + 100 and eco.debt(AUTHOR) == 100
 
 
 # ----------------------------- 正解・不正解の文言（出題者が決める） ----------------------------- #
