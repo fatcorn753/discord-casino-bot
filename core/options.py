@@ -10,7 +10,7 @@
 
 import math
 
-from core import market
+from core import market, market_events
 
 OPTION_HOURS = 6  # 満期までの時間（固定）
 STRIKE_OTM = 0.05  # 権利行使価格のずれ（コール = 現在値 ×1.05、プット = 現在値 ×0.95）
@@ -41,11 +41,20 @@ def jump_variance_per_tick(symbol: str) -> float:
     return market.EVENT_PROB * mean_sq * scale * scale
 
 
-def total_variance(symbol: str, seconds: float) -> float:
-    """いまから seconds 秒後までの、対数価格の分散の合計（1分ごとの揺れ + 有事）。"""
+def total_variance(symbol: str, seconds: float, now: float = 0.0, events=()) -> float:
+    """いまから seconds 秒後までの、対数価格の分散の合計（1分ごとの揺れ + 有事 + 市場イベント）。
+
+    events（core/market_events.py のボラティリティ予告）と時間が重なる分は、揺れが factor² 倍になる。
+    その増え分は、予告の直後は一部（PRICED_AT_ANNOUNCE）だけ、開始に近づくほど全部が、値段に織り込まれる。
+    """
     ticks = max(0.0, seconds) / TICK_SECONDS
     index = [s.key for s in market.SYMBOLS].index(symbol)
-    return ticks * (market.COVARIANCE[index][index] + jump_variance_per_tick(symbol))
+    base = market.COVARIANCE[index][index]
+    total = ticks * (base + jump_variance_per_tick(symbol))
+    for ev in events:
+        if ev["symbol"] == symbol:
+            total += market_events.extra_variance_ticks(ev, now, seconds, TICK_SECONDS) * base * (ev["factor"] ** 2 - 1)
+    return total
 
 
 def fair_price(kind: str, spot: float, strike: float, variance: float) -> float:
@@ -65,15 +74,19 @@ def strike_for(kind: str, spot: float) -> float:
     return round(spot * (1 + STRIKE_OTM if kind == CALL else 1 - STRIKE_OTM), 2)
 
 
-def ask_per_unit(kind: str, symbol: str, spot: float, strike: float, seconds: float) -> float:
+def ask_per_unit(
+    kind: str, symbol: str, spot: float, strike: float, seconds: float, now: float = 0.0, events=()
+) -> float:
     """買うときの、1口あたりの値段（ペリカ）。公正価格 +SPREAD。1口 = 1枚の 1/UNIT。"""
-    fair = fair_price(kind, spot, strike, total_variance(symbol, seconds))
+    fair = fair_price(kind, spot, strike, total_variance(symbol, seconds, now, events))
     return fair * (1 + SPREAD) / market.UNIT
 
 
-def bid_per_unit(kind: str, symbol: str, spot: float, strike: float, seconds: float) -> float:
+def bid_per_unit(
+    kind: str, symbol: str, spot: float, strike: float, seconds: float, now: float = 0.0, events=()
+) -> float:
     """売るときの、1口あたりの値段（ペリカ）。公正価格 −SPREAD。"""
-    fair = fair_price(kind, spot, strike, total_variance(symbol, seconds))
+    fair = fair_price(kind, spot, strike, total_variance(symbol, seconds, now, events))
     return fair * (1 - SPREAD) / market.UNIT
 
 

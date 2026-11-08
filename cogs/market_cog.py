@@ -11,7 +11,7 @@ from discord.ext import commands, tasks
 
 from cogs._amount import balance_choices
 from cogs.bond_cog import KIND_CHOICES, describe_done, due_text
-from core import bonds, logthrottle, market, ui
+from core import bonds, logthrottle, market, market_events, ui
 from core import options as opt
 from core.confirm import confirm_action
 from core.economy import Economy
@@ -56,6 +56,30 @@ class HoldingsView(discord.ui.View):
         return True
 
 
+class OptionAmountModal(discord.ui.Modal):
+    """イベントのボタンから、コール・プットの掛け金を入れる画面。"""
+
+    def __init__(self, cog, kind: str, symbol: str):
+        name = opt.KINDS[kind][0]
+        super().__init__(title=f"{market.BY_KEY[symbol].name}の{name}")
+        self.cog, self.kind, self.symbol = cog, kind, symbol
+        self.amount = discord.ui.TextInput(
+            label=f"掛け金（{opt.MIN_PREMIUM:,}ペリカ以上）", default="1000", max_length=9
+        )
+        self.add_item(self.amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = self.amount.value.replace(",", "").strip()
+        if not raw.isdigit() or int(raw) < opt.MIN_PREMIUM:
+            return await interaction.response.send_message(
+                embed=ui.error_embed(
+                    "掛け金が正しくありません", f"{opt.MIN_PREMIUM:,}ペリカ以上の数字で入れてください。"
+                ),
+                ephemeral=True,
+            )
+        await self.cog._option_buy(interaction, self.kind, self.symbol, int(raw))
+
+
 class MarketView(discord.ui.View):
     """/証券 市況 の、銘柄と期間のチャートを切り替える画面（自動更新はしない。開いた本人だけが操作できる）。"""
 
@@ -76,10 +100,28 @@ class MarketView(discord.ui.View):
         self.period_select.callback = self._on_period
         self.add_item(self.symbol_select)
         self.add_item(self.period_select)
+        now = time.time()
+        ev = market_events.current(cog.eco.market_events(now), now)
+        if ev is not None:  # イベントがあるとき、その銘柄のコール・プットを、すぐ買えるボタンを出す
+            for kind in (opt.CALL, opt.PUT):
+                name, emoji, _ = opt.KINDS[kind]
+                button = discord.ui.Button(
+                    label=f"⚡ {market.BY_KEY[ev['symbol']].name}の{name}を買う",
+                    style=discord.ButtonStyle.danger if kind == opt.CALL else discord.ButtonStyle.primary,
+                    emoji=emoji,
+                )
+                button.callback = self._quick_buy(kind, ev["symbol"])
+                self.add_item(button)
+
+    def _quick_buy(self, kind: str, symbol: str):
+        async def callback(interaction: discord.Interaction):
+            await interaction.response.send_modal(OptionAmountModal(self.cog, kind, symbol))
+
+        return callback
 
     def _embed(self) -> discord.Embed:
         if self.symbol is None:
-            return self.cog.summary_embed()
+            return self.cog.summary_embed(self.guild_id)
         return self.cog.chart_embed(self.period, guild_id=self.guild_id, symbol=self.symbol)
 
     async def _on_symbol(self, interaction: discord.Interaction):
@@ -129,7 +171,13 @@ class MarketCog(commands.Cog):
         """全銘柄の価格を1つ進めて、(新しい価格 {銘柄: 価格}, 有事の出来事) を返す。"""
         prices = self._prices()
         last_ts = max((self.eco.market_latest(k) or (0,))[0] for k in prices)
-        new, event = market.next_prices(prices, RNG)
+        now = time.time()
+        announced = self.eco.event_step(now, RNG)  # ボラティリティ予告の抽選
+        if announced is not None:
+            print(
+                f"ボラティリティ予告: {announced['symbol']} {market_events.LEAD_MIN}分後から{market_events.DURATION_MIN}分"
+            )
+        new, event = market.next_prices(prices, RNG, self.eco.vol_multipliers(now))
         ts = max(time.time(), last_ts + 0.001)  # 時計が戻っても、記録の順序を崩さない
         for key, price in new.items():
             self.eco.market_set(ts, price, event, key)
@@ -254,8 +302,42 @@ class MarketCog(commands.Cog):
             rows.append(f"{a.emoji} {a.key:<5} " + " ".join(f"{c:^5}" for c in cells))
         return "```\n" + "\n".join(rows) + "\n```"
 
-    def summary_embed(self) -> discord.Embed:
-        """全銘柄のいまの価格と、銘柄どうしの連動。"""
+    def event_lines(self) -> str:
+        """市場イベント（ボラティリティ予告）。なければ空文字。"""
+        now = time.time()
+        ev = market_events.current(self.eco.market_events(now), now)
+        return market_events.event_text(ev, now) if ev else ""
+
+    def alert_lines(self) -> str:
+        """相関崩壊の警報（連動する2銘柄の値動きの差が開いたもの）。なければ空文字。"""
+        since = time.time() - (market_events.ALERT_WINDOW + 5) * 60
+        history = {s.key: [p for _, p, _ in self.eco.market_history(since, s.key)] for s in market.SYMBOLS}
+        return "\n".join(f"⚠️ {market_events.describe_alert(a)}" for a in market_events.spread_alerts(history)[:3])
+
+    def cut_lines(self, guild_id: int) -> str:
+        """ロスカット水準の密集（サーバー内の信用建玉が、ほぼ同じ価格帯で強制決済されるところ）。なければ空文字。"""
+        prices = self._prices()
+        rows = self.eco.for_guild(guild_id).margin_cut_map(prices)
+        lines = []
+        for sym in market.SYMBOLS:
+            for side, label, sign in (("long", "信用買い", -1), ("short", "空売り", 1)):
+                near = [
+                    (price, notional)
+                    for s, sd, price, notional in rows
+                    if s == sym.key and sd == side and abs(price / prices[sym.key] - 1) <= 0.10
+                ]
+                if not near:
+                    continue
+                total = sum(n for _, n in near)
+                nearest = min(near, key=lambda x: abs(x[0] - prices[sym.key]))[0]
+                move = (nearest / prices[sym.key] - 1) * 100
+                lines.append(
+                    f"{sym.emoji}{sym.name}: {market.fmt(nearest)}（{move:+.1f}%）の{'下' if sign < 0 else '上'}に、{label} 計 {ui.pelica(int(total))}分が強制決済のライン"
+                )
+        return "\n".join(lines[:6])
+
+    def summary_embed(self, guild_id: Optional[int] = None) -> discord.Embed:
+        """全銘柄のいまの価格と、銘柄どうしの連動、市場イベント・警報・ロスカット水準。"""
         lines = []
         for sym in market.SYMBOLS:
             hist = self.eco.market_history(time.time() - 86400, sym.key)
@@ -266,7 +348,15 @@ class MarketCog(commands.Cog):
                 f"{sym.emoji} **{sym.name}**　**{market.pel(s['last'])}**（1枚）　{arrow} {s['change']:+.1f}%（24時間）　高値 {market.fmt(s['high'])} 安値 {market.fmt(s['low'])}"
             )
         body = "\n".join(lines) + "\n\n**銘柄どうしの連動（直近24時間の1分ごとの値動き）**\n" + self.correlation_table()
-        return ui.embed("📈 市況（全銘柄）", body + "\n下のメニューで、銘柄と期間のチャートを見られます。", ui.GOLD)
+        e = ui.embed("📈 市況（全銘柄）", body + "\n下のメニューで、銘柄と期間のチャートを見られます。", ui.GOLD)
+        for name, text in (
+            ("⚡ 市場イベント", self.event_lines()),
+            ("🔀 相関崩壊の警報", self.alert_lines()),
+            ("🎯 ロスカットが密集しているところ", self.cut_lines(guild_id) if guild_id else ""),
+        ):
+            if text:
+                e.add_field(name=name, value=text[:1024], inline=False)
+        return e
 
     @group.command(
         name="市況", description=f"価格・連動・チャート。銘柄を選ぶと、{LIVE_MINUTES}分間、自動で更新するチャートを出す"
@@ -284,7 +374,9 @@ class MarketCog(commands.Cog):
     ):
         if symbol is None:
             view = MarketView(self, interaction.user.id, interaction.guild.id, period.value if period else "24h")
-            return await interaction.response.send_message(embed=self.summary_embed(), view=view, ephemeral=True)
+            return await interaction.response.send_message(
+                embed=self.summary_embed(interaction.guild.id), view=view, ephemeral=True
+            )
         await self._post_chart(interaction, symbol.value, period.value if period else "24h")
 
     async def _post_chart(self, interaction: discord.Interaction, sym: str, key: str) -> None:
@@ -613,7 +705,8 @@ class MarketCog(commands.Cog):
 
         def quote(price: float) -> tuple:
             strike = opt.strike_for(kind, price)
-            per = opt.ask_per_unit(kind, sym.key, price, strike, seconds)
+            now = time.time()
+            per = opt.ask_per_unit(kind, sym.key, price, strike, seconds, now, self.eco.market_events(now))
             units = int(amount / per) if per > 0 else 0
             return strike, units, math.ceil(round(units * per, 6))
 

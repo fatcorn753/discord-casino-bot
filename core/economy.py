@@ -31,6 +31,7 @@ from core.eco_debt import DebtMixin
 from core.eco_events import EventMixin
 from core.eco_guild import GuildMixin
 from core.eco_loans import LoanMixin
+from core.eco_market_events import MarketEventMixin
 from core.eco_options import OptionMixin
 from core.eco_pachinko import PachinkoMixin
 from core.eco_quiz import QuizMixin
@@ -64,6 +65,7 @@ class Economy(
     DebtMixin,
     BankMixin,
     OptionMixin,
+    MarketEventMixin,
 ):
     DAILY_BASE = 1000
     DAILY_STREAK_BONUS = 100  # 連続1日ごとの加算

@@ -192,6 +192,14 @@ def create_tables(conn: sqlite3.Connection) -> None:
             paid      INTEGER NOT NULL DEFAULT 0, -- 満期・売却で受け取った額
             final     REAL                        -- 満期の価格
         );
+        CREATE TABLE IF NOT EXISTS market_events (     -- 市場イベント（ボラティリティ予告）。市場は全サーバー共通なので、サーバーに属さない
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol      TEXT NOT NULL,
+            announce_ts REAL NOT NULL,                -- 予告した時刻
+            start_ts    REAL NOT NULL,                -- 値動きが大きくなり始める時刻
+            end_ts      REAL NOT NULL,
+            factor      REAL NOT NULL                 -- 値動きの大きさ σ の倍率
+        );
         CREATE TABLE IF NOT EXISTS quiz_questions (     -- クイズの問題（全サーバー共通。持ち主が登録する）
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             question    TEXT    NOT NULL,

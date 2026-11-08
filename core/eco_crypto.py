@@ -467,6 +467,40 @@ class CryptoMixin:
             cut.append((symbol, side, -res.profit))
         return cut
 
+    def margin_cut_map(self, prices: Optional[dict] = None) -> list:
+        """このサーバーの、信用建玉のロスカット水準の地図 [(銘柄, 向き, ロスカットされる価格, 建玉額), ...]。
+
+        各建玉について、その銘柄の価格だけが逆に動いたとき、口座の維持率が LOSSCUT_RATIO を割る価格を、二分探索で求める
+        （買い建ては下へ、空売りは上へ。±50% の範囲で見つからなければ入れない）。持ち主は分からない形で、まとめて見せるための材料。
+        """
+        out = []
+        with self._lock:
+            prices = prices or self.latest_prices()
+            for uid in {
+                r["user_id"]
+                for table in self._MARGIN_TABLE.values()
+                for r in self._conn.execute(f"SELECT user_id FROM {table} WHERE guild_id=? AND units>0", (self._g(),))
+            }:
+                for side, symbol, units, _entry, _margin in self._margin_rows(uid):
+                    if symbol not in prices:
+                        continue
+                    spot = prices[symbol]
+                    notional = units * spot / market_mod.UNIT
+                    sign = -1 if side == "long" else 1  # 買い建ては下へ、空売りは上へ動くと損
+
+                    def broken(move: float) -> bool:
+                        status = self._margin_status_locked(uid, {**prices, symbol: spot * (1 + sign * move)})
+                        return status["ratio"] is not None and status["ratio"] < market_mod.LOSSCUT_RATIO
+
+                    if not broken(0.5):
+                        continue
+                    lo, hi = 0.0, 0.5
+                    for _ in range(18):
+                        mid = (lo + hi) / 2
+                        lo, hi = (lo, mid) if broken(mid) else (mid, hi)
+                    out.append((symbol, side, spot * (1 + sign * hi), notional))
+        return out
+
     def margin_losscut(self, prices: dict) -> list:
         """全サーバーの口座を調べ、維持率が LOSSCUT_RATIO を下回る口座を、連鎖ロスカットする。prices は {銘柄: いまの価格}。[(サーバー, ユーザー, 銘柄, 向き, 損失)]。"""
         done = []

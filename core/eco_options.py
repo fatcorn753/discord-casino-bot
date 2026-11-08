@@ -47,7 +47,7 @@ class OptionMixin:
                 return False, "まだ価格がありません。"
             strike = opt.strike_for(kind, spot)
             seconds = opt.OPTION_HOURS * 3600
-            per_unit = opt.ask_per_unit(kind, symbol, spot, strike, seconds)
+            per_unit = opt.ask_per_unit(kind, symbol, spot, strike, seconds, now, self.market_events(now))
             units = int(amount / per_unit) if per_unit > 0 else 0
             if units < 1:
                 return False, "その掛け金では 1口も買えません。掛け金を増やしてください。"
@@ -86,9 +86,10 @@ class OptionMixin:
         if row["expiry"] <= now:
             value = opt.intrinsic(row["kind"], row["units"], spot, row["strike"])
         else:
-            value = int(
-                opt.bid_per_unit(row["kind"], row["symbol"], spot, row["strike"], row["expiry"] - now) * row["units"]
+            bid = opt.bid_per_unit(
+                row["kind"], row["symbol"], spot, row["strike"], row["expiry"] - now, now, self.market_events(now)
             )
+            value = int(bid * row["units"])
         return min(value, row["premium"] * opt.PAYOUT_CAP_MULT)
 
     def option_values(self) -> dict:

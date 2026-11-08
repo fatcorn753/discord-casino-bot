@@ -83,11 +83,12 @@ COVARIANCE = covariance_matrix()
 CHOLESKY = cholesky(COVARIANCE)
 
 
-def next_prices(prices: dict, rng: random.Random) -> tuple:
+def next_prices(prices: dict, rng: random.Random, vol: Optional[dict] = None) -> tuple:
     """1分後の全銘柄の価格と、有事の出来事（+1 急騰 / -1 急落 / 0 なし）。
 
     独立な標準正規乱数 z から、相関のある揺れ ε = L z を作り、P_i ← P_i · exp(-Σ_ii/2 + ε_i) と動かす（Σ = L Lᵀ）。
     対数の補正（-Σ_ii/2）で、どの銘柄も価格の期待値がちょうど変わらない（マルチンゲール）ので、先を読んで儲けることはできない。
+    市場イベント（vol = {銘柄: 倍率}）で、その銘柄の揺れだけが m 倍になる（-m²Σ/2 の補正で、期待値は変わらない）。
     有事は、全銘柄が同じ向きに動く（逆相関のヘッジが効かなくなる）。大きさは、CSトークンの ±3〜8% に、銘柄の値動きの大きさの比をかけたもの。急騰と急落は同じ確率で、打ち消し合う。
     """
     z = [rng.gauss(0, 1) for _ in SYMBOLS]
@@ -101,7 +102,10 @@ def next_prices(prices: dict, rng: random.Random) -> tuple:
         panic = 1 + event * size * min(
             EVENT_SCALE_MAX, sym.sigma / CS.sigma
         )  # 急騰と急落は同じ確率なので、打ち消し合う
-        factor = math.exp(-COVARIANCE[i][i] / 2 + shock[i]) * panic
+        m = (vol or {}).get(
+            sym.key, 1.0
+        )  # 市場イベントで、この銘柄の値動きが m 倍（補正も m² 倍にして、期待値は変えない）
+        factor = math.exp(-m * m * COVARIANCE[i][i] / 2 + m * shock[i]) * panic
         new = round(prices[sym.key] * factor, 2)  # 低い価格でも動きが止まらないよう、小数2桁まで持つ
         out[sym.key] = min(MAX_PRICE, max(MIN_PRICE, new))
     return out, event
