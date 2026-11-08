@@ -1,6 +1,7 @@
-"""債券: 購入、満期の入金、倒産、解約、上限、ランキング、再起動。"""
+"""債券: 購入、満期の入金、ポアソン倒産、DCF売却、上限、ランキング、再起動。"""
 
 import asyncio
+import math
 import random
 from types import SimpleNamespace
 
@@ -64,15 +65,67 @@ def test_default_rate_is_roughly_twenty_percent():
     assert 0.95 < (1 - bonds.JUNK.default_pct / 100) * (1 + bonds.JUNK.rate / 100) < 0.97  # 期待値は約96%
 
 
-def test_cancel_only_normal_with_penalty(eco):
+def test_only_normal_bonds_can_be_sold_at_the_dcf_price(eco):
     eco.bond_buy(1, "normal", 2000, NOW)
     eco.bond_buy(1, "junk", 1000, NOW)
     by_kind = {r["kind"]: r["id"] for r in eco.bond_list(1)["active"]}
     ids = [by_kind["normal"], by_kind["junk"]]
-    assert eco.bond_cancel(1, ids[1]) == (False, "ジャンク債は解約できません。")
-    assert eco.bond_cancel(1, ids[0]) == (True, 1800)  # 10%引き
-    assert eco.balance(1) == INITIAL_BALANCE - 3000 + 1800
-    assert not eco.bond_cancel(1, ids[0])[0] and not eco.bond_cancel(2, ids[1])[0]  # 二重・他人の債券
+    assert eco.bond_cancel(1, ids[1], NOW) == (False, "ジャンク債は売れません（満期まで持つだけです）。")
+    ok, got = eco.bond_cancel(1, ids[0], NOW)  # 買った直後: 満期の2,080を、72時間ぶん割り引く
+    assert ok and got == int(2080 * math.exp(-bonds.SALE_DISCOUNT_PER_HOUR * 72)) and 1900 < got < 2000
+    assert eco.balance(1) == INITIAL_BALANCE - 3000 + got
+    assert not eco.bond_cancel(1, ids[0], NOW)[0] and not eco.bond_cancel(2, ids[1], NOW)[0]  # 二重・他人の債券
+
+
+def test_dcf_price_rises_toward_the_maturity_payout_and_never_exceeds_it():
+    k, due = bonds.NORMAL, NOW + 72 * 3600
+    prices = [bonds.sale_value(k, 1000, NOW + h * 3600, due) for h in range(0, 73, 6)]
+    assert prices == sorted(prices) and prices[-1] == 1040  # 満期の瞬間は、満期の受取額そのもの
+    assert all(p <= 1040 for p in prices) and prices[0] < 1000 < prices[-1]  # 直後は元本割れ、待てば元本より増える
+
+
+def test_selling_late_beats_selling_early(eco):
+    eco.bond_buy(1, "normal", 2_000, NOW)
+    bond_id = eco.bond_list(1)["active"][0]["id"]
+    early = bonds.sale_value(bonds.NORMAL, 2_000, NOW + 3600, NOW + 72 * 3600)
+    ok, late = eco.bond_cancel(1, bond_id, NOW + 60 * 3600)
+    assert ok and late > early
+
+
+# ----------------------------- ジャンク債の倒産（ポアソン過程）----------------------------- #
+def test_hazard_gives_twenty_percent_over_the_term_and_is_additive():
+    k = bonds.JUNK
+    assert bonds.default_probability(k, k.hours) == pytest.approx(0.20)
+    one, two = bonds.default_probability(k, 1), bonds.default_probability(k, 2)
+    assert 1 - (1 - one) ** 2 == pytest.approx(two)  # 分けて引いても、まとめて引いても、生き残る確率は同じ
+    assert bonds.hazard_per_hour(bonds.NORMAL) == 0 and bonds.default_probability(bonds.NORMAL, 72) == 0
+
+
+def test_junk_can_default_before_maturity_and_is_not_paid_later(eco):
+    eco.bond_buy(1, "junk", 1000, NOW)
+    done = eco.bond_settle(NOW + 3600, Always(0.0))  # 1時間後（満期の23時間前）に倒産
+    assert [(d["status"], d["paid"]) for d in done] == [("defaulted", 0)]
+    assert eco.bond_list(1)["active"] == [] and eco.balance(1) == INITIAL_BALANCE - 1000
+    assert eco.bond_settle(NOW + DAY, Always(0.0)) == []  # 満期が来ても、もう何も起こらない
+
+
+def test_survivors_are_paid_at_maturity_with_no_extra_lottery(eco):
+    eco.bond_buy(1, "junk", 1000, NOW)
+    assert eco.bond_settle(NOW + 3600, Always(0.99)) == []  # 生き残った
+    row = eco.bond_list(1)["active"][0]
+    assert row["checked"] == NOW + 3600  # 抽選済みの時刻が進む
+    done = eco.bond_settle(NOW + DAY + 500, Always(0.99))  # 満期のあとに呼ばれても、満期までの分しか引かない
+    assert [(d["status"], d["paid"]) for d in done] == [("paid", 1200)]
+
+
+def test_per_minute_rolls_and_one_big_roll_default_equally_often():
+    """1分ごとに引いても、止まっていたあとに1回で引いても、満期までに倒産する割合は約20%（同じ）。"""
+    rng_a, rng_b, n = random.Random(1), random.Random(2), 3000
+    minute = 1 - bonds.default_probability(bonds.JUNK, 1 / 60)
+    survived_a = sum(all(rng_a.random() >= 1 - minute for _ in range(24 * 60)) for _ in range(n // 6))
+    one_roll = bonds.default_probability(bonds.JUNK, 24)
+    survived_b = sum(rng_b.random() >= one_roll for _ in range(n))
+    assert abs(survived_a / (n // 6) - 0.80) < 0.04 and abs(survived_b / n - 0.80) < 0.03
 
 
 def test_buy_guards(eco):

@@ -275,7 +275,7 @@ def test_positions_and_settle_command_close_each_kind(eco):
     a.crypto_buy(U, 1_000, cog._price("cs"), "cs")
     a.short_open(U, 2_000, cog._price("teio"), 1, "teio")  # 確認ボタンが出ない小さい額
     a.bond_buy(U, "normal", 1_000, time.time())
-    a.bond_buy(U, "junk", 1_000, time.time())  # ジャンク債は解約できない: 候補に出ない
+    a.bond_buy(U, "junk", 1_000, time.time())  # ジャンク債は売れない: 候補に出ない
     codes = [c for c, _ in cog.positions(U, G)]
     bond_id = next(c for c in codes if c.startswith("bond:"))
     assert codes[:2] == ["spot:cs", "short:teio"] and len(codes) == 3
@@ -287,7 +287,7 @@ def test_positions_and_settle_command_close_each_kind(eco):
     assert [r["kind"] for r in a.bond_list(U)["active"]] == ["junk"]
     it = It()
     asyncio.run(MarketCog.settle.callback(cog, it, "bond:99999", None))  # 無い番号
-    assert "解約できません" in it.sent[-1]["embed"].title
+    assert "売れません" in it.sent[-1]["embed"].title
     it = It()
     asyncio.run(MarketCog.settle.callback(cog, it, "なにか", None))
     assert "決済できません" in it.sent[-1]["embed"].title
@@ -318,7 +318,7 @@ def test_holdings_screen_lists_everything_with_a_button_per_position(eco):
     view = it.sent[-1]["view"]
     assert [b.label for b in view.children] == [
         "🥇 GOLD地金 全売却",
-        f"🏦 通常債 #{a.bond_list(U)['active'][0]['id']} 解約",
+        f"🏦 通常債 #{a.bond_list(U)['active'][0]['id']} 売却",
     ]
     it = It()
     asyncio.run(view.children[0].callback(it))  # ボタンで、全部売る

@@ -1,6 +1,7 @@
 """債券の満期の入金（1分ごと）と、表示の部品。通常債（元本保証）とジャンク債（高利回り・倒産あり）。
 
-買う・解約は `/証券 注文`・`/証券 決済`（cogs/market_cog.py）。種類ごとの利率・期間・上限は core/bonds.py。
+買う・売る（満期前の DCF 売却）は `/証券 注文`・`/証券 決済`（cogs/market_cog.py）。種類ごとの利率・期間・上限・倒産の強さは core/bonds.py。
+ジャンク債の倒産抽選は、ここの1分ごとのループ（bond_settle）で引く。
 決着の結果は `/証券 保有` の「債券の最近の決着」で見られる（通知は出さない）。
 ミッション・連勝・週間ランキング・突発イベントには数えない。
 """
@@ -17,7 +18,7 @@ RNG = random.SystemRandom()
 KIND_CHOICES = [
     app_commands.Choice(
         name=f"{k.emoji} {k.name}（{k.hours // 24}日・利息+{k.rate}%"
-        + (f"・倒産{k.default_pct}%）" if k.default_pct else "・元本保証）"),
+        + (f"・満期までに{k.default_pct}%倒産）" if k.default_pct else "・元本保証）"),
         value=k.key,
     )
     for k in bonds.KINDS.values()
@@ -35,7 +36,7 @@ def describe_done(row: dict) -> str:
         return f"{kind.emoji} {kind.name} {ui.pelica(p)} → 満期 **{ui.pelica(row['paid'])}**（+{row['paid'] - p:,}）"
     if row["status"] == "defaulted":
         return f"{kind.emoji} {kind.name} {ui.pelica(p)} → 💥 **倒産**（元本は戻りません）"
-    return f"{kind.emoji} {kind.name} {ui.pelica(p)} → 解約 {ui.pelica(row['paid'])}（違約金 {row['principal'] - row['paid']:,}）"
+    return f"{kind.emoji} {kind.name} {ui.pelica(p)} → 売却 {ui.pelica(row['paid'])}（元本との差 {row['paid'] - p:+,}）"
 
 
 class BondCog(commands.Cog):

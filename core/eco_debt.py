@@ -149,7 +149,7 @@ class DebtMixin:
                 break
             ok, refund = self._bond_cancel_locked(user_id, row["id"])
             if ok:
-                self._note(user_id, f"💥 通常債が強制解約されました（{refund:,}ペリカ）。")
+                self._note(user_id, f"💥 通常債が強制売却されました（{refund:,}ペリカ）。")
                 covered += self._take_cash(user_id, need - covered, reason)
         return covered
 
@@ -224,7 +224,7 @@ class DebtMixin:
     def _liquidate_everything(self, user_id: int) -> int:
         """空売り・CSトークン・債券をすべて現金にして、手元の現金ごと、すべて差し押さえる。差し押さえた現金の合計を返す。
 
-        通常債は途中解約の返金額、解約できない債券（ジャンク債）は、元本の SEIZE_RATE で換金する。
+        通常債は売却額（DCF）、売れない債券（ジャンク債）は、元本の SEIZE_RATE で換金する。
         """
         total = 0
         prices = self.latest_prices()

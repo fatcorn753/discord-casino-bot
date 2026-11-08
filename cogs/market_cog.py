@@ -669,12 +669,12 @@ class MarketCog(commands.Cog):
             out.append((f"{side}:{symbol}", f"{name.emoji} {name.name} {Economy.SIDE_NAME[side]}全決済"))
         for r in eco.bond_list(uid)["active"]:
             k = bonds.KINDS[r["kind"]]
-            if k.cancel_penalty is not None:
-                out.append((f"bond:{r['id']}", f"{k.emoji} {k.name} #{r['id']} 解約"))
+            if k.sellable:
+                out.append((f"bond:{r['id']}", f"{k.emoji} {k.name} #{r['id']} 売却"))
         return out
 
     async def settle_position(self, interaction: discord.Interaction, code: str, ratio=None) -> None:
-        """positions のコードで指す持ち物を決済する（現物は売る・空売りは買い戻す・債券は解約）。ratio は半分か全部。"""
+        """positions のコードで指す持ち物を決済する（現物は売る・信用取引は反対売買・債券は満期前に売却）。ratio は半分か全部。"""
         kind, _, target = code.partition(":")
         if kind == "spot" and target in market.BY_KEY:
             return await self._sell(interaction, target, None, ratio)
@@ -725,6 +725,11 @@ class MarketCog(commands.Cog):
                 k = bonds.KINDS[r["kind"]]
                 lines.append(
                     f"`#{r['id']}` {k.emoji} {k.name} 元本 {ui.pelica(r['principal'])} → 満期 {due_text(r['due'])}（受取 {ui.pelica(bonds.maturity_payout(k, r['principal']))}）"
+                    + (
+                        f"　いま売ると {ui.pelica(eco.bond_price(r, time.time()))}"
+                        if k.sellable
+                        else "　⚠️ 倒産しうる・売れない"
+                    )
                 )
             parts.append("🏦 **債券**\n" + "\n".join(lines))
         ratio_text = self.margin_ratio_text(eco.margin_status(uid, self._prices())) if margins else ""
@@ -786,19 +791,22 @@ class MarketCog(commands.Cog):
             f"満期に受け取る額: **{ui.pelica(bonds.maturity_payout(k, amount))}**（利息 +{k.rate}%）",
         ]
         if k.default_pct:
-            lines.append(f"⚠️ **{k.default_pct}%の確率で倒産**して、元本が戻りません。途中で解約もできません。")
+            lines.append(
+                f"⚠️ 満期までに **{k.default_pct}%の確率で倒産**します（満期を待たず、**途中のどの瞬間にも**起こります）。倒産すると元本は戻りません。売ることもできません。"
+            )
         else:
-            lines.append(f"元本保証です。途中解約は元本の{k.cancel_penalty}%が引かれます（`/証券 決済`）。")
+            sold = bonds.sale_value(k, amount, time.time(), time.time() + k.hours * 3600)
+            lines.append(
+                f"元本保証です。満期の前でも、残り時間で割り引いた値段で売れます（`/証券 決済`。いま売ると {ui.pelica(sold)}、待つほど満期の額に近づきます）。"
+            )
         await interaction.response.send_message(embed=ui.ok_embed(f"{k.emoji} {k.name}を買いました", "\n".join(lines)))
 
     async def _bond_cancel(self, interaction: discord.Interaction, bond_id: int) -> None:
         ok, result = self.g(interaction).bond_cancel(interaction.user.id, bond_id)
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("解約できません", result), ephemeral=True
-            )
+            return await interaction.response.send_message(embed=ui.error_embed("売れません", result), ephemeral=True)
         await interaction.response.send_message(
-            embed=ui.ok_embed("解約しました", f"{ui.pelica(result)}を残高に戻しました。"), ephemeral=True
+            embed=ui.ok_embed("債券を売りました", f"{ui.pelica(result)}を残高に戻しました。"), ephemeral=True
         )
 
     # ------------------------------ 出したチャートの自動更新 ------------------------------ #

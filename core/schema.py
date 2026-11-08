@@ -188,8 +188,9 @@ def create_tables(conn: sqlite3.Connection) -> None:
             principal INTEGER NOT NULL,
             due       REAL    NOT NULL,           -- 満期（epoch秒）
             status    TEXT    NOT NULL DEFAULT 'active',   -- active / paid / defaulted / cancelled
-            paid      INTEGER NOT NULL DEFAULT 0, -- 満期・解約で戻した額
-            ts        REAL    NOT NULL            -- 買った時刻
+            paid      INTEGER NOT NULL DEFAULT 0, -- 満期・売却で戻した額
+            ts        REAL    NOT NULL,           -- 買った時刻
+            checked   REAL                        -- ジャンク債の倒産抽選を、ここまで済ませた時刻（NULL なら買った時刻）
         );
         CREATE TABLE IF NOT EXISTS raffle (             -- 抽選（持ち主が開催。1サーバーに募集中は1つだけ）
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -346,6 +347,8 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN last_slot INTEGER")
     if "debt" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN debt INTEGER NOT NULL DEFAULT 0")
+    if "checked" not in {r["name"] for r in conn.execute("PRAGMA table_info(bonds)")}:
+        conn.execute("ALTER TABLE bonds ADD COLUMN checked REAL")
     ps = {r["name"] for r in conn.execute("PRAGMA table_info(play_state)")}
     for col, ddl in (
         ("day_streak", "INTEGER NOT NULL DEFAULT 0"),
