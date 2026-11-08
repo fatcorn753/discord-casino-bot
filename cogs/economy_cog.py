@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs._amount import balance_choices
+from cogs._teiai_panel import TeiaiPanel, panel_embed
 from core import approval, logthrottle, ranking, shop, teiai, ui
 from core import history as history_mod
 from core import missions as missions_mod
@@ -219,6 +220,13 @@ class EconomyCog(commands.Cog):
             f"\n残りの借金: **{ui.pelica(left)}**" if left else "\n**借金を完済しました！**"
         )
         await interaction.response.send_message(embed=ui.ok_embed("返済しました", text), ephemeral=True)
+
+    @group.command(name="帝愛", description="帝愛銀行（預金・準備率）・破産猶予・CDS（破綻保証）・種銭の画面")
+    async def teiai_panel(self, interaction: discord.Interaction):
+        eco, uid = self.g(interaction), interaction.user.id
+        await interaction.response.send_message(
+            embed=panel_embed(eco, uid), view=TeiaiPanel(self.bot, uid), ephemeral=True
+        )
 
     @group.command(
         name="破産",

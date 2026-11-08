@@ -10,12 +10,35 @@
 - 自己破産: 全財産とショップの全品を差し押さえ、換金して債権者へ配当する。貸付の残りは免責、帝愛の借金は BANKRUPT_FLOOR まで圧縮
 """
 
+from typing import Optional
+
 SEED = 3_000  # 帝愛が貸し付ける種銭の枠（手元がこの額になるまで補充する）
 SKIM_RATE = 0.20  # 借金中のデイリーから、帝愛が没収する割合
 REPAY_RATE = 0.30  # 収入から、借金の返済へ天引きする割合
 BANKRUPT_FLOOR = 10_000  # 自己破産のあとに残る、帝愛の借金の上限（これより多い分は圧縮）
 BLACKLIST_DAYS = 7  # 破産者の身分が続く、完済後の日数
 SEIZE_RATE = 0.50  # ショップの品と、解約できない債券を差し押さえるときの換金率（購入額に対して）
+
+# ---- 破産猶予（取り立てのカウントダウン）----
+GRACE_DEBT = 15_000  # 帝愛への借金がこの額以上になると、破産猶予に入る
+GRACE_HOURS = 24  # 猶予の長さ。この間に借金を GRACE_DEBT 未満へ戻せば回避、時間切れで自動の強制破産
+
+# ---- 帝愛預金（部分準備銀行）----
+BANK_MIN_DEPOSIT = 100
+RESERVE_RATIO = 0.20  # 預けられた額のうち、すぐ払い出せる現金として手元に置く割合（残りは「地下融資」に回す）
+LOAN_RECOVERY_PER_HOUR = 0.02  # 地下融資が、1時間あたりこの割合ずつ手元の現金に戻ってくる
+LOCK_DEBT_RATE = 0.05  # 地下労働者の借金の、この割合を、貸し倒れに備えて現金からロックする
+LOSS_SHARE = 0.03  # カジノでプレイヤーが負けた額の、この割合を、預金者の利回りへ回す
+PREMIUM_YIELD_SHARE = 0.5  # CDS の掛け金のうち、預金者の利回りへ回す割合（残りは帝愛の手元現金に残る）
+SKIM_YIELD_SHARE = 0.5  # デイリーのピンハネのうち、預金者の利回りへ回す割合
+RUN_WARN_RATIO = 0.15  # 利用可能現金 ÷ 預金総額 がこれ未満なら 🟡、RUN_DANGER_RATIO 未満なら 🔴
+RUN_DANGER_RATIO = 0.05
+
+# ---- CDS（破綻保証）----
+CDS_MIN_STAKE = 100
+CDS_MIN_ODDS, CDS_MAX_ODDS = 1.2, 15.0
+CDS_TERM_DAYS = 14  # この間に、対象が強制破産しなければ、掛け金は戻らず失効
+CDS_PAYOUT_CAP_RATE = 0.50  # 他人への CDS の配当の合計は、対象の破産時の借金のこの割合まで（結託しても損にする）
 
 KATAGI, UNDERGROUND, BANKRUPT = "katagi", "underground", "bankrupt"
 STATUS_LABEL = {KATAGI: "🟢 カタギ", UNDERGROUND: "🟡 地下労働者", BANKRUPT: "🔴 破産者"}
@@ -30,3 +53,15 @@ def withhold(income: int) -> int:
 def skim(amount: int) -> int:
     """デイリーから没収する額。"""
     return int(amount * SKIM_RATE)
+
+
+def cds_odds(status: str, debt: int, margin_ratio: Optional[float] = None) -> float:
+    """CDS のオッズ（倍率）。対象の危険度 r に連動し、オッズ = 0.85 ÷ r（MIN〜MAX に収める）。
+
+    r: カタギ 0.04 / 地下労働者 0.25〜0.75（借金が GRACE_DEBT に近いほど高い）。信用取引の維持率が 150% 未満なら +0.1。
+    危なくなるほど安く買えなくなる（買い遅れると、配当が小さい）。
+    """
+    r = 0.04 if status == KATAGI else 0.25 + 0.5 * min(1.0, debt / GRACE_DEBT)
+    if margin_ratio is not None and margin_ratio < 1.5:
+        r += 0.1
+    return round(min(CDS_MAX_ODDS, max(CDS_MIN_ODDS, 0.85 / r)), 1)

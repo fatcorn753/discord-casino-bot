@@ -64,7 +64,8 @@ class DebtMixin:
         )
 
     def _after_debt_change(self, user_id: int) -> None:
-        """借金が増減したあとの後始末。破産者が完済したら、そこから BLACKLIST_DAYS 日が始まる。"""
+        """借金が増減したあとの後始末。破産猶予の出入りを直し、破産者が完済したら、そこから BLACKLIST_DAYS 日が始まる。"""
+        self._grace_update(user_id)
         if self._debt(user_id) > 0:
             return
         self._conn.execute(
@@ -119,6 +120,12 @@ class DebtMixin:
     def _seize_assets(self, user_id: int, need: int, reason: str) -> int:
         """need を満たすまで、現金 → 空売り・信用買い → 現物 → 通常債（古い順）の順に強制執行する。充てた額を返す。"""
         covered = self._take_cash(user_id, need, reason)
+        if covered < need:  # 預金は、引き出しの制限なしに、差し押さえる
+            taken = self._deposit_take(user_id, need - covered)
+            if taken:
+                self._ledger(user_id, 0, self._balance(user_id), f"強制執行:預金の差し押さえ（{taken:,}ペリカ）")
+                self._note(user_id, f"💥 帝愛への預金が差し押さえられました（{taken:,}ペリカ）。")
+                covered += taken
         if covered >= need:
             return covered
         prices = self.latest_prices()
@@ -159,9 +166,44 @@ class DebtMixin:
         self._conn.execute(
             "UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (amount, self._g(), user_id)
         )
+        self._grace_update(user_id)
         self._note(
             user_id, f"🕴️ 帝愛ファイナンスから種銭 {amount:,}ペリカ が貸し付けられました。「これで取り返してこい…！」"
         )
+
+    def borrow_seed(self, user_id: int) -> tuple:
+        """（いつでも）手元が種銭の枠に満たなければ、枠まで帝愛から借りる。借金が増え、地下労働者になる。(成功か, 理由か借りた額)。"""
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            if self.status(user_id) == teiai.BANKRUPT:
+                return False, "破産者は、完済して7日たつまで、帝愛から借りられません。"
+            if self.grace_until(user_id) is not None:
+                return False, "破産猶予の間は、新しく借りられません。"
+            short = teiai.SEED - self._balance(user_id)
+            if short <= 0:
+                return (
+                    False,
+                    f"手元が {teiai.SEED:,}ペリカ 以上あるので、借りられません（借りられるのは、枠の {teiai.SEED:,}ペリカ に足りない分まで）。",
+                )
+            self._seed(user_id, short)
+            self._go_underground(user_id)
+            return True, short
+
+    def can_borrow_for_bet(self, user_id: int, need: int) -> tuple:
+        """（ダブルダウンなど）手元が足りない need を、帝愛の信用で借りて賭けられるか。(可否, 理由)。借りられるのは、種銭の枠まで。"""
+        with self._lock:
+            if need <= 0:
+                return True, ""
+            if self.status(user_id) == teiai.BANKRUPT:
+                return False, "破産者は、帝愛の信用を使えません。"
+            if self.grace_until(user_id) is not None:
+                return False, "破産猶予の間は、帝愛の信用を使えません。"
+            if need > teiai.SEED:
+                return (
+                    False,
+                    f"帝愛の信用で借りられるのは、1回 {teiai.SEED:,}ペリカ までです（足りない額: {need:,}ペリカ）。",
+                )
+            return True, ""
 
     def _seed_if_empty(self, user_id: int) -> int:
         """借金があって手元が空なら、種銭を貸す。貸した額を返す。"""
@@ -182,6 +224,9 @@ class DebtMixin:
         """払えなかった shortfall を、強制執行したうえで、残りを帝愛の借金にする。借金に加えた額を返す。"""
         if shortfall <= 0:
             return 0
+        shortfall -= self._cds_cover_self(user_id, shortfall)  # 自分への CDS があれば、まず帝愛が肩代わりする
+        if shortfall <= 0:
+            return 0
         need = shortfall - self._seize_assets(user_id, shortfall, f"強制執行:{reason}")
         if need <= 0:
             return 0
@@ -191,6 +236,7 @@ class DebtMixin:
         self._ledger(user_id, 0, self._balance(user_id), f"借金:{reason}（{need:,}ペリカ）")
         self._go_underground(user_id)
         self._seed_if_empty(user_id)
+        self._grace_update(user_id)
         return need
 
     # ------------------------------------------------------------------ #
@@ -244,6 +290,9 @@ class DebtMixin:
             if not ok:  # 解約できない債券は、元本の一部で換金して、差し押さえる
                 self._apply(user_id, int(row["principal"] * teiai.SEIZE_RATE), "破産:債券の差し押さえ")
                 self._conn.execute("UPDATE bonds SET status='cancelled' WHERE id=?", (row["id"],))
+        saved = self._deposit_take(user_id, self.deposit_of(user_id))
+        if saved:
+            self._apply(user_id, saved, "破産:預金の差し押さえ")
         total += self._take_cash(user_id, self._balance(user_id), "破産:現金の差し押さえ")
         return total
 
@@ -269,11 +318,13 @@ class DebtMixin:
         )
         return int(value * teiai.SEIZE_RATE)
 
-    def bankrupt(self, user_id: int) -> tuple:
+    def bankrupt(self, user_id: int, forced: bool = False) -> tuple:
         """自己破産。全財産とショップの全品を差し押さえて換金し、帝愛 → 貸付の順に配当する。(成功か, 理由か結果) を返す。
 
         貸付の残りは免責（貸し倒れ）。帝愛の借金は、BANKRUPT_FLOOR まで圧縮される。破産者の身分になり、完済して
         BLACKLIST_DAYS 日たつまで、貸付を借りられない。
+
+        forced=True は、破産猶予の時間切れによる強制破産。この場合だけ、他人からの CDS に配当が出る（自分から破産しても出ない）。
         """
         with self._lock, self._conn:
             self._ensure(user_id)
@@ -288,6 +339,7 @@ class DebtMixin:
             ]
             if self._debt(user_id) <= 0 and not loans:
                 return False, "借金も貸付の借り入れもないので、破産できません。"
+            debt_before = self._debt(user_id)
             pool = self._liquidate_everything(user_id)
             shop_value = self._seize_shop(user_id)
             pool += shop_value
@@ -324,7 +376,13 @@ class DebtMixin:
             self._go_underground(user_id)
             self._after_debt_change(user_id)
             seed = self._seed_if_empty(user_id)
+            self._conn.execute("UPDATE users SET grace_until=NULL WHERE guild_id=? AND user_id=?", (self._g(), user_id))
+            cds_paid = self._cds_settle_default(user_id, debt_before, now) if forced else 0
+            if not forced:
+                self._cds_void(user_id)
             return True, {
+                "forced": forced,
+                "cds_paid": cds_paid,
                 "seized": total_pool,
                 "shop_value": shop_value,
                 "senior_paid": to_senior,

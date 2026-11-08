@@ -24,6 +24,7 @@ from typing import Optional
 
 from core import market as market_mod
 from core import schema, teiai
+from core.eco_bank import BankMixin
 from core.eco_bonds import BondMixin
 from core.eco_crypto import CryptoMixin
 from core.eco_debt import DebtMixin
@@ -60,6 +61,7 @@ class Economy(
     ShopMixin,
     GuildMixin,
     DebtMixin,
+    BankMixin,
 ):
     DAILY_BASE = 1000
     DAILY_STREAK_BONUS = 100  # 連続1日ごとの加算
@@ -280,14 +282,23 @@ class Economy(
             )
             return cur.lastrowid
 
-    def add_to_escrow(self, escrow_id: int, extra: int) -> bool:
-        """預かり金を増やす（ブラックジャックのダブルダウン）。残高不足なら False。"""
+    def add_to_escrow(self, escrow_id: int, extra: int, credit: bool = False) -> bool:
+        """預かり金を増やす（ブラックジャックのダブルダウン）。残高不足なら False。
+
+        credit=True なら、足りない分を帝愛の信用で借りて（借金になる）追加する（can_borrow_for_bet で許される範囲だけ）。
+        """
         with self._lock, self._conn:
             row = self._conn.execute(
                 "SELECT user_id, game FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g())
             ).fetchone()
-            if row is None or extra <= 0 or self._balance(row["user_id"]) < extra:
+            if row is None or extra <= 0:
                 return False
+            short = extra - self._balance(row["user_id"])
+            if short > 0:
+                if not credit or not self.can_borrow_for_bet(row["user_id"], short)[0]:
+                    return False
+                self._seed(row["user_id"], short)  # 手元に足りない分だけ、帝愛が貸す
+                self._go_underground(row["user_id"])
             self._apply(row["user_id"], -extra, f"追加の賭け:{row['game']}")
             self._conn.execute(
                 "UPDATE escrow SET amount = amount + ? WHERE id=? AND guild_id=?", (extra, escrow_id, self._g())
@@ -349,6 +360,9 @@ class Economy(
                     income=max(0, payout - amount),
                 )
             self._conn.execute("DELETE FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g()))
+            self._bank_income(
+                int(max(0, amount - total) * teiai.LOSS_SHARE), 1.0, needs_depositors=True
+            )  # 負けた額の一部が、預金者の利回りになる
             taken = -self._apply(user_id, -penalty, f"追加の支払い:{game}") if penalty > 0 else 0
             if penalty > taken:  # 残高で足りない分は、強制執行したうえで、残りを帝愛の借金にする
                 self._owe(user_id, penalty - taken, f"{game}の倍払い")
@@ -433,6 +447,7 @@ class Economy(
             skimmed = teiai.skim(amount) if debt_before > 0 else 0  # 借金中は、帝愛がピンハネ（借金の元本は減らない）
             if skimmed:
                 self._ledger(user_id, 0, self._balance(user_id), f"帝愛のピンハネ（デイリー {skimmed:,}ペリカ）")
+                self._bank_income(skimmed, teiai.SKIM_YIELD_SHARE, needs_depositors=True)  # 預金者の利回りになる
             credit = amount - skimmed
             self._apply(user_id, credit, f"デイリー（{streak}日連続{'・2倍券' if boosted else ''}）", income=credit)
             repaid = debt_before - self._debt(user_id)
@@ -487,6 +502,8 @@ class Economy(
                 values[uid] = values.get(uid, 0) + eq
             for uid, held in self.bond_values().items():
                 values[uid] = values.get(uid, 0) + held  # 預けている債券の元本も総資産
+            for uid, held in self.bank_values().items():
+                values[uid] = values.get(uid, 0) + held  # 帝愛への預金も総資産
         total = [
             (r["user_id"], r["balance"] + values.get(r["user_id"], 0))
             for r in rows

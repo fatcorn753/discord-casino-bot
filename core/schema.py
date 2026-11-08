@@ -152,6 +152,30 @@ def create_tables(conn: sqlite3.Connection) -> None:
             margin      INTEGER NOT NULL,         -- 預けた担保
             PRIMARY KEY (guild_id, user_id, symbol)
         );
+        CREATE TABLE IF NOT EXISTS teiai_bank (        -- 帝愛銀行の手元（サーバーごとに1行）
+            guild_id INTEGER PRIMARY KEY,
+            cash     REAL NOT NULL DEFAULT 0,          -- すぐ払い出せる現金
+            loaned   REAL NOT NULL DEFAULT 0,          -- 地下融資に回している額（時間がたつと現金に戻る）
+            ts       REAL NOT NULL DEFAULT 0           -- 融資の回収を、ここまで反映した時刻
+        );
+        CREATE TABLE IF NOT EXISTS teiai_deposits (    -- 帝愛への預金（人ごと）
+            guild_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            amount   INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        );
+        CREATE TABLE IF NOT EXISTS cds (               -- CDS（破綻保証）。買い手が掛け金を払い、対象が強制破産すると配当（自分への CDS は借金を肩代わり）
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id  INTEGER NOT NULL,
+            buyer_id  INTEGER NOT NULL,
+            target_id INTEGER NOT NULL,
+            stake     INTEGER NOT NULL,               -- 掛け金
+            odds      REAL    NOT NULL,               -- 買ったときのオッズ（配当の見込み = 掛け金 × オッズ）
+            ts        REAL    NOT NULL,
+            expires   REAL    NOT NULL,
+            status    TEXT    NOT NULL DEFAULT 'active',   -- active / paid / expired / void
+            paid      INTEGER NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS quiz_questions (     -- クイズの問題（全サーバー共通。持ち主が登録する）
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             question    TEXT    NOT NULL,
@@ -349,6 +373,8 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN debt INTEGER NOT NULL DEFAULT 0")
     if "checked" not in {r["name"] for r in conn.execute("PRAGMA table_info(bonds)")}:
         conn.execute("ALTER TABLE bonds ADD COLUMN checked REAL")
+    if "grace_until" not in us:
+        conn.execute("ALTER TABLE users ADD COLUMN grace_until REAL")
     ps = {r["name"] for r in conn.execute("PRAGMA table_info(play_state)")}
     for col, ddl in (
         ("day_streak", "INTEGER NOT NULL DEFAULT 0"),

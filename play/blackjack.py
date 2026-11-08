@@ -5,6 +5,7 @@ import random
 import discord
 
 from core import ui
+from core.confirm import confirm_action
 from games import blackjack as rules
 from play.common import (
     GameContext,
@@ -131,6 +132,15 @@ class BlackjackView(OwnerView):
             self.double_button.disabled = True  # ダブルは最初の判断のときだけ
             await interaction.response.edit_message(embed=self.embed(), view=self)
 
+    async def _after_origin(self) -> None:
+        """_after の、確認ボタンを挟んだあと版（もとのメッセージを書き換える）。"""
+        if self.game.finished:
+            self.stop()
+            await self.origin.edit_original_response(embed=self.final_embed(), view=self.replay_view())
+        else:
+            self.double_button.disabled = True
+            await self.origin.edit_original_response(embed=self.embed(), view=self)
+
     @discord.ui.button(label="ヒット（もう1枚）", style=discord.ButtonStyle.primary)
     async def hit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if await self._guard(interaction):
@@ -155,11 +165,37 @@ class BlackjackView(OwnerView):
             return await interaction.response.send_message(
                 embed=ui.error_embed("ダブルできません", "ダブルは、最初の2枚のときだけ選べます。"), ephemeral=True
             )
-        if not self.ctx.economy.add_to_escrow(self.ctx.escrow_id, self.ctx.bet):
-            return await interaction.response.send_message(
-                embed=ui.error_embed("ダブルできません", "倍にするためのペリカが足りません。"), ephemeral=True
+        eco = self.ctx.economy
+        if not eco.add_to_escrow(self.ctx.escrow_id, self.ctx.bet):
+            need = self.ctx.bet - eco.balance(interaction.user.id)
+            can, why = eco.can_borrow_for_bet(interaction.user.id, need)
+            if not can:
+                return await interaction.response.send_message(
+                    embed=ui.error_embed("ダブルできません", f"倍にするためのペリカが足りません。{why}"), ephemeral=True
+                )
+            agreed = await confirm_action(
+                interaction,
+                "帝愛の信用でダブルしますか？",
+                f"手元が **{need:,}ペリカ** 足りません。足りない分を帝愛から借りて、倍賭けします。\n"
+                "**借金になり、🟡地下労働者に落ちます**（デイリーのピンハネ・収入の天引きが始まります）。",
+                "借りてダブル",
             )
-        self.ctx.bet = self.ctx.economy.escrow_amount(self.ctx.escrow_id)
+            if (  # 確認を待つ間に、ゲームが進んだり終わったりしていたら、何もしない
+                agreed is not True
+                or self.ctx.done
+                or self.game.finished
+                or self.game.doubled
+                or len(self.game.player) != 2
+            ):
+                return
+            if not eco.add_to_escrow(self.ctx.escrow_id, self.ctx.bet, credit=True):
+                return await interaction.followup.send(
+                    embed=ui.error_embed("ダブルできません", "帝愛から借りられませんでした。"), ephemeral=True
+                )
+            self.ctx.bet = eco.escrow_amount(self.ctx.escrow_id)
+            self.game.double()
+            return await self._after_origin()
+        self.ctx.bet = eco.escrow_amount(self.ctx.escrow_id)
         self.game.double()
         await self._after(interaction)
 

@@ -1,0 +1,227 @@
+"""`/ペリカ 帝愛` のパネル: 帝愛銀行の金庫メーター・破産猶予の一覧・預金・種銭・CDS（cogs/economy_cog.py から使う）。
+
+数字と考え方は core/teiai.py、処理は core/eco_bank.py。ここは画面の部品だけ（読み込まれる Cog ではない）。
+"""
+
+import time
+
+import discord
+
+from core import teiai, ui
+
+LEVEL_MARK = {"safe": "🟢", "warn": "🟡", "danger": "🔴", "frozen": "🚨"}
+LEVEL_TEXT = {
+    "safe": "余裕あり",
+    "warn": "取り付け警戒",
+    "danger": "取り付け危険水域！",
+    "frozen": "支払停止（預金封鎖）",
+}
+
+
+def meter(ratio, width: int = 10) -> str:
+    """準備率のメーター（預金総額に対する、利用可能現金の割合。30% で満タン）。"""
+    if ratio is None:
+        return "─" * width
+    filled = max(0, min(width, round(ratio / 0.30 * width)))
+    return "█" * filled + "░" * (width - filled)
+
+
+def bank_lines(bank: dict) -> str:
+    mark = LEVEL_MARK[bank["level"]]
+    if bank["ratio"] is None:
+        ratio_text = "預金はまだありません"
+    else:
+        ratio_text = f"準備率 **{bank['ratio']:.0%}**　`{meter(bank['ratio'])}`"
+    lines = [
+        f"{mark} **{LEVEL_TEXT[bank['level']]}**　{ratio_text}",
+        f"預金総額 {ui.pelica(bank['deposits'])}　手元の現金 {ui.pelica(int(bank['cash']))}　地下融資 {ui.pelica(int(bank['loaned']))}",
+        f"引当金のロック {ui.pelica(int(bank['locks']))}　**引き出せる現金 {ui.pelica(max(0, int(bank['available'])))}**",
+    ]
+    return "\n".join(lines)
+
+
+def panel_embed(eco, uid: int) -> discord.Embed:
+    """帝愛銀行と、自分の状況の画面。"""
+    now = time.time()
+    bank = eco.bank_status(now)
+    color = {"safe": ui.OK, "warn": ui.GOLD, "danger": ui.ERROR, "frozen": ui.ERROR}[bank["level"]]
+    e = ui.embed("🏦 帝愛銀行", bank_lines(bank), color)
+    graced = eco.grace_list()
+    if graced:
+        e.add_field(
+            name="⚠️ 破産猶予のカウントダウン中",
+            value="\n".join(
+                f"<@{u}>　借金 {ui.pelica(debt)}　<t:{int(until)}:R> に強制破産" for u, debt, until in graced[:10]
+            ),
+            inline=False,
+        )
+    claims = eco.cds_total_claims()
+    if claims:
+        e.add_field(name="💀 掛けられている CDS（配当見込みの合計）", value=ui.pelica(claims), inline=False)
+    status, debt = eco.status(uid, now), eco.debt(uid)
+    me = [f"身分: {teiai.STATUS_LABEL[status]}　預金: **{ui.pelica(eco.deposit_of(uid))}**"]
+    if debt:
+        me.append(f"帝愛への借金: **{ui.pelica(debt)}**")
+    until = eco.grace_until(uid)
+    if until is not None:
+        me.append(
+            f"⚠️ **破産猶予中**。<t:{int(until)}:R> までに借金を {ui.pelica(teiai.GRACE_DEBT)} 未満へ戻せないと、強制破産です。"
+        )
+    cds = eco.cds_list(uid)
+    if cds["bought"]:
+
+        def who(c: dict) -> str:
+            return "自分" if c["target_id"] == uid else f"<@{c['target_id']}>"
+
+        me.append(
+            "持っている CDS: "
+            + "、".join(f"{who(c)}（{ui.pelica(c['stake'])}・{c['odds']}倍）" for c in cds["bought"][:5])
+        )
+    if cds["on_me"]:
+        me.append(f"あなたに掛けられている CDS: {cds['on_me']}件")
+    e.add_field(name="あなた", value="\n".join(me), inline=False)
+    e.set_footer(
+        text=f"預金はカタギだけ。利回りは、ピンハネ・CDS の掛け金・カジノの負け分から。CDS は、対象が時間切れで強制破産したときだけ配当（{teiai.CDS_TERM_DAYS}日で失効）"
+    )
+    return e
+
+
+class AmountModal(discord.ui.Modal):
+    """預ける・引き出す額の入力。"""
+
+    def __init__(self, panel, mode: str):
+        super().__init__(title="帝愛に預ける" if mode == "deposit" else "帝愛から引き出す")
+        self.panel, self.mode = panel, mode
+        self.amount = discord.ui.TextInput(
+            label="金額（ペリカ）" if mode == "deposit" else "金額（空欄なら全額）",
+            required=mode == "deposit",
+            max_length=12,
+        )
+        self.add_item(self.amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = self.amount.value.replace(",", "").strip()
+        if raw and not raw.isdigit():
+            return await interaction.response.send_message(
+                embed=ui.error_embed("金額が正しくありません", "半角の数字で入れてください。"), ephemeral=True
+            )
+        eco, uid = self.panel.eco(interaction), interaction.user.id
+        if self.mode == "deposit":
+            ok, result = eco.bank_deposit(uid, int(raw))
+            text = f"帝愛に預けました。いまの預金: **{ui.pelica(result)}**" if ok else result
+        else:
+            ok, result = eco.bank_withdraw(uid, int(raw) if raw else None)
+            text = f"**{ui.pelica(result)}** を引き出しました。" if ok else result
+        embed = ui.ok_embed("完了", text) if ok else ui.error_embed("できませんでした", text)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+class StakeModal(discord.ui.Modal):
+    """CDS の掛け金の入力。"""
+
+    def __init__(self, panel, target_id: int, odds: float):
+        super().__init__(title=f"CDS を買う（{odds}倍）")
+        self.panel, self.target_id = panel, target_id
+        self.stake = discord.ui.TextInput(label=f"掛け金（{teiai.CDS_MIN_STAKE:,}ペリカ以上）", max_length=12)
+        self.add_item(self.stake)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        raw = self.stake.value.replace(",", "").strip()
+        if not raw.isdigit():
+            return await interaction.response.send_message(
+                embed=ui.error_embed("金額が正しくありません", "半角の数字で入れてください。"), ephemeral=True
+            )
+        eco, uid = self.panel.eco(interaction), interaction.user.id
+        ok, result = eco.cds_buy(uid, self.target_id, int(raw))
+        if not ok:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("買えませんでした", result), ephemeral=True
+            )
+        mine = self.target_id == uid
+        text = (
+            f"**{result}倍**で買いました（掛け金 {ui.pelica(int(raw))}・配当の見込み {ui.pelica(int(int(raw) * result))}）。\n"
+            + (
+                "自分が借金に落ちるとき、その額を帝愛が肩代わりします（1件、使い切り）。"
+                if mine
+                else f"<@{self.target_id}> が**破産猶予の時間切れで強制破産**したときに配当が出ます。本人が自分から破産しても、出ません。"
+            )
+        )
+        await interaction.response.send_message(embed=ui.ok_embed("CDS を買いました", text), ephemeral=True)
+
+
+class TargetSelect(discord.ui.UserSelect):
+    def __init__(self, panel):
+        super().__init__(placeholder="CDS の対象を選ぶ（自分も選べる）", min_values=1, max_values=1)
+        self.panel = panel
+
+    async def callback(self, interaction: discord.Interaction):
+        target = self.values[0]
+        if target.bot:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("選べません", "Bot は選べません。"), ephemeral=True
+            )
+        quote = self.panel.eco(interaction).cds_quote(target.id)
+        await interaction.response.send_modal(StakeModal(self.panel, target.id, quote["odds"]))
+
+
+class TargetView(discord.ui.View):
+    def __init__(self, panel):
+        super().__init__(timeout=120)
+        self.add_item(TargetSelect(panel))
+
+
+class TeiaiPanel(discord.ui.View):
+    """パネルの下のボタン（押せるのはコマンドを使った本人だけ）。"""
+
+    def __init__(self, bot, uid: int):
+        super().__init__(timeout=300)
+        self.bot, self.uid = bot, uid
+
+    def eco(self, interaction: discord.Interaction):
+        return self.bot.economy.for_guild(interaction.guild.id)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message(
+                "この画面を使えるのは、コマンドを使った本人だけです。", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="預ける", style=discord.ButtonStyle.success)
+    async def deposit(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AmountModal(self, "deposit"))
+
+    @discord.ui.button(label="引き出す", style=discord.ButtonStyle.primary)
+    async def withdraw(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AmountModal(self, "withdraw"))
+
+    @discord.ui.button(label="CDS を掛ける", style=discord.ButtonStyle.danger)
+    async def cds(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            embed=ui.embed(
+                "💀 CDS（破綻保証）",
+                "対象を選んでください。**自分**を選ぶと、自分が借金に落ちるときに帝愛が肩代わりする保険。"
+                "**他人**を選ぶと、その人が破産猶予の時間切れで強制破産したときに配当が出ます（オッズは、相手の危険度で決まります）。",
+                ui.INFO,
+            ),
+            view=TargetView(self),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="種銭を借りる", style=discord.ButtonStyle.secondary)
+    async def seed(self, interaction: discord.Interaction, button: discord.ui.Button):
+        ok, result = self.eco(interaction).borrow_seed(interaction.user.id)
+        embed = (
+            ui.ok_embed("種銭を借りました", f"帝愛から **{ui.pelica(result)}** を借りました（借金に加わります）。")
+            if ok
+            else ui.error_embed("借りられません", result)
+        )
+        self.eco(interaction).take_notices(interaction.user.id)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
+    async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            embed=panel_embed(self.eco(interaction), interaction.user.id), view=self
+        )

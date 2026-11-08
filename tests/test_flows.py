@@ -294,13 +294,46 @@ def test_blackjack_double_down_doubles_bet_and_payout(bot):
     assert_clean(bot) and ledger_matches_balance(bot)
 
 
-def test_blackjack_double_refused_when_balance_short(bot):
-    bot.economy.debit_up_to(1, INITIAL_BALANCE - 1200, "テスト")  # 残高 1,200
-    ctx, view = make_bj(bot, 1000, ("5", "6"), ("10", "7"), deck=("10",))  # 預けて残り 200 → ダブル不可
+def test_blackjack_double_refused_when_even_teiai_credit_cannot_cover_it(bot):
+    bot.economy.credit(1, 10_000, "テスト")
+    bot.economy.debit_up_to(1, bot.economy.balance(1) - 5_100, "テスト")  # 残高 5,100
+    ctx, view = make_bj(
+        bot, 5_000, ("5", "6"), ("10", "7"), deck=("10",)
+    )  # 預けて残り 100 → 足りない 4,900 は信用の枠（3,000）超え
     pressed = FakeInteraction()
     run(view.double_button.callback(pressed))
     assert not view.game.doubled and pressed.sent and pressed.sent[0]["ephemeral"]
-    assert bot.economy.escrow_amount(ctx.escrow_id) == 1000
+    assert bot.economy.escrow_amount(ctx.escrow_id) == 5_000 and bot.economy.debt(1) == 0
+    ctx.abort()
+    assert_clean(bot)
+
+
+def test_blackjack_double_on_teiai_credit_after_confirmation(bot, monkeypatch):
+    async def agree(interaction, title, description, label):
+        return True
+
+    monkeypatch.setattr(play_bj, "confirm_action", agree)
+    bot.economy.debit_up_to(1, INITIAL_BALANCE - 1200, "テスト")  # 残高 1,200
+    ctx, view = make_bj(
+        bot, 1000, ("5", "6"), ("10", "7"), deck=("10",)
+    )  # 預けて残り 200 → 足りない 800 を、帝愛から借りる
+    run(view.double_button.callback(FakeInteraction()))
+    assert view.game.doubled and ctx.bet == 2000
+    assert (
+        bot.economy.debt(1) == 200 and view.origin.edits
+    )  # 800 借りた。勝って、純利益2,000の3割（600）が天引きで返済され、残り200
+    assert_clean(bot)
+
+
+def test_blackjack_double_on_credit_is_cancelled_without_borrowing(bot, monkeypatch):
+    async def decline(interaction, title, description, label):
+        return False
+
+    monkeypatch.setattr(play_bj, "confirm_action", decline)
+    bot.economy.debit_up_to(1, INITIAL_BALANCE - 1200, "テスト")
+    ctx, view = make_bj(bot, 1000, ("5", "6"), ("10", "7"), deck=("10",))
+    run(view.double_button.callback(FakeInteraction()))
+    assert not view.game.doubled and bot.economy.debt(1) == 0 and bot.economy.escrow_amount(ctx.escrow_id) == 1000
     ctx.abort()
     assert_clean(bot)
 
