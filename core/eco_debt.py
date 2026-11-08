@@ -154,8 +154,8 @@ class DebtMixin:
         ).fetchall():
             if covered >= need:
                 break
-            ok, got = self._option_sell_locked(user_id, row["id"], time.time())
-            if ok and got:
+            ok, got = self._option_close_locked(user_id, row["id"], time.time())
+            if ok and got > 0:
                 self._note(user_id, f"💥 オプションが差し押さえられました（{got:,}ペリカ）。")
                 covered += self._take_cash(user_id, need - covered, reason)
         for row in self._conn.execute(
@@ -304,7 +304,7 @@ class DebtMixin:
             "SELECT id FROM options WHERE guild_id=? AND user_id=? AND status='active' ORDER BY id",
             (self._g(), user_id),
         ).fetchall():
-            self._option_sell_locked(user_id, row["id"], time.time())
+            self._option_close_locked(user_id, row["id"], time.time())
         saved = self._deposit_take(user_id, self.deposit_of(user_id))
         if saved:
             self._apply(user_id, saved, "破産:預金の差し押さえ")

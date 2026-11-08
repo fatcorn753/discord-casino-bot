@@ -190,7 +190,11 @@ def create_tables(conn: sqlite3.Connection) -> None:
             ts        REAL    NOT NULL,
             status    TEXT    NOT NULL DEFAULT 'active',   -- active / exercised / expired / sold
             paid      INTEGER NOT NULL DEFAULT 0, -- 満期・売却で受け取った額
-            final     REAL                        -- 満期の価格
+            final     REAL,                       -- 満期の価格（ペア・ワラントは A の価格）
+            symbol2   TEXT,                       -- ペア・ワラントの、比べる相手の銘柄（なければ NULL）
+            spot2     REAL,                       -- 買った時点の、相手の価格
+            side      TEXT    NOT NULL DEFAULT 'long',   -- long（買い）/ short（裸売り。帝愛に売って、プレミアムを先にもらう）
+            margin    INTEGER NOT NULL DEFAULT 0  -- 裸売りで預けた証拠金（買いは 0）
         );
         CREATE TABLE IF NOT EXISTS market_events (     -- 市場イベント（ボラティリティ予告）。市場は全サーバー共通なので、サーバーに属さない
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -397,6 +401,15 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN debt INTEGER NOT NULL DEFAULT 0")
     if "checked" not in {r["name"] for r in conn.execute("PRAGMA table_info(bonds)")}:
         conn.execute("ALTER TABLE bonds ADD COLUMN checked REAL")
+    opt_cols = {r["name"] for r in conn.execute("PRAGMA table_info(options)")}
+    for col, ddl in (
+        ("symbol2", "TEXT"),
+        ("spot2", "REAL"),
+        ("side", "TEXT NOT NULL DEFAULT 'long'"),
+        ("margin", "INTEGER NOT NULL DEFAULT 0"),
+    ):
+        if opt_cols and col not in opt_cols:
+            conn.execute(f"ALTER TABLE options ADD COLUMN {col} {ddl}")
     if "grace_until" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN grace_until REAL")
     ps = {r["name"] for r in conn.execute("PRAGMA table_info(play_state)")}

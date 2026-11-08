@@ -7,10 +7,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from cogs.market_cog import MarketView, OptionAmountModal
+from cogs.market_cog import MarketCog, MarketView, OptionAmountModal
 from core import market, market_events
 from core import options as opt
 from core.economy import Economy
+from core.session import Sessions
 
 pytestmark = pytest.mark.real_scope
 
@@ -184,10 +185,10 @@ def test_cut_map_is_empty_without_positions(root):
 # ----------------------------- 市況の画面 ----------------------------- #
 @pytest.fixture
 def cog(root):
-    from tests.test_symbols import make_cog
-
     root.for_guild(G).credit(U, 30_000, "テスト")
-    return make_cog(root)
+    cog = MarketCog(SimpleNamespace(economy=root, sessions=Sessions(cooldown=0), config={}))
+    cog._prices()  # このファイルで読み込んだ MarketCog で作る（他のテストが cogs を読み込み直しても、クラスがずれない）
+    return cog
 
 
 def test_summary_shows_event_alert_and_cut_zones(cog):

@@ -21,11 +21,16 @@ MIN_PREMIUM = 100  # 1回の掛け金の下限
 MAX_OPEN_PREMIUM = 20_000  # 1人が同時に持てる、有効なオプションの掛け金の合計の上限
 YIELD_SHARE = 0.04  # 掛け金のうち、預金者の利回りへ回す割合（残りは、配当に備えて銀行の手元に残る）
 
-CALL, PUT = "call", "put"
+MARGIN_RATE = 0.20  # 裸売りの証拠金（行使価格 × 口数 の、この割合を、売るときに預ける）
+MAX_SHORT_MARGIN = 20_000  # 1人が同時に預けられる、裸売りの証拠金の合計の上限
+
+CALL, PUT, PAIR = "call", "put", "pair"
 KINDS = {
     CALL: ("爆騰コール", "🚀", "上がると儲かる"),
     PUT: ("暴落プット", "📉", "下がると儲かる"),
+    PAIR: ("ペア・ワラント", "⚖️", "相手の銘柄より上がると儲かる"),
 }
+SHORT_NAMES = {CALL: "コール裸売り", PUT: "プット裸売り"}  # 売る側（帝愛に売って、プレミアムを先にもらう）
 
 
 def phi(x: float) -> float:
@@ -94,3 +99,57 @@ def intrinsic(kind: str, units: int, spot: float, strike: float) -> int:
     """満期の配当（上限をかける前）。"""
     per = max(0.0, spot - strike) if kind == CALL else max(0.0, strike - spot)
     return int(per * units / market.UNIT)
+
+
+# ---- ペア・ワラント（銘柄 A が、銘柄 B より上がると当たる。Margrabe の交換オプション）----
+def pair_variance(a: str, b: str, seconds: float, now: float = 0.0, events=()) -> float:
+    """A と B の値動きの差（相対ボラティリティ）の、満期までの分散の合計。
+
+    1分ごとは Σ_AA + Σ_BB − 2Σ_AB（連動が強いほど小さい）。有事（同じ向きに、銘柄ごとの大きさで動く）の差と、
+    市場イベント（その銘柄の揺れが m 倍）の分も足す。
+    """
+    ticks = max(0.0, seconds) / TICK_SECONDS
+    symbols = [s.key for s in market.SYMBOLS]
+    ia, ib = symbols.index(a), symbols.index(b)
+    cov = market.COVARIANCE
+    saa, sbb, sab = cov[ia][ia], cov[ib][ib], cov[ia][ib]
+    lo, hi = market.EVENT_RANGE
+    mean_sq = (hi**3 - lo**3) / (3 * (hi - lo))
+    scale = lambda k: min(market.EVENT_SCALE_MAX, market.BY_KEY[k].sigma / market.CS.sigma)  # noqa: E731
+    jump = market.EVENT_PROB * mean_sq * (scale(a) - scale(b)) ** 2
+    total = ticks * (saa + sbb - 2 * sab + jump)
+    for ev in events:
+        m, weight = ev["factor"], market_events.extra_variance_ticks(ev, now, seconds, TICK_SECONDS)
+        if ev["symbol"] == a:
+            total += weight * ((m * m - 1) * saa - 2 * (m - 1) * sab)
+        elif ev["symbol"] == b:
+            total += weight * ((m * m - 1) * sbb - 2 * (m - 1) * sab)
+    return max(total, 0.0)
+
+
+def pair_fair_rate(rel_a: float, rel_b: float, variance: float) -> float:
+    """ペア・ワラントの公正価格（想定元本 1 あたり）。rel_a・rel_b は、買った時点を 1 とした、いまの A・B の価格。
+
+    交換オプション max(0, A_T − B_T) の Margrabe の式。比 A/B に対する、金利 0 のコールと同じ形になる。
+    """
+    return fair_price(CALL, rel_a, rel_b, variance)
+
+
+def pair_ask_rate(a: str, b: str, seconds: float, now: float = 0.0, events=()) -> float:
+    """買うときの、想定元本 1 ペリカあたりの値段（買った直後。A も B も 1）。公正価格 +SPREAD。"""
+    return pair_fair_rate(1.0, 1.0, pair_variance(a, b, seconds, now, events)) * (1 + SPREAD)
+
+
+def pair_bid_rate(a: str, b: str, rel_a: float, rel_b: float, seconds: float, now: float = 0.0, events=()) -> float:
+    """売るときの、想定元本 1 ペリカあたりの値段（いまの相対価格で）。公正価格 −SPREAD。"""
+    return pair_fair_rate(rel_a, rel_b, pair_variance(a, b, seconds, now, events)) * (1 - SPREAD)
+
+
+def pair_intrinsic(notional: int, a0: float, b0: float, a_t: float, b_t: float) -> int:
+    """満期の配当（上限をかける前）: 想定元本 × max(0, A の上昇率 − B の上昇率)。"""
+    return int(notional * max(0.0, a_t / a0 - b_t / b0))
+
+
+def margin_per_unit(strike: float) -> float:
+    """裸売りの、1口あたりの証拠金（ペリカ）。"""
+    return MARGIN_RATE * strike / market.UNIT

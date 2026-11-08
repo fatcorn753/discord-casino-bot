@@ -10,6 +10,7 @@ from cogs.market_cog import MarketCog
 from core import market, teiai
 from core import options as opt
 from core.economy import INITIAL_BALANCE, Economy
+from core.session import Sessions
 
 pytestmark = pytest.mark.real_scope
 
@@ -198,9 +199,10 @@ def test_options_count_in_the_ranking_and_are_seized_for_debt(eco):
 
 # ----------------------------- コマンド ----------------------------- #
 def make_cog(eco_root):
-    from tests.test_symbols import make_cog as _make
-
-    return _make(eco_root)
+    """このファイルで読み込んだ MarketCog で作る（他のテストが cogs を読み込み直しても、クラスがずれない）。"""
+    cog = MarketCog(SimpleNamespace(economy=eco_root, sessions=Sessions(cooldown=0), config={}))
+    cog._prices()
+    return cog
 
 
 def choice(value):
