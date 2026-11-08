@@ -31,6 +31,7 @@ from core.eco_debt import DebtMixin
 from core.eco_events import EventMixin
 from core.eco_guild import GuildMixin
 from core.eco_loans import LoanMixin
+from core.eco_options import OptionMixin
 from core.eco_pachinko import PachinkoMixin
 from core.eco_quiz import QuizMixin
 from core.eco_raffle import RaffleMixin
@@ -62,6 +63,7 @@ class Economy(
     GuildMixin,
     DebtMixin,
     BankMixin,
+    OptionMixin,
 ):
     DAILY_BASE = 1000
     DAILY_STREAK_BONUS = 100  # 連続1日ごとの加算
@@ -504,6 +506,8 @@ class Economy(
                 values[uid] = values.get(uid, 0) + held  # 預けている債券の元本も総資産
             for uid, held in self.bank_values().items():
                 values[uid] = values.get(uid, 0) + held  # 帝愛への預金も総資産
+            for uid, held in self.option_values().items():
+                values[uid] = values.get(uid, 0) + held  # オプションも、いま売ったときの手取りで総資産
         total = [
             (r["user_id"], r["balance"] + values.get(r["user_id"], 0))
             for r in rows

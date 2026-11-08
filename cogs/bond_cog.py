@@ -69,6 +69,7 @@ class BondCog(commands.Cog):
             try:
                 eco = self.bot.economy.for_guild(guild.id)
                 eco.bond_settle(now, RNG)
+                eco.option_settle(now)  # 満期のオプションの決済
                 for user_id, result in eco.grace_expire(now):  # 破産猶予の時間切れ（強制破産と、CDS の配当）
                     print(
                         f"強制破産: guild={guild.id} user={user_id} 差し押さえ={result['seized']:,} CDS配当={result['cds_paid']:,}"

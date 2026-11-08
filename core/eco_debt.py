@@ -148,6 +148,16 @@ class DebtMixin:
                 f"💥 保有していた{market_mod.BY_KEY[symbol].name}が差し押さえられました（{result.money:,}ペリカ）。",
             )
             covered += self._take_cash(user_id, need - covered, reason)
+        for row in self._conn.execute(  # オプションを、時価（売値）で売って充てる
+            "SELECT id FROM options WHERE guild_id=? AND user_id=? AND status='active' ORDER BY id",
+            (self._g(), user_id),
+        ).fetchall():
+            if covered >= need:
+                break
+            ok, got = self._option_sell_locked(user_id, row["id"], time.time())
+            if ok and got:
+                self._note(user_id, f"💥 オプションが差し押さえられました（{got:,}ペリカ）。")
+                covered += self._take_cash(user_id, need - covered, reason)
         for row in self._conn.execute(
             "SELECT id, kind FROM bonds WHERE guild_id=? AND user_id=? AND status='active' ORDER BY id",
             (self._g(), user_id),
@@ -290,6 +300,11 @@ class DebtMixin:
             if not ok:  # 解約できない債券は、元本の一部で換金して、差し押さえる
                 self._apply(user_id, int(row["principal"] * teiai.SEIZE_RATE), "破産:債券の差し押さえ")
                 self._conn.execute("UPDATE bonds SET status='cancelled' WHERE id=?", (row["id"],))
+        for row in self._conn.execute(
+            "SELECT id FROM options WHERE guild_id=? AND user_id=? AND status='active' ORDER BY id",
+            (self._g(), user_id),
+        ).fetchall():
+            self._option_sell_locked(user_id, row["id"], time.time())
         saved = self._deposit_take(user_id, self.deposit_of(user_id))
         if saved:
             self._apply(user_id, saved, "破産:預金の差し押さえ")

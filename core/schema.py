@@ -176,6 +176,22 @@ def create_tables(conn: sqlite3.Connection) -> None:
             status    TEXT    NOT NULL DEFAULT 'active',   -- active / paid / expired / void
             paid      INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS options (           -- オプション（爆騰コール・暴落プット）。買った分ごとに1行。相手は帝愛銀行
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id  INTEGER NOT NULL,
+            user_id   INTEGER NOT NULL,
+            kind      TEXT    NOT NULL,           -- call / put
+            symbol    TEXT    NOT NULL,
+            strike    REAL    NOT NULL,           -- 権利行使価格（買った時点の価格の ±5%）
+            units     INTEGER NOT NULL,           -- 口数（1000口 = 1枚）
+            premium   INTEGER NOT NULL,           -- 払った掛け金（最大の損失）
+            expiry    REAL    NOT NULL,           -- 満期（epoch秒）
+            spot      REAL    NOT NULL,           -- 買った時点の価格
+            ts        REAL    NOT NULL,
+            status    TEXT    NOT NULL DEFAULT 'active',   -- active / exercised / expired / sold
+            paid      INTEGER NOT NULL DEFAULT 0, -- 満期・売却で受け取った額
+            final     REAL                        -- 満期の価格
+        );
         CREATE TABLE IF NOT EXISTS quiz_questions (     -- クイズの問題（全サーバー共通。持ち主が登録する）
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             question    TEXT    NOT NULL,
