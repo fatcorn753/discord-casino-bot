@@ -516,13 +516,16 @@ def test_short_profits_when_price_falls_and_returns_margin(eco):
     assert a.balance(U) == INITIAL_BALANCE + 200 and a.short_position(U) == (0, 0.0, 0)
 
 
-def test_short_loss_is_capped_at_the_margin_and_partial_close_is_proportional(eco):
+def test_short_partial_close_is_proportional_and_loss_beyond_margin_is_collected(eco):
     a = eco.for_guild(G)
     assert a.short_open(U, 10_000, 100.0, 1).ok  # 担保1000
     half = a.short_close(U, 5_000, 120.0)  # 半分を、20%上がったところで決済: 損失100
     assert half.profit == -100 and a.short_position(U)[0] == 5_000 and a.short_position(U)[2] == 500
-    assert a.short_close(U, None, 500.0).money == 0  # 価格が急騰しても、担保を超えて失わない
-    assert a.balance(U) == INITIAL_BALANCE - 1000 + 400 and a.debt(U) == 0
+    last = a.short_close(
+        U, None, 500.0
+    )  # 急騰: 担保500に対して損失2,000。戻りは0で、超えた1,500は手元の現金から取り立てる
+    assert last.money == 0 and last.profit == -2000
+    assert a.balance(U) == INITIAL_BALANCE - 1000 + 400 - 1500 and a.debt(U) == 0
 
 
 def test_short_validation(eco):
@@ -536,14 +539,14 @@ def test_short_validation(eco):
     assert "借金" in a.short_open(U, 10_000, 100.0, 1).reason  # 借金中は建てられない
 
 
-def test_losscut_closes_positions_that_lose_half_the_margin(eco):
+def test_losscut_closes_accounts_whose_maintenance_ratio_falls_below_100_percent(eco):
     a = eco.for_guild(G)
-    a.short_open(U, 10_000, 100.0, 5)  # 担保200。損失が100になる +10% でロスカット
-    a.short_open(2, 10_000, 100.0, 1)  # 担保1000。+50% までは平気
-    assert eco.short_losscut({"cs": 109.0}) == []
-    done = eco.short_losscut({"cs": 110.0})
-    assert done == [(G, U, 100)] and a.short_position(U)[0] == 0 and a.short_position(2)[0] == 10_000
-    assert a.balance(U) == INITIAL_BALANCE - 100  # 担保の半分が戻る
+    a.short_open(U, 10_000, 100.0, 5)  # 担保200・必要証拠金 80。+12% を超えて有効証拠金が 80 を割るとロスカット
+    a.short_open(2, 10_000, 100.0, 1)  # 担保1000。ずっと余裕がある
+    assert eco.margin_losscut({"cs": 111.0}) == []  # 損失110 → 有効90 ÷ 必要89 ≒ 101%
+    done = eco.margin_losscut({"cs": 113.0})
+    assert done == [(G, U, "cs", "short", 130)] and a.short_position(U)[0] == 0 and a.short_position(2)[0] == 10_000
+    assert a.balance(U) == INITIAL_BALANCE - 200 + 70  # 担保の残り70が戻る
 
 
 def test_short_counts_in_ranking_and_payout_repays_debt(eco):
@@ -566,7 +569,7 @@ def test_short_commands(cog):
     assert cog.eco.for_guild(G).short_position(U)[0] == 1_000
     it = It()
     run(MarketCog.holdings.callback(cog, it))
-    assert "空売り" in it.sent[-1]["embed"].description and "ロスカット" in it.sent[-1]["embed"].description
+    assert "空売り" in it.sent[-1]["embed"].description and "維持率" in it.sent[-1]["embed"].description
     it = It()
     run(cog._cover(it, "cs", None, None))
     assert "買い戻しました" in it.sent[-1]["embed"].title and cog.eco.for_guild(G).short_position(U)[0] == 0

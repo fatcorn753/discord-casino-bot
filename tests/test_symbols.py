@@ -119,14 +119,16 @@ def test_prices_history_and_holdings_are_kept_per_symbol(eco):
     assert [u for u, _, _ in a.crypto_holders(symbol="teio")] == []
 
 
-def test_shorts_are_kept_per_symbol_and_losscut_uses_each_price(eco):
+def test_shorts_are_kept_per_symbol_and_chain_losscut_closes_the_biggest_loser_first(eco):
     a = eco.for_guild(G)
     assert a.short_open(U, 10_000, 100.0, 5, "cs").ok and a.short_open(U, 10_000, 100.0, 5, "gold").ok
     assert [s for s, *_ in a.short_positions(U)] == ["cs", "gold"]
-    done = eco.short_losscut({"cs": 100.0, "gold": 111.0})  # goldだけ +11%
-    assert done == [(G, U, 110)] and [s for s, *_ in a.short_positions(U)] == ["cs"]
+    done = eco.margin_losscut({"cs": 100.0, "gold": 160.0})  # goldだけ +60%: 損失600が担保200を超え、維持率が割れる
+    assert done == [(G, U, "gold", "short", 600)]  # 損の大きい gold だけを切れば足りる（csは残る）
+    assert [s for s, *_ in a.short_positions(U)] == ["cs"]
+    assert a.balance(U) == INITIAL_BALANCE - 400 - 400 and a.debt(U) == 0  # 担保を超えた400は、現金から取り立て
     eco.market_set(1.0, 100.0, 0, "cs")
-    assert a.short_equity()[U] == 200  # 残った CS の建玉の担保だけ（gold は決済済み）
+    assert a.margin_equity()[U] == 200  # 残った CS の建玉の担保だけ（gold は決済済み）
 
 
 def test_total_assets_count_every_symbol(eco):

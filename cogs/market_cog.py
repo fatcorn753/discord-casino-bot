@@ -145,8 +145,8 @@ class MarketCog(commands.Cog):
     async def tick(self):
         try:
             prices, _event = self.step_prices()
-            for guild_id, user_id, loss in self.eco.short_losscut(prices):
-                print(f"空売りをロスカット: guild={guild_id} user={user_id} 損失={loss:,}")
+            for guild_id, user_id, symbol, side, loss in self.eco.margin_losscut(prices):
+                print(f"{Economy.SIDE_NAME[side]}をロスカット: guild={guild_id} user={user_id} {symbol} 損失={loss:,}")
             self.eco.market_prune(time.time() - KEEP_DAYS * 86400)
             self.eco.prune_chart_posts(time.time() - KEEP_DAYS * 86400)
         except Exception as exc:
@@ -394,19 +394,22 @@ class MarketCog(commands.Cog):
         await self._trade(interaction, run)
 
     async def _cover(self, interaction, symbol: str, lots, ratio) -> None:
-        """空売りの買い戻し（決済）。枚数か割合で指定する。どちらも省略すると全部。"""
+        await self._margin_close(interaction, "short", symbol, lots, ratio)
+
+    async def _margin_close(self, interaction, side: str, symbol: str, lots, ratio) -> None:
+        """信用取引の決済（空売りは買い戻し、信用買いは売り戻し）。枚数か割合で指定する。どちらも省略すると全部。"""
         if await self._reject_lots_and_ratio(interaction, lots, ratio):
             return
 
-        sym = market.BY_KEY[symbol]
+        sym, label = market.BY_KEY[symbol], Economy.SIDE_NAME[side]
+        verb = "買い戻し" if side == "short" else "売り戻し"
+        cannot = "買い戻せません" if side == "short" else "売り戻せません"
 
         async def run(uid):
-            have, entry_value, margin = self.g(interaction).short_position(uid, sym.key)
+            have, entry_value, margin = self.g(interaction).margin_position(uid, sym.key, side)
             if have <= 0:
                 return await interaction.response.send_message(
-                    embed=ui.error_embed(
-                        "買い戻せません", f"{sym.name}の空売りを建てていません。`/証券 注文` で建てられます。"
-                    ),
+                    embed=ui.error_embed(cannot, f"{sym.name}の{label}を建てていません。`/証券 注文` で建てられます。"),
                     ephemeral=True,
                 )
             units = self._units_from(have, lots, ratio)
@@ -415,27 +418,33 @@ class MarketCog(commands.Cog):
             reply = await self._confirmed_reply(
                 interaction,
                 self._worth(have, units, price) >= CONFIRM_FROM,
-                "買い戻しますか？",
-                f"**{shown}** を買い戻して、空売りを閉じます。\n\n{self._short_position(have, entry_value, margin, price)}",
-                "買い戻す",
+                f"{verb}ますか？",
+                f"**{shown}** を{verb}て、{label}を閉じます。\n\n{self._margin_position(side, have, entry_value, margin, price)}",
+                f"{verb}る",
             )
             if reply is None:
                 return
             price = self._price(sym.key)
-            res = self.g(interaction).short_close(uid, units, price, sym.key)
+            res = self.g(interaction).margin_close(uid, side, units, price, sym.key)
             if not res.ok:
-                return await reply(embed=ui.error_embed("買い戻せませんでした", res.reason), ephemeral=True)
-            left, left_entry, left_margin = self.g(interaction).short_position(uid, sym.key)
+                return await reply(embed=ui.error_embed(f"{cannot[:-2]}ませんでした", res.reason), ephemeral=True)
+            left, left_entry, left_margin = self.g(interaction).margin_position(uid, sym.key, side)
             rest = (
-                f"\n\n残りの建玉\n{self._short_position(left, left_entry, left_margin, price)}"
+                f"\n\n残りの建玉\n{self._margin_position(side, left, left_entry, left_margin, price)}"
                 if left > 0
-                else "\n空売りを全部閉じました。"
+                else f"\n{label}を全部閉じました。"
+            )
+            debt = self.g(interaction).debt(uid)
+            owed = (
+                f"\n⚠️ 担保を超える損失は、手元の資産から取り立てられました（借金 {ui.pelica(debt)}）。"
+                if debt > 0
+                else ""
             )
             await reply(
                 embed=ui.embed(
-                    f"{sym.name}を買い戻しました（空売りの決済）",
+                    f"{sym.name}を{verb}ました（{label}の決済）",
                     f"**{market.lots(res.units)}**（価格 {market.pel(price)}）\n"
-                    f"戻ってきた額: {ui.pelica(res.money)}（担保 + 損益）\n損益: **{res.profit:+,}ペリカ**\n残高: **{ui.pelica(res.balance)}**{rest}",
+                    f"戻ってきた額: {ui.pelica(res.money)}（担保 + 損益）\n損益: **{res.profit:+,}ペリカ**\n残高: **{ui.pelica(res.balance)}**{owed}{rest}",
                     ui.OK if res.profit >= 0 else ui.ERROR,
                 )
             )
@@ -443,15 +452,27 @@ class MarketCog(commands.Cog):
         await self._trade(interaction, run)
 
     @staticmethod
-    def _short_position(units: int, entry_value: float, margin: int, price: float) -> str:
-        """空売りの建玉の状態（建値・いまの価格・損益・担保・ロスカットされる価格）。"""
+    def _margin_position(side: str, units: int, entry_value: float, margin: int, price: float) -> str:
+        """信用取引の建玉の状態（建値・いまの価格・損益・担保）。強制決済は口座ぜんたいの維持率で決まる。"""
         avg = entry_value * market.UNIT / units
-        pnl = Economy.short_pnl(units, entry_value, price)
-        pct = (avg - price) / avg * 100
-        cut = (entry_value + Economy.LOSSCUT * margin) * market.UNIT / units
+        pnl = Economy.margin_pnl(side, units, entry_value, price)
+        pct = (avg - price) / avg * 100 if side == "short" else (price - avg) / avg * 100
+        hint = "下がると利益" if side == "short" else "上がると利益"
         return (
-            f"建てている: **{market.lots(units)}**\n建値 {market.fmt(avg)} → いま {market.fmt(price)}　{'🔺' if pct >= 0 else '🔻'}**{pct:+.1f}%**（下がると利益）\n"
-            f"含み損益: **{pnl:+,}ペリカ**　担保: {ui.pelica(margin)}\n⚠️ 価格が **{market.fmt(cut)}** 以上になると強制決済（ロスカット）"
+            f"建てている: **{market.lots(units)}**\n建値 {market.fmt(avg)} → いま {market.fmt(price)}　{'🔺' if pct >= 0 else '🔻'}**{pct:+.1f}%**（{hint}）\n"
+            f"含み損益: **{pnl:+,}ペリカ**　担保: {ui.pelica(margin)}"
+        )
+
+    @staticmethod
+    def margin_ratio_text(status: dict) -> str:
+        """口座の維持率の表示（🟢 150%以上 / 🟡 強制決済ラインの手前 / 🔴 強制決済の対象）。建玉がなければ空文字。"""
+        ratio = status["ratio"]
+        if ratio is None:
+            return ""
+        mark = "🟢" if ratio >= 1.5 else "🟡" if ratio >= market.OPEN_RATIO else "🔴"
+        return (
+            f"{mark} **口座の維持率 {ratio:.0%}**　有効証拠金 {ui.pelica(int(status['equity']))} ÷ 必要証拠金 {ui.pelica(math.ceil(status['required']))}\n"
+            f"（{market.LOSSCUT_RATIO:.0%} を下回ると、損の大きい建玉から強制決済。現物・債券は担保に数えます）"
         )
 
     @staticmethod
@@ -513,11 +534,23 @@ class MarketCog(commands.Cog):
     async def _short(
         self, interaction: discord.Interaction, symbol: str, lots=None, amount: Optional[int] = None, leverage: int = 1
     ) -> None:
-        """空売り（売り建て）。担保 = 総額 ÷ レバレッジ を預ける。枚数か金額（売り建てる総額）で指定する。"""
+        await self._margin_order(interaction, "short", symbol, lots, amount, leverage)
+
+    async def _margin_order(
+        self,
+        interaction: discord.Interaction,
+        side: str,
+        symbol: str,
+        lots=None,
+        amount: Optional[int] = None,
+        leverage: int = 1,
+    ) -> None:
+        """信用取引（空売り＝売り建て、信用買い＝買い建て）。担保 = 総額 ÷ レバレッジ を預ける。枚数か金額（建てる総額）で指定する。"""
+        label = Economy.SIDE_NAME[side]
         if (lots is None) == (amount is None):
             return await interaction.response.send_message(
                 embed=ui.error_embed(
-                    "どちらか1つを指定してください", "空売りする量は、「枚数」か「金額」のどちらか一方で指定します。"
+                    "どちらか1つを指定してください", f"{label}する量は、「枚数」か「金額」のどちらか一方で指定します。"
                 ),
                 ephemeral=True,
             )
@@ -534,34 +567,38 @@ class MarketCog(commands.Cog):
             if units < 1:
                 return await interaction.response.send_message(
                     embed=ui.error_embed(
-                        "空売りできません", "その金額では 0.001枚にもなりません。金額を増やしてください。"
+                        f"{label}できません", "その金額では 0.001枚にもなりません。金額を増やしてください。"
                     ),
                     ephemeral=True,
                 )
             notional = units * price / market.UNIT
             margin = math.ceil(round(notional / leverage, 6))
+            direction = "売り建て" if side == "short" else "買い建て"
+            gain = "下がると利益、上がると損失" if side == "short" else "上がると利益、下がると損失"
             reply = await self._confirmed_reply(
                 interaction,
                 notional >= CONFIRM_FROM,
-                "空売りしますか？",
-                f"**{sym.name}** を、いまの価格 **{market.pel(price)}** で、**{market.lots(units)}**（約 {ui.pelica(int(notional))}）を売り建てます。\n"
+                f"{label}しますか？",
+                f"**{sym.name}** を、いまの価格 **{market.pel(price)}** で、**{market.lots(units)}**（約 {ui.pelica(int(notional))}）を{direction}ます。\n"
                 f"レバレッジ **{leverage}倍**・担保 **{ui.pelica(margin)}**\n"
-                f"価格が下がると利益、上がると損失です。損失が担保の{int(Economy.LOSSCUT * 100)}%になると強制決済されます。",
-                "空売りする",
+                f"価格が{gain}です。口座ぜんたいの維持率が {market.LOSSCUT_RATIO:.0%} を下回ると、損の大きい建玉から強制決済されます。",
+                f"{label}する",
             )
             if reply is None:
                 return
             price = self._price(sym.key)
             units = units_at(price)  # 確認を待つ間に動いた価格で、確定する
-            res = self.g(interaction).short_open(uid, units, price, leverage, sym.key)
+            eco = self.g(interaction)
+            res = (eco.short_open if side == "short" else eco.long_open)(uid, units, price, leverage, sym.key)
             if not res.ok:
-                return await reply(embed=ui.error_embed("空売りできませんでした", res.reason), ephemeral=True)
-            have, entry_value, margin_all = self.g(interaction).short_position(uid, sym.key)
+                return await reply(embed=ui.error_embed(f"{label}できませんでした", res.reason), ephemeral=True)
+            have, entry_value, margin_all = eco.margin_position(uid, sym.key, side)
             await reply(
                 embed=ui.ok_embed(
-                    f"{sym.name}を空売りしました",
+                    f"{sym.name}を{label}しました",
                     f"**{market.lots(res.units)}**（価格 {market.pel(price)}・{leverage}倍）\n"
-                    f"預けた担保: {ui.pelica(res.money)}\n残高: **{ui.pelica(res.balance)}**\n\n{self._short_position(have, entry_value, margin_all, price)}\n\n"
+                    f"預けた担保: {ui.pelica(res.money)}\n残高: **{ui.pelica(res.balance)}**\n\n{self._margin_position(side, have, entry_value, margin_all, price)}\n\n"
+                    f"{self.margin_ratio_text(eco.margin_status(uid, self._prices()))}\n"
                     "閉じるには `/証券 保有` のボタンか、`/証券 決済` を使います。",
                 )
             )
@@ -569,18 +606,19 @@ class MarketCog(commands.Cog):
         await self._trade(interaction, run)
 
     # ------------------------------ 注文 ------------------------------ #
-    @group.command(name="注文", description="買う・空売り・債券を買う（銘柄と金額を選ぶだけ）")
+    @group.command(name="注文", description="買う・信用買い・空売り・債券を買う（銘柄と金額を選ぶだけ）")
     @app_commands.rename(symbol="銘柄", amount="金額", order_type="注文種別", leverage="レバレッジ")
     @app_commands.describe(
         symbol="買う銘柄か債券",
-        amount="使うペリカ（空売りは、売り建てる額）",
+        amount="使うペリカ（信用買い・空売りは、建てる総額）",
         order_type="省略すると現物買い（債券は現物買いのみ）",
-        leverage="空売りの倍率（省略で1倍。大きいほど損益が大きく、強制決済されやすい）",
+        leverage="信用買い・空売りの倍率（省略で1倍。大きいほど損益が大きく、強制決済されやすい）",
     )
     @app_commands.choices(
         symbol=ORDER_CHOICES,
         order_type=[
             app_commands.Choice(name="現物買い", value="spot"),
+            app_commands.Choice(name="信用買い", value="long"),
             app_commands.Choice(name="空売り", value="short"),
         ],
         leverage=[app_commands.Choice(name=f"{n}倍", value=n) for n in Economy.SHORT_LEVERAGES],
@@ -599,15 +637,19 @@ class MarketCog(commands.Cog):
         if symbol.value.startswith(BOND_PREFIX):
             if kind != "spot" or lev != 1:
                 return await interaction.response.send_message(
-                    embed=ui.error_embed("債券は現物買いだけです", "債券には、空売りもレバレッジもありません。"),
+                    embed=ui.error_embed(
+                        "債券は現物買いだけです", "債券には、信用買いも空売りも、レバレッジもありません。"
+                    ),
                     ephemeral=True,
                 )
             return await self._bond_buy(interaction, symbol.value[len(BOND_PREFIX) :], amount)
-        if kind == "short":
-            return await self._short(interaction, symbol.value, amount=amount, leverage=lev)
+        if kind in ("short", "long"):
+            return await self._margin_order(interaction, kind, symbol.value, amount=amount, leverage=lev)
         if lev != 1:
             return await interaction.response.send_message(
-                embed=ui.error_embed("現物買いにレバレッジはありません", "レバレッジは、空売りのときだけ選べます。"),
+                embed=ui.error_embed(
+                    "現物買いにレバレッジはありません", "レバレッジは、信用買いと空売りのときだけ選べます。"
+                ),
                 ephemeral=True,
             )
         if amount > 1_000_000:
@@ -618,12 +660,13 @@ class MarketCog(commands.Cog):
 
     # ------------------------------ 保有 ------------------------------ #
     def positions(self, uid: int, guild_id: int) -> list:
-        """決済できる持ち物 [(コード, ボタンの名前), ...]。コードは spot:銘柄 / short:銘柄 / bond:番号。"""
+        """決済できる持ち物 [(コード, ボタンの名前), ...]。コードは spot:銘柄 / long:銘柄 / short:銘柄 / bond:番号。"""
         eco, out = self.bot.economy.for_guild(guild_id), []
         for symbol, _units, _cost in eco.holdings(uid):
             out.append((f"spot:{symbol}", f"{market.BY_KEY[symbol].emoji} {market.BY_KEY[symbol].name} 全売却"))
-        for symbol, *_ in eco.short_positions(uid):
-            out.append((f"short:{symbol}", f"{market.BY_KEY[symbol].emoji} {market.BY_KEY[symbol].name} 空売り全決済"))
+        for side, symbol, *_ in eco.margin_positions(uid):
+            name = market.BY_KEY[symbol]
+            out.append((f"{side}:{symbol}", f"{name.emoji} {name.name} {Economy.SIDE_NAME[side]}全決済"))
         for r in eco.bond_list(uid)["active"]:
             k = bonds.KINDS[r["kind"]]
             if k.cancel_penalty is not None:
@@ -635,8 +678,8 @@ class MarketCog(commands.Cog):
         kind, _, target = code.partition(":")
         if kind == "spot" and target in market.BY_KEY:
             return await self._sell(interaction, target, None, ratio)
-        if kind == "short" and target in market.BY_KEY:
-            return await self._cover(interaction, target, None, ratio)
+        if kind in ("short", "long") and target in market.BY_KEY:
+            return await self._margin_close(interaction, kind, target, None, ratio)
         if kind == "bond" and target.isdigit():
             return await self._bond_cancel(interaction, int(target))
         await interaction.response.send_message(
@@ -647,13 +690,15 @@ class MarketCog(commands.Cog):
         eco = self.bot.economy.for_guild(guild_id)
         eco.bond_settle(time.time(), RNG)  # 満期の分を先に入金する
         spots = {symbol: (units, cost) for symbol, units, cost in eco.holdings(uid)}
-        shorts = {symbol: (units, entry, margin) for symbol, units, entry, margin in eco.short_positions(uid)}
+        margins = {
+            (side, symbol): (units, entry, margin) for side, symbol, units, entry, margin in eco.margin_positions(uid)
+        }
         data = eco.bond_list(uid)
-        if not spots and not shorts and not data["active"] and not data["done"]:
+        if not spots and not margins and not data["active"] and not data["done"]:
             return ui.embed("💼 証券", "まだ持っていません。`/証券 注文` で買えます。", ui.INFO)
         parts, total = [], 0
         for sym in market.SYMBOLS:
-            if sym.key not in spots and sym.key not in shorts:
+            if sym.key not in spots and (("long", sym.key) not in margins) and (("short", sym.key) not in margins):
                 continue
             price = self._price(sym.key)
             lines = [f"{sym.emoji} **{sym.name}**　価格 {market.pel(price)}"]
@@ -666,10 +711,13 @@ class MarketCog(commands.Cog):
                     f"保有: **{market.lots(units)}**　評価額 **{ui.pelica(value)}**（売ったときの手取り）\n"
                     f"買った額 {ui.pelica(cost)}　損益 **{'+' if diff >= 0 else ''}{diff:,}ペリカ**"
                 )
-            if sym.key in shorts:
-                units, entry, margin = shorts[sym.key]
-                lines.append(f"📉 **空売り**\n{self._short_position(units, entry, margin, price)}")
-                total += Economy.short_pnl(units, entry, price)
+            for side, icon in (("long", "📈"), ("short", "📉")):
+                if (side, sym.key) in margins:
+                    units, entry, margin = margins[(side, sym.key)]
+                    lines.append(
+                        f"{icon} **{Economy.SIDE_NAME[side]}**\n{self._margin_position(side, units, entry, margin, price)}"
+                    )
+                    total += Economy.margin_pnl(side, units, entry, price)
             parts.append("\n".join(lines))
         if data["active"]:
             lines = []
@@ -679,6 +727,9 @@ class MarketCog(commands.Cog):
                     f"`#{r['id']}` {k.emoji} {k.name} 元本 {ui.pelica(r['principal'])} → 満期 {due_text(r['due'])}（受取 {ui.pelica(bonds.maturity_payout(k, r['principal']))}）"
                 )
             parts.append("🏦 **債券**\n" + "\n".join(lines))
+        ratio_text = self.margin_ratio_text(eco.margin_status(uid, self._prices())) if margins else ""
+        if ratio_text:
+            parts.append(ratio_text)
         e = ui.embed(
             "💼 証券", "\n\n".join(parts) or "いま持っている銘柄はありません。", ui.OK if total >= 0 else ui.ERROR
         )
@@ -689,7 +740,7 @@ class MarketCog(commands.Cog):
         )
         return e
 
-    @group.command(name="保有", description="現物・空売り・債券をまとめて見る（ボタンで、すぐ決済できる）")
+    @group.command(name="保有", description="現物・信用取引・債券をまとめて見る（ボタンで、すぐ決済できる）")
     async def holdings(self, interaction: discord.Interaction):
         uid, gid = interaction.user.id, interaction.guild.id
         embed = self.holdings_embed(uid, gid)

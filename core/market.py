@@ -107,6 +107,23 @@ def next_prices(prices: dict, rng: random.Random) -> tuple:
     return out, event
 
 
+# ---- クロスマージン（口座ぜんたいの証拠金）----
+RISK_K = 20.0  # 必要証拠金 = RISK_K × √(wᵀΣw)。1分の値動きの約2.6σ を、約60分ぶん（2.6×√60≒20）見込んだ額
+OPEN_RATIO = 1.3  # 新しく建てる（または担保を手放す）とき、この維持率を下回るなら受け付けない
+LOSSCUT_RATIO = 1.0  # 維持率がこれを下回ったら、損失の大きい建玉から順に強制決済する
+COLLATERAL_HAIRCUT = {"spot": 0.8, "normal": 0.95, "junk": 0.5}  # 現物・通常債・ジャンク債を、担保として数える掛目
+
+
+def required_margin(exposure: dict) -> float:
+    """必要証拠金。exposure は {銘柄: 符号つきの建玉額（買い建てが＋、空売りが−）}。
+
+    RISK_K × √(wᵀΣw)。相関のある建玉（CSの買いとTEIOの売りなど）は、互いの値動きを打ち消すので、必要額が小さくなる。
+    """
+    w = [exposure.get(s.key, 0.0) for s in SYMBOLS]
+    var = sum(w[i] * COVARIANCE[i][j] * w[j] for i in range(len(w)) for j in range(len(w)))
+    return RISK_K * math.sqrt(max(0.0, var))
+
+
 def fmt(price: float) -> str:
     """価格の表示。100未満は小数2桁、それ以上は整数。"""
     return f"{price:,.2f}" if price < 100 else f"{price:,.0f}"

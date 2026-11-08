@@ -117,18 +117,19 @@ class DebtMixin:
         return take
 
     def _seize_assets(self, user_id: int, need: int, reason: str) -> int:
-        """need を満たすまで、現金 → 空売り → CSトークン → 通常債（古い順）の順に強制執行する。充てた額を返す。"""
+        """need を満たすまで、現金 → 空売り・信用買い → 現物 → 通常債（古い順）の順に強制執行する。充てた額を返す。"""
         covered = self._take_cash(user_id, need, reason)
         if covered >= need:
             return covered
         prices = self.latest_prices()
-        for symbol, units, _, _ in self.short_positions(user_id):  # 空売りを、銘柄の順に強制決済
+        for side, symbol, *_ in self.margin_positions(user_id):  # 空売り・信用買いを、銘柄の順に強制決済
             if covered >= need or symbol not in prices:
                 continue
-            result = self._short_close_locked(user_id, None, prices[symbol], "強制執行:空売り決済", symbol)
+            name = self.SIDE_NAME[side]
+            result = self._margin_close_locked(user_id, side, None, prices[symbol], f"強制執行:{name}決済", symbol)
             self._note(
                 user_id,
-                f"💥 {market_mod.BY_KEY[symbol].name}の空売りが強制決済されました（戻り {result.money:,}ペリカ）。",
+                f"💥 {market_mod.BY_KEY[symbol].name}の{name}が強制決済されました（戻り {result.money:,}ペリカ）。",
             )
             covered += self._take_cash(user_id, need - covered, reason)
         for symbol, units, _ in self.holdings(user_id):  # 現物を、銘柄の順に差し押さえ
@@ -227,9 +228,11 @@ class DebtMixin:
         """
         total = 0
         prices = self.latest_prices()
-        for symbol, _, _, _ in self.short_positions(user_id):
+        for side, symbol, *_ in self.margin_positions(user_id):
             if symbol in prices:
-                self._short_close_locked(user_id, None, prices[symbol], "破産:空売り決済", symbol)
+                self._margin_close_locked(
+                    user_id, side, None, prices[symbol], f"破産:{self.SIDE_NAME[side]}決済", symbol
+                )
         for symbol, _, _ in self.holdings(user_id):
             if symbol in prices:
                 self._crypto_sell_locked(user_id, None, prices[symbol], symbol)

@@ -143,6 +143,15 @@ def create_tables(conn: sqlite3.Connection) -> None:
             margin      INTEGER NOT NULL,         -- 預けた担保
             PRIMARY KEY (guild_id, user_id, symbol)
         );
+        CREATE TABLE IF NOT EXISTS crypto_long (       -- 銘柄ごとの信用買い（レバレッジをかけた買い建て。空売りと同じ形）
+            guild_id    INTEGER NOT NULL,
+            user_id     INTEGER NOT NULL,
+            symbol      TEXT    NOT NULL,
+            units       INTEGER NOT NULL,         -- 買い建てた口数
+            entry_value REAL NOT NULL,            -- 建てたときの総額（口数×価格）。損益 = いまの総額 − これ
+            margin      INTEGER NOT NULL,         -- 預けた担保
+            PRIMARY KEY (guild_id, user_id, symbol)
+        );
         CREATE TABLE IF NOT EXISTS quiz_questions (     -- クイズの問題（全サーバー共通。持ち主が登録する）
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             question    TEXT    NOT NULL,

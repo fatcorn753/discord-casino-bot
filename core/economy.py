@@ -483,7 +483,7 @@ class Economy(
                 "SELECT user_id, balance - debt AS balance FROM users WHERE guild_id=?", (self._g(),)
             ).fetchall()
             values = self.crypto_values()
-            for uid, eq in self.short_equity().items():
+            for uid, eq in self.margin_equity().items():
                 values[uid] = values.get(uid, 0) + eq
             for uid, held in self.bond_values().items():
                 values[uid] = values.get(uid, 0) + held  # 預けている債券の元本も総資産

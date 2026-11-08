@@ -6,6 +6,7 @@
 import random
 
 from core import bonds as bonds_mod
+from core import market as market_mod
 
 
 class BondMixin:
@@ -87,6 +88,19 @@ class BondMixin:
     def bond_cancel(self, user_id: int, bond_id: int) -> tuple:
         """途中解約（通常債だけ）。(成功か, 理由か返した額) を返す。"""
         with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT kind, principal FROM bonds WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
+                (bond_id, self._g(), user_id),
+            ).fetchone()
+            if row is not None and self._margin_rows(user_id):
+                drop = row["principal"] * market_mod.COLLATERAL_HAIRCUT.get(row["kind"], 0.0)
+                after = self._margin_status_locked(user_id, self.latest_prices(), drop_collateral=drop)
+                if after["ratio"] is not None and after["ratio"] < market_mod.OPEN_RATIO:
+                    return (
+                        False,
+                        f"信用取引の担保になっているので、売れません（売ると維持率が {after['ratio']:.0%}・{market_mod.OPEN_RATIO:.0%} 以上が必要）。"
+                        "先に建玉を決済してください。",
+                    )
             return self._bond_cancel_locked(user_id, bond_id)
 
     def _bond_cancel_locked(self, user_id: int, bond_id: int) -> tuple:
