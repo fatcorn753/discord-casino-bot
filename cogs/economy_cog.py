@@ -265,8 +265,8 @@ class EconomyCog(commands.Cog):
         ]
         if result["seed"]:
             lines.append(f"🕴️ 帝愛が種銭 **{ui.pelica(result['seed'])}** を貸し付けました（借金に加わります）。")
-        await interaction.followup.send(
-            embed=ui.embed("🔴 自己破産しました", "\n".join(lines), ui.ERROR), ephemeral=True
+        await interaction.followup.send(  # 公開（見せ場）。誰が破産したかも出す
+            embed=ui.embed(f"🔴 {interaction.user.display_name} が自己破産しました", "\n".join(lines), ui.ERROR)
         )
         eco.take_notices(uid)
         shop_cog = interaction.client.get_cog("ShopCog")

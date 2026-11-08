@@ -146,7 +146,16 @@ class StakeModal(discord.ui.Modal):
                 else f"<@{self.target_id}> が**破産猶予の時間切れで強制破産**したときに配当が出ます。本人が自分から破産しても、出ません。"
             )
         )
-        await interaction.response.send_message(embed=ui.ok_embed("CDS を買いました", text), ephemeral=True)
+        if mine:  # 自分への保険は、戦略が見えるので、本人だけ
+            return await interaction.response.send_message(embed=ui.ok_embed("CDS を買いました", text), ephemeral=True)
+        await interaction.response.send_message(  # 他人への CDS は公開（「あいつの破産に賭けた」）
+            embed=ui.embed(
+                f"💀 {interaction.user.display_name} が、<@{self.target_id}> の破産に賭けた",
+                f"掛け金 **{ui.pelica(int(raw))}**・**{result}倍**（的中すれば約 {ui.pelica(int(int(raw) * result))}）。\n"
+                f"<@{self.target_id}> が**破産猶予の時間切れで強制破産**したときだけ配当が出ます。",
+                ui.ERROR,
+            )
+        )
 
 
 class TargetSelect(discord.ui.UserSelect):
@@ -212,12 +221,16 @@ class TeiaiPanel(discord.ui.View):
     @discord.ui.button(label="種銭を借りる", style=discord.ButtonStyle.secondary)
     async def seed(self, interaction: discord.Interaction, button: discord.ui.Button):
         ok, result = self.eco(interaction).borrow_seed(interaction.user.id)
-        embed = (
-            ui.ok_embed("種銭を借りました", f"帝愛から **{ui.pelica(result)}** を借りました（借金に加わります）。")
-            if ok
-            else ui.error_embed("借りられません", result)
-        )
         self.eco(interaction).take_notices(interaction.user.id)
+        if ok:  # 成功は公開（「💸 ○○ が帝愛から種銭を借りた」）。失敗は本人だけ
+            return await interaction.response.send_message(
+                embed=ui.embed(
+                    f"💸 {interaction.user.display_name} が帝愛から種銭を借りました",
+                    f"**{ui.pelica(result)}** を借りました（借金に加わります）。「これで取り返してこい…！」",
+                    ui.GOLD,
+                )
+            )
+        embed = ui.error_embed("借りられません", result)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)

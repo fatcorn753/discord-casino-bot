@@ -1213,8 +1213,10 @@ class MarketCog(commands.Cog):
         ok, result = self.g(interaction).bond_cancel(interaction.user.id, bond_id)
         if not ok:
             return await interaction.response.send_message(embed=ui.error_embed("売れません", result), ephemeral=True)
-        await interaction.response.send_message(
-            embed=ui.ok_embed("債券を売りました", f"{ui.pelica(result)}を残高に戻しました。"), ephemeral=True
+        await interaction.response.send_message(  # 公開（ほかの売買の結果と同じ）
+            embed=ui.ok_embed(
+                f"{interaction.user.display_name} が債券を売りました", f"{ui.pelica(result)}を残高に戻しました。"
+            )
         )
 
     # ------------------------------ 出したチャートの自動更新 ------------------------------ #
