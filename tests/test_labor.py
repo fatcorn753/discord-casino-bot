@@ -1,4 +1,4 @@
-"""地下作業（クリッカー）: 計算・疲労・事故・上限・受け取り・強化・画面。"""
+"""地下作業（クリッカー）: 計算・疲労・事故・受け取り・強化・画面。"""
 
 import asyncio
 import random
@@ -41,7 +41,6 @@ def click(eco, n, rng=None, start=T0, step=1.5):
 
 def test_pure_numbers():
     assert lab.pay_per_click(0) == 10 and lab.pay_per_click(5) == 30 and lab.pay_per_click(99) == 30
-    assert lab.daily_cap(0, 0, 0) == 1_000 and lab.daily_cap(5, 5, 5) == 2_500
     assert lab.pay_rate(0) == 1.0 and abs(lab.pay_rate(100) - lab.MIN_PAY_RATE) < 1e-9
     assert lab.fatigue_gain(5) == 1.0 and lab.accident_chance(5) == pytest.approx(0.005)
     assert lab.fatigue_now(50, 0, 100) == 30 and lab.fatigue_now(10, 0, 1000) == 0
@@ -104,27 +103,12 @@ def test_rest_recovers_and_blocks_clicks(eco):
     assert eco.labor_rest(U, T0 + 10**6, DAY) == (False, "疲れていません。")
 
 
-def test_daily_cap_and_reset_next_day(eco):
-    eco._conn.execute(
-        "INSERT OR IGNORE INTO labor (guild_id, user_id, day, day_earned) VALUES (?, ?, ?, ?)",
-        (eco._g(), U, DAY, lab.DAILY_CAP - 5),
-    )
-    r = eco.labor_click(U, T0, DAY, NoAccident())
-    assert r["ok"] and r["pay"] == 5  # 上限までしか入らない
-    full = eco.labor_click(U, T0 + 2, DAY, NoAccident())
-    assert not full["ok"] and "上限" in full["reason"]
-    assert eco.labor_click(U, T0 + 4, "2026-11-11", NoAccident())["ok"]  # 日が変われば、また稼げる
-    eco.credit(U, 500, "テスト")
-    eco.labor_upgrade(U, "helmet", T0 + 6, "2026-11-11")
-    assert eco.labor_state(U, T0 + 6, "2026-11-11")["cap"] == lab.DAILY_CAP + lab.CAP_PER_LEVEL  # 強化で、上限が増える
-
-
-def test_rich_users_cannot_work(eco):
-    eco.set_balance(U, lab.BALANCE_LIMIT + 1, "テスト")
-    r = eco.labor_click(U, T0, DAY, NoAccident())
-    assert not r["ok"] and "超えている" in r["reason"]
-    eco.set_balance(U, lab.BALANCE_LIMIT, "テスト")
-    assert eco.labor_click(U, T0 + 2, DAY, NoAccident())["ok"]
+def test_no_daily_cap_or_balance_limit_and_today_total_resets(eco):
+    eco.set_balance(U, 1_000_000, "テスト")  # 金持ちも、働ける
+    for i in range(300):  # 1日に、いくらでも稼げる（疲労で、稼ぎの速さが頭打ちになるだけ）
+        assert eco.labor_click(U, T0 + i * 1.5, DAY, NoAccident())["ok"]
+    assert eco.labor_state(U, T0 + 500, DAY)["day_earned"] > 1_000
+    assert eco.labor_state(U, T0 + 500, "2026-11-11")["day_earned"] == 0  # 日が変われば、「今日の稼ぎ」は戻る
 
 
 def test_income_is_withheld_for_debt(eco):
@@ -149,7 +133,7 @@ def test_upgrade_costs_pelica_and_changes_numbers(eco):
 
 def test_state_does_not_create_rows(eco):
     s = eco.labor_state(999, T0, DAY)
-    assert s["balance"] == 0 and s["left"] == lab.DAILY_CAP
+    assert s["balance"] == 0 and s["day_earned"] == 0
     assert eco._conn.execute("SELECT COUNT(*) c FROM labor WHERE user_id=999").fetchone()["c"] == 0
 
 
@@ -191,4 +175,4 @@ def test_panel_work_and_collect_update_message(eco):
     asyncio.run(view._collect(it))
     assert eco.balance(U) == 10 and eco.labor_state(U, 0, day)["pot"] == 0
     embed = labor_cog.panel_embed(view.state)
-    assert "疲労" in embed.description and "今日の残り枠" in embed.description
+    assert "疲労" in embed.description and "今日の稼ぎ" in embed.description

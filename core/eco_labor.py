@@ -1,7 +1,7 @@
 """地下作業（Economy に混ぜ込む部品）。クリッカー。数字と計算は core/labor.py、表は core/schema.py の labor。
 
 稼ぎは、まず「受け取る前の稼ぎ（pot）」に貯まる。AUTO_COLLECT に届くか、受け取りを押すと、残高に移る（収入なので、借金があれば天引き）。
-1日の上限は、pot に貯めた時点で数える。手元が BALANCE_LIMIT を超える人は、押せない（受け取りと工具の強化はできる）。
+上限や、手元の制限はない。day_earned は、画面に出す「今日の稼ぎ」。
 """
 
 import random
@@ -76,8 +76,6 @@ class LaborMixin:
                 "SELECT balance FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
             ).fetchone()
             row["balance"] = bal["balance"] if bal else 0
-            row["cap"] = labor_mod.daily_cap(row["pick"], row["glove"], row["helmet"])
-            row["left"] = max(0, row["cap"] - row["day_earned"])
             row["resting"] = max(0.0, row["rest_until"] - now)
             return row
 
@@ -90,23 +88,12 @@ class LaborMixin:
         with self._lock, self._conn:
             self._ensure(user_id)
             row = self._labor_row(user_id, now, day)
-            if self._balance(user_id) > labor_mod.BALANCE_LIMIT:
-                return {
-                    "ok": False,
-                    "reason": f"手元が {labor_mod.BALANCE_LIMIT:,} ペリカを超えている人は、働けません。",
-                }
             if row["rest_until"] > now:
                 return {"ok": False, "reason": f"休憩中です（あと {row['rest_until'] - now:.0f} 秒）。"}
             if now - row["last_click"] < labor_mod.CLICK_INTERVAL:
                 return {"ok": False, "reason": "押すのが早すぎます。", "quiet": True}
-            cap = labor_mod.daily_cap(row["pick"], row["glove"], row["helmet"])
-            if row["day_earned"] >= cap:
-                return {
-                    "ok": False,
-                    "reason": f"今日の稼ぎの上限（{cap:,}）に達しました。工具を強化すると、上限が増えます。",
-                }
             out = labor_mod.click_outcome(row["pick"], row["glove"], row["helmet"], row["fatigue"], rng)
-            pay = min(out["pay"], cap - row["day_earned"])
+            pay = out["pay"]
             row.update(
                 fatigue=out["fatigue"],
                 last_click=now,

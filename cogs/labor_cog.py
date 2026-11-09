@@ -32,12 +32,10 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
         f"疲労 {lab.bar(fat)} **{fat:.0f}%**（稼ぎ {rate:.0%}）",
         f"1回の稼ぎ **{ui.pelica(lab.click_pay(state['pick'], fat))}**　"
         f"事故 **{lab.accident_chance(state['helmet']):.1%}**",
-        f"今日の残り枠 **{ui.pelica(state['left'])}** / {state['cap']:,}",
+        f"今日の稼ぎ **{ui.pelica(state['day_earned'])}**",
         "",
         "　".join(f"{lab.TOOL_MARK[t]} {lab.TOOL_NAME[t]} Lv{state[t]}" for t in lab.TOOLS),
     ]
-    if state["balance"] > lab.BALANCE_LIMIT:
-        lines += ["", f"手元が {lab.BALANCE_LIMIT:,} ペリカを超えているので、働けません。"]
     e = ui.embed("⛏ 地下作業", "\n".join(x for x in lines if x is not None).strip(), ui.DARK)
     e.set_footer(text="疲労は時間で回復します。工具を強化すると、稼ぎ・疲れにくさ・事故が良くなります。")
     return e
@@ -59,10 +57,7 @@ class LaborView(discord.ui.View):
         self.state = self.eco().labor_state(self.user_id, time.time(), today(self.bot))
         s = self.state
         self.clear_items()
-        can_work = s["balance"] <= lab.BALANCE_LIMIT and s["left"] > 0
-        work = discord.ui.Button(
-            label="働く", emoji="⛏", style=discord.ButtonStyle.primary, row=0, disabled=not can_work
-        )
+        work = discord.ui.Button(label="働く", emoji="⛏", style=discord.ButtonStyle.primary, row=0)
         work.callback = self._work
         rest = discord.ui.Button(label="休憩", emoji="☕", style=discord.ButtonStyle.secondary, row=0)
         rest.callback = self._rest

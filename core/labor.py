@@ -4,7 +4,7 @@
 - 疲労: 押すたびに溜まり、溜まるほど1回の稼ぎが減る。時間で自然に回復する。「休憩」で一気に回復できるが、しばらく押せない
 - 事故: 押すたびに小さな確率で起き、その回の稼ぎが消えて、疲労が増える
 - 工具: ツルハシ（稼ぎ）・手袋（疲労の溜まりにくさ）・ヘルメット（事故の少なさ）を、稼いだペリカで強化する
-インフレを防ぐため、1日の稼ぎに上限があり、手元が多い人は働けない。
+1日の上限や、手元の制限はない（連打は、手間がかかるので、続かない）。稼ぎの速さは、疲労で自然に頭打ちになる。
 """
 
 TOOLS = ("pick", "glove", "helmet")
@@ -29,21 +29,11 @@ CLICK_INTERVAL = 1.0  # 連打の最短間隔（秒）
 REST_SECONDS = 20.0  # 休憩の間、押せない時間
 REST_RECOVER = 30.0  # 休憩で回復する疲労
 
-DAILY_CAP = (
-    1_000  # 1日に稼げる上限（工具なし）。工具を1段強化するごとに CAP_PER_LEVEL ずつ増える（デイリーを超えない程度）
-)
-CAP_PER_LEVEL = 100
-BALANCE_LIMIT = 5_000  # 手元がこれを超える人は、働けない（救済が目的）
 AUTO_COLLECT = 100  # 稼ぎがこの額たまったら、自動で残高に移す（台帳の行を増やしすぎない）
 
 
 def clamp_level(level: int) -> int:
     return max(0, min(MAX_LEVEL, int(level)))
-
-
-def daily_cap(pick: int, glove: int, helmet: int) -> int:
-    """1日に稼げる上限。工具を強化するほど増える（強化が、稼ぎの速さだけでなく、1日の天井も上げる）。"""
-    return DAILY_CAP + CAP_PER_LEVEL * sum(clamp_level(x) for x in (pick, glove, helmet))
 
 
 def pay_per_click(pick: int) -> int:
@@ -85,7 +75,7 @@ def bar(fatigue: float, width: int = 10) -> str:
 
 
 def click_outcome(pick: int, glove: int, helmet: int, fatigue: float, rng) -> dict:
-    """1回押した結果（上限や残高は見ない）。{accident, pay, fatigue}。fatigue は押したあとの疲労。"""
+    """1回押した結果（残高などは見ない）。{accident, pay, fatigue}。fatigue は押したあとの疲労。"""
     if rng.random() < accident_chance(helmet):
         return {"accident": True, "pay": 0, "fatigue": min(FATIGUE_MAX, fatigue + ACCIDENT_FATIGUE)}
     return {
