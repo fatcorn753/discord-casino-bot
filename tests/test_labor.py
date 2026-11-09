@@ -567,3 +567,28 @@ def test_collect_announces_big_ores_publicly(eco, monkeypatch):
     asyncio.run(view._collect(it))
     assert sent and "ダイヤ" in sent[0] and "銅" not in sent[0]
     assert "掘り出し" in it.response.edits[-1]["embed"].description
+
+
+# ------------------------------ 旧契約の返金 ------------------------------ #
+def test_old_contracts_are_refunded_and_cancelled_once_when_the_legacy_column_is_added(tmp_path):
+    path = str(tmp_path / "old.db")
+    e = Economy(path)
+    e.set_balance(U, 10_000, "テスト")
+    for kind in ("craftsman", "craftsman", "apprentice", "foreman"):
+        assert e.labor_hire(U, kind, T0, DAY)[0]
+    balance_after_hiring = e.balance(U)
+    assert balance_after_hiring == 10_000 - 2 * 2_700 - 340 - 1_500
+    e._conn.execute("ALTER TABLE labor_workers DROP COLUMN legacy")  # この列が無かった頃の記録にする
+    e._conn.commit()
+    e.close() if hasattr(e, "close") else None
+
+    again = Economy(path)  # 起動: 列が足され、旧契約の契約料が戻って、解約される
+    assert again.balance(U) == 10_000
+    assert again.labor_state(U, T0, DAY)["workers"] == 0
+    assert any(
+        "契約料の返金" in r["reason"] and r["delta"] == 2 * 2_700 + 340 + 1_500
+        for r in again._conn.execute("SELECT reason, delta FROM ledger WHERE user_id=?", (U,))
+    )
+    assert again.labor_hire(U, "miner", T0, DAY)[0]  # 雇い直せる
+    third = Economy(path)  # 次の起動では、新しい契約は返金されない
+    assert third.labor_state(U, T0, DAY)["miner"] == 1 and third.balance(U) == 10_000 - 1_200

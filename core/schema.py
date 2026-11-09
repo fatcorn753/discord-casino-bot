@@ -186,7 +186,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
             guild_id   INTEGER NOT NULL,
             user_id    INTEGER NOT NULL,
             kind       TEXT NOT NULL,
-            expires_at REAL NOT NULL
+            expires_at REAL NOT NULL,
+            legacy     INTEGER NOT NULL DEFAULT 0   -- 1 = 鉱石版より前の契約（起動時に、契約料を返して解約した）
         );
         CREATE INDEX IF NOT EXISTS labor_workers_owner ON labor_workers (guild_id, user_id);
         CREATE TABLE IF NOT EXISTS seized_items (
@@ -542,6 +543,10 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         if col not in ls:
             conn.execute(f"ALTER TABLE labor ADD COLUMN {col} {ddl}")
     _migrate_labor_counts(conn)
+    if "legacy" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor_workers)")}:
+        conn.execute("ALTER TABLE labor_workers ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0")
+        conn.execute("UPDATE labor_workers SET legacy=1")  # この列を足す前に雇われていた人は、すべて旧ルールの契約
+        _refund_legacy_contracts(conn)
     if "grace_until" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN grace_until REAL")
     ps = {r["name"] for r in conn.execute("PRAGMA table_info(play_state)")}
@@ -620,6 +625,29 @@ def _migrate_labor_counts(conn: sqlite3.Connection, now: float = None) -> None:
             "UPDATE labor SET apprentice=0, miner=0, craftsman=0, foreman=0 WHERE guild_id=? AND user_id=?",
             (r["guild_id"], r["user_id"]),
         )
+
+
+def _refund_legacy_contracts(conn: sqlite3.Connection, now: float = None) -> None:
+    """鉱石版より前に雇った作業員の契約料を、いまの値段で返して、契約を解約する（ルール変更の補償）。列を足したときに、1回だけ動く。"""
+    import time
+
+    from core import labor
+
+    now = time.time() if now is None else now
+    refunds: dict = {}
+    for r in conn.execute("SELECT id, guild_id, user_id, kind FROM labor_workers WHERE legacy=1").fetchall():
+        key = (r["guild_id"], r["user_id"])
+        refunds[key] = refunds.get(key, 0) + labor.CONTRACT_FEE.get(r["kind"], 0)
+    for (guild_id, user_id), amount in refunds.items():
+        row = conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id)).fetchone()
+        if row is not None and amount > 0:
+            after = row["balance"] + amount
+            conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, guild_id, user_id))
+            conn.execute(
+                "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
+                (guild_id, user_id, amount, after, "地下作業:契約料の返金（ルール変更で解約）", now),
+            )
+    conn.execute("DELETE FROM labor_workers WHERE legacy=1")
 
 
 def _add_symbol_columns(conn: sqlite3.Connection) -> None:
