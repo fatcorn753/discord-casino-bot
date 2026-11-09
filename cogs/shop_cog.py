@@ -176,12 +176,16 @@ class ShopView(discord.ui.View):
     def embed(self) -> discord.Embed:
         if self.screen == "inv":
             return self.cog._inventory_embed(self.guild_id, self.user_id)
+        if self.screen == "auction":
+            return self.cog._auction_embed(self.guild_id, self.user_id)
         return self.cog._catalog_embed(self.guild_id, self.user_id, [self.kind] if self.kind else None)
 
     def _build(self) -> None:
         self.clear_items()
         if self.screen == "inv":
             self._build_inventory()
+        elif self.screen == "auction":
+            self._build_auction()
         else:
             self._build_shop()
 
@@ -221,6 +225,42 @@ class ShopView(discord.ui.View):
         go = discord.ui.Button(label="🎒 持ち物", style=discord.ButtonStyle.primary, row=3)
         go.callback = self._to_inventory
         self.add_item(go)
+        auction = discord.ui.Button(label="🕴️ 帝愛の競売", style=discord.ButtonStyle.danger, row=3)
+        auction.callback = self._to_auction
+        self.add_item(auction)
+
+    def _build_auction(self) -> None:
+        eco = self.cog.bot.economy.for_guild(self.guild_id)
+        listed = eco.auction_list()
+        if listed:
+            buy = discord.ui.Select(
+                placeholder="買う品を選ぶ",
+                row=0,
+                options=[
+                    discord.SelectOption(
+                        label=shop.label(shop.BY_ID[e["item_id"]])[:100],
+                        value=e["item_id"],
+                        description=f"{e['price']:,}ペリカ（定価の{e['rate']:.0%}）　残り{e['qty']}",
+                    )
+                    for e in listed[:25]
+                ],
+            )
+            buy.callback = self._on_buy_auction
+            self.add_item(buy)
+            if any(not shop.BY_ID[e["item_id"]].unique for e in listed):
+                qty = discord.ui.Select(
+                    placeholder=f"消耗品の個数（いま {self.qty} 個）",
+                    row=1,
+                    options=[
+                        discord.SelectOption(label=f"{n}個", value=str(n), default=n == self.qty)
+                        for n in range(1, MAX_QTY + 1)
+                    ],
+                )
+                qty.callback = self._on_qty
+                self.add_item(qty)
+        back = discord.ui.Button(label="🛍️ ショップ", style=discord.ButtonStyle.primary, row=3)
+        back.callback = self._to_shop
+        self.add_item(back)
 
     def _build_inventory(self) -> None:
         eco = self.cog.bot.economy.for_guild(self.guild_id)
@@ -281,6 +321,13 @@ class ShopView(discord.ui.View):
         await self.cog.buy_item(
             interaction, interaction.data["values"][0], self.qty if self.kind == shop.CONSUMABLE else 1
         )
+
+    async def _on_buy_auction(self, interaction: discord.Interaction):
+        await self.cog.buy_auction(interaction, interaction.data["values"][0], self.qty)
+
+    async def _to_auction(self, interaction: discord.Interaction):
+        self.screen, self.qty = "auction", 1
+        await self._redraw(interaction)
 
     async def _to_inventory(self, interaction: discord.Interaction):
         self.screen = "inv"
@@ -470,6 +517,83 @@ class ShopCog(commands.Cog):
         e.set_footer(text=f"あなたの残高: {ui.pelica(me['balance'] if me else 0)}")
         return e
 
+    def _auction_embed(self, guild_id: int, user_id: int) -> discord.Embed:
+        """帝愛の競売の棚（破産で差し押さえた品。値段は日ごとに下がる）。"""
+        eco = self.bot.economy.for_guild(guild_id)
+        listed = eco.auction_list()
+        e = ui.embed(
+            "🕴️ 帝愛の競売",
+            "破産で差し押さえた品を、帝愛が売りに出します。**買えるのはカタギだけ**。"
+            f"値段は定価の{teiai.AUCTION_START:.0%}から、1日ごとに{teiai.AUCTION_STEP:.0%}ずつ下がり、{teiai.AUCTION_FLOOR:.0%}で止まります。\n"
+            "売上は、帝愛銀行の収入（預金者の利回り）になります。",
+            ui.GOLD,
+        )
+        if not listed:
+            e.add_field(name="棚", value="いまは、売りに出ている品はありません。", inline=False)
+        else:
+            e.add_field(
+                name="棚",
+                value="\n".join(
+                    f"{shop.label(shop.BY_ID[x['item_id']])} — **{ui.pelica(x['price'])}**（定価の{x['rate']:.0%}）"
+                    + (f" ×{x['qty']}" if not shop.BY_ID[x["item_id"]].unique else "")
+                    for x in listed
+                )[:1024],
+                inline=False,
+            )
+        me = eco.peek_stats(user_id)
+        e.set_footer(text=f"あなたの残高: {ui.pelica(me['balance'] if me else 0)}")
+        return e
+
+    async def buy_auction(self, interaction: discord.Interaction, item_id: str, qty: int = 1):
+        """競売で買う。買い物の間は「プレイ中」にする（buy_item と同じ理由）。"""
+        it = shop.BY_ID.get(item_id)
+        uid = interaction.user.id
+        if it is None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("品が見つかりません", "競売の画面で選んでください。"), ephemeral=True
+            )
+        reason = self.bot.sessions.try_start(uid)
+        if reason:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("いまは買えません", reason), ephemeral=True
+            )
+        try:
+            qty = 1 if it.unique else qty
+            entry = next((x for x in self.g(interaction).auction_list() if x["item_id"] == item_id), None)
+            if entry is None:
+                return await interaction.response.send_message(
+                    embed=ui.error_embed("買えませんでした", "その品は、もう売れてしまいました。"), ephemeral=True
+                )
+            if entry["price"] * min(qty, entry["qty"]) >= CONFIRM_FROM:
+                ok = await confirm_action(
+                    interaction,
+                    "競売で買いますか？",
+                    f"**{shop.label(it)}**"
+                    + (f" ×{qty}" if qty > 1 else "")
+                    + f"\n約 {ui.pelica(entry['price'] * qty)} かかります。",
+                    "買う",
+                )
+                if ok is not True:
+                    return
+                reply = interaction.followup.send
+            else:
+                reply = interaction.response.send_message
+            res = self.g(interaction).auction_buy(uid, item_id, qty)
+            if not res.ok:
+                return await reply(embed=ui.error_embed("買えませんでした", res.reason), ephemeral=True)
+            hint = "「🎒 持ち物」の画面で身につけましょう。" if it.unique else "「🎒 持ち物」の画面で使えます。"
+            await reply(
+                embed=ui.ok_embed(
+                    "競売で買いました",
+                    f"**{shop.label(it)}**"
+                    + (f" ×{qty}" if qty > 1 else "")
+                    + f"\n残高: **{ui.pelica(res.balance)}**\n{hint}",
+                ),
+                ephemeral=True,
+            )
+        finally:
+            self.bot.sessions.end(uid)
+
     # ------------------------------ 購入 ------------------------------ #
     async def buy_item(self, interaction: discord.Interaction, item: str, qty: int = 1):
         """景品を買う。item は ID か名前。消耗品だけ qty 個（1〜MAX_QTY）まとめて買える。"""
@@ -584,6 +708,14 @@ class ShopCog(commands.Cog):
         if it is None or inv.get(it.id, 0) <= 0:
             return await interaction.response.send_message(
                 embed=ui.error_embed("持っていません", "「🎒 持ち物」の画面で確認できます。"), ephemeral=True
+            )
+        if it.id == shop.STREAK_GUARD:
+            return await interaction.response.send_message(
+                embed=ui.ok_embed(
+                    "自動で使われます",
+                    f"**{it.name}** は、持っているだけで、デイリーを受け取れなかった日があったとき、次のデイリーで自動で使われます（1枚で1日ぶん）。",
+                ),
+                ephemeral=True,
             )
         if it.kind == shop.CONSUMABLE:
             if self.bot.sessions.is_active(uid):

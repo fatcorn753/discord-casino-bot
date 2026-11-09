@@ -305,17 +305,21 @@ class DebtMixin:
     def _seize_shop(self, user_id: int) -> int:
         """ショップの持ち物と装備をすべて消して、換金額（購入額の SEIZE_RATE）を返す（現金は動かさない）。"""
         value = 0
+        now = time.time()
         for row in self._conn.execute(
             "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0", (self._g(), user_id)
         ).fetchall():
             item = shop_mod.BY_ID.get(row["item_id"])
             value += (item.price if item else 0) * row["qty"]
+            self._auction_list_locked(row["item_id"], row["qty"], now)  # 差し押さえた品は、帝愛の競売に出る
         prof = self._conn.execute(
             "SELECT daily_boost, insurance FROM profile WHERE guild_id=? AND user_id=?", (self._g(), user_id)
         ).fetchone()
         if prof:  # 使う前の消耗品（有効にしてある分）も、没収する
             value += prof["daily_boost"] * shop_mod.BY_ID[shop_mod.DAILY_DOUBLE].price
             value += prof["insurance"] * shop_mod.BY_ID[shop_mod.INSURANCE].price
+            self._auction_list_locked(shop_mod.DAILY_DOUBLE, prof["daily_boost"], now)
+            self._auction_list_locked(shop_mod.INSURANCE, prof["insurance"], now)
         self._conn.execute("DELETE FROM inventory WHERE guild_id=? AND user_id=?", (self._g(), user_id))
         self._conn.execute(
             "UPDATE profile SET title=NULL, card_color=NULL, card_icon=NULL, skin_dice=NULL, skin_table=NULL, "

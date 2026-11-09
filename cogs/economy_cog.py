@@ -189,6 +189,8 @@ class EconomyCog(commands.Cog):
             )
         next_bonus = Economy.DAILY_BASE + Economy.DAILY_STREAK_BONUS * min(result.streak, Economy.DAILY_STREAK_CAP)
         boost = "🎟️ デイリー2倍券を使った！\n" if result.boosted else ""
+        if result.guarded:
+            boost += f"🛡️ 連続守り券を **{result.guarded}枚** 使って、連続ログインをつないだ！\n"
         debt_line = ""
         if result.skimmed:
             debt_line += f"🕴️ 帝愛にピンハネされた: **{ui.pelica(result.skimmed)}**（借金は減りません）\n"

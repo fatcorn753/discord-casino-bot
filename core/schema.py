@@ -80,6 +80,14 @@ def create_tables(conn: sqlite3.Connection) -> None:
             game       TEXT NOT NULL,
             created_at REAL NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS seized_items (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id  INTEGER NOT NULL,
+            item_id   TEXT NOT NULL,
+            qty       INTEGER NOT NULL,
+            listed_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS seized_items_item ON seized_items (guild_id, item_id, listed_at);
         CREATE TABLE IF NOT EXISTS guild_users (
             guild_id INTEGER NOT NULL,
             user_id  INTEGER NOT NULL,

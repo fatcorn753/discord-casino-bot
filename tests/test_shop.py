@@ -445,3 +445,102 @@ def test_buying_without_enough_pelica_shows_a_clear_message(cog, eco):
     assert "買えませんでした" in embed.title and "足りません" in embed.description and "100,000" in embed.description
     assert eco.balance(1) == INITIAL_BALANCE and eco.inventory(1) == {}
     assert not cog.bot.sessions.is_active(1)  # 失敗してもロックが残らない
+
+
+# ----------------------------- 連続守り券 ----------------------------- #
+def _days(eco, *days):
+    eco.credit(1, 100_000, "テスト")
+    return [eco.claim_daily(1, datetime.date(2026, 11, d)) for d in days]
+
+
+def test_streak_guard_fills_missed_days_one_ticket_per_day(eco):
+    _days(eco, 1, 2)  # 連続2日
+    assert buy(eco, shop.STREAK_GUARD, qty=2).ok
+    r = eco.claim_daily(1, datetime.date(2026, 11, 5))  # 3日・4日を逃した（2日ぶん）
+    assert r.streak == 3 and r.guarded == 2
+    assert eco.inventory(1).get(shop.STREAK_GUARD, 0) == 0
+
+
+def test_streak_guard_not_used_when_tickets_are_short(eco):
+    _days(eco, 1, 2)
+    assert buy(eco, shop.STREAK_GUARD).ok
+    r = eco.claim_daily(1, datetime.date(2026, 11, 5))  # 2日ぶん逃したが、券は1枚
+    assert r.streak == 1 and r.guarded == 0
+    assert eco.inventory(1)[shop.STREAK_GUARD] == 1  # 足りないときは1枚も使わない
+
+
+def test_streak_guard_not_used_when_nothing_missed(eco):
+    _days(eco, 1)
+    assert buy(eco, shop.STREAK_GUARD).ok
+    r = eco.claim_daily(1, datetime.date(2026, 11, 2))
+    assert r.streak == 2 and r.guarded == 0 and eco.inventory(1)[shop.STREAK_GUARD] == 1
+
+
+def test_streak_guard_price_and_use_message(cog, eco):
+    assert shop.BY_ID[shop.STREAK_GUARD].price == 12_000
+    eco.credit(1, 100_000, "テスト")
+    buy(eco, shop.STREAK_GUARD)
+    it = FakeInteraction()
+    run(cog.use_item(it, shop.STREAK_GUARD))
+    assert "自動で使われます" in it.sent[0]["embed"].title and eco.inventory(1)[shop.STREAK_GUARD] == 1
+
+
+# ----------------------------- 帝愛の競売 ----------------------------- #
+from core import teiai  # noqa: E402
+
+
+def _seized(eco, uid=1):
+    """uid が品物を買って、破産する。"""
+    eco.credit(uid, 100_000, "テスト")
+    assert buy(eco, shop.STREAK_GUARD, qty=2, uid=uid).ok
+    assert buy(eco, "title_regular", uid=uid).ok
+    eco._conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (uid,))
+    eco._owe(uid, 500, "テスト")
+    assert eco.bankrupt(uid)[0]
+
+
+def test_bankruptcy_lists_seized_items_but_not_collection_or_limited(eco):
+    _seized(eco)
+    listed = {e["item_id"]: e for e in eco.auction_list()}
+    assert listed[shop.STREAK_GUARD]["qty"] == 2 and "title_regular" in listed
+    assert listed[shop.STREAK_GUARD]["price"] == round(12_000 * teiai.AUCTION_START)
+    assert not any(shop.BY_ID[i].kind == shop.COLLECTION or shop.BY_ID[i].limited for i in listed)
+
+
+def test_auction_price_falls_daily_and_stops_at_floor():
+    day = 86400
+    assert teiai.auction_rate(0, 0) == teiai.AUCTION_START
+    assert round(teiai.auction_rate(0, day), 2) == 0.8
+    assert teiai.auction_rate(0, 30 * day) == teiai.AUCTION_FLOOR > teiai.SEIZE_RATE
+
+
+def test_auction_buy_moves_item_pays_bank_and_blocks_non_katagi(eco):
+    _seized(eco, uid=1)
+    eco.credit(2, 100_000, "テスト")
+    cash_before = eco.bank_status()["cash"]
+    res = eco.auction_buy(2, shop.STREAK_GUARD, qty=2)
+    assert res.ok and eco.inventory(2)[shop.STREAK_GUARD] == 2
+    assert eco.balance(2) == INITIAL_BALANCE + 100_000 - 2 * round(12_000 * teiai.AUCTION_START)
+    assert not any(e["item_id"] == shop.STREAK_GUARD for e in eco.auction_list())
+    assert eco.bank_status()["cash"] > cash_before  # 売上は帝愛の収入
+    # 破産者（カタギでない）は、買えない。持っているものは買えない
+    assert not eco.auction_buy(1, "title_regular").ok
+    assert eco.auction_buy(2, "title_regular").ok and not eco.auction_buy(2, "title_regular").ok
+
+
+def test_auction_buy_rejects_missing_or_unaffordable(eco):
+    _seized(eco, uid=1)
+    assert not eco.auction_buy(2, shop.STREAK_GUARD, qty=3).ok  # 在庫は2
+    assert "足りません" in eco.auction_buy(2, "title_regular").reason or eco.balance(2) >= 4000
+
+
+def test_auction_screen_and_buy_flow(cog, eco):
+    _seized(eco, uid=1)
+    eco.credit(2, 50_000, "テスト")
+    view = shop_cog.ShopView(cog, 2, eco.guild_id if hasattr(eco, "guild_id") else 0, screen="auction")
+    text = view.embed().fields[0].value
+    assert "連続守り券" in text and "×2" in text
+    it = FakeInteraction()
+    it.user = SimpleNamespace(id=2)
+    run(cog.buy_auction(it, "title_regular", 1))
+    assert "競売で買いました" in it.sent[0]["embed"].title and "title_regular" in eco.inventory(2)

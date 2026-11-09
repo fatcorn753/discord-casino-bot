@@ -19,6 +19,7 @@ class DailyResult:
     repaid: int = 0  # 受け取った額から、借金の返済として天引きされた額
     skimmed: int = 0  # 帝愛が没収した額（借金中のデイリーのピンハネ。借金は減らない）
     seed: int = 0  # 帝愛が貸し付けた種銭（手元が枠に満たなかったとき）
+    guarded: int = 0  # 連続守り券で埋めた、受け取れなかった日数
 
 
 @dataclass(frozen=True)

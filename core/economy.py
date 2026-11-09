@@ -24,6 +24,7 @@ from typing import Optional
 
 from core import market as market_mod
 from core import schema, teiai
+from core.eco_auction import AuctionMixin
 from core.eco_bank import BankMixin
 from core.eco_bonds import BondMixin
 from core.eco_crypto import CryptoMixin
@@ -48,6 +49,7 @@ from core.eco_types import (  # noqa: F401  (他のモジュールが core.econo
     PurchaseResult,
     TransferResult,
 )
+from core.shop import STREAK_GUARD
 
 
 class Economy(
@@ -64,6 +66,7 @@ class Economy(
     GuildMixin,
     DebtMixin,
     BankMixin,
+    AuctionMixin,
     OptionMixin,
     MarketEventMixin,
 ):
@@ -431,10 +434,22 @@ class Economy(
                 return DailyResult(
                     False, streak=row["daily_streak"], balance=self._balance(user_id)
                 )  # 時計が戻っても二重に受け取れない
+            guarded = 0
             if last == today:
                 streak = max(1, row["daily_streak"])
+            elif last == today - datetime.timedelta(days=1):
+                streak = row["daily_streak"] + 1
             else:
-                streak = row["daily_streak"] + 1 if last == today - datetime.timedelta(days=1) else 1
+                streak = 1
+                # 受け取れなかった日が、連続守り券の枚数以内なら、1枚で1日ぶん埋めて連続をつなぐ（足りなければ1枚も使わない）
+                missed = (today - last).days - 1 if last is not None else 0
+                if missed > 0 and row["daily_streak"] > 0:
+                    cur = self._conn.execute(
+                        "UPDATE inventory SET qty = qty - ? WHERE guild_id=? AND user_id=? AND item_id=? AND qty>=?",
+                        (missed, self._g(), user_id, STREAK_GUARD, missed),
+                    )
+                    if cur.rowcount:
+                        streak, guarded = row["daily_streak"] + 1, missed
             amount = self.DAILY_BASE + self.DAILY_STREAK_BONUS * min(streak - 1, self.DAILY_STREAK_CAP)
             prof = self._conn.execute(
                 "SELECT daily_boost FROM profile WHERE guild_id=? AND user_id=?", (self._g(), user_id)
@@ -452,14 +467,19 @@ class Economy(
                 self._ledger(user_id, 0, self._balance(user_id), f"帝愛のピンハネ（デイリー {skimmed:,}ペリカ）")
                 self._bank_income(skimmed, teiai.SKIM_YIELD_SHARE, needs_depositors=True)  # 預金者の利回りになる
             credit = amount - skimmed
-            self._apply(user_id, credit, f"デイリー（{streak}日連続{'・2倍券' if boosted else ''}）", income=credit)
+            self._apply(
+                user_id,
+                credit,
+                f"デイリー（{streak}日連続{'・2倍券' if boosted else ''}{'・連続守り券' + str(guarded) + '枚' if guarded else ''}）",
+                income=credit,
+            )
             repaid = debt_before - self._debt(user_id)
             seed = self._topup_seed(user_id)  # 借金中で、手元が種銭の枠に満たなければ、枠まで貸す
             self._conn.execute(
                 "UPDATE users SET daily_streak=?, last_daily=?, last_slot=? WHERE guild_id=? AND user_id=?",
                 (streak, today.isoformat(), slot, self._g(), user_id),
             )
-            return DailyResult(True, amount, streak, self._balance(user_id), boosted, repaid, skimmed, seed)
+            return DailyResult(True, amount, streak, self._balance(user_id), boosted, repaid, skimmed, seed, guarded)
 
     # ------------------------------------------------------------------ #
     # サーバー別ランキング用: どのサーバーで遊んだか                      #

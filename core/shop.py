@@ -23,6 +23,7 @@ ROLE_PREFIX = "ペリカ・"
 WEEKLY_KING = "title_weekly_king"
 DAILY_DOUBLE = "daily_double"
 INSURANCE = "insurance"
+STREAK_GUARD = "streak_guard"
 # 保険券で戻る額の上限。券の値段（2,000）より小さくして、買って使うほど増える（期待値がプラスになる）ことがないようにする
 INSURANCE_CAP = 1_000
 
@@ -96,6 +97,13 @@ CATALOG = [
         CONSUMABLE,
         2_000,
         desc=f"次に負けたゲーム1回で、賭け金の半分が戻る（最大{INSURANCE_CAP:,}ペリカ。倍払いの追加分は対象外）",
+    ),
+    Item(
+        STREAK_GUARD,
+        "連続守り券",
+        CONSUMABLE,
+        12_000,
+        desc="デイリーを受け取れなかった日を、1枚で1日ぶん埋めて、連続ログインをつなぐ（持っているだけで、次のデイリーで自動で使われる）",
     ),
     # ゲーム演出の変更品（装備すると、結果画面のタイトル・飾り・地の文が変わる。勝率と配当は変わらない）。見た目は core/skins.py
     Item("skin_kuro", "黒服の立会い", SKIN_DICE, 30_000, desc="黒服が立ち会い、実況する"),

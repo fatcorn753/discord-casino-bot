@@ -17,6 +17,10 @@ SKIM_RATE = 0.20  # 借金中のデイリーから、帝愛が没収する割合
 REPAY_RATE = 0.30  # 収入から、借金の返済へ天引きする割合
 BANKRUPT_FLOOR = 10_000  # 自己破産のあとに残る、帝愛の借金の上限（これより多い分は圧縮）
 BLACKLIST_DAYS = 7  # 破産者の身分が続く、完済後の日数
+AUCTION_START = 0.90  # 差し押さえた品を競売に出すときの、最初の値段（定価に対して）
+AUCTION_STEP = 0.10  # 1日ごとの値下がり（定価に対して）
+AUCTION_FLOOR = 0.60  # 値下がりの下限。SEIZE_RATE より高くして、買い直して破産し直すと損をするようにする
+AUCTION_YIELD_SHARE = 0.5  # 競売の売上のうち、預金者の利回りへ回す割合
 SEIZE_RATE = 0.50  # ショップの品と、解約できない債券を差し押さえるときの換金率（購入額に対して）
 
 # ---- 破産猶予（取り立てのカウントダウン）----
@@ -65,3 +69,9 @@ def cds_odds(status: str, debt: int, margin_ratio: Optional[float] = None) -> fl
     if margin_ratio is not None and margin_ratio < 1.5:
         r += 0.1
     return round(min(CDS_MAX_ODDS, max(CDS_MIN_ODDS, 0.85 / r)), 1)
+
+
+def auction_rate(listed_at: float, now: float) -> float:
+    """競売に出してから時間がたった分だけ値下がりした、いまの値段（定価に対する割合）。下限は AUCTION_FLOOR。"""
+    days = max(0, int((now - listed_at) // 86400))
+    return max(AUCTION_FLOOR, AUCTION_START - AUCTION_STEP * days)
