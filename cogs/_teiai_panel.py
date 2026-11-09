@@ -7,6 +7,7 @@ import time
 
 import discord
 
+from cogs._teiai_escape import run_escape
 from core import teiai, ui
 
 LEVEL_MARK = {"safe": "🟢", "warn": "🟡", "danger": "🔴", "frozen": "🚨"}
@@ -232,6 +233,25 @@ class TeiaiPanel(discord.ui.View):
             )
         embed = ui.error_embed("借りられません", result)
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="🚢 海外逃亡チャンス！！", style=discord.ButtonStyle.danger, row=1)
+    async def escape(self, interaction: discord.Interaction, button: discord.ui.Button):
+        eco = self.eco(interaction)
+        if eco.debt(interaction.user.id) < teiai.ESCAPE_MIN_DEBT:
+            return await interaction.response.send_message(
+                embed=ui.error_embed(
+                    "逃亡できません", f"試せるのは、帝愛の借金が {teiai.ESCAPE_MIN_DEBT:,}ペリカ 以上のときだけです。"
+                ),
+                ephemeral=True,
+            )
+
+        async def after_success(inter: discord.Interaction):
+            shop_cog = inter.client.get_cog("ShopCog")  # 破産と同じく、色ロールとニックネームをすぐに反映する
+            member = inter.guild.get_member(inter.user.id) or inter.user
+            if shop_cog is not None and isinstance(member, discord.Member):
+                await shop_cog.after_bankruptcy(inter.guild, member)
+
+        await run_escape(interaction, eco, after_success)
 
     @discord.ui.button(label="更新", style=discord.ButtonStyle.secondary)
     async def refresh(self, interaction: discord.Interaction, button: discord.ui.Button):

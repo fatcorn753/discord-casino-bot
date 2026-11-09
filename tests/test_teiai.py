@@ -539,3 +539,65 @@ def test_after_bankruptcy_never_raises_on_discord_failures(tmp_path):
         asyncio.run(cog.after_bankruptcy(SimpleNamespace(id=7), SimpleNamespace(id=U)))  # 例外にならない
     finally:
         sc.set_color_role = orig
+
+
+# ----------------------------- 海外逃亡 ----------------------------- #
+class _Roll:
+    def __init__(self, value):
+        self.value = value
+
+    def random(self):
+        return self.value
+
+
+def _in_debt(eco, debt=20_000):
+    eco.credit(U, 10_000, "テスト")
+    eco._conn.execute("UPDATE users SET balance=1_000, debt=? WHERE user_id=?", (debt, U))
+    eco._conn.commit()
+
+
+def test_escape_success_wipes_the_whole_debt_but_takes_everything(eco):
+    _in_debt(eco)
+    ok, r = eco.escape_attempt(U, now=NOW_E, rng=_Roll(0.0))
+    assert ok and r["escaped"] and eco.debt(U) == 0 and eco.balance(U) == 0  # 種銭も貸さない
+    assert eco.status(U) == teiai.BANKRUPT  # 破産者のブラックリスト
+    assert r["bankrupt"]["compressed"] > teiai.BANKRUPT_FLOOR - 1  # 圧縮ではなく全額ゼロ
+
+
+def test_escape_failure_adds_a_fine_and_starts_the_cooldown(eco):
+    _in_debt(eco, 20_000)
+    ok, r = eco.escape_attempt(U, now=NOW_E, rng=_Roll(0.99))
+    assert ok and not r["escaped"] and r["fine"] == 2_000 and eco.debt(U) == 22_000
+    assert eco.balance(U) == 1_000  # 失敗では、財産は取られない
+    ok, reason = eco.escape_attempt(U, now=NOW_E + 3600, rng=_Roll(0.0))
+    assert not ok and "次に試せる" in reason and eco.debt(U) == 22_000
+    ok, r = eco.escape_attempt(U, now=NOW_E + teiai.ESCAPE_COOLDOWN_HOURS * 3600 + 1, rng=_Roll(0.0))
+    assert ok and r["escaped"]
+
+
+def test_escape_has_a_minimum_fine_and_a_minimum_debt(eco):
+    _in_debt(eco, 5_000)
+    ok, r = eco.escape_attempt(U, now=NOW_E, rng=_Roll(0.99))
+    assert ok and r["fine"] == teiai.ESCAPE_FINE_MIN  # 500 ではなく、最低 1,000
+    _in_debt(eco, 4_999)
+    eco._conn.execute("UPDATE users SET escape_at=NULL WHERE user_id=?", (U,))
+    ok, reason = eco.escape_attempt(U, now=NOW_E, rng=_Roll(0.0))
+    assert not ok and "以上" in reason
+
+
+def test_escape_success_rate_is_about_seven_percent(eco):
+    import random
+
+    rng = random.Random(1)
+    wins = sum(rng.random() < teiai.ESCAPE_CHANCE for _ in range(20_000))
+    assert 0.06 < wins / 20_000 < 0.08 and teiai.ESCAPE_CHANCE == 0.07
+
+
+def test_escape_is_not_available_to_bankrupts(eco):
+    _in_debt(eco)
+    assert eco.escape_attempt(U, now=NOW_E, rng=_Roll(0.0))[0]
+    ok, reason = eco.escape_attempt(U, now=NOW_E + 10 * 86400, rng=_Roll(0.0))
+    assert not ok and "破産者" in reason
+
+
+NOW_E = 1_000_000.0

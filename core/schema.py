@@ -444,7 +444,7 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         if col not in profile_cols:
             conn.execute(f"ALTER TABLE profile ADD COLUMN {col} TEXT")
     users_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    for col in ("bankrupt_at", "blacklist_until"):
+    for col in ("bankrupt_at", "blacklist_until", "escape_at"):
         if col not in users_cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} REAL")
     _add_symbol_columns(conn)

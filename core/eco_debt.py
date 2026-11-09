@@ -3,6 +3,7 @@
 表の定義は core/schema.py（users の debt・bankrupt_at・blacklist_until）。
 """
 
+import random
 import time
 from typing import Optional
 
@@ -328,13 +329,48 @@ class DebtMixin:
         )
         return int(value * teiai.SEIZE_RATE)
 
-    def bankrupt(self, user_id: int, forced: bool = False) -> tuple:
+    def escape_attempt(self, user_id: int, now: Optional[float] = None, rng=None) -> tuple:
+        """海外逃亡。成功すると、全財産を置いて、帝愛の借金が全額ゼロ（破産の扱い）。失敗すると、罰金が借金に加わり、クールダウン。
+
+        (成功か, 理由か結果の辞書) を返す。結果は {"escaped": 成功か, "fine": 罰金, "debt": いまの借金, "bankrupt": 成功時の破産の結果}。
+        """
+        now = time.time() if now is None else now
+        rng = rng or random
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            if self.status(user_id, now) == teiai.BANKRUPT:
+                return False, "破産者は、逃亡できません（すでに全財産を差し押さえられています）。"
+            debt = self._debt(user_id)
+            if debt < teiai.ESCAPE_MIN_DEBT:
+                return False, f"逃亡を試せるのは、帝愛の借金が {teiai.ESCAPE_MIN_DEBT:,}ペリカ 以上のときだけです。"
+            row = self._conn.execute(
+                "SELECT escape_at FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
+            ).fetchone()
+            ready = (row["escape_at"] or 0) + teiai.ESCAPE_COOLDOWN_HOURS * 3600
+            if now < ready:
+                return False, f"警戒が厳しく、次に試せるのは <t:{int(ready)}:R> です。"
+            self._conn.execute("UPDATE users SET escape_at=? WHERE guild_id=? AND user_id=?", (now, self._g(), user_id))
+            if rng.random() < teiai.ESCAPE_CHANCE:
+                ok, result = self.bankrupt(user_id, escape=True)
+                if not ok:
+                    return False, result
+                return True, {"escaped": True, "fine": 0, "debt": self._debt(user_id), "bankrupt": result}
+            fine = max(teiai.ESCAPE_FINE_MIN, int(debt * teiai.ESCAPE_FINE_RATE))
+            self._conn.execute(
+                "UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (fine, self._g(), user_id)
+            )
+            self._ledger(user_id, 0, self._balance(user_id), f"海外逃亡に失敗（罰金 {fine:,}ペリカが借金に加わる）")
+            self._after_debt_change(user_id)
+            return True, {"escaped": False, "fine": fine, "debt": self._debt(user_id), "bankrupt": None}
+
+    def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> tuple:
         """自己破産。全財産とショップの全品を差し押さえて換金し、帝愛 → 貸付の順に配当する。(成功か, 理由か結果) を返す。
 
         貸付の残りは免責（貸し倒れ）。帝愛の借金は、BANKRUPT_FLOOR まで圧縮される。破産者の身分になり、完済して
         BLACKLIST_DAYS 日たつまで、貸付を借りられない。
 
         forced=True は、破産猶予の時間切れによる強制破産。この場合だけ、他人からの CDS に配当が出る（自分から破産しても出ない）。
+        escape=True は、海外逃亡の成功。同じ差し押さえをして、帝愛の借金は圧縮ではなく、全額ゼロになる（種銭も貸さない）。
         """
         with self._lock, self._conn:
             self._ensure(user_id)
@@ -378,7 +414,7 @@ class DebtMixin:
                 )
             if pool > 0:  # 借金をすべて払ってもあまった分は、手元に残す
                 self._apply(user_id, pool, "破産の整理のあまり")
-            compressed = max(0, self._debt(user_id) - teiai.BANKRUPT_FLOOR)
+            compressed = max(0, self._debt(user_id) - (0 if escape else teiai.BANKRUPT_FLOOR))
             self._conn.execute(
                 "UPDATE users SET debt=debt-?, bankrupt_at=?, blacklist_until=NULL WHERE guild_id=? AND user_id=?",
                 (compressed, now, self._g(), user_id),
