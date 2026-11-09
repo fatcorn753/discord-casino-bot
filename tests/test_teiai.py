@@ -183,10 +183,10 @@ def test_equipment_is_frozen_while_not_a_katagi_and_comes_back_after(eco):
 # ----------------------------- 自己破産 ----------------------------- #
 def make_bankrupt_case(eco, debt=40_000):
     eco.credit(U, 3_000_000, "テスト")
-    for item_id in ("title_emperor", "col_beer"):
+    for item_id in ("title_lucky", "col_sunglasses", "col_beer"):
         item = shop.BY_ID[item_id]
         assert eco.purchase(U, item.id, item.name, item.price, True).ok
-    eco.equip(U, "title", "title_emperor")
+    eco.equip(U, "title", "title_lucky")
     eco._conn.execute("UPDATE users SET balance=1_000, debt=? WHERE user_id=?", (debt, U))
     eco.balance(A)
     eco._conn.execute(
@@ -197,7 +197,7 @@ def make_bankrupt_case(eco, debt=40_000):
     eco._conn.commit()
 
 
-SHOP_VALUE = int((100_000 + 13_500) * teiai.SEIZE_RATE)  # ショップの全品の換金（購入額の50%）
+SHOP_VALUE = int((20_000 + 100_000 + 13_500) * teiai.SEIZE_RATE)  # ショップの全品の換金（購入額の50%）
 
 
 def test_bankruptcy_seizes_everything_and_pays_the_senior_then_the_junior_creditors(eco):

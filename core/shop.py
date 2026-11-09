@@ -56,7 +56,7 @@ CATALOG = [
     Item("title_zawa", "ざわ…ざわ…", TITLE, 8_000),
     Item("title_underground", "地下の住人", TITLE, 12_000),
     Item("title_lucky", "強運の持ち主", TITLE, 20_000),
-    Item("title_emperor", "地下の帝王", TITLE, 100_000),
+    Item("title_emperor", "地下の帝王", TITLE, 20_000_000),
     Item("title_creditor", "債権王", TITLE, 500_000),
     Item("title_fixer", "フィクサー", TITLE, 2_000_000),
     Item("title_100oku", "百億の男", TITLE, 10_000_000),

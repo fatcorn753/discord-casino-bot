@@ -49,7 +49,7 @@ def test_cannot_buy_unique_item_twice_or_without_money(eco):
     assert buy(eco, "title_rookie").ok
     again = buy(eco, "title_rookie")
     assert not again.ok and "持って" in again.reason and eco.balance(1) == INITIAL_BALANCE - 2_000
-    poor = buy(eco, "title_emperor")  # 100,000 は足りない
+    poor = buy(eco, "col_sunglasses")  # 100,000 は足りない
     assert not poor.ok and "足りません" in poor.reason and eco.balance(1) == INITIAL_BALANCE - 2_000
     assert "title_emperor" not in eco.inventory(1)  # 失敗したら持ち物も増えない
 
@@ -410,9 +410,9 @@ def test_purchase_holds_the_session_while_waiting_for_confirmation(cog, eco, mon
             self.followup = SimpleNamespace(send=self._send)
 
     it = It()
-    run(cog.buy_item(it, "title_emperor", 1))  # 100,000: 確認ボタンが出る価格
+    run(cog.buy_item(it, "col_sunglasses", 1))  # 100,000: 確認ボタンが出る価格
     assert seen == {"active": True, "start_blocked": True}
-    assert "title_emperor" in eco.inventory(1)
+    assert "col_sunglasses" in eco.inventory(1)
     assert not cog.bot.sessions.is_active(1)  # 終わったら解除される
 
 
@@ -440,7 +440,7 @@ def test_list_does_not_create_an_account(cog, eco):
 
 def test_buying_without_enough_pelica_shows_a_clear_message(cog, eco):
     it = FakeInteraction()
-    run(cog.buy_item(it, "title_emperor", 1))  # 100,000: 初期の 3,000 では足りない
+    run(cog.buy_item(it, "col_sunglasses", 1))  # 100,000: 初期の 3,000 では足りない
     embed = it.sent[-1]["embed"]
     assert "買えませんでした" in embed.title and "足りません" in embed.description and "100,000" in embed.description
     assert eco.balance(1) == INITIAL_BALANCE and eco.inventory(1) == {}
