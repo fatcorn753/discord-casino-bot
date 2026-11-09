@@ -28,7 +28,16 @@ class Chan:
     id = 55
 
     def __init__(self):
-        self.sent, self.edits = [], []
+        self.sent, self.edits, self.retired = [], [], []
+
+    def get_partial_message(self, mid):
+        chan = self
+
+        class Partial:
+            async def edit(self, **kw):
+                chan.retired.append((mid, kw))
+
+        return Partial()
 
     async def send(self, **kw):
         self.sent.append(kw)
@@ -91,10 +100,14 @@ def test_scheduled_flow_announces_closes_with_odds_runs_animation_and_settles(se
     entries = eco.race_entries(race["id"])
     assert len(entries) == h.FIELD_SIZE and all(e["odds_win"] >= 1.0 for e in entries)
     assert eco.race_bet(V, race["id"], "win", 1, 100, race["entry_close"] + 2)[1] != ""  # V には残高があるので買える
+    assert len(chan.retired) == 1 and "受付終了" in chan.retired[0][1]["embed"].title  # 申し込みの投稿を書き換えた
+    assert chan.retired[0][1]["view"] is None and "R>" not in chan.retired[0][1]["embed"].description
     sent_before = len(chan.sent)
     monkeypatch.setattr("cogs.horse_cog.time.time", lambda: race["start_at"] + 1)
     asyncio.run(cog.run_once())  # 発走 → 精算 → アニメーション → 結果
     assert eco.race_get(race["id"])["status"] == "done"
+    assert len(chan.retired) == 2 and "発売終了" in chan.retired[1][1]["embed"].title  # 出馬表の投稿も、書き換えた
+    assert "R>" not in chan.retired[1][1]["embed"].description
     assert len(chan.sent) == sent_before + 3  # 次のレースの申し込み開始・アニメーションのメッセージ・結果
     assert "発走" in chan.sent[-2]["embed"].title
     assert len(chan.edits) >= 5 and "ゴール" in chan.edits[-1]["embed"].description
@@ -110,6 +123,17 @@ def test_special_race_command_path_creates_and_announces(setup, monkeypatch):
     race = eco.race_get(rid)
     assert race["kind"] == "special" and race["entry_close"] == 1_700_000_000.0 + 180
     assert race["bet_close"] == race["entry_close"] + 240 and "申し込みが始まりました" in chan.sent[0]["content"]
+
+
+def test_special_race_can_use_a_chosen_channel(setup, monkeypatch):
+    eco, chan, guild, bot, cog = setup
+    other = Chan()
+    other.id = 77
+    guild.get_channel = lambda cid: other if cid == 77 else chan
+    monkeypatch.setattr("cogs.horse_cog.time.time", lambda: 1_700_000_000.0)
+    rid = asyncio.run(cog.start_special(guild, 3, 4, other))
+    assert eco.race_get(rid)["channel_id"] == 77 and not chan.sent
+    assert "申し込みが始まりました" in other.sent[0]["content"]
 
 
 def test_card_embed_for_each_stage_and_bet_panel(setup):
@@ -198,3 +222,16 @@ def test_auction_screen_lists_seized_horses_with_a_horse_select(setup):
     assert any("競売の馬" in f.value for f in embed.fields)
     view = shop_cog.ShopView(cog_shop, V, 0, screen="auction")
     assert any(getattr(c, "placeholder", "") == "競走馬を買う" for c in view.children)
+
+
+def test_bet_is_announced_publicly_in_the_race_channel(setup):
+    eco, chan, guild, bot, cog = setup
+    bot.get_cog = lambda name: cog
+    rid = eco.race_create_special(1_700_000_000.0, 1, 1)
+    race = eco.race_get(rid)
+    panel = views.BetPanel(bot, V, {**race, "guild_id": 0})
+    interaction = SimpleNamespace(guild=guild, guild_id=0, user=SimpleNamespace(id=V))
+    result = {"kind": "win", "lanes": [3], "name": "アルファ", "stake": 500, "odds": 4.2}
+    asyncio.run(panel.announce_bet(interaction, "3", result))
+    text = chan.sent[-1]["content"]
+    assert f"<@{V}>" in text and "単勝" in text and "アルファ" in text and "4.2" in text

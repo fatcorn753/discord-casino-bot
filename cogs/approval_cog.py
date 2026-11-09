@@ -547,9 +547,10 @@ class ApprovalCog(commands.Cog):
     @group.command(
         name="競馬開催", description="[管理者] 臨時の競馬レースを開催する（出走の申し込み → 馬券の発売 → 発走）"
     )
-    @app_commands.rename(guild_id="サーバー", entry_min="申し込み分", bet_min="発売分")
+    @app_commands.rename(guild_id="サーバー", entry_min="申し込み分", bet_min="発売分", channel_id="チャンネル")
     @app_commands.describe(
         guild_id="開催するサーバー（候補から選ぶ）",
+        channel_id="開催の掲示・馬券・レースを出すチャンネル（候補から選ぶ。空なら告知チャンネル）",
         entry_min="出走の申し込みを受け付ける時間（分。1〜120。省略で5分）",
         bet_min="馬券を発売する時間（分。1〜120。省略で5分。そのあと2分で発走）",
     )
@@ -559,27 +560,32 @@ class ApprovalCog(commands.Cog):
         guild_id: str,
         entry_min: app_commands.Range[int, 1, 120] = 5,
         bet_min: app_commands.Range[int, 1, 120] = 5,
+        channel_id: str = None,
     ):
         if not await self._owner_only(interaction):
             return
         guild = await self._pick_guild(interaction, guild_id)
         if guild is None:
             return
+        ok, channel = await self._pick_channel(interaction, guild, channel_id)
+        if not ok:
+            return
         cog = self.bot.get_cog("HorseCog")
         if cog is None:
             return await interaction.response.send_message(
                 embed=ui.error_embed("競馬が読み込まれていません"), ephemeral=True
             )
-        race_id = await cog.start_special(guild, entry_min, bet_min)
+        race_id = await cog.start_special(guild, entry_min, bet_min, channel)
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "臨時レースを開催しました",
-                f"{guild.name} で、臨時レース（#{race_id}）の申し込みを始めました。申し込み {entry_min}分 → 馬券 {bet_min}分 → 発走（2分後）。",
+                f"{guild.name} で、臨時レース（#{race_id}）の申し込みを始めました（掲示は{channel.mention if channel else '告知チャンネル'}）。申し込み {entry_min}分 → 馬券 {bet_min}分 → 発走（2分後）。",
             ),
             ephemeral=True,
         )
 
     special_race.autocomplete("guild_id")(guild_autocomplete)
+    special_race.autocomplete("channel_id")(channel_autocomplete)
 
     # ---- お知らせ ---- #
     @group.command(name="お知らせ", description="[管理者] Bot から、文字や画像をお知らせとして告知チャンネルに出す")

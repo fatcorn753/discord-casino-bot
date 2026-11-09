@@ -150,14 +150,15 @@ class HorseCog(commands.Cog):
         await interaction.response.send_message(
             embed=card_embed(eco, race),
             view=card_view(race["id"], race["status"] == "betting"),
-            ephemeral=True,
         )
 
     # ------------------------------ 開催 ------------------------------ #
-    async def start_special(self, guild: discord.Guild, entry_min: int, bet_min: int) -> int:
-        """臨時レースを開催する（管理者用）。作ったレースの番号を返す。"""
+    async def start_special(
+        self, guild: discord.Guild, entry_min: int, bet_min: int, channel: discord.abc.Messageable = None
+    ) -> int:
+        """臨時レースを開催する（管理者用）。channel を指定すれば、掲示・馬券・レースはそこに出す。作ったレースの番号を返す。"""
         eco = self.bot.economy.for_guild(guild.id)
-        channel = announce_channel(guild, eco)
+        channel = channel or announce_channel(guild, eco)
         race_id = eco.race_create_special(time.time(), entry_min, bet_min, channel.id if channel else 0)
         await self._announce_entry(guild, eco, race_id)
         return race_id
@@ -187,10 +188,23 @@ class HorseCog(commands.Cog):
         if msg is not None:
             eco.race_set_message(race_id, channel.id, msg.id)
 
+    async def _retire(self, guild: discord.Guild, eco, race: dict) -> None:
+        """締切後の古い投稿を、ボタンなしで「締め切りました」の表示に書き換える（残ると、締切の「◯秒前」が増え続ける）。"""
+        channel = guild.get_channel(race["channel_id"]) if race["channel_id"] else None
+        if channel is None or not race["message_id"]:
+            return
+        try:
+            await channel.get_partial_message(race["message_id"]).edit(
+                embed=card_embed(eco, race, closed=True), view=None
+            )
+        except discord.HTTPException as exc:  # 消されていても、進行には関係ない
+            logthrottle.warn(("horse-retire", channel.id), f"競馬の古い投稿を書き換えられません: {exc!r}")
+
     async def _close_entries(self, guild: discord.Guild, eco, race: dict) -> None:
         field = eco.race_close_entries(race["id"])
         if field is None:
             return
+        await self._retire(guild, eco, race)  # 申し込みの投稿（race は、まだ entry のときの値）
         seed = random.SystemRandom().randrange(2**31)
         odds = await asyncio.to_thread(
             horse_mod.make_all_odds, field["runners"], field["track"], horse_mod.ODDS_SIMS, seed
@@ -199,17 +213,20 @@ class HorseCog(commands.Cog):
         race = eco.race_get(race["id"])
         channel = await self._channel(guild, eco, race)
         if channel is not None:
-            await self._post(
+            msg = await self._post(
                 channel,
                 content="🏇 **出馬表とオッズが出ました！** 馬券は、発走の2分前まで買えます。",
                 embed=card_embed(eco, race),
                 view=card_view(race["id"], True),
             )
+            if msg is not None:
+                eco.race_set_message(race["id"], channel.id, msg.id)  # 発走で書き換えるために、こちらを覚える
 
     async def _run(self, guild: discord.Guild, eco, race: dict) -> None:
         result = eco.race_run(race["id"])
         if result is None:
             return
+        await self._retire(guild, eco, race)  # 発売中の投稿（race は、まだ betting のときの値）
         entries = result["entries"]
         winner = result["order"][0]
         frames = pick_frames(display_frames(result["frames"], winner, result["finish"]))

@@ -35,32 +35,44 @@ def when(ts: float) -> str:
     return f"<t:{int(ts)}:t>（<t:{int(ts)}:R>）"
 
 
-def card_embed(eco, race: dict) -> discord.Embed:
-    """出馬表。申し込み中は申し込みの馬、発売中は枠・オッズ・調子、終わったら着順。"""
+def card_embed(eco, race: dict, closed: bool = False) -> discord.Embed:
+    """出馬表。申し込み中は申し込みの馬、発売中は枠・オッズ・調子、終わったら着順。
+
+    closed=True は、締切後に古い投稿を書き換える用。「◯秒前」は時間がたつほど増えて紛らわしいので、締切の時刻だけにする。
+    """
     title = race_title(eco, race)
     entries = eco.race_entries(race["id"])
     if race["status"] == "entry":
         reg = [e for e in entries if e["lane"] < 0]
-        lines = [f"出走の申し込み: **{when(race['entry_close'])}** まで（出走料 {ui.pelica(horse_mod.ENTRY_FEE)}）"]
-        lines.append(f"発走: {when(race['start_at'])}")
-        lines.append("`/競馬 厩舎` から、馬を申し込めます。足りない分は、帝愛の馬が走ります。")
+        if closed:
+            lines = [f"出走の申し込みは、<t:{int(race['entry_close'])}:t> に締め切りました。"]
+        else:
+            lines = [f"出走の申し込み: **{when(race['entry_close'])}** まで（出走料 {ui.pelica(horse_mod.ENTRY_FEE)}）"]
+            lines.append(f"発走: {when(race['start_at'])}")
+            lines.append("`/競馬 厩舎` から、馬を申し込めます。足りない分は、帝愛の馬が走ります。")
         lines += ["", f"**申し込み {len(reg)} / {horse_mod.FIELD_SIZE}頭**"] + [
             f"{e['silks']} {e['name']}（<@{e['owner_id']}>）" for e in reg
         ]
-        return ui.embed(f"{title}　出走受付中", "\n".join(lines), ui.INFO)
+        return ui.embed(f"{title}　{'受付終了' if closed else '出走受付中'}", "\n".join(lines), ui.INFO)
     track = horse_mod.Track(race["distance"], race["going"])
     if race["status"] == "betting":
-        head = [
-            f"コース: **{track.label}**　発走: {when(race['start_at'])}",
-            f"馬券の発売: **{when(race['bet_close'])}** まで（単勝=1着・複勝=3着以内。**賭けた時点のオッズで確定**）",
-        ]
+        if closed:
+            head = [
+                f"コース: **{track.label}**",
+                f"馬券の発売は、<t:{int(race['bet_close'])}:t> に締め切りました。",
+            ]
+        else:
+            head = [
+                f"コース: **{track.label}**　発走: {when(race['start_at'])}",
+                f"馬券の発売: **{when(race['bet_close'])}** まで（単勝=1着・複勝=3着以内。**賭けた時点のオッズで確定**）",
+            ]
         rows = [
             f"`{e['lane']}` {e['silks']} **{e['name']}** {horse_mod.FORM_MARK[e['form']]}　"
             f"単勝 **{e['odds_win']:.1f}** 複勝 **{e['odds_place']:.1f}**\n　└ {stat_short(e)}"
             + (f"　馬主 <@{e['owner_id']}>" if e["owner_id"] else "")
             for e in entries
         ]
-        e = ui.embed(f"{title}　発売中", "\n".join(head + [""] + rows), ui.GOLD)
+        e = ui.embed(f"{title}　{'発売終了' if closed else '発売中'}", "\n".join(head + [""] + rows), ui.GOLD)
         e.set_footer(
             text=f"調子 ◎好調 ○普通 △不調　控除 {horse_mod.TAKEOUT:.0%}　スピードは短距離、スタミナは長距離、パワーは重い馬場に効く"
         )
@@ -156,6 +168,7 @@ class StakeModal(discord.ui.Modal):
             if result["kind"] == "exacta"
             else "・".join(map(str, sorted(result["lanes"])))
         )
+        await self.panel.announce_bet(interaction, picks, result)
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "馬券を買いました",
@@ -179,6 +192,23 @@ class BetPanel(discord.ui.View):
         self.kind = "win"
         self.lanes = [1, 2, 3]  # 複数選ぶ馬券の選択（先頭から、必要な頭数だけ使う）
         self._build(bot.economy.for_guild(race["guild_id"]))
+
+    async def announce_bet(self, interaction: discord.Interaction, picks: str, result: dict) -> None:
+        """買った馬券を、レースのチャンネルに公開する（誰が何に賭けたか）。投稿できなくても、購入は済んでいる。"""
+        cog = self.bot.get_cog("HorseCog")
+        eco = self.bot.economy.for_guild(interaction.guild_id)
+        if cog is None or interaction.guild is None:
+            return
+        channel = await cog._channel(interaction.guild, eco, self.race)
+        if channel is None:
+            return
+        await cog._post(
+            channel,
+            content=(
+                f"🎫 <@{interaction.user.id}> が **{horse_mod.BET_KINDS[result['kind']]}** {picks}枠 "
+                f"（{result['name']}）に {ui.pelica(result['stake'])}！　オッズ **{result['odds']:.1f}**"
+            ),
+        )
 
     def picked(self) -> list:
         return self.lanes[: horse_mod.COMBO_SIZE.get(self.kind, 1)]
