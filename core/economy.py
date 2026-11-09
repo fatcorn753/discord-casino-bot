@@ -260,15 +260,24 @@ class Economy(
             return self._balance(user_id)
 
     def set_balance(self, user_id: int, amount: int, reason: str) -> tuple:
-        """残高を amount ちょうどにする（管理者用。差額は台帳に残る）。(変更前, 変更後) を返す。収入ではないので、天引きしない。"""
-        if amount < 0:
-            raise ValueError("amount は 0 以上にしてください")
+        """残高を amount ちょうどにする（管理者用。差額は台帳に残る）。収入ではないので、天引きしない。
+
+        amount が負のときは、手元を 0 にして、帝愛の借金を -amount ちょうどにする（借金状態にする。いまの借金は置き換わる）。
+        0 以上のときは、借金には触れない。(変更前の残高, 変更後の残高, 変更前の借金, 変更後の借金) を返す。
+        """
         with self._lock, self._conn:
             self._ensure(user_id)
-            before = self._balance(user_id)
-            if amount != before:
-                self._apply(user_id, amount - before, reason)
-            return before, self._balance(user_id)
+            before, debt_before = self._balance(user_id), self._debt(user_id)
+            target = max(0, amount)
+            if target != before:
+                self._apply(user_id, target - before, reason)
+            if amount < 0 and -amount != debt_before:
+                self._conn.execute(
+                    "UPDATE users SET debt=? WHERE guild_id=? AND user_id=?", (-amount, self._g(), user_id)
+                )
+                self._ledger(user_id, 0, self._balance(user_id), f"{reason}（借金を {-amount:,}ペリカ に設定）")
+                self._after_debt_change(user_id)
+            return before, self._balance(user_id), debt_before, self._debt(user_id)
 
     def debit_up_to(self, user_id: int, amount: int, reason: str) -> int:
         """残高の範囲で amount を引く。実際に引けた額を返す（チンチロの倍払いなど）。"""

@@ -351,7 +351,7 @@ class ApprovalCog(commands.Cog):
     @app_commands.describe(
         guild_id="対象のサーバー（候補から選ぶ）",
         user_id="対象の人（名前の候補が出なければ、ユーザーIDを貼る）",
-        amount="残高をこの額にする（0〜1,000,000,000）",
+        amount="残高をこの額にする（0〜1,000,000,000）。マイナス（例 -5000）なら、手元を0にして、その額の借金にする",
         reason="台帳に残す理由（なくてもよい）",
     )
     async def set_balance(
@@ -359,7 +359,7 @@ class ApprovalCog(commands.Cog):
         interaction: discord.Interaction,
         guild_id: str,
         user_id: str,
-        amount: app_commands.Range[int, 0, 1_000_000_000],
+        amount: app_commands.Range[int, -1_000_000_000, 1_000_000_000],
         reason: str = "",
     ):
         if not await self._owner_only(interaction):
@@ -368,7 +368,7 @@ class ApprovalCog(commands.Cog):
         if picked is None:
             return
         guild, member = picked
-        before, after = self.bot.economy.for_guild(guild.id).set_balance(
+        before, after, debt_before, debt_after = self.bot.economy.for_guild(guild.id).set_balance(
             member.id, amount, f"残高の設定（管理）{reason}".strip()
         )
         await interaction.response.send_message(
@@ -376,6 +376,7 @@ class ApprovalCog(commands.Cog):
                 "残高を設定しました",
                 f"{guild.name} の {member.mention}（{member.display_name}）の残高を "
                 f"**{ui.pelica(before)} → {ui.pelica(after)}** にしました（差額は台帳に残ります）。"
+                + (f"\n帝愛の借金: **{ui.pelica(debt_before)} → {ui.pelica(debt_after)}**" if amount < 0 else "")
                 + (f"\n理由: {reason}" if reason else ""),
             ),
             ephemeral=True,

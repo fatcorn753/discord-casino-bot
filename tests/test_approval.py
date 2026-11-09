@@ -849,18 +849,24 @@ def test_set_balance_command_sets_exact_amount_for_owner_only(tmp_path):
     log.clear()
     asyncio.run(cog.set_balance.callback(cog, dm(OWNER, log), "5", "42", 0))  # 減らすこともできる
     assert eco.balance(42) == 0
+    asyncio.run(cog.set_balance.callback(cog, dm(OWNER, log), "5", "42", -5000))  # マイナスは借金
+    assert eco.balance(42) == 0 and eco.debt(42) == 5000
     log.clear()
     for args in (("5", "43"), ("5", "44")):
         asyncio.run(cog.set_balance.callback(cog, dm(OWNER, log), *args, 1000))
     assert [t for _, t in log] == ["❌ Bot には設定できません", "❌ そのサーバーにいません"]
 
 
-def test_economy_set_balance_exact_and_validated(tmp_path):
+def test_economy_set_balance_exact_and_negative_means_debt(tmp_path):
     from core.economy import INITIAL_BALANCE
 
     eco = Economy(str(tmp_path / "t.db"))
-    assert eco.set_balance(42, 10_000, "テスト") == (INITIAL_BALANCE, 10_000)
-    assert eco.set_balance(42, 0, "テスト") == (10_000, 0) and eco.balance(42) == 0
-    assert eco.set_balance(42, 0, "テスト") == (0, 0)  # 同じ額なら、何も変わらない
-    with pytest.raises(ValueError):
-        eco.set_balance(42, -1, "テスト")
+    assert eco.set_balance(42, 10_000, "テスト") == (INITIAL_BALANCE, 10_000, 0, 0)
+    assert eco.set_balance(42, 0, "テスト") == (10_000, 0, 0, 0) and eco.balance(42) == 0
+    assert eco.set_balance(42, 0, "テスト") == (0, 0, 0, 0)  # 同じ額なら、何も変わらない
+    eco.credit(42, 700, "テスト")
+    assert eco.set_balance(42, -5_000, "テスト") == (700, 0, 0, 5_000)  # 手元は0、借金は5,000ちょうど
+    assert eco.balance(42) == 0 and eco.debt(42) == 5_000
+    assert eco.set_balance(42, -2_000, "テスト")[2:] == (5_000, 2_000)  # いまの借金は置き換わる
+    assert eco.set_balance(42, 1_000, "テスト")[2:] == (2_000, 2_000)  # 0以上なら、借金には触れない
+    assert eco.balance(42) == 1_000 and eco.debt(42) == 2_000
