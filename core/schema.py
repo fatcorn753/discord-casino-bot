@@ -170,6 +170,13 @@ def create_tables(conn: sqlite3.Connection) -> None:
             rest_until   REAL NOT NULL DEFAULT 0,
             clicks       INTEGER NOT NULL DEFAULT 0,
             earned_total INTEGER NOT NULL DEFAULT 0,
+            apprentice   INTEGER NOT NULL DEFAULT 0,   -- 雇っている作業員の人数
+            miner        INTEGER NOT NULL DEFAULT 0,
+            craftsman    INTEGER NOT NULL DEFAULT 0,
+            foreman      INTEGER NOT NULL DEFAULT 0,
+            dorm         INTEGER NOT NULL DEFAULT 0,   -- 寮の段（1段ごとに、雇える人数 +1）
+            wage         TEXT NOT NULL DEFAULT 'normal',
+            idle_at      REAL NOT NULL DEFAULT 0,      -- 作業員の稼ぎを、最後に数えた時刻
             PRIMARY KEY (guild_id, user_id)
         );
         CREATE TABLE IF NOT EXISTS seized_items (
@@ -510,6 +517,18 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     ):
         if opt_cols and col not in opt_cols:
             conn.execute(f"ALTER TABLE options ADD COLUMN {col} {ddl}")
+    ls = {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}
+    for col, ddl in (
+        ("apprentice", "INTEGER NOT NULL DEFAULT 0"),
+        ("miner", "INTEGER NOT NULL DEFAULT 0"),
+        ("craftsman", "INTEGER NOT NULL DEFAULT 0"),
+        ("foreman", "INTEGER NOT NULL DEFAULT 0"),
+        ("dorm", "INTEGER NOT NULL DEFAULT 0"),
+        ("wage", "TEXT NOT NULL DEFAULT 'normal'"),
+        ("idle_at", "REAL NOT NULL DEFAULT 0"),
+    ):
+        if col not in ls:
+            conn.execute(f"ALTER TABLE labor ADD COLUMN {col} {ddl}")
     if "grace_until" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN grace_until REAL")
     ps = {r["name"] for r in conn.execute("PRAGMA table_info(play_state)")}
