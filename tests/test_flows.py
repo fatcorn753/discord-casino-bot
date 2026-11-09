@@ -397,6 +397,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
         "運営",
         "クイズ",
         "貸付",
+        "競馬",
     }
     assert [n for n in names if re.search(r"[A-Z]", n) or not 1 <= len(n) <= 32] == []
 
@@ -423,6 +424,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
         "サーバー取消",
         "付与",
         "残高設定",
+        "競馬開催",
         "お知らせ",
         "発言削除",
         "抽選",

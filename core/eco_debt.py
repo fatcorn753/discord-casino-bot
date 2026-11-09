@@ -321,6 +321,7 @@ class DebtMixin:
             value += prof["insurance"] * shop_mod.BY_ID[shop_mod.INSURANCE].price
             self._auction_list_locked(shop_mod.DAILY_DOUBLE, prof["daily_boost"], now)
             self._auction_list_locked(shop_mod.INSURANCE, prof["insurance"], now)
+        value += self._seize_horses(user_id, now)  # 持ち馬は、購入券の値段で換金して、帝愛の競売に出す
         self._conn.execute("DELETE FROM inventory WHERE guild_id=? AND user_id=?", (self._g(), user_id))
         self._conn.execute(
             "UPDATE profile SET title=NULL, card_color=NULL, card_icon=NULL, skin_dice=NULL, skin_table=NULL, "

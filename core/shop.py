@@ -24,6 +24,9 @@ WEEKLY_KING = "title_weekly_king"
 DAILY_DOUBLE = "daily_double"
 INSURANCE = "insurance"
 STREAK_GUARD = "streak_guard"
+HORSE_VOUCHER = "horse_voucher"
+CARROT = "carrot"
+AUTO_USED = (STREAK_GUARD, HORSE_VOUCHER, CARROT)  # 「使う」を押さなくてよい（持っているだけ・別の画面で使う）消耗品
 # 保険券で戻る額の上限。券の値段（2,000）より小さくして、買って使うほど増える（期待値がプラスになる）ことがないようにする
 INSURANCE_CAP = 1_000
 
@@ -104,6 +107,20 @@ CATALOG = [
         CONSUMABLE,
         16_000,
         desc="デイリーを受け取れなかった日を、1枚で1日ぶん埋めて、連続ログインをつなぐ（持っているだけで、次のデイリーで自動で使われる）",
+    ),
+    Item(
+        HORSE_VOUCHER,
+        "競走馬（購入券）",
+        CONSUMABLE,
+        30_000,
+        desc="`/競馬 厩舎` で、名前と見た目を決めて、競走馬を迎える（1人3頭まで）。ステータスは合計固定で、配分だけを選ぶ",
+    ),
+    Item(
+        CARROT,
+        "にんじん",
+        CONSUMABLE,
+        1_000,
+        desc="`/競馬 厩舎` で、馬のステータスを5ポイント、別のステータスへ動かす（合計は変わらない）",
     ),
     # ゲーム演出の変更品（装備すると、結果画面のタイトル・飾り・地の文が変わる。勝率と配当は変わらない）。見た目は core/skins.py
     Item("skin_kuro", "黒服の立会い", SKIN_DICE, 30_000, desc="黒服が立ち会い、実況する"),

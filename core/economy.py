@@ -31,6 +31,7 @@ from core.eco_crypto import CryptoMixin
 from core.eco_debt import DebtMixin
 from core.eco_events import EventMixin
 from core.eco_guild import GuildMixin
+from core.eco_horse import HorseMixin
 from core.eco_loans import LoanMixin
 from core.eco_market_events import MarketEventMixin
 from core.eco_options import OptionMixin
@@ -67,6 +68,7 @@ class Economy(
     DebtMixin,
     BankMixin,
     AuctionMixin,
+    HorseMixin,
     OptionMixin,
     MarketEventMixin,
 ):

@@ -482,7 +482,7 @@ def test_streak_guard_price_and_use_message(cog, eco):
     buy(eco, shop.STREAK_GUARD)
     it = FakeInteraction()
     run(cog.use_item(it, shop.STREAK_GUARD))
-    assert "自動で使われます" in it.sent[0]["embed"].title and eco.inventory(1)[shop.STREAK_GUARD] == 1
+    assert "ここでは使いません" in it.sent[0]["embed"].title and eco.inventory(1)[shop.STREAK_GUARD] == 1
 
 
 # ----------------------------- 帝愛の競売 ----------------------------- #

@@ -258,6 +258,25 @@ class ShopView(discord.ui.View):
                 )
                 qty.callback = self._on_qty
                 self.add_item(qty)
+        horses = eco.auction_horses()
+        if horses:
+            pick = discord.ui.Select(
+                placeholder="競走馬を買う",
+                row=2,
+                options=[
+                    discord.SelectOption(
+                        label=f"{h['name']}（{h['coat']}）"[:100],
+                        value=str(h["id"]),
+                        emoji=h["silks"],
+                        description=f"{h['price']:,}ペリカ（定価の{h['rate']:.0%}）　速{h['speed']} ス{h['stamina']} パ{h['power']} 根{h['guts']}"[
+                            :100
+                        ],
+                    )
+                    for h in horses[:25]
+                ],
+            )
+            pick.callback = self._on_buy_horse
+            self.add_item(pick)
         back = discord.ui.Button(label="🛍️ ショップ", style=discord.ButtonStyle.primary, row=3)
         back.callback = self._to_shop
         self.add_item(back)
@@ -321,6 +340,9 @@ class ShopView(discord.ui.View):
         await self.cog.buy_item(
             interaction, interaction.data["values"][0], self.qty if self.kind == shop.CONSUMABLE else 1
         )
+
+    async def _on_buy_horse(self, interaction: discord.Interaction):
+        await self.cog.buy_auction_horse(interaction, int(interaction.data["values"][0]))
 
     async def _on_buy_auction(self, interaction: discord.Interaction):
         await self.cog.buy_auction(interaction, interaction.data["values"][0], self.qty)
@@ -528,7 +550,7 @@ class ShopCog(commands.Cog):
             "売上は、帝愛銀行の収入（預金者の利回り）になります。",
             ui.GOLD,
         )
-        if not listed:
+        if not listed and not eco.auction_horses():
             e.add_field(name="棚", value="いまは、売りに出ている品はありません。", inline=False)
         else:
             e.add_field(
@@ -540,9 +562,60 @@ class ShopCog(commands.Cog):
                 )[:1024],
                 inline=False,
             )
+        horses = eco.auction_horses()
+        if horses:
+            e.add_field(
+                name="🐴 競走馬（名前とステータスは、そのまま引き継ぎます）",
+                value="\n".join(
+                    f"{h['silks']} **{h['name']}**（{h['coat']}）— **{ui.pelica(h['price'])}**（定価の{h['rate']:.0%}）"
+                    f"　速{h['speed']} ス{h['stamina']} パ{h['power']} 根{h['guts']}　{h['races']}戦{h['wins']}勝"
+                    for h in horses
+                )[:1024],
+                inline=False,
+            )
         me = eco.peek_stats(user_id)
         e.set_footer(text=f"あなたの残高: {ui.pelica(me['balance'] if me else 0)}")
         return e
+
+    async def buy_auction_horse(self, interaction: discord.Interaction, horse_id: int):
+        """競売の馬を買う（買い物の間は「プレイ中」にする。buy_item と同じ理由）。"""
+        uid = interaction.user.id
+        reason = self.bot.sessions.try_start(uid)
+        if reason:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("いまは買えません", reason), ephemeral=True
+            )
+        try:
+            eco = self.g(interaction)
+            horse = next((h for h in eco.auction_horses() if h["id"] == horse_id), None)
+            if horse is None:
+                return await interaction.response.send_message(
+                    embed=ui.error_embed("買えませんでした", "その馬は、もう売れてしまいました。"), ephemeral=True
+                )
+            if horse["price"] >= CONFIRM_FROM:
+                ok = await confirm_action(
+                    interaction,
+                    "競売で買いますか？",
+                    f"{horse['silks']} **{horse['name']}**\n約 {ui.pelica(horse['price'])} かかります。",
+                    "買う",
+                )
+                if ok is not True:
+                    return
+                reply = interaction.followup.send
+            else:
+                reply = interaction.response.send_message
+            res = eco.auction_buy_horse(uid, horse_id)
+            if not res.ok:
+                return await reply(embed=ui.error_embed("買えませんでした", res.reason), ephemeral=True)
+            await reply(
+                embed=ui.ok_embed(
+                    "競売で競走馬を買いました",
+                    f"{horse['silks']} **{horse['name']}**\n残高: **{ui.pelica(res.balance)}**\n`/競馬 厩舎` で、出走を申し込めます。",
+                ),
+                ephemeral=True,
+            )
+        finally:
+            self.bot.sessions.end(uid)
 
     async def buy_auction(self, interaction: discord.Interaction, item_id: str, qty: int = 1):
         """競売で買う。買い物の間は「プレイ中」にする（buy_item と同じ理由）。"""
@@ -709,13 +782,14 @@ class ShopCog(commands.Cog):
             return await interaction.response.send_message(
                 embed=ui.error_embed("持っていません", "「🎒 持ち物」の画面で確認できます。"), ephemeral=True
             )
-        if it.id == shop.STREAK_GUARD:
+        if it.id in shop.AUTO_USED:
+            note = {
+                shop.STREAK_GUARD: "持っているだけで、デイリーを受け取れなかった日があったとき、次のデイリーで自動で使われます（1枚で1日ぶん）。",
+                shop.HORSE_VOUCHER: "`/競馬 厩舎` で使います（名前と見た目を決めて、競走馬を迎えます）。",
+                shop.CARROT: "`/競馬 厩舎` で使います（馬のステータスを、5ポイント動かします）。",
+            }[it.id]
             return await interaction.response.send_message(
-                embed=ui.ok_embed(
-                    "自動で使われます",
-                    f"**{it.name}** は、持っているだけで、デイリーを受け取れなかった日があったとき、次のデイリーで自動で使われます（1枚で1日ぶん）。",
-                ),
-                ephemeral=True,
+                embed=ui.ok_embed("ここでは使いません", f"**{it.name}**: {note}"), ephemeral=True
             )
         if it.kind == shop.CONSUMABLE:
             if self.bot.sessions.is_active(uid):
