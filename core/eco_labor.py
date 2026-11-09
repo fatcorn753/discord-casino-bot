@@ -4,6 +4,7 @@
 上限や、手元の制限はない。day_earned は、画面に出す「今日の稼ぎ」。
 """
 
+import json
 import time
 from typing import Optional
 
@@ -31,6 +32,14 @@ class LaborMixin:
     @staticmethod
     def _counts(row: dict) -> dict:
         return {k: row[k] for k in labor_mod.WORKERS}
+
+    @staticmethod
+    def _ores_of(row: dict) -> dict:
+        """受け取る前の稼ぎに含まれる鉱石 {鉱石: 個数}。"""
+        try:
+            return {k: int(n) for k, n in json.loads(row.get("ores") or "{}").items() if k in labor_mod.ORE_VALUE}
+        except (ValueError, AttributeError):
+            return {}
 
     def _workers_of(self, user_id: int) -> list:
         return [
@@ -70,6 +79,11 @@ class LaborMixin:
             for wid in plan["removed"] + plan["quit"]:
                 self._conn.execute("DELETE FROM labor_workers WHERE id=?", (wid,))
             row["pot"] += plan["gain"] - plan["pot_spent"]
+            if plan["ores"]:
+                found = self._ores_of(row)
+                for k, n in plan["ores"].items():
+                    found[k] = found.get(k, 0) + n
+                row["ores"] = json.dumps(found)
             row["day_earned"] += plan["gain"]
             row["earned_total"] += plan["gain"]
             workers = self._workers_of(user_id)
@@ -79,7 +93,7 @@ class LaborMixin:
     def _labor_save(self, user_id: int, row: dict) -> None:
         self._conn.execute(
             "UPDATE labor SET pick=?, glove=?, fatigue=?, fatigue_at=?, pot=?, day=?, day_earned=?, "
-            "last_click=?, clicks=?, earned_total=?, dorm=?, wage=?, idle_at=?, renew=? WHERE guild_id=? AND user_id=?",
+            "last_click=?, clicks=?, earned_total=?, dorm=?, wage=?, idle_at=?, renew=?, ores=? WHERE guild_id=? AND user_id=?",
             (
                 row["pick"],
                 row["glove"],
@@ -95,6 +109,7 @@ class LaborMixin:
                 row["wage"],
                 row["idle_at"],
                 row["renew"],
+                row.get("ores", ""),
                 self._g(),
                 user_id,
             ),
@@ -108,6 +123,7 @@ class LaborMixin:
         self._ensure(user_id)
         self._apply(user_id, amount, "地下作業:稼ぎ", income=amount)
         row["pot"] = 0
+        row["ores"] = ""
         return amount
 
     def labor_state(self, user_id: int, now: Optional[float] = None, day: str = "") -> dict:
@@ -134,6 +150,7 @@ class LaborMixin:
                     "day": day,
                     "wage": "normal",
                     "renew": 1,
+                    "ores": "",
                 }
             )
             row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now)
@@ -161,6 +178,7 @@ class LaborMixin:
             row["workers"] = len(stay)
             row["slots"] = labor_mod.slots(row["dorm"])
             row["rate"] = labor_mod.idle_rate(self._counts(row), row["wage"])
+            row["ores"] = self._ores_of(row)  # 決算ずみの鉱石（見込みの分は、掘るまで分からない）
             row["idle_pending"] = plan["gain"]  # まだ数えていない、作業員の稼ぎ（見込み）
             row["pot_total"] = row["pot"] + plan["gain"] - plan["pot_spent"]
             row["renew_fee"] = plan["pot_spent"] + plan["balance_spent"]  # 切れていた契約の更新に、いま払う額
@@ -218,14 +236,15 @@ class LaborMixin:
             self._labor_save(user_id, row)
             return {"ok": True, "pay": pay}
 
-    def labor_collect(self, user_id: int, now: Optional[float] = None, day: str = "") -> int:
-        """受け取る前の稼ぎを、残高に移す。移した額（天引きの前）を返す。"""
+    def labor_collect(self, user_id: int, now: Optional[float] = None, day: str = "", detail: bool = False):
+        """受け取る前の稼ぎを、残高に移す。移した額（天引きの前）を返す。detail=True なら {amount, ores}（掘った鉱石つき）。"""
         now = time.time() if now is None else now
         with self._lock, self._conn:
             row = self._labor_row(user_id, now, day)
+            ores = self._ores_of(row)
             amount = self._labor_flush(user_id, row)
             self._labor_save(user_id, row)
-            return amount
+            return {"amount": amount, "ores": ores} if detail else amount
 
     def labor_drink(self, user_id: int, now: Optional[float] = None, day: str = "") -> tuple:
         """栄養ドリンクを1本飲んで、疲労を DRINK_RECOVER 回復する。(ok, 理由) を返す。疲れていなければ、減らさない。"""

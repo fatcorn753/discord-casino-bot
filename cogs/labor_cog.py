@@ -26,6 +26,12 @@ def fatigue_label(fatigue: float) -> str:
     return "元気" if fatigue < 25 else "ふつう" if fatigue < 50 else "疲れ気味" if fatigue < 75 else "ぐったり"
 
 
+def ore_text(found: dict) -> str:
+    """掘った鉱石の一覧（価値の高い順）。"""
+    order = [o[0] for o in reversed(lab.ORES)]
+    return "　".join(f"{lab.ORE_MARK[k]}{lab.ORE_NAME[k]}×{found[k]}" for k in order if found.get(k))
+
+
 def panel_embed(state: dict, note: str = "") -> discord.Embed:
     """作業の画面。上に、直前の結果。つぎに、お金と疲労。"""
     fat = state["fatigue"]
@@ -49,6 +55,8 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
         value="　".join(f"{lab.TOOL_MARK[t]} {lab.TOOL_NAME[t]} Lv{state[t]}/{lab.MAX_LEVEL}" for t in lab.TOOLS),
         inline=False,
     )
+    if state.get("ores"):
+        e.add_field(name="💎 作業員の掘り出し", value=ore_text(state["ores"]), inline=False)
     e.set_footer(text="疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します。")
     return e
 
@@ -57,10 +65,16 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
     """雇用の画面。作業員の一覧（人数・稼ぎ・次の値段）、寮、賃金。"""
     full = state["workers"] >= state["slots"]
     head = [x for x in (note, "⚠ 人数がいっぱいです。寮を強化するか、誰かを解雇しよう。" if full else "") if x]
-    e = ui.embed("👷 作業員の雇用", "\n".join(head) if head else "雇った作業員は、放置でも稼いでくれます。", ui.DARK)
+    e = ui.embed(
+        "👷 作業員の雇用",
+        "\n".join(head)
+        if head
+        else "雇った作業員は、放置で働き、1時間ごとに鉱石を掘ります。レア鉱石を引けば、大きく黒字です。",
+        ui.DARK,
+    )
     e.add_field(name="💴 手元", value=ui.pelica(state["balance"]), inline=True)
     e.add_field(name="🎒 未受け取り", value=f"**{ui.pelica(state['pot_total'])}**", inline=True)
-    e.add_field(name="📈 作業員の稼ぎ", value=f"**{state['rate']:,.0f}/時**", inline=True)
+    e.add_field(name="📈 基本給", value=f"**{state['rate']:,.1f}/時**", inline=True)
     e.add_field(
         name="🏠 人数",
         value=f"**{state['workers']} / {state['slots']}人**（寮 Lv{state['dorm']}/{lab.DORM_MAX}）",
@@ -70,7 +84,7 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
     e.add_field(
         name="💼 賃金",
         value=f"**{lab.WAGE_NAME[wage]}**"
-        + (f"\n稼ぎ ×{lab.WAGE_MULT['low']}・1日に {lab.QUIT_PER_DAY:.0%} で1人ずつ辞める" if wage == "low" else ""),
+        + (f"\n基本給 ×{lab.WAGE_MULT['low']}・1日に {lab.QUIT_PER_DAY:.0%} で1人ずつ辞める" if wage == "low" else ""),
         inline=True,
     )
     e.add_field(
@@ -79,7 +93,11 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
         inline=True,
     )
     for k in lab.WORKERS:
-        gain = f"{lab.WORKER_RATE[k]}/時" if k != "foreman" else f"全員の稼ぎ +{lab.FOREMAN_BONUS:.0%}"
+        gain = (
+            f"基本給 {lab.WORKER_RATE[k]:g}/時 ＋ 鉱石"
+            if k != "foreman"
+            else f"レア鉱石が出やすい +{lab.FOREMAN_LUCK:.0%}"
+        )
         until = f"\n契約が切れる: <t:{int(state['expires'][k])}:R>" if state["expires"].get(k) else ""
         e.add_field(
             name=f"{lab.WORKER_MARK[k]} {lab.WORKER_NAME[k]} ×{state[k]}",
@@ -87,7 +105,7 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
             inline=True,
         )
     e.set_footer(
-        text=f"契約は{lab.CONTRACT_DAYS}日ごと。貯まるのは最大{lab.STOCK_HOURS:.0f}時間分。解雇しても契約料は戻りません。"
+        text=f"契約は{lab.CONTRACT_DAYS}日ごと。基本給だけでは赤字で、平均でも契約料に届きません。当たり次第です。貯まるのは最大{lab.STOCK_HOURS:.0f}時間分。"
     )
     return e
 
@@ -249,8 +267,17 @@ class LaborView(discord.ui.View):
         )
 
     async def _collect(self, interaction: discord.Interaction):
-        amount = self.eco().labor_collect(self.user_id, time.time(), today(self.bot))
-        await self._show(interaction, f"💰 **{amount:,}** ペリカを、まとめて手元に移しました。" if amount else "")
+        got = self.eco().labor_collect(self.user_id, time.time(), today(self.bot), detail=True)
+        amount, found = got["amount"], got["ores"]
+        note = f"💰 **{amount:,}** ペリカを、まとめて手元に移しました。" if amount else ""
+        if found:
+            note += f"\n💎 掘り出し: {ore_text(found)}"
+        await self._show(interaction, note)
+        big = {k: n for k, n in found.items() if k in lab.ORE_BIG}
+        if big:  # 大当たりは、みんなに知らせる
+            await interaction.followup.send(
+                f"🎉 {interaction.user.mention} の作業員が、**{ore_text(big)}** を掘り当てた！"
+            )
 
     def _goto(self, tab: str):
         async def callback(interaction: discord.Interaction):

@@ -20,6 +20,15 @@ def text(embed) -> str:
     return "\n".join([embed.title or "", embed.description or ""] + [f"{f.name} {f.value}" for f in embed.fields])
 
 
+_REAL_ROLL = lab.roll_ores
+
+
+@pytest.fixture(autouse=True)
+def no_ores(monkeypatch):
+    """ふつうのテストは、鉱石を掘らない（稼ぎを一定にする）。鉱石のテストは、_REAL_ROLL を戻して使う。"""
+    monkeypatch.setattr(lab, "roll_ores", lambda *a, **k: {})
+
+
 @pytest.fixture
 def eco(tmp_path):
     e = Economy(str(tmp_path / "t.db"))
@@ -196,10 +205,10 @@ def test_worker_numbers():
     assert lab.contract_fee("apprentice") == 340 and lab.contract_fee("craftsman") == 2_700 and lab.CONTRACT_DAYS == 7
     assert lab.slots(0) == 5 and lab.slots(99) == 10 and lab.dorm_cost(5) is None and lab.dorm_cost(0) == 2_000
     counts = {"apprentice": 2, "craftsman": 1}
-    assert lab.idle_rate(counts, "normal") == 2 * 10 + 80
-    assert lab.idle_rate(counts, "low") == pytest.approx(100 * 1.25)
-    assert lab.idle_rate({**counts, "foreman": 1}, "normal") == pytest.approx(100 * 1.08)
-    assert lab.foreman_bonus(99) == lab.FOREMAN_BONUS_CAP
+    assert lab.idle_rate(counts, "normal") == 2 * 2.0 + 16.5
+    assert lab.idle_rate(counts, "low") == pytest.approx(20.5 * lab.WAGE_MULT["low"])
+    assert lab.idle_rate({**counts, "foreman": 1}, "normal") == 20.5  # 監督は、基本給を増やさない
+    assert lab.foreman_luck(99) == lab.FOREMAN_LUCK_CAP
     assert lab.idle_hours(0, 100 * H) == lab.STOCK_HOURS and lab.idle_hours(100, 50) == 0
 
 
@@ -218,13 +227,13 @@ def test_hire_costs_the_contract_fee_and_sets_a_7_day_term(eco):
 def test_workers_earn_while_idle_up_to_the_stock_limit(eco):
     eco.credit(U, 5_000, "テスト")
     eco.labor_hire(U, "apprentice", T0, DAY)
-    eco.labor_hire(U, "apprentice", T0, DAY)  # 1時間 20ペリカ
+    eco.labor_hire(U, "apprentice", T0, DAY)  # 1時間 4ペリカ（基本給）
     s = eco.labor_state(U, T0 + 2 * H, DAY)
-    assert s["rate"] == 20 and s["idle_pending"] == 40 and s["pot_total"] == 40
-    assert eco.labor_collect(U, T0 + 2 * H, DAY) == 40
+    assert s["rate"] == 4 and s["idle_pending"] == 8 and s["pot_total"] == 8
+    assert eco.labor_collect(U, T0 + 2 * H, DAY) == 8
     eco.labor_collect(U, T0 + 2 * H, DAY)
-    assert eco.labor_collect(U, T0 + 100 * H, DAY) == int(20 * lab.STOCK_HOURS)  # 放っておいても、12時間分まで
-    assert eco.labor_state(U, T0 + 100 * H, DAY)["earned_total"] == 40 + 240
+    assert eco.labor_collect(U, T0 + 100 * H, DAY) == int(4 * lab.STOCK_HOURS)  # 放っておいても、12時間分まで
+    assert eco.labor_state(U, T0 + 100 * H, DAY)["earned_total"] == 8 + 48
 
 
 def test_idle_income_is_taxed_for_debt_and_counts_for_ranking(eco):
@@ -262,7 +271,7 @@ def test_low_wage_pays_more_but_workers_quit(eco):
     eco.labor_hire(U, "apprentice", T0, DAY)
     eco.labor_hire(U, "apprentice", T0, DAY)
     assert eco.labor_set_wage(U, "low", T0, DAY) == (True, "")
-    assert eco.labor_state(U, T0, DAY)["rate"] == pytest.approx(25)
+    assert eco.labor_state(U, T0, DAY)["rate"] == pytest.approx(4 * lab.WAGE_MULT["low"])
     with eco._lock, eco._conn:
         row = eco._labor_row(U, T0 + 10 * H, DAY, Quit())  # 必ず辞める乱数
         eco._labor_save(U, row)
@@ -274,15 +283,16 @@ def test_wage_change_counts_the_earlier_time_at_the_old_rate(eco):
     eco.credit(U, 5_000, "テスト")
     eco.labor_hire(U, "miner", T0, DAY)
     eco.labor_set_wage(U, "low", T0 + 4 * H, DAY)  # 4時間は、標準で数える
-    assert eco.labor_state(U, T0 + 4 * H, DAY)["pot"] == 4 * 35
+    assert eco.labor_state(U, T0 + 4 * H, DAY)["pot"] == int(4 * 7.5)
 
 
-def test_foreman_raises_everyones_income(eco):
+def test_foreman_raises_rare_ore_chance_not_the_wage(eco):
     eco.credit(U, 100_000, "テスト")
     eco.labor_hire(U, "craftsman", T0, DAY)
     base = eco.labor_state(U, T0, DAY)["rate"]
     eco.labor_hire(U, "foreman", T0, DAY)
-    assert eco.labor_state(U, T0, DAY)["rate"] == pytest.approx(base * 1.08)
+    assert eco.labor_state(U, T0, DAY)["rate"] == base
+    assert lab.ore_ev("craftsman", lab.foreman_luck(1)) == pytest.approx(lab.ore_ev("craftsman") * 1.1)
 
 
 def test_hire_tab_buttons_hire_and_dismiss_through_the_panel(eco):
@@ -315,8 +325,8 @@ def test_hire_embed_shows_prices_slots_and_pending(eco):
     eco.labor_hire(U, "apprentice", T0, DAY)
     state = eco.labor_state(U, T0 + 3 * H, DAY)
     d = text(labor_cog.hire_embed(state))
-    assert "1 / 5人" in d and "見習い" in d and "340" in d and "10/時" in d and "自動更新" in d
-    assert state["pot_total"] == 30 and "30" in text(labor_cog.panel_embed(state))
+    assert "1 / 5人" in d and "見習い" in d and "340" in d and "基本給 2/時" in d and "自動更新" in d
+    assert state["pot_total"] == 6 and "6" in text(labor_cog.panel_embed(state))
 
 
 def test_fatigue_label_and_no_hints(eco):
@@ -388,14 +398,14 @@ def worker(i, kind, expires):
 
 def test_settle_plan_no_renewals_needed():
     plan = lab.settle_plan([worker(1, "apprentice", T0 + W)], "normal", True, T0, T0 + 2 * H, 0, 0)
-    assert plan == {"gain": 20, "pot_spent": 0, "balance_spent": 0, "renewed": [], "removed": [], "quit": []}
+    assert plan == {"gain": 4, "ores": {}, "pot_spent": 0, "balance_spent": 0, "renewed": [], "removed": [], "quit": []}
 
 
 def test_settle_plan_renews_from_pot_then_balance():
     now = T0 + 5 * H
     w = [worker(1, "apprentice", T0 + H)]  # 契約は、1時間で切れた
     plan = lab.settle_plan(w, "normal", True, T0, now, 0, 0)  # 払えない（稼ぎも手元も 0）… 更新前の稼ぎは、貯まらない
-    assert plan["removed"] == [1] and plan["renewed"] == [] and plan["gain"] == 10  # 切れるまでの1時間分だけ稼いだ
+    assert plan["removed"] == [1] and plan["renewed"] == [] and plan["gain"] == 2  # 切れるまでの1時間分だけ稼いだ
     paid_pot = lab.settle_plan(
         [worker(1, "apprentice", T0 + H), worker(2, "apprentice", T0 + 9 * H)], "normal", True, T0, now, 340, 0
     )
@@ -406,7 +416,7 @@ def test_settle_plan_renews_from_pot_then_balance():
 
 def test_settle_plan_renew_off_removes_expired_workers():
     plan = lab.settle_plan([worker(1, "miner", T0 + H)], "normal", False, T0, T0 + 4 * H, 9_999, 9_999)
-    assert plan["removed"] == [1] and plan["pot_spent"] == 0 and plan["balance_spent"] == 0 and plan["gain"] == 35
+    assert plan["removed"] == [1] and plan["pot_spent"] == 0 and plan["balance_spent"] == 0 and plan["gain"] == 7
 
 
 def test_workers_leave_when_contract_ends_and_nothing_pays_for_renewal(eco):
@@ -419,7 +429,8 @@ def test_workers_leave_when_contract_ends_and_nothing_pays_for_renewal(eco):
     assert eco.labor_state(U, now, DAY)["workers"] == 0
 
 
-def test_auto_renew_pays_from_the_pot_when_you_visit_regularly(eco):
+def test_auto_renew_pays_from_the_pot_when_you_visit_regularly(eco, monkeypatch):
+    monkeypatch.setitem(lab.WORKER_RATE, "miner", 35)  # 契約料を稼ぎで払える数字にして、仕組みだけを確かめる
     eco.credit(U, 5_000, "テスト")
     eco.labor_hire(U, "miner", T0, DAY)  # 1時間 35。契約料 1,200
     for k in range(1, 17):  # 10時間ごとに見に来る（クリックでも、決算される）
@@ -441,7 +452,9 @@ def test_renewal_fee_comes_from_balance_when_the_pot_is_empty(eco):
     now = T0 + W + H  # 1週間、見に来なかった（pot は 0）
     eco.labor_collect(U, now, DAY)
     assert eco.labor_state(U, now, DAY)["miner"] == 1
-    assert eco.balance(U) == 5_000 - 1_200 + 35 * 12  # 手元から契約料が引かれ、更新した作業員の、12時間分の稼ぎが入る
+    assert eco.balance(U) == 5_000 - 1_200 + int(
+        7.5 * 12
+    )  # 手元から契約料が引かれ、更新した作業員の、12時間分の稼ぎが入る
     assert any(
         "契約の更新" in r["reason"] for r in eco._conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))
     )
@@ -474,3 +487,81 @@ def test_old_count_columns_migrate_to_contracts(eco):
     s = eco.labor_state(U, T0, DAY)
     assert s["apprentice"] == 2 and s["miner"] == 1 and s["expires"]["miner"] == T0 + W
     assert eco._conn.execute("SELECT apprentice+miner c FROM labor WHERE user_id=?", (U,)).fetchone()["c"] == 0
+
+
+# ------------------------------ 鉱石 ------------------------------ #
+class Fixed(random.Random):
+    """random() が、決めた値を順に返す（尽きたら 1.0 = 何も出ない）。"""
+
+    def __init__(self, *vals):
+        super().__init__()
+        self.vals = list(vals)
+
+    def random(self):
+        return self.vals.pop(0) if self.vals else 1.0
+
+
+def test_ore_numbers_are_a_losing_bet_on_average():
+    for kind in ("apprentice", "miner", "craftsman"):
+        week_hours = lab.STOCK_HOURS * 7  # 毎日1回受け取る人の、1週間の働き
+        mean = (lab.WORKER_RATE[kind] + lab.ore_ev(kind)) * week_hours
+        mean_low = (lab.WORKER_RATE[kind] * lab.WAGE_MULT["low"] + lab.ore_ev(kind)) * week_hours
+        assert 0.8 * lab.CONTRACT_FEE[kind] < mean < lab.CONTRACT_FEE[kind]  # 平均は赤字（ただし、遠くはない）
+        assert mean_low < lab.CONTRACT_FEE[kind]  # 低賃金でも、平均は赤字
+        base_only = lab.WORKER_RATE[kind] * lab.WAGE_MULT["low"] * week_hours
+        assert base_only < 0.7 * lab.CONTRACT_FEE[kind]  # 基本給だけでは、はっきり赤字
+
+
+def test_roll_ores_follows_the_table_and_foreman_luck():
+    assert _REAL_ROLL("miner", 3, 0.0, Fixed()) == {}  # 全部外れ
+    # 銅の区間は [0, p)。最初の抽選だけ当たり、あとは外れ
+    copper_p = lab.ORES[0][3] * lab.ORE_POWER["miner"]
+    assert _REAL_ROLL("miner", 3, 0.0, Fixed(copper_p * 0.5)) == {"copper": 1}
+    just_over = copper_p * 1.01  # 銅を超えて、銀の区間に入る
+    assert _REAL_ROLL("miner", 1, 0.0, Fixed(just_over)) == {"silver": 1}
+    assert _REAL_ROLL("miner", 1, 0.5, Fixed(just_over)) == {"copper": 1}  # 運がいいと、同じ値でも銅に収まる
+    assert _REAL_ROLL("foreman", 99, 0.5, Fixed(0.0)) == {}  # 監督は掘らない
+    legend = _REAL_ROLL("craftsman", 1, 0.0, Fixed(sum(o[3] for o in lab.ORES[:-1]) * 1.9 + 1e-9))
+    assert legend == {"legend": 1}
+    assert lab.ore_gain({"gold": 2, "diamond": 1}) == 2 * 400 + 3_000
+
+
+def test_settle_plan_adds_ore_value_to_the_gain(monkeypatch):
+    monkeypatch.setattr(lab, "roll_ores", _REAL_ROLL)
+    rng = Fixed(0.0, 0.0)  # 2時間とも、銅
+    plan = lab.settle_plan([worker(1, "miner", T0 + W)], "normal", True, T0, T0 + 2 * H, 0, 0, rng)
+    assert plan["ores"] == {"copper": 2} and plan["gain"] == int(7.5 * 2) + 2 * 20
+
+
+def test_ores_pile_up_until_collected_and_are_reported(eco, monkeypatch):
+    monkeypatch.setattr(lab, "roll_ores", lambda kind, h, luck, rng: {"copper": 2, "diamond": 1} if h > 0 else {})
+    eco.credit(U, 5_000, "テスト")
+    eco.labor_hire(U, "miner", T0, DAY)
+    s1 = eco.labor_state(U, T0 + H, DAY)
+    assert s1["ores"] == {}  # 見込みでは、掘らない
+    eco.labor_click(U, T0 + H, DAY)  # 触れると決算される
+    s2 = eco.labor_state(U, T0 + H, DAY)
+    assert s2["ores"] == {"copper": 2, "diamond": 1}
+    assert s2["pot_total"] >= 3_040 + int(7.5)
+    got = eco.labor_collect(U, T0 + H, DAY, detail=True)
+    assert got["ores"] == {"copper": 2, "diamond": 1} and got["amount"] >= 3_040
+    assert eco.labor_state(U, T0 + H, DAY)["ores"] == {}
+
+
+def test_collect_announces_big_ores_publicly(eco, monkeypatch):
+    monkeypatch.setattr(lab, "roll_ores", lambda kind, h, luck, rng: {"copper": 1, "diamond": 1} if h > 0 else {})
+    eco.credit(U, 5_000, "テスト")
+    eco.labor_hire(U, "miner", T0, DAY)
+    view = make_view(eco)
+    sent = []
+
+    async def send(content, **kw):
+        sent.append(content)
+
+    it = SimpleNamespace(
+        user=SimpleNamespace(id=U, mention="<@1>"), response=Resp(), data={}, followup=SimpleNamespace(send=send)
+    )
+    monkeypatch.setattr(labor_cog.time, "time", lambda: T0 + H)
+    asyncio.run(view._collect(it))
+    assert sent and "ダイヤ" in sent[0] and "銅" not in sent[0]
+    assert "掘り出し" in it.response.edits[-1]["embed"].description

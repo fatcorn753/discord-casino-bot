@@ -178,6 +178,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             wage         TEXT NOT NULL DEFAULT 'normal',
             idle_at      REAL NOT NULL DEFAULT 0,      -- 作業員の稼ぎを、最後に数えた時刻
             renew        INTEGER NOT NULL DEFAULT 1,   -- 作業員の契約の自動更新（1=オン）
+            ores         TEXT NOT NULL DEFAULT '',     -- 受け取る前の稼ぎに含まれる鉱石（JSON {鉱石: 個数}）
             PRIMARY KEY (guild_id, user_id)
         );
         CREATE TABLE IF NOT EXISTS labor_workers (    -- 雇っている作業員（1人1行。契約の期限つき）
@@ -536,6 +537,7 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         ("wage", "TEXT NOT NULL DEFAULT 'normal'"),
         ("idle_at", "REAL NOT NULL DEFAULT 0"),
         ("renew", "INTEGER NOT NULL DEFAULT 1"),
+        ("ores", "TEXT NOT NULL DEFAULT ''"),
     ):
         if col not in ls:
             conn.execute(f"ALTER TABLE labor ADD COLUMN {col} {ddl}")
