@@ -302,7 +302,6 @@ class Economy(
                 if not credit or not self.can_borrow_for_bet(row["user_id"], short)[0]:
                     return False
                 self._seed(row["user_id"], short)  # 手元に足りない分だけ、帝愛が貸す
-                self._go_underground(row["user_id"])
             self._apply(row["user_id"], -extra, f"追加の賭け:{row['game']}")
             self._conn.execute(
                 "UPDATE escrow SET amount = amount + ? WHERE id=? AND guild_id=?", (extra, escrow_id, self._g())

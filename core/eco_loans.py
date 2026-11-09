@@ -224,8 +224,6 @@ class LoanMixin:
                 left = self.loan_remaining(loan, loan["due"])
                 status = "repaid" if left <= 0 else "overdue"
                 self._conn.execute("UPDATE loans SET status=? WHERE id=?", (status, loan["id"]))
-                if status == "overdue":
-                    self._go_underground(loan["borrower_id"])  # 延滞で、地下労働者に落ちる（連続ログインは 0 に戻る）
                 out.append({**loan, "status": status, "collected": take, "left": left})
         return out
 

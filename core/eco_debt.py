@@ -56,13 +56,6 @@ class DebtMixin:
                 return teiai.UNDERGROUND
             return teiai.KATAGI
 
-    def _go_underground(self, user_id: int) -> None:
-        """借金や延滞で、カタギから落ちる。連続ログインは 0 に戻る（すでに落ちていても、同じ）。"""
-        self._conn.execute(
-            "UPDATE users SET daily_streak=0 WHERE guild_id=? AND user_id=?",
-            (self._g(), user_id),
-        )
-
     def _after_debt_change(self, user_id: int) -> None:
         """借金が増減したあとの後始末。破産猶予の出入りを直し、破産者が完済したら、そこから BLACKLIST_DAYS 日が始まる。"""
         self._grace_update(user_id)
@@ -196,7 +189,6 @@ class DebtMixin:
                     f"手元が {teiai.SEED:,}ペリカ 以上あるので、借りられません（借りられるのは、枠の {teiai.SEED:,}ペリカ に足りない分まで）。",
                 )
             self._seed(user_id, short)
-            self._go_underground(user_id)
             return True, short
 
     def can_borrow_for_bet(self, user_id: int, need: int) -> tuple:
@@ -244,7 +236,6 @@ class DebtMixin:
             "UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (need, self._g(), user_id)
         )
         self._ledger(user_id, 0, self._balance(user_id), f"借金:{reason}（{need:,}ペリカ）")
-        self._go_underground(user_id)
         self._seed_if_empty(user_id)
         self._grace_update(user_id)
         return need
@@ -388,7 +379,6 @@ class DebtMixin:
                 "UPDATE users SET debt=debt-?, bankrupt_at=?, blacklist_until=NULL WHERE guild_id=? AND user_id=?",
                 (compressed, now, self._g(), user_id),
             )
-            self._go_underground(user_id)
             self._after_debt_change(user_id)
             seed = self._seed_if_empty(user_id)
             self._conn.execute("UPDATE users SET grace_until=NULL WHERE guild_id=? AND user_id=?", (self._g(), user_id))

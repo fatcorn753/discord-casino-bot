@@ -130,13 +130,13 @@ def test_a_debtor_with_an_empty_hand_gets_the_seed_money(eco):
     assert any("種銭" in n for n in eco.take_notices(U))
 
 
-def test_a_shortfall_resets_the_daily_streak_once(eco):
+def test_a_shortfall_keeps_the_daily_streak(eco):
     eco.claim_daily(U, datetime.date(2026, 11, 1))
     eco.claim_daily(U, datetime.date(2026, 11, 2))
     assert eco.stats(U)["daily_streak"] == 2
     eco._conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (U,))
     eco._owe(U, 500, "テスト")
-    assert eco.stats(U)["daily_streak"] == 0  # 地下労働者に落ちると、連続ログインは0に戻る
+    assert eco.stats(U)["daily_streak"] == 2  # 地下労働者に落ちても、連続ログインは途切れない
 
 
 # ----------------------------- 返済 ----------------------------- #
