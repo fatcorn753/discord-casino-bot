@@ -50,6 +50,11 @@ TIER_TABLE = {  # リーチの格。"" はリーチなし（当たっても、�
 HIT_TARGET = (
     0.01322  # 1回転あたりの、当たる確率の平均。基本の確率は、これに合うよう下で決める（還元率が100%を超えない値）
 )
+# ハズレの回転でも、予告やリーチが出ていれば、その演出を見せることがある（見せる確率。格が高いほど出やすい）。当落には関係しない
+MISS_SHOW_OMEN = {"": 0.0, "blue": 0.20, "red": 0.50, "gold": 1.0}
+MISS_SHOW_TIER = {"": 0.0, NORMAL: 0.35, SUPER: 0.75, PREMIUM: 1.0}
+MISS_STAGE_SCALE = 1.0  # ハズレ演出の出やすさの倍率（0 なら、ハズレの演出は出さない）
+MISS_SCENES_MAX = 2  # 1回の演出で見せる、ハズレの場面の数の上限
 OMEN_TEXT = {"blue": "（青）ざわ…", "red": "（赤）ゾワッ…！ 予告だ…！", "gold": "（金）⚡ 激アツ予告 ⚡ これは来る…！"}
 
 
@@ -317,6 +322,10 @@ def spin_frames(rng: random.Random, spin: SpinInfo, label: str = "") -> list:
         text = f"**【予告】** {OMEN_TEXT[omen]}" if k + 1 == STEPS_OF[omen] else f"**【予告】** {STEP_TEXT[k]}"
         frames.append(Frame((head if k == 0 else "") + hold_row(STEP_ICON[k]) + "\n" + text, mood))
     frames.append(_text_frame(head if not omen else "", (SPINNING,) * 3, "回転中…"))  # ② 回転
+    if not tier and not spin.hit:  # 予告だけで、何も起きない「ガセ」
+        frames.append(_text_frame("", (SPINNING,) * 3, "…何も、起きない…？", omen or "normal"))
+        frames.append(_text_frame(head, reels, "…**ガセだった**…"))
+        return frames
     if not tier:  # リーチなしで、突然3つ揃う「サプライズ当たり」。揃う直前まで、3つとも回っている
         frames.append(_text_frame("", (SPINNING,) * 3, "…！？ **まさか…**", omen or "normal"))
         frames.append(_text_frame("💫 **フリーズ！！** 💫\n", (SPINNING,) * 3, "画面が固まった…！！", "gold"))
@@ -348,8 +357,23 @@ def spin_frames(rng: random.Random, spin: SpinInfo, label: str = "") -> list:
             )  # 全回転のあとは、すぐ出目
         else:
             frames.append(_text_frame("⚡ スローになった… ⚡\n", (sym, sym, SPINNING), "…ここで決まる…！", mood))
-    frames.append(_text_frame(head, reels))  # ⑤ 出目（3つ揃い）。揃ったら、演出はここで終わる
+    frames.append(
+        _text_frame(head, reels, "" if spin.hit else "…**外れた**…")
+    )  # ⑤ 出目（当たりは3つ揃い）。ここで演出は終わる
     return frames
+
+
+def miss_show_prob(spin: SpinInfo) -> float:
+    """ハズレの回転を、演出で見せる確率。予告とリーチのどちらかが出れば、高いほうに近づく（何も出ていなければ 0）。"""
+    p = 1 - (1 - MISS_SHOW_OMEN[spin.omen]) * (1 - MISS_SHOW_TIER[spin.tier])
+    return min(1.0, p * MISS_STAGE_SCALE)
+
+
+def pick_miss_scenes(rng: random.Random, spins, limit: int = MISS_SCENES_MAX) -> list:
+    """見せるハズレの回転を、(何回転目か, 回転) の並び（回転の順）で返す。出やすいものを優先して、limit 個まで。"""
+    picked = [(i, s) for i, s in enumerate(spins, start=1) if not s.hit and rng.random() < miss_show_prob(s)]
+    picked.sort(key=lambda item: -miss_show_prob(item[1]))
+    return sorted(picked[:limit], key=lambda item: item[0])
 
 
 def hit_spins(spins) -> list:

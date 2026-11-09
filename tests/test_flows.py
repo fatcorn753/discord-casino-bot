@@ -831,6 +831,7 @@ def test_log_display_failure_handles_errors_without_status(capsys):
 def test_pachinko_sets_play_in_one_go_and_settle_once(bot, monkeypatch):
     monkeypatch.setattr(play_pa, "RNG", random.Random(7))
     monkeypatch.setattr(play_pa, "STEP", 0)
+    monkeypatch.setattr(play_pa.pachinko, "MISS_STAGE_SCALE", 0.0)  # コマ数を数えるので、ハズレの演出は出さない
     it = FakeInteraction()
     run(play_pa.play_pachinko(it, bot, 200, 5))  # 200 × 5セット = 1,000
     stats = bot.economy.pachinko_stats()

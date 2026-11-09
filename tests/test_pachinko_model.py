@@ -125,8 +125,10 @@ def test_spin_frames_show_the_cues_and_end_on_the_reels():
     for _ in range(3000):
         s = pachinko.roll_spin(rng)
         frames = pachinko.spin_frames(rng, s, "3回転目")
-        last = frames[-1].text.splitlines()[-1]
-        assert last.startswith("┃") and last.endswith("┃")  # 最後のコマは、出目
+        last = [line for line in frames[-1].text.splitlines() if line.startswith("┃")][-1]
+        assert last.endswith("┃")  # 最後のコマは、出目（ハズレは、そのあとに一言だけ付く）
+        if not s.hit:
+            assert "外れた" in frames[-1].text or "ガセ" in frames[-1].text
         assert all(f.mood in {"normal", "blue", "red", "gold"} for f in frames) and len(frames) <= 20
         if s.omen:
             assert any(f.mood == s.omen for f in frames)
@@ -199,13 +201,54 @@ def reel_frames(frames):
     return [f for f in frames if REEL in f.text or "🌀" in f.text]
 
 
-def test_a_set_with_no_hit_shows_no_reels_even_if_a_reach_missed():
-    rng = random.Random(1)
-    frames = play_pa.single_frames(rng, make_result([MISS, REACH_MISS, MISS]))
+def test_a_missed_reach_is_not_staged_when_the_miss_staging_is_off(monkeypatch):
+    monkeypatch.setattr(pachinko, "MISS_STAGE_SCALE", 0.0)
+    frames = play_pa.single_frames(random.Random(1), make_result([MISS, REACH_MISS, MISS]))
     assert reel_frames(frames) == [] and len(frames) == 4  # 打ち出し2 + 入賞 + まとめ1
-    assert (
-        "すべてハズレ" in frames[-1].text and "リーチが **1回**" in frames[-1].text
-    )  # 外れたリーチは、文字で触れるだけ
+    assert "すべてハズレ" in frames[-1].text and "リーチが **1回**" in frames[-1].text
+
+
+def test_a_missed_premium_reach_is_staged_and_ends_with_a_miss_not_a_hit():
+    frames = play_pa.single_frames(random.Random(1), make_result([MISS, REACH_MISS, MISS]))
+    assert any("2回転目" in f.text and REEL in f.text for f in frames)  # 外れたリーチにも、演出がある
+    last_reel = [f for f in frames if REEL in f.text][-1]
+    assert "外れた" in last_reel.text and not any("当たり！" in f.text or "🎉" in f.text for f in frames)
+    assert "すべてハズレ" in frames[-1].text and "リーチが" not in frames[-1].text  # 見せたリーチは、数に入れない
+
+
+def test_omen_only_miss_is_a_fake_cue_without_freeze():
+    fake = pachinko.SpinInfo("gold", "", False, (), 0.1)
+    texts = [f.text for f in pachinko.spin_frames(random.Random(2), fake, "1回転目")]
+    assert any("ガセだった" in t for t in texts) and not any("フリーズ" in t for t in texts)
+
+
+def test_miss_show_probability_grows_with_the_rank():
+    p = lambda o, t: pachinko.miss_show_prob(pachinko.SpinInfo(o, t, False, (), 0.0))  # noqa: E731
+    assert p("", "") == 0.0 and p("blue", "") < p("red", "") < p("gold", "") == 1.0
+    assert p("", pachinko.NORMAL) < p("", pachinko.SUPER) < p("", pachinko.PREMIUM) == 1.0
+    assert p("blue", pachinko.NORMAL) > p("", pachinko.NORMAL)
+
+
+def test_miss_scenes_are_capped_and_prefer_the_stronger_ones():
+    rng = random.Random(4)
+    spins = [REACH_MISS] * 5 + [pachinko.SpinInfo("blue", "", False, (), 0.0)]
+    picked = pachinko.pick_miss_scenes(rng, spins)
+    assert len(picked) == pachinko.MISS_SCENES_MAX and all(s is REACH_MISS for _, s in picked)
+    assert [i for i, _ in picked] == sorted(i for i, _ in picked)  # 回転の順
+
+
+def test_a_hit_set_also_shows_a_missed_reach_within_the_budget():
+    frames = play_pa.single_frames(random.Random(2), make_result([REACH_MISS, MISS, HIT]))
+    assert any("1回転目" in f.text and REEL in f.text for f in frames)  # 外れたリーチ
+    assert any("3回転目" in f.text and REEL in f.text for f in frames)  # 当たり
+    assert len(frames) <= play_pa.FRAME_BUDGET + 12
+
+
+def test_a_losing_set_in_a_multi_play_can_show_a_missed_reach():
+    results = [make_result([REACH_MISS, MISS]), make_result([MISS]), make_result([HIT])]
+    frames = play_pa.multi_frames(random.Random(2), results)
+    assert any("① セットの 1回転目" in f.text and REEL in f.text for f in frames)
+    assert not any("② セットの" in f.text for f in frames)  # 予告もリーチもないセットは、表に載るだけ
 
 
 def test_a_set_with_no_start_stops_after_the_ball_frames():

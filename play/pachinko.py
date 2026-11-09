@@ -75,6 +75,11 @@ def hit_scene(rng: random.Random, spin: pachinko.SpinInfo, label: str, skin=None
     return pachinko.spin_frames(rng, spin, label) + reveal_frames(spin, skin=skin)
 
 
+def miss_scene(rng: random.Random, spin: pachinko.SpinInfo, label: str) -> list:
+    """ハズレの1場面: 予告やリーチの演出を見せて、外れる（当たりの宣言はない）。"""
+    return pachinko.spin_frames(rng, spin, label)
+
+
 def single_frames(rng: random.Random, result: pachinko.SetResult, skin=None) -> list:
     """1セットの演出のコマ。**当たった回転だけ**を、予告・リーチ・リール・連チャンまでじっくり見せる。
     当たりの宣言は演出のあと。ハズレの回転は数字でまとめる。連続する当たりも、上限まではそのまま見せる。"""
@@ -88,25 +93,46 @@ def single_frames(rng: random.Random, result: pachinko.SetResult, skin=None) -> 
     if not result.starts:
         return frames
     hits = pachinko.hit_spins(result.spins)
+    misses = pachinko.pick_miss_scenes(rng, result.spins)  # ハズレの回転でも、予告やリーチが出ていれば、確率で見せる
     if not hits:
-        reach = sum(1 for s in result.spins if s.tier)
+        shown_idx = {i for i, _ in misses}
+        previous = 0
+        for index, spin in misses:
+            if index - 1 - previous > 0:
+                frames.append(pachinko.Frame(f"…{index - 1 - previous}回転 経過…"))
+            frames += miss_scene(rng, spin, f"{index}回転目")
+            previous = index
+        reach = sum(1 for i, s in enumerate(result.spins, start=1) if s.tier and i not in shown_idx)
         frames.append(
             pachinko.Frame(
                 f"**{result.starts}回転**、すべてハズレ…"
-                + (f"\n（リーチが **{reach}回** あったが、外れた）" if reach else "")
+                + (f"\n（ほかに、リーチが **{reach}回** あったが、外れた）" if reach else "")
             )
         )
         return frames
-    previous, shown = 0, 0
+    entries, used = (
+        [],
+        len(frames),
+    )  # (何回転目か, 場面)。当たりを先に決め、ハズレの場面は、残りのコマに収まる分だけ足す
     for index, spin in hits:
         scene = hit_scene(rng, spin, f"{index}回転目", skin)
-        if shown and len(frames) + len(scene) > FRAME_BUDGET:
+        if entries and used + len(scene) + 1 > FRAME_BUDGET:
             break
+        entries.append((index, scene))
+        used += len(scene) + 1
+    shown = len(entries)
+    for index, spin in misses:
+        scene = miss_scene(rng, spin, f"{index}回転目")
+        if used + len(scene) + 1 <= FRAME_BUDGET:
+            entries.append((index, scene))
+            used += len(scene) + 1
+    previous = 0
+    for index, scene in sorted(entries, key=lambda e: e[0]):
         gap = index - 1 - previous
         if gap > 0:
             frames.append(pachinko.Frame(f"…{gap}回転 経過…"))
         frames += scene
-        previous, shown = index, shown + 1
+        previous = index
     more = len(hits) - shown
     if more > 0:
         frames.append(pachinko.Frame(f"さらに、大当たりが **{more}回**！ 合計 **+{result.mult}倍**", "gold"))
@@ -139,6 +165,19 @@ def multi_frames(rng: random.Random, results: list, skin=None) -> list:
             continue
         scenes[i] = scene
         used += len(scene)
+    missed = 0  # ハズレのセットでも、予告やリーチが出ていれば、確率で1場面だけ見せる（残りのコマに収まる分だけ）
+    for i, r in enumerate(results):
+        if r.mult or not r.starts or missed >= pachinko.MISS_SCENES_MAX:
+            continue
+        pick = pachinko.pick_miss_scenes(rng, r.spins, 1)
+        if not pick:
+            continue
+        hit_index, spin = pick[0]
+        scene = miss_scene(rng, spin, f"{NUMBER[i] if i < len(NUMBER) else i + 1} セットの {hit_index}回転目")
+        if used + len(scene) <= FRAME_BUDGET:
+            scenes[i] = scene
+            used += len(scene)
+            missed += 1
     lines = []
     for i, r in enumerate(results):
         if i in scenes:
