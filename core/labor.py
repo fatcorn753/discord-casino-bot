@@ -79,16 +79,16 @@ WORKERS = ("apprentice", "miner", "craftsman", "foreman")
 WORKER_NAME = {"apprentice": "見習い", "miner": "坑夫", "craftsman": "職人", "foreman": "監督"}
 WORKER_MARK = {"apprentice": "🧒", "miner": "👷", "craftsman": "🧑‍🔧", "foreman": "🕴️"}
 WORKER_RATE = {
-    "apprentice": 2.0,
-    "miner": 7.5,
-    "craftsman": 16.5,
+    "apprentice": 1.0,
+    "miner": 3.75,
+    "craftsman": 8.25,
     "foreman": 0,
-}  # 基本給（1時間）。契約料の約5割（監督は掘らない）
+}  # 基本給（1時間）。毎日受け取る人の、契約料の約5割（監督は掘らない）
 CONTRACT_DAYS = 7  # 契約の期間（日）。切れたら、自動更新（オンの場合）か、退職
-# 契約料（雇うときと、更新のときに払う）。1日1回受け取る人が、契約の1週間（84時間分）に稼ぐ額の、4割ほど
+# 契約料（雇うときと、更新のときに払う）。毎日受け取る人が、契約の1週間（168時間）に稼ぐ、基本給（約5割）と鉱石の期待値（約3.5割）の合計を上回る
 CONTRACT_FEE = {"apprentice": 340, "miner": 1_200, "craftsman": 2_700, "foreman": 1_500}
-FOREMAN_LUCK = 0.10  # 監督1人ごとに、レア鉱石の出やすさが増える割合（基本給は増えない）
-FOREMAN_LUCK_CAP = 0.50  # 監督の加算の上限（5人分）
+FOREMAN_LUCK = 0.25  # 監督1人ごとに、レア鉱石の出やすさが増える割合（基本給は増えない）
+FOREMAN_LUCK_CAP = 1.00  # 監督の加算の上限（4人分）
 
 # 鉱石。働いた1時間ごとに1回、掘る（外れもある）。(id, 名前, 印, 出る確率, 売値)。確率は、ORE_POWER=1 の作業員のもの
 ORES = (
@@ -103,13 +103,13 @@ ORE_MARK = {o[0]: o[2] for o in ORES}
 ORE_VALUE = {o[0]: o[4] for o in ORES}
 ORE_BIG = ("diamond", "legend")  # 公開で知らせる当たり
 # 作業員の種類ごとの、鉱石の出やすさ（確率にかける。契約料に比例して、期待値は契約料の約3.5割）
-ORE_POWER = {"apprentice": 0.24, "miner": 0.83, "craftsman": 1.9, "foreman": 0.0}
+ORE_POWER = {"apprentice": 0.12, "miner": 0.415, "craftsman": 0.95, "foreman": 0.0}
 
 SLOTS_BASE = 5  # 雇える人数（監督も数える）
 DORM_COST = (2_000, 6_000, 15_000, 40_000, 100_000)  # 寮を1段上げる値段。1段ごとに +1人
 DORM_MAX = 5
 
-STOCK_HOURS = 12.0  # 受け取らずに貯められる時間（超えた分は消える）
+STOCK_HOURS = 24.0  # 受け取らずに貯められる時間（超えた分は消える）
 WAGES = ("normal", "low")
 WAGE_NAME = {"normal": "標準", "low": "低賃金"}
 WAGE_MULT = {"normal": 1.0, "low": 1.2}  # 低賃金は、基本給が増える代わりに、作業員が辞める（鉱石は変わらない）
