@@ -477,7 +477,7 @@ def test_streak_guard_not_used_when_nothing_missed(eco):
 
 
 def test_streak_guard_price_and_use_message(cog, eco):
-    assert shop.BY_ID[shop.STREAK_GUARD].price == 12_000
+    assert shop.BY_ID[shop.STREAK_GUARD].price == 16_000
     eco.credit(1, 100_000, "テスト")
     buy(eco, shop.STREAK_GUARD)
     it = FakeInteraction()
@@ -503,7 +503,7 @@ def test_bankruptcy_lists_seized_items_but_not_collection_or_limited(eco):
     _seized(eco)
     listed = {e["item_id"]: e for e in eco.auction_list()}
     assert listed[shop.STREAK_GUARD]["qty"] == 2 and "title_regular" in listed
-    assert listed[shop.STREAK_GUARD]["price"] == round(12_000 * teiai.AUCTION_START)
+    assert listed[shop.STREAK_GUARD]["price"] == round(16_000 * teiai.AUCTION_START)
     assert not any(shop.BY_ID[i].kind == shop.COLLECTION or shop.BY_ID[i].limited for i in listed)
 
 
@@ -520,7 +520,7 @@ def test_auction_buy_moves_item_pays_bank_and_blocks_non_katagi(eco):
     cash_before = eco.bank_status()["cash"]
     res = eco.auction_buy(2, shop.STREAK_GUARD, qty=2)
     assert res.ok and eco.inventory(2)[shop.STREAK_GUARD] == 2
-    assert eco.balance(2) == INITIAL_BALANCE + 100_000 - 2 * round(12_000 * teiai.AUCTION_START)
+    assert eco.balance(2) == INITIAL_BALANCE + 100_000 - 2 * round(16_000 * teiai.AUCTION_START)
     assert not any(e["item_id"] == shop.STREAK_GUARD for e in eco.auction_list())
     assert eco.bank_status()["cash"] > cash_before  # 売上は帝愛の収入
     # 破産者（カタギでない）は、買えない。持っているものは買えない
