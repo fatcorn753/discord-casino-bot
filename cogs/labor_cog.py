@@ -22,51 +22,84 @@ def today(bot) -> str:
     return datetime.datetime.now(tz).date().isoformat()
 
 
+def fatigue_label(fatigue: float) -> str:
+    return "元気" if fatigue < 25 else "ふつう" if fatigue < 50 else "疲れ気味" if fatigue < 75 else "ぐったり"
+
+
+def next_goal(state: dict) -> str:
+    """初めての人にも、次に何をすればよいかが分かる、ひとこと。"""
+    bal, first = state["balance"], lab.worker_cost("apprentice", state["apprentice"])
+    if state["workers"] == 0:
+        if bal >= first:
+            return f"💡 **{first:,}ペリカ** あるので、「👷 作業員」から見習いを雇えます。雇うと、放置でも稼ぎます。"
+        return f"💡 あと **{first - bal:,}ペリカ** で、最初の作業員（見習い）を雇えます。まずは「働く」を押して稼ごう。"
+    cost = lab.upgrade_cost(state["pick"])
+    if cost is not None and bal >= cost:
+        return f"💡 **{cost:,}ペリカ** あるので、ツルハシを強化できます（1回の稼ぎが増えます）。"
+    if state["workers"] < state["slots"] and bal >= lab.worker_cost("apprentice", state["apprentice"]):
+        return "💡 まだ、作業員を雇う枠があります。「👷 作業員」を見てみよう。"
+    return ""
+
+
 def panel_embed(state: dict, note: str = "") -> discord.Embed:
+    """作業の画面。上に、直前の結果。つぎに、お金と疲労。最後に、次の目標。"""
     fat = state["fatigue"]
-    rate = lab.pay_rate(fat)
-    lines = [
-        note,
-        "",
-        f"手元 **{ui.pelica(state['balance'])}**　未受け取りの稼ぎ **{ui.pelica(state['pot_total'])}**",
-        f"疲労 {lab.bar(fat)} **{fat:.0f}%**（稼ぎ {rate:.0%}）",
-        f"1回の稼ぎ **{ui.pelica(lab.click_pay(state['pick'], fat))}**",
-        f"今日の稼ぎ **{ui.pelica(state['day_earned'])}**",
-        "",
-        "　".join(f"{lab.TOOL_MARK[t]} {lab.TOOL_NAME[t]} Lv{state[t]}" for t in lab.TOOLS),
-    ]
-    e = ui.embed("⛏ 地下作業", "\n".join(x for x in lines if x is not None).strip(), ui.DARK)
-    e.set_footer(text="疲労は時間で回復します。工具を強化すると、稼ぎと疲れにくさが良くなります。")
+    head = [x for x in (note, next_goal(state)) if x]
+    e = ui.embed("⛏ 地下作業", "\n".join(head) if head else "「働く」を押すと、ペリカが貯まります。", ui.DARK)
+    e.add_field(name="💴 手元", value=ui.pelica(state["balance"]), inline=True)
+    e.add_field(name="🎒 未受け取り", value=f"**{ui.pelica(state['pot_total'])}**", inline=True)
+    e.add_field(name="📅 今日の稼ぎ", value=ui.pelica(state["day_earned"]), inline=True)
+    e.add_field(name="⛏ 1回の稼ぎ", value=f"**{ui.pelica(lab.click_pay(state['pick'], fat))}**", inline=True)
+    e.add_field(
+        name=f"😮\u200d💨 疲労（{fatigue_label(fat)}）",
+        value=f"{lab.bar(fat)}\n{fat:.0f}%　稼ぎ {lab.pay_rate(fat):.0%}",
+        inline=True,
+    )
+    e.add_field(
+        name="👷 作業員",
+        value=f"{state['workers']}/{state['slots']}人　{state['rate']:,.0f}/時" if state["workers"] else "いません",
+        inline=True,
+    )
+    e.add_field(
+        name="🧰 工具",
+        value="　".join(f"{lab.TOOL_MARK[t]} {lab.TOOL_NAME[t]} Lv{state[t]}/{lab.MAX_LEVEL}" for t in lab.TOOLS),
+        inline=False,
+    )
+    e.set_footer(text="疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します。")
     return e
 
 
 def hire_embed(state: dict, note: str = "") -> discord.Embed:
-    """雇用の画面。作業員の人数・次の値段・1時間の稼ぎ、寮、賃金。"""
-    counts = {k: state[k] for k in lab.WORKERS}
-    rows = []
-    for k in lab.WORKERS:
-        nxt = lab.worker_cost(k, counts[k])
-        gain = f"{lab.WORKER_RATE[k]}/時" if k != "foreman" else f"全員の稼ぎ +{lab.FOREMAN_BONUS:.0%}"
-        rows.append(f"{lab.WORKER_MARK[k]} **{lab.WORKER_NAME[k]}** ×{counts[k]}　{gain}　次の1人 {ui.pelica(nxt)}")
+    """雇用の画面。作業員の一覧（人数・稼ぎ・次の値段）、寮、賃金。"""
+    full = state["workers"] >= state["slots"]
+    head = [x for x in (note, "⚠ 人数がいっぱいです。寮を強化するか、誰かを解雇しよう。" if full else "") if x]
+    e = ui.embed("👷 作業員の雇用", "\n".join(head) if head else "雇った作業員は、放置でも稼いでくれます。", ui.DARK)
+    e.add_field(name="💴 手元", value=ui.pelica(state["balance"]), inline=True)
+    e.add_field(name="🎒 未受け取り", value=f"**{ui.pelica(state['pot_total'])}**", inline=True)
+    e.add_field(name="📈 作業員の稼ぎ", value=f"**{state['rate']:,.0f}/時**", inline=True)
+    e.add_field(
+        name="🏠 人数",
+        value=f"**{state['workers']} / {state['slots']}人**（寮 Lv{state['dorm']}/{lab.DORM_MAX}）",
+        inline=True,
+    )
     wage = state["wage"]
-    lines = [
-        note,
-        "",
-        f"手元 **{ui.pelica(state['balance'])}**　未受け取りの稼ぎ **{ui.pelica(state['pot_total'])}**",
-        f"作業員 **{state['workers']} / {state['slots']}人**（🏠 寮 Lv{state['dorm']}）"
-        f"　稼ぎ **{state['rate']:,.0f}/時**（受け取らずに貯まるのは、最大 {lab.STOCK_HOURS:.0f}時間分）",
-        f"賃金 **{lab.WAGE_NAME[wage]}**"
-        + (
-            f"（稼ぎ ×{lab.WAGE_MULT['low']}。ただし1日に {lab.QUIT_PER_DAY:.0%} の確率で、1人ずつ辞める）"
-            if wage == "low"
-            else ""
-        ),
-        "",
-        *rows,
-    ]
-    e = ui.embed("👷 地下作業の雇用", "\n".join(x for x in lines if x is not None).strip(), ui.DARK)
+    e.add_field(
+        name="💼 賃金",
+        value=f"**{lab.WAGE_NAME[wage]}**"
+        + (f"\n稼ぎ ×{lab.WAGE_MULT['low']}・1日に {lab.QUIT_PER_DAY:.0%} で1人ずつ辞める" if wage == "low" else ""),
+        inline=True,
+    )
+    e.add_field(name="\u200b", value="\u200b", inline=True)
+    for k in lab.WORKERS:
+        nxt = lab.worker_cost(k, state[k])
+        gain = f"{lab.WORKER_RATE[k]}/時" if k != "foreman" else f"全員の稼ぎ +{lab.FOREMAN_BONUS:.0%}"
+        e.add_field(
+            name=f"{lab.WORKER_MARK[k]} {lab.WORKER_NAME[k]} ×{state[k]}",
+            value=f"{gain}\n次の1人 **{nxt:,}**",
+            inline=True,
+        )
     e.set_footer(
-        text="作業員は、放置でも稼ぎます。解雇しても、お金は戻りません。同じ種類は、雇うほど値段が上がります。"
+        text=f"貯まるのは最大{lab.STOCK_HOURS:.0f}時間分。解雇してもお金は戻りません。同じ種類は、雇うほど値段が上がります。"
     )
     return e
 
@@ -109,7 +142,7 @@ class LaborView(discord.ui.View):
         s = self.state
         self.clear_items()
         collect = discord.ui.Button(
-            label=f"受け取る（{s['pot_total']:,}）",
+            label=f"受け取る {s['pot_total']:,}",
             emoji="💰",
             style=discord.ButtonStyle.success,
             row=0,
@@ -117,13 +150,13 @@ class LaborView(discord.ui.View):
         )
         collect.callback = self._collect
         if self.tab == "hire":
-            back = discord.ui.Button(label="作業へ", emoji="⛏", style=discord.ButtonStyle.secondary, row=0)
+            back = discord.ui.Button(label="作業にもどる", emoji="⛏", style=discord.ButtonStyle.secondary, row=0)
             back.callback = self._goto("work")
             self.add_item(back)
             self.add_item(collect)
             wage = discord.ui.Button(
-                label="賃金を " + lab.WAGE_NAME["normal" if s["wage"] == "low" else "low"] + " に",
-                emoji="💴",
+                label="賃金を" + lab.WAGE_NAME["normal" if s["wage"] == "low" else "low"] + "にする",
+                emoji="💼",
                 style=discord.ButtonStyle.secondary,
                 row=0,
             )
@@ -133,7 +166,7 @@ class LaborView(discord.ui.View):
             for k in lab.WORKERS:
                 cost = lab.worker_cost(k, s[k])
                 b = discord.ui.Button(
-                    label=f"{lab.WORKER_NAME[k]}（{cost:,}）",
+                    label=f"{lab.WORKER_NAME[k]}を雇う {cost:,}",
                     emoji=lab.WORKER_MARK[k],
                     style=discord.ButtonStyle.primary,
                     row=1,
@@ -143,7 +176,7 @@ class LaborView(discord.ui.View):
                 self.add_item(b)
             dcost = lab.dorm_cost(s["dorm"])
             dorm = discord.ui.Button(
-                label="寮を強化" + (f"（{dcost:,}）" if dcost else "（最大）"),
+                label="寮を強化 " + (f"{dcost:,}" if dcost else "（最大）"),
                 emoji="🏠",
                 style=discord.ButtonStyle.secondary,
                 row=2,
@@ -169,14 +202,14 @@ class LaborView(discord.ui.View):
             return
         work = discord.ui.Button(label="働く", emoji="⛏", style=discord.ButtonStyle.primary, row=0)
         work.callback = self._work
-        hire = discord.ui.Button(label="雇用", emoji="👷", style=discord.ButtonStyle.secondary, row=0)
+        hire = discord.ui.Button(label="作業員", emoji="👷", style=discord.ButtonStyle.secondary, row=0)
         hire.callback = self._goto("hire")
         for b in (work, collect, hire):
             self.add_item(b)
         for tool in lab.TOOLS:
             cost = lab.upgrade_cost(s[tool])
             b = discord.ui.Button(
-                label=f"{lab.TOOL_NAME[tool]} 強化" + (f"（{cost:,}）" if cost else "（最大）"),
+                label=f"{lab.TOOL_NAME[tool]}を強化 " + (f"{cost:,}" if cost else "（最大）"),
                 emoji=lab.TOOL_MARK[tool],
                 style=discord.ButtonStyle.secondary,
                 row=1,

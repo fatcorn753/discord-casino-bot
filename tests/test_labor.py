@@ -15,6 +15,11 @@ DAY = "2026-11-10"
 T0 = 1_700_000_000.0
 
 
+def text(embed) -> str:
+    """埋め込みの、見出し・説明・欄をつなげた文字列。"""
+    return "\n".join([embed.title or "", embed.description or ""] + [f"{f.name} {f.value}" for f in embed.fields])
+
+
 @pytest.fixture
 def eco(tmp_path):
     e = Economy(str(tmp_path / "t.db"))
@@ -139,7 +144,7 @@ def test_panel_view_buttons_and_owner_check(eco):
     assert labels[0] == "働く" and "休憩" not in labels and any("受け取る" in x for x in labels)
     assert sum("強化" in x for x in labels) == 2
     assert view.children[0].disabled is False and view.children[1].disabled is True  # 稼ぎが無いので、受け取れない
-    assert labels[2] == "雇用" and all(c.disabled for c in view.children[3:])  # 元手 0 では、強化できない
+    assert labels[2] == "作業員" and all(c.disabled for c in view.children[3:])  # 元手 0 では、強化できない
     stranger = SimpleNamespace(user=SimpleNamespace(id=U + 1), response=Resp())
     assert asyncio.run(view.interaction_check(stranger)) is False and stranger.response.sent
 
@@ -154,7 +159,7 @@ def test_panel_work_and_collect_update_message(eco):
     asyncio.run(view._collect(it))
     assert eco.balance(U) == 10 and eco.labor_state(U, 0, day)["pot"] == 0
     embed = labor_cog.panel_embed(view.state)
-    assert "疲労" in embed.description and "今日の稼ぎ" in embed.description
+    assert "疲労" in text(embed) and "今日の稼ぎ" in text(embed)
 
 
 def test_ranking_total_today_and_my_rank(eco):
@@ -299,7 +304,7 @@ def test_hire_tab_buttons_hire_and_dismiss_through_the_panel(eco):
     assert eco.labor_state(U, 0, labor_cog.today(view.bot))["apprentice"] == 0
     asyncio.run(view._wage(it))
     assert eco.labor_state(U, 0, labor_cog.today(view.bot))["wage"] == "low"
-    assert "低賃金" in labor_cog.hire_embed(view.state).description
+    assert "低賃金" in text(labor_cog.hire_embed(view.state))
     asyncio.run(view._goto("work")(it))
     assert view.children[0].label == "働く"
 
@@ -308,6 +313,16 @@ def test_hire_embed_shows_prices_slots_and_pending(eco):
     eco.credit(U, 5_000, "テスト")
     eco.labor_hire(U, "apprentice", T0, DAY)
     state = eco.labor_state(U, T0 + 3 * H, DAY)
-    d = labor_cog.hire_embed(state).description
+    d = text(labor_cog.hire_embed(state))
     assert "1 / 5人" in d and "見習い" in d and "650" in d and "10/時" in d  # 次の1人は 650
-    assert state["pot_total"] == 30 and "30" in labor_cog.panel_embed(state).description
+    assert state["pot_total"] == 30 and "30" in text(labor_cog.panel_embed(state))
+
+
+def test_next_goal_guides_a_new_player(eco):
+    s = eco.labor_state(U, T0, DAY)
+    assert "あと **500ペリカ**" in labor_cog.next_goal(s)  # 手元が足りないときは、あといくらかを出す
+    eco.credit(U, 1_000, "テスト")
+    assert "見習いを雇えます" in labor_cog.next_goal(eco.labor_state(U, T0, DAY))
+    eco.labor_hire(U, "apprentice", T0, DAY)
+    assert "ツルハシ" in labor_cog.next_goal(eco.labor_state(U, T0, DAY))
+    assert labor_cog.fatigue_label(0) == "元気" and labor_cog.fatigue_label(90) == "ぐったり"
