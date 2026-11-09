@@ -155,6 +155,23 @@ def create_tables(conn: sqlite3.Connection) -> None:
             odds    REAL NOT NULL,
             PRIMARY KEY (race_id, kind, key)
         );
+        CREATE TABLE IF NOT EXISTS labor (           -- 地下作業（クリッカー）。工具・疲労・まだ受け取っていない稼ぎ
+            guild_id     INTEGER NOT NULL,
+            user_id      INTEGER NOT NULL,
+            pick         INTEGER NOT NULL DEFAULT 0,
+            glove        INTEGER NOT NULL DEFAULT 0,
+            helmet       INTEGER NOT NULL DEFAULT 0,
+            fatigue      REAL NOT NULL DEFAULT 0,
+            fatigue_at   REAL NOT NULL DEFAULT 0,
+            pot          INTEGER NOT NULL DEFAULT 0,   -- 受け取る前の稼ぎ
+            day          TEXT NOT NULL DEFAULT '',
+            day_earned   INTEGER NOT NULL DEFAULT 0,   -- 今日の稼ぎ（上限の判定）
+            last_click   REAL NOT NULL DEFAULT 0,
+            rest_until   REAL NOT NULL DEFAULT 0,
+            clicks       INTEGER NOT NULL DEFAULT 0,
+            earned_total INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id)
+        );
         CREATE TABLE IF NOT EXISTS seized_items (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id  INTEGER NOT NULL,
