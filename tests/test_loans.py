@@ -1,6 +1,7 @@
 """貸し借り: 日割り単利、承諾でお金が移る、返済、期限の自動回収、延滞の強制徴収、ボタンと通知。"""
 
 import asyncio
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -402,3 +403,67 @@ def test_daily_rate_up_to_one_hundred_percent_is_computed_and_collected(eco):
     eco.credit(B, 10_000, "テスト")  # 残高を増やして、返せるようにする
     ok, paid = eco.loan_repay(lid, B, None, NOW + 1 + 100)  # 1日目: 利息 100% = 1000
     assert ok and paid == 2000 and eco.loan_get(lid)["status"] == "repaid"
+
+
+# ----------------------------- 募集（借りたい人が出す） ----------------------------- #
+def request(eco, borrower=B, principal=1000, rate=20, days=10, now=NOW):
+    ok, result = eco.loan_request(borrower, principal, rate, days, 777, now)
+    assert ok, result
+    return result
+
+
+def test_request_then_first_lender_gets_it_and_money_moves(eco):
+    lid = request(eco)
+    assert eco.loan_get(lid)["status"] == "request" and eco.loan_get(lid)["lender_id"] == 0
+    assert eco.loan_lend(lid, A, NOW + 5) == (True, "")
+    loan = eco.loan_get(lid)
+    assert loan["status"] == "active" and loan["lender_id"] == A and loan["due"] == NOW + 5 + 10 * DAY
+    assert eco.balance(A) == INITIAL_BALANCE - 1000 and eco.balance(B) == INITIAL_BALANCE + 1000
+    ok, reason = eco.loan_lend(lid, C, NOW + 6)  # 早い者勝ち: 2人目は貸せない
+    assert not ok and "もう終わって" in reason
+
+
+def test_request_rules(eco):
+    lid = request(eco)
+    ok, reason = eco.loan_request(B, 1000, 20, 10, 777, NOW)  # 同時に出せるのは1件
+    assert not ok and "1 件" in reason
+    assert eco.loan_lend(lid, B, NOW)[1] == "自分の募集には、貸せません。"
+    assert "期限" in eco.loan_lend(lid, A, NOW + loans.OFFER_HOURS * 3600)[1]
+    ok, reason = eco.loan_request(C, 50, 20, 10, 777, NOW)
+    assert not ok and "以上" in reason
+    ok, reason = eco.loan_request(C, 1000, 20, 99, 777, NOW)
+    assert not ok and "期間" in reason
+
+
+def test_lender_needs_balance_and_borrower_state_is_rechecked(eco):
+    lid = request(eco, principal=INITIAL_BALANCE + 1)
+    assert "残高が足りません" in eco.loan_lend(lid, A, NOW)[1]
+    lid2 = request(eco, borrower=C)
+    eco._conn.execute("UPDATE users SET bankrupt_at=?, blacklist_until=? WHERE user_id=?", (NOW, time.time() + DAY, C))
+    ok, reason = eco.loan_lend(lid2, A, NOW + 1)  # 募集のあとで破産者になった
+    assert not ok and "借りられない状態" in reason
+    assert eco.balance(A) == INITIAL_BALANCE  # お金は動いていない
+
+
+def test_request_cancel_expire_and_borrower_block(eco):
+    lid = request(eco)
+    assert eco.loan_cancel(lid, A) == (False, "取り下げられるのは、募集を出した人だけです。")
+    assert eco.loan_cancel(lid, B) == (True, "")
+    assert eco.loan_get(lid)["status"] == "cancelled"
+    lid = request(eco)
+    assert [r["id"] for r in eco.loan_expire_offers(NOW + loans.OFFER_HOURS * 3600 + 1)] == [lid]
+    active(eco, lender=A, borrower=C)
+    eco._conn.execute("UPDATE loans SET status='overdue' WHERE borrower_id=?", (C,))
+    ok, reason = eco.loan_request(C, 1000, 20, 10, 777, NOW)
+    assert not ok and "延滞中" in reason
+
+
+def test_credit_info_counts_history_and_hides_assets(eco):
+    lid = active(eco, lender=A, borrower=B)
+    eco.loan_repay(lid, B, None, NOW + 2)
+    active(eco, lender=A, borrower=B, principal=500)
+    c = eco.loan_credit(B)
+    assert c["repaid"] == 1 and c["active"] == 1 and c["owed"] == 500 and c["overdue"] == 0
+    assert c["status"] == teiai.KATAGI and "balance" not in c
+    eco._conn.execute("UPDATE loans SET status='discharged' WHERE borrower_id=? AND status='active'", (B,))
+    assert eco.loan_credit(B)["discharged"] == 1

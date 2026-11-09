@@ -12,6 +12,7 @@ USER_MIN_PRINCIPAL = 100
 MIN_TERM_DAYS = 1
 MAX_TERM_DAYS = 30
 OFFER_HOURS = 24  # 承諾を待つ時間
+MAX_BORROWER_OPEN = 1  # 同時に出せる募集（借りたい人が出す）の数
 MAX_LENDER_OPEN = 5  # 同時に出せる提案（承諾待ち）の数
 MAX_LENDER_ACTIVE = 10  # 同時に貸せる件数
 REMIND_HOURS = 24  # 期限のこの時間前に知らせる

@@ -1,6 +1,7 @@
 """/貸付 — ユーザー同士の貸し借り（日割りの単利）。
 
 - 貸す人が `/貸付 提案` で、相手・金額・日利・期間を決める。投稿の「承諾」を借りる本人が押すと成立し、お金が移る。
+- 借りたい人が `/貸付 募集` で、金額・日利・期間を決めて募集する。最初に「貸す」を押した人が貸し手になり、その場でお金が移る。
 - 返済は `/貸付 返済`。期限には、借りた人の残高から自動で回収する。足りない分は延滞になり、入ってくるお金から古い順に回収する。
 - 期限の前日と、延滞になったときに、貸付を出したチャンネルに知らせる。
 - 担保（CSトークン・称号・債券）は、次の段階で足す。
@@ -16,6 +17,7 @@ from discord.ext import commands, tasks
 from cogs._amount import balance_choices
 from cogs.weekly_cog import announce_channel
 from core import approval, loans, logthrottle, teiai, ui
+from core.confirm import confirm_action
 from core.duration import format_minutes
 
 
@@ -25,8 +27,9 @@ def who(user_id: int) -> str:
 
 def terms_lines(loan: dict) -> list:
     p, r, t = loan["principal"], loan["rate_tenths"], loan["term_days"]
+    lender = who(loan["lender_id"]) if loan["lender_id"] else "（募集中）"
     return [
-        f"貸す人: {who(loan['lender_id'])}　借りる人: {who(loan['borrower_id'])}",
+        f"貸す人: {lender}　借りる人: {who(loan['borrower_id'])}",
         f"金額: **{ui.pelica(p)}**　日利: **{loans.rate_text(r)}**　期間: **{t}日**",
         f"期間いっぱい借りた場合の返済: **{ui.pelica(loans.full_term_total(p, r, t))}**（利息 {ui.pelica(loans.interest(p, r, t))}）",
         "早く返せば、利息は日割りで減ります（経過日数は切り上げで、最低1日）。",
@@ -34,11 +37,33 @@ def terms_lines(loan: dict) -> list:
 
 
 def borrower_note(eco, user_id: int) -> str:
-    """貸す人が、貸す相手のリスクを見られるように、借りる人の身分と帝愛への借金を1行で出す。"""
-    debt = eco.debt(user_id)
-    return f"借りる人の身分: {teiai.STATUS_LABEL[eco.status(user_id)]}" + (
-        f"（帝愛への借金 {ui.pelica(debt)}）" if debt else ""
+    """貸す人が、貸す相手のリスクを見られるように、借りる人の信用情報を出す（資産の額は見せない）。"""
+    c = eco.loan_credit(user_id)
+    lines = [
+        f"**借りる人の信用情報**\n身分: {teiai.STATUS_LABEL[c['status']]}"
+        + (f"　帝愛への借金: {ui.pelica(c['debt'])}" if c["debt"] else "")
+    ]
+    if c["grace_until"] is not None:
+        lines.append(f"⚠️ 破産猶予中（<t:{int(c['grace_until'])}:R> に強制破産）")
+    lines.append(
+        f"返済の実績: 完済 **{c['repaid']}件**　延滞中 **{c['overdue']}件**　踏み倒し（破産で免責） **{c['discharged']}件**"
     )
+    lines.append(f"いま借りている貸付: **{c['active']}件**（元本の残り {ui.pelica(c['owed'])}）")
+    if c["bankrupt_at"]:
+        lines.append(f"破産の履歴: 最後に <t:{int(c['bankrupt_at'])}:D>")
+    return "\n".join(lines)
+
+
+def request_embed(loan: dict, note: str = "") -> discord.Embed:
+    lines = (
+        terms_lines(loan)
+        + ([note] if note else [])
+        + [
+            f"募集の期限: <t:{int(loan['offer_expires'])}:R>",
+            "最初に「貸す」を押した人が、貸し手になります（その場で、貸す人の残高から、借りる人へお金が移ります）。",
+        ]
+    )
+    return ui.embed(f"🙋 貸付の募集 #{loan['id']}", "\n".join(lines), ui.GOLD)
 
 
 def offer_embed(loan: dict, note: str = "") -> discord.Embed:
@@ -58,7 +83,7 @@ def state_embed(loan: dict, title: str, note: str, color: int = ui.INFO) -> disc
 
 
 class LoanButton(
-    discord.ui.DynamicItem[discord.ui.Button], template=r"loan:(?P<act>accept|decline|cancel):(?P<id>\d+)"
+    discord.ui.DynamicItem[discord.ui.Button], template=r"loan:(?P<act>accept|decline|cancel|lend):(?P<id>\d+)"
 ):
     """提案の投稿のボタン。再起動しても動くように、貸付の番号を custom_id に入れている。"""
 
@@ -66,6 +91,7 @@ class LoanButton(
         "accept": ("承諾", discord.ButtonStyle.success),
         "decline": ("辞退", discord.ButtonStyle.secondary),
         "cancel": ("取り下げ", discord.ButtonStyle.danger),
+        "lend": ("貸す", discord.ButtonStyle.success),
     }
 
     def __init__(self, act: str, loan_id: int):
@@ -88,11 +114,63 @@ def offer_view(loan_id: int) -> discord.ui.View:
     return view
 
 
+def request_view(loan_id: int) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    for act in ("lend", "cancel"):
+        view.add_item(LoanButton(act, loan_id))
+    return view
+
+
+async def handle_lend(bot, interaction: discord.Interaction, loan_id: int) -> None:
+    """募集の「貸す」。お金が動くので、確認ボタンを挟んでから貸す。"""
+    eco = bot.economy.for_guild(interaction.guild_id)
+    loan = eco.loan_get(loan_id)
+    if loan is None or loan["status"] != "request":
+        return await interaction.response.send_message(
+            embed=ui.error_embed("できません", "この募集はもう終わっています。"), ephemeral=True
+        )
+    if interaction.user.id == loan["borrower_id"]:
+        return await interaction.response.send_message(
+            embed=ui.error_embed("できません", "自分の募集には、貸せません。"), ephemeral=True
+        )
+    ok = await confirm_action(
+        interaction,
+        "この募集に貸しますか？",
+        "\n".join(terms_lines(loan) + [borrower_note(eco, loan["borrower_id"])])
+        + "\n\n貸すと、その場で残高から引かれます。借りる人が破産すると、**全額は戻らない**ことがあります。",
+        "貸す",
+    )
+    if ok is not True:
+        return
+    ok, reason = eco.loan_lend(loan_id, interaction.user.id, time.time())
+    if not ok:
+        return await interaction.followup.send(embed=ui.error_embed("貸せませんでした", reason), ephemeral=True)
+    loan = eco.loan_get(loan_id)
+    embed = state_embed(
+        loan,
+        "成立",
+        f"<t:{int(loan['due'])}:R>が返済の期限です。`/貸付 返済` で返せます。期限には自動で回収します。",
+        ui.OK,
+    )
+    try:
+        await interaction.message.edit(embed=embed, view=None)
+    except discord.HTTPException:
+        pass
+    await interaction.followup.send(
+        f"🤝 {who(loan['lender_id'])} が {who(loan['borrower_id'])} の募集に応じて、{ui.pelica(loan['principal'])}を貸しました。",
+        allowed_mentions=discord.AllowedMentions(
+            users=[discord.Object(id=loan["lender_id"]), discord.Object(id=loan["borrower_id"])]
+        ),
+    )
+
+
 async def handle_button(bot, interaction: discord.Interaction, act: str, loan_id: int) -> None:
     eco = bot.economy.for_guild(interaction.guild_id)
     if not approval.is_allowed(bot.economy, bot.config, interaction.guild_id, interaction.user.id):
         return await interaction.response.send_message(embed=ui.error_embed("利用できません"), ephemeral=True)
     now = time.time()
+    if act == "lend":
+        return await handle_lend(bot, interaction, loan_id)
     if act == "accept":
         ok, reason = eco.loan_accept(loan_id, interaction.user.id, now)
     elif act == "decline":
@@ -176,6 +254,41 @@ class LoanCog(commands.Cog):
                 ("loan-msg", interaction.guild_id), f"貸付の提案の投稿番号を保存できません: loan={result}: {exc!r}"
             )
 
+    @group.command(name="募集", description="お金を借りたい人を募集する（最初に貸すと言った人が、貸し手になる）")
+    @app_commands.rename(principal="金額", rate="日利", days="期間")
+    @app_commands.describe(
+        principal=f"借りたい額（{loans.USER_MIN_PRINCIPAL:,}以上）",
+        rate="払う1日の利息（％。0以上、0.1刻み。高いほど貸す人が現れやすい）",
+        days=f"返済の期限（日。{loans.MIN_TERM_DAYS}〜{loans.MAX_TERM_DAYS}）",
+    )
+    async def request(
+        self,
+        interaction: discord.Interaction,
+        principal: app_commands.Range[int, loans.USER_MIN_PRINCIPAL],
+        rate: app_commands.Range[float, 0.0],
+        days: app_commands.Range[int, loans.MIN_TERM_DAYS, loans.MAX_TERM_DAYS],
+    ):
+        eco = self.g(interaction)
+        ok, result = eco.loan_request(
+            interaction.user.id, principal, round(rate * 10), days, interaction.channel_id, time.time()
+        )
+        if not ok:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("募集できません", result), ephemeral=True
+            )
+        loan = eco.loan_get(result)
+        await interaction.response.send_message(
+            embed=request_embed(loan, borrower_note(eco, interaction.user.id)),
+            view=request_view(result),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        try:
+            eco.loan_set_message(result, (await interaction.original_response()).id)
+        except discord.HTTPException as exc:
+            logthrottle.warn(
+                ("loan-msg", interaction.guild_id), f"貸付の募集の投稿番号を保存できません: loan={result}: {exc!r}"
+            )
+
     # ------------------------------ 返済・一覧 ------------------------------ #
     @group.command(name="返済", description="借りたペリカを返す（金額を省くと全額）")
     @app_commands.rename(loan_id="貸付", amount="金額")
@@ -208,7 +321,7 @@ class LoanCog(commands.Cog):
         eco, now = self.g(interaction), time.time()
         out = []
         for loan in eco.loan_list(interaction.user.id)["borrowed"]:
-            if loan["status"] == "offer":
+            if loan["status"] in ("offer", "request"):
                 continue
             left = eco.loan_remaining(loan, loan["due"] if loan["status"] == "overdue" else now)
             label = f"#{loan['id']} 残り{left:,}（{'延滞中' if loan['status'] == 'overdue' else '期限 ' + format_minutes(max(1, int((loan['due'] - now) // 60))) + '後'}）"
@@ -222,7 +335,13 @@ class LoanCog(commands.Cog):
         data = eco.loan_list(interaction.user.id)
 
         def line(loan: dict, mine_is_borrower: bool) -> str:
-            other = who(loan["lender_id"] if mine_is_borrower else loan["borrower_id"])
+            other = (
+                who(loan["lender_id"] if mine_is_borrower else loan["borrower_id"])
+                if loan["lender_id"]
+                else "（募集中）"
+            )
+            if loan["status"] == "request":
+                return f"`#{loan['id']}` {ui.pelica(loan['principal'])}　日利{loans.rate_text(loan['rate_tenths'])}・{loan['term_days']}日　**貸し手を募集中**"
             if loan["status"] == "offer":
                 return f"`#{loan['id']}` {other}　{ui.pelica(loan['principal'])}　日利{loans.rate_text(loan['rate_tenths'])}・{loan['term_days']}日　**承諾待ち**"
             left = eco.loan_remaining(loan, loan["due"] if loan["status"] == "overdue" else now)
@@ -254,7 +373,16 @@ class LoanCog(commands.Cog):
             try:
                 eco = self.bot.economy.for_guild(guild.id)
                 for loan in eco.loan_expire_offers(now):
-                    await self._edit_offer(guild, loan, state_embed(loan, "承諾の期限が切れました", "", ui.INFO))
+                    await self._edit_offer(
+                        guild,
+                        loan,
+                        state_embed(
+                            loan,
+                            "募集の期限が切れました" if loan["lender_id"] == 0 else "承諾の期限が切れました",
+                            "",
+                            ui.INFO,
+                        ),
+                    )
                 for loan in eco.loan_due_soon(now):
                     await self._say(
                         guild,
