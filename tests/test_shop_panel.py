@@ -66,7 +66,13 @@ def test_command_is_a_single_top_level_guild_command():
     }  # 旧コマンドのグループは登録されない
 
 
-def test_opening_shows_the_catalog_and_the_kind_select_only(cog):
+def buttons(view):
+    import discord
+
+    return {c.label: c for c in view.children if isinstance(c, discord.ui.Button)}
+
+
+def test_opening_shows_the_home_with_shelf_buttons_and_no_buy_select(cog):
     it = It()
     run(ShopCog.shop_panel.callback(cog, it))
     sent = it.sent[0]
@@ -76,47 +82,82 @@ def test_opening_shows_the_catalog_and_the_kind_select_only(cog):
         and "あなたの残高" in sent["embed"].footer.text
     )
     view = sent["view"]
-    assert has(view, 0) and not has(view, 1)  # まだ買う景品の選択肢は出ない（種類を選ぶまで）
-    kinds = [o.value for o in select(view, 0).options]
-    assert kinds == ["*"] + list(shop.KIND_LABEL)
+    assert not any(has(view, r) for r in range(4))  # トップでは、買う景品の選択肢は出ない
+    assert set(buttons(view)) >= {
+        "🏠 トップ",
+        "🏷️ 称号",
+        "🎴 カード",
+        "🎟️ 消耗品",
+        "🐎 競馬",
+        "✨ 演出・名前の色",
+        "🏆 コレクション",
+        "🕴️ 帝愛の競売",
+        "🎒 持ち物",
+    }
+    assert {r.row for r in buttons(view).values()} <= {0, 1}  # ボタンは2段まで
+    assert [f.name for f in sent["embed"].fields] == ["売り場", "🕴️ 帝愛の競売", "🎒 持ち物"]
 
 
-def test_choosing_a_kind_filters_the_catalog_and_offers_only_buyable_items(cog):
+def test_every_item_is_on_exactly_one_shelf():
+    from cogs.shop_cog import TABS, tab_items
+
+    shelved = [i.id for tab in TABS for i in tab_items(tab)]
+    sellable = [i.id for i in shop.CATALOG if not i.limited]
+    assert sorted(shelved) == sorted(sellable) and len(shelved) == len(set(shelved))
+    for tab in TABS:
+        prices = [i.price for i in tab_items(tab)]
+        assert prices == sorted(prices)  # 安い順
+
+
+def test_choosing_a_shelf_shows_only_that_shelf_and_offers_only_buyable_items(cog):
     view = ShopView(cog, 1, 0)
-    it = It(values=[shop.TITLE])
-    run(view._on_kind(it))
+    it = It()
+    run(view._make_tab("title")(it))
     embed = it.edits[0]["embed"]
-    assert [f.name for f in embed.fields] == [shop.KIND_LABEL[shop.TITLE]]  # 称号だけ
-    options = select(view, 1).options
-    assert 0 < len(options) <= 25 and all(
-        o.description.endswith("ペリカ") or "ペリカ" in o.description for o in options
-    )
+    assert embed.title == "🏷️ 称号" and all(f.name[0] in "🌱🥉🥈🥇" for f in embed.fields)  # 値段の段階ごと
+    assert (
+        "🌱 入門" in [f.name for f in embed.fields] and "地下の帝王" in embed.fields[-1].value
+    )  # 最高額は、いちばん最後
+    options = select(view, 2).options
+    assert 0 < len(options) <= 25 and all("ペリカ" in o.description for o in options)
+    prices = [int(o.description.split("ペリカ")[0].replace(",", "")) for o in options]
+    assert prices == sorted(prices)
     limited = {i.id for i in shop.CATALOG if i.limited}
     assert limited and not (limited & {o.value for o in options})  # 限定称号（買えない）は出ない
-    run(view._on_kind(It(values=["*"])))
-    assert not has(view, 1)  # 「すべて」に戻すと、買う選択肢は消える
+    assert buttons(view)["🏷️ 称号"].style.name == "primary"  # いまの売り場は青
+    run(view._make_tab("home")(It()))
+    assert not has(view, 2)  # トップに戻ると、買う選択肢は消える
+
+
+def test_mixed_shelves_label_each_item_with_its_kind(cog):
+    view = ShopView(cog, 1, 0)
+    run(view._make_tab("card")(It()))
+    labels = [o.label for o in select(view, 2).options]
+    assert len(labels) == 12 and all("カード" in name for name in labels)
+    run(view._make_tab("style")(It()))
+    assert len(select(view, 2).options) == 17
 
 
 def test_consumables_get_a_quantity_select_and_buying_uses_it(cog, eco):
     view = ShopView(cog, 1, 0)
-    run(view._on_kind(It(values=[shop.CONSUMABLE])))
-    qty = select(view, 2)
+    run(view._make_tab("item")(It()))
+    qty = select(view, 3)
     assert [o.value for o in qty.options] == [str(n) for n in range(1, MAX_QTY + 1)]
     run(view._on_qty(It(values=["3"])))
-    assert view.qty == 3 and select(view, 2).placeholder == "個数（いま 3 個）"
+    assert view.qty == 3 and select(view, 3).placeholder == "個数（いま 3 個）"
     eco.credit(1, 20_000, "テスト")
     buy_it = It(values=[shop.INSURANCE])
     run(view._on_buy(buy_it))
     assert (
         eco.inventory(1)[shop.INSURANCE] == 3 and "購入しました" in buy_it.sent[-1]["embed"].title
     )  # 個数が反映される
-    run(view._on_kind(It(values=[shop.TITLE])))
-    assert view.qty == 1 and not has(view, 2)  # 種類を変えると個数は1に戻り、個数の選択肢も消える
+    run(view._make_tab("title")(It()))
+    assert view.qty == 1 and not has(view, 3)  # 売り場を変えると個数は1に戻り、個数の選択肢も消える
 
 
 def test_buying_a_title_then_equipping_and_unequipping_from_the_inventory_screen(cog, eco):
     view = ShopView(cog, 1, 0)
-    run(view._on_kind(It(values=[shop.TITLE])))
+    run(view._make_tab("title")(It()))
     it = It(values=["title_rookie"])
     run(view._on_buy(it))
     assert "title_rookie" in eco.inventory(1) and it.sent[-1]["ephemeral"] and eco.balance(1) < INITIAL_BALANCE

@@ -1,9 +1,11 @@
 """ショップの商品一覧（カタログ）。景品はすべてゲーム内・サーバー内で完結するもので、現実の価値はない。"""
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Optional
 
 TITLE, CARD_COLOR, CARD_ICON, CONSUMABLE, COLOR_ROLE = "title", "card_color", "card_icon", "consumable", "color_role"
+RACING = "racing"  # 競馬の品（購入券・にんじん）。買うと持ち物に増え、`/競馬 厩舎` で使う（枚数が増える品なので、消耗品と同じ扱い）
 SKIN_DICE, SKIN_TABLE, COLLECTION = "skin_dice", "skin_table", "collection"
 
 KIND_LABEL = {
@@ -11,6 +13,7 @@ KIND_LABEL = {
     CARD_COLOR: "🎨 カードの色",
     CARD_ICON: "🖼️ カードのアイコン",
     CONSUMABLE: "🎟️ 消耗品",
+    RACING: "🐎 競馬",
     COLOR_ROLE: "🌈 名前の色（ロール）",
     SKIN_DICE: "🎲 演出（チンチロ用）",
     SKIN_TABLE: "🃏 演出（パチンコ・ブラックジャック用）",
@@ -40,11 +43,12 @@ class Item:
     value: object = None  # 色(16進)・絵文字など
     desc: str = ""
     limited: bool = False  # 買えない限定品（ランキングなどで贈られる）。販売の一覧・購入の候補には出ない
+    mark: str = ""  # ショップの画面で、名前の前に付ける絵文字（名前そのものには入れない。ニックネームなどに出る名前は変わらない）
 
     @property
     def unique(self) -> bool:
         """一度買えば持ち続けるもの（消耗品以外）。"""
-        return self.kind != CONSUMABLE
+        return self.kind not in (CONSUMABLE, RACING)
 
 
 def _colors(prefix: str, kind: str, price: int, items: list) -> list:
@@ -93,34 +97,34 @@ CATALOG = [
     ),
     Item("cardicon_crown", "王冠", CARD_ICON, 5_000, "👑"),
     # 消耗品（使うとなくなる）
-    Item(DAILY_DOUBLE, "デイリー2倍券", CONSUMABLE, 3_000, desc="次に受け取るデイリーボーナスが2倍になる"),
+    Item(DAILY_DOUBLE, "デイリー2倍券", CONSUMABLE, 3_000, desc="次のデイリーが2倍"),
     Item(
         INSURANCE,
         "保険券",
         CONSUMABLE,
         2_000,
-        desc=f"次に負けたゲーム1回で、賭け金の半分が戻る（最大{INSURANCE_CAP:,}ペリカ。倍払いの追加分は対象外）",
+        desc=f"負けた1回の賭け金の半分が戻る（最大{INSURANCE_CAP:,}）",
     ),
     Item(
         STREAK_GUARD,
         "連続守り券",
         CONSUMABLE,
         16_000,
-        desc="デイリーを受け取れなかった日を、1枚で1日ぶん埋めて、連続ログインをつなぐ（持っているだけで、次のデイリーで自動で使われる）",
+        desc="受け取れなかった日を1日ぶん埋める（持つだけで自動で使われる）",
     ),
     Item(
         HORSE_VOUCHER,
         "競走馬（購入券）",
-        CONSUMABLE,
+        RACING,
         30_000,
-        desc="`/競馬 厩舎` で、名前と見た目を決めて、競走馬を迎える（1人3頭まで）。ステータスは合計固定で、配分だけを選ぶ",
+        desc="競走馬を1頭迎える（`/競馬 厩舎`・3頭まで）",
     ),
     Item(
         CARROT,
         "にんじん",
-        CONSUMABLE,
+        RACING,
         1_000,
-        desc="`/競馬 厩舎` で、馬のステータスを5ポイント、別のステータスへ動かす（合計は変わらない）",
+        desc="馬のステータスを5点動かす（`/競馬 厩舎`）",
     ),
     # ゲーム演出の変更品（装備すると、結果画面のタイトル・飾り・地の文が変わる。勝率と配当は変わらない）。見た目は core/skins.py
     Item("skin_kuro", "黒服の立会い", SKIN_DICE, 30_000, desc="黒服が立ち会い、実況する"),
@@ -160,6 +164,48 @@ CATALOG = [
     ),
 ]
 
+# ショップの画面で使う絵文字（適したものがある品だけ。カードのアイコンとコレクションは、もともと絵文字を持っている）
+MARKS = {
+    "title_rookie": "🎲",
+    "title_broke": "💸",
+    "title_regular": "🎰",
+    "title_zawa": "😨",
+    "title_underground": "🕳️",
+    "title_lucky": "🍀",
+    "title_emperor": "🔱",
+    "title_creditor": "💰",
+    "title_fixer": "🕴️",
+    "title_100oku": "💴",
+    "cardcolor_red": "🔴",
+    "cardcolor_blue": "🔵",
+    "cardcolor_green": "🟢",
+    "cardcolor_gold": "🟡",
+    "cardcolor_purple": "🟣",
+    "cardcolor_dark": "⚫",
+    DAILY_DOUBLE: "🎟️",
+    INSURANCE: "🛡️",
+    STREAK_GUARD: "🔥",
+    HORSE_VOUCHER: "🐎",
+    CARROT: "🥕",
+    "skin_kuro": "🕴️",
+    "skin_gold_dice": "🎲",
+    "skin_glass_dice": "💅",
+    "skin_vip": "🌹",
+    "skin_numa": "🌀",
+    "role_red": "🔴",
+    "role_orange": "🟠",
+    "role_yellow": "🟡",
+    "role_green": "🟢",
+    "role_cyan": "🩵",
+    "role_blue": "🔵",
+    "role_purple": "🟣",
+    "role_pink": "🩷",
+    "role_gold": "🥇",
+    "role_silver": "🥈",
+    "role_black": "⚫",
+    "role_white": "⚪",
+}
+CATALOG = [dataclasses.replace(i, mark=MARKS.get(i.id, "")) for i in CATALOG]
 BY_ID = {i.id: i for i in CATALOG}
 BY_NAME = {}
 for _i in CATALOG:

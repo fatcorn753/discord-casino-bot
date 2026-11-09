@@ -49,6 +49,57 @@ def kind_name(kind: str) -> str:
     return shop.KIND_LABEL[kind].split(" ", 1)[1]
 
 
+# ショップの売り場（種類をまとめたもの）。画面上部のボタンで切り替える
+TABS = {
+    "home": ("🏠 トップ", ()),
+    "title": ("🏷️ 称号", (shop.TITLE,)),
+    "card": ("🎴 カード", (shop.CARD_COLOR, shop.CARD_ICON)),
+    "item": ("🎟️ 消耗品", (shop.CONSUMABLE,)),
+    "horse": ("🐎 競馬", (shop.RACING,)),
+    "style": ("✨ 演出・名前の色", (shop.SKIN_DICE, shop.SKIN_TABLE, shop.COLOR_ROLE)),
+    "collection": ("🏆 コレクション", (shop.COLLECTION,)),
+}
+TAB_NOTE = {
+    "title": "名前の横に出る称号です（1つだけ装備できます）。",
+    "card": "`/ペリカ 残高` のカードの、色とアイコンです。",
+    "item": "使うと減る品です。デイリー2倍券・保険券は「🎒 持ち物」で使い、連続守り券は持っているだけで自動で使われます。",
+    "horse": "競走馬を迎える購入券と、ステータスを動かすにんじんです。どちらも `/競馬 厩舎` で使います。馬そのものは、使うと減る品ではありません。",
+    "style": "ゲーム画面の演出と、名前の色（ロール）です。勝率と配当は変わりません。",
+    "collection": "持っているだけで、`/ペリカ 残高` に飾られる自慢の品です。",
+}
+TIERS = (
+    (10_000, "🌱 入門"),
+    (100_000, "🥉 中堅"),
+    (1_000_000, "🥈 大物"),
+    (None, "🥇 頂点"),
+)  # 値段の段階（称号・コレクション）
+SECTION_NAME = {
+    shop.CARD_COLOR: "🎨 色",
+    shop.CARD_ICON: "🖼️ アイコン",
+    shop.CONSUMABLE: "品ぞろえ（安い順）",
+    shop.RACING: "品ぞろえ（安い順）",
+    shop.SKIN_DICE: "🎲 チンチロの演出",
+    shop.SKIN_TABLE: "🃏 パチンコ・ブラックジャックの演出",
+    shop.COLOR_ROLE: "🌈 名前の色（ロール）",
+}
+
+
+def item_line(item, inv: dict) -> str:
+    """売り場の1行: 持っていれば ✅、値段をそろえて、名前。説明があれば、次の行に。"""
+    icon = item.value if item.kind in (shop.CARD_ICON, shop.COLLECTION) else item.mark
+    mark = "✅" if item.unique and inv.get(item.id, 0) > 0 else "▫️"
+    line = f"{mark} `{item.price:>10,}`　{icon}{item.name}"
+    if item.kind in (shop.CONSUMABLE, shop.RACING) and inv.get(item.id, 0) > 0:
+        line += f"　（持っている: {inv[item.id]}）"
+    return line + (f"\n　　└ {item.desc}" if item.desc else "")
+
+
+def tab_items(tab: str) -> list:
+    """売り場の商品を、値段の安い順に（限定品は出さない）。"""
+    items = [i for k in TABS[tab][1] for i in shop.of_kind(k)]
+    return sorted(items, key=lambda i: i.price)  # 同じ値段は、カタログの順のまま
+
+
 def _is_ours(role: discord.Role) -> bool:
     """Bot が管理する色ロールか。名前が「接頭辞＋色の名前」に完全一致し、権限が空で、連携用でないものだけ。
 
@@ -160,14 +211,14 @@ class ShopView(discord.ui.View):
     結果は別のメッセージ（自分だけに見える）で返す。パネルを開いた本人だけが操作できる。
     """
 
-    def __init__(self, cog: "ShopCog", user_id: int, guild_id: int, screen: str = "shop", kind: str = None):
+    def __init__(self, cog: "ShopCog", user_id: int, guild_id: int, screen: str = "shop", tab: str = "home"):
         super().__init__(timeout=600)
-        self.cog, self.user_id, self.guild_id, self.screen, self.kind, self.qty = (
+        self.cog, self.user_id, self.guild_id, self.screen, self.tab, self.qty = (
             cog,
             user_id,
             guild_id,
             screen,
-            kind,
+            tab,
             1,
         )
         self._build()
@@ -178,7 +229,7 @@ class ShopView(discord.ui.View):
             return self.cog._inventory_embed(self.guild_id, self.user_id)
         if self.screen == "auction":
             return self.cog._auction_embed(self.guild_id, self.user_id)
-        return self.cog._catalog_embed(self.guild_id, self.user_id, [self.kind] if self.kind else None)
+        return self.cog._catalog_embed(self.guild_id, self.user_id, self.tab)
 
     def _build(self) -> None:
         self.clear_items()
@@ -190,31 +241,50 @@ class ShopView(discord.ui.View):
             self._build_shop()
 
     def _build_shop(self) -> None:
-        options = [discord.SelectOption(label="すべて", value="*", default=self.kind is None)]
-        options += [discord.SelectOption(label=kind_name(k), value=k, default=self.kind == k) for k in shop.KIND_LABEL]
-        kind_select = discord.ui.Select(placeholder="種類を選ぶ", options=options, row=0)
-        kind_select.callback = self._on_kind
-        self.add_item(kind_select)
-        items = [i for i in shop.of_kind(self.kind) if not i.limited] if self.kind else []
+        """上の2段が売り場のボタン（いまの売り場は青）。その下に、買う景品の選択肢（トップでは出ない）。"""
+        for tab, row in (
+            ("home", 0),
+            ("title", 0),
+            ("card", 0),
+            ("item", 0),
+            ("style", 0),
+            ("collection", 1),
+            ("horse", 1),
+        ):
+            style = discord.ButtonStyle.primary if tab == self.tab else discord.ButtonStyle.secondary
+            btn = discord.ui.Button(label=TABS[tab][0], style=style, row=row)
+            btn.callback = self._make_tab(tab)
+            self.add_item(btn)
+        auction = discord.ui.Button(label="🕴️ 帝愛の競売", style=discord.ButtonStyle.danger, row=1)
+        auction.callback = self._to_auction
+        self.add_item(auction)
+        go = discord.ui.Button(label="🎒 持ち物", style=discord.ButtonStyle.success, row=1)
+        go.callback = self._to_inventory
+        self.add_item(go)
+        items = tab_items(self.tab) if self.tab != "home" else []
         if items:
+            inv = self.cog.bot.economy.for_guild(self.guild_id).inventory(self.user_id)
+            mixed = len(TABS[self.tab][1]) > 1
             buy = discord.ui.Select(
-                placeholder="買う景品を選ぶ",
-                row=1,
+                placeholder="買う景品を選ぶ（安い順）",
+                row=2,
                 options=[
                     discord.SelectOption(
-                        label=shop.label(i)[:100],
+                        label=("✅ " if i.unique and inv.get(i.id, 0) > 0 else "")
+                        + (shop.label(i) if mixed else i.name)[:90],
                         value=i.id,
                         description=f"{i.price:,}ペリカ" + (f"　{i.desc}" if i.desc else "")[:60],
+                        emoji=i.mark or None,
                     )
                     for i in items[:25]
                 ],
             )
             buy.callback = self._on_buy
             self.add_item(buy)
-        if self.kind == shop.CONSUMABLE:
+        if self.tab in ("item", "horse"):
             qty = discord.ui.Select(
                 placeholder=f"個数（いま {self.qty} 個）",
-                row=2,
+                row=3,
                 options=[
                     discord.SelectOption(label=f"{n}個", value=str(n), default=n == self.qty)
                     for n in range(1, MAX_QTY + 1)
@@ -222,12 +292,13 @@ class ShopView(discord.ui.View):
             )
             qty.callback = self._on_qty
             self.add_item(qty)
-        go = discord.ui.Button(label="🎒 持ち物", style=discord.ButtonStyle.primary, row=3)
-        go.callback = self._to_inventory
-        self.add_item(go)
-        auction = discord.ui.Button(label="🕴️ 帝愛の競売", style=discord.ButtonStyle.danger, row=3)
-        auction.callback = self._to_auction
-        self.add_item(auction)
+
+    def _make_tab(self, tab: str):
+        async def callback(interaction: discord.Interaction):
+            self.tab, self.qty = tab, 1
+            await self._redraw(interaction)
+
+        return callback
 
     def _build_auction(self) -> None:
         eco = self.cog.bot.economy.for_guild(self.guild_id)
@@ -327,18 +398,13 @@ class ShopView(discord.ui.View):
         self._build()
         await interaction.response.edit_message(embed=self.embed(), view=self)
 
-    async def _on_kind(self, interaction: discord.Interaction):
-        value = interaction.data["values"][0]
-        self.kind, self.qty = (None if value == "*" else value), 1
-        await self._redraw(interaction)
-
     async def _on_qty(self, interaction: discord.Interaction):
         self.qty = int(interaction.data["values"][0])
         await self._redraw(interaction)
 
     async def _on_buy(self, interaction: discord.Interaction):
         await self.cog.buy_item(
-            interaction, interaction.data["values"][0], self.qty if self.kind == shop.CONSUMABLE else 1
+            interaction, interaction.data["values"][0], self.qty if self.tab in ("item", "horse") else 1
         )
 
     async def _on_buy_horse(self, interaction: discord.Interaction):
@@ -511,32 +577,56 @@ class ShopCog(commands.Cog):
         view = ShopView(self, interaction.user.id, interaction.guild.id)
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
-    def _catalog_embed(self, guild_id: int, user_id: int, kinds=None) -> discord.Embed:
-        """景品の一覧（kinds が None ならすべての種類）。残高つき。"""
+    def _catalog_embed(self, guild_id: int, user_id: int, tab: str = "home") -> discord.Embed:
+        """売り場の画面。トップは、売り場の案内だけ。各売り場は、値段の安い順に、持っている品に ✅ を付けて並べる。"""
         eco = self.bot.economy.for_guild(guild_id)
         inv = eco.inventory(user_id)
-        e = ui.embed(
-            "🛍️ ペリカショップ",
-            "景品はすべて、ゲーム内・サーバー内で完結するものです（現実の価値はありません）。\n"
-            "種類を選ぶと、下の選択肢で買えます。身につけるのは「🎒 持ち物」の画面です。",
-            ui.GOLD,
-        )
-        for k in kinds or list(shop.KIND_LABEL):
-            items = shop.of_kind(k)
-            if k == shop.COLOR_ROLE:
-                owned = [i.name for i in items if i.id in inv]
-                value = f"{'・'.join(i.name for i in items)}\n**各 {ui.pelica(items[0].price)}**" + (
-                    f"\n持っている: {'・'.join(owned)}" if owned else ""
-                )
-            else:
-                value = "\n".join(
-                    f"{'✅ ' if i.id in inv and i.unique else ''}{i.value if k == shop.CARD_ICON else ''}{i.name} — {ui.pelica(i.price)}"
-                    + (f"\n　└ {i.desc}" if i.desc else "")
-                    for i in items
-                )
-            e.add_field(name=shop.KIND_LABEL[k], value=value[:1024], inline=False)
         me = eco.peek_stats(user_id)
-        e.set_footer(text=f"あなたの残高: {ui.pelica(me['balance'] if me else 0)}")
+        balance = me["balance"] if me else 0
+        if tab == "home":
+            e = ui.embed(
+                "🛍️ ペリカショップ",
+                "売り場を、上のボタンで選んでください。景品は、ゲーム内・サーバー内のものだけです（現実の価値はありません）。",
+                ui.GOLD,
+            )
+            lines = []
+            for key in ("title", "card", "item", "horse", "style", "collection"):
+                items = tab_items(key)
+                lines.append(
+                    f"**{TABS[key][0]}**　{len(items)}種　{items[0].price:,}〜{items[-1].price:,}ペリカ\n　└ {TAB_NOTE[key]}"
+                )
+            e.add_field(name="売り場", value="\n".join(lines)[:1024], inline=False)
+            waiting = len(eco.auction_list()) + len(eco.auction_horses())
+            e.add_field(
+                name="🕴️ 帝愛の競売",
+                value="破産で差し押さえた品が、定価の9割から安く出ます。"
+                + (f"（いま **{waiting}種** 出品中）" if waiting else ""),
+                inline=False,
+            )
+            e.add_field(name="🎒 持ち物", value="買った品を身につける・使うのは、こちらです。", inline=False)
+        else:
+            e = ui.embed(f"{TABS[tab][0]}", TAB_NOTE[tab] + "\n価格はペリカ。✅ は持っている品です。", ui.GOLD)
+            items = tab_items(tab)
+            if tab in ("title", "collection"):  # 値段の段階ごとに、まとめる
+                low = 0
+                for limit, name in TIERS:
+                    group = [i for i in items if i.price >= low and (limit is None or i.price < limit)]
+                    if group:
+                        e.add_field(name=name, value="\n".join(item_line(i, inv) for i in group)[:1024], inline=False)
+                    low = limit if limit is not None else low
+            else:
+                for kind in TABS[tab][1]:
+                    group = [i for i in items if i.kind == kind]
+                    if kind == shop.COLOR_ROLE and group:
+                        owned = [i.name for i in group if inv.get(i.id, 0) > 0]
+                        value = f"{'・'.join(i.mark + i.name for i in group)}\n**各 {group[0].price:,}**" + (
+                            f"\n✅ 持っている: {'・'.join(owned)}" if owned else ""
+                        )
+                    else:
+                        value = "\n".join(item_line(i, inv) for i in group)
+                    if group:
+                        e.add_field(name=SECTION_NAME[kind], value=value[:1024], inline=False)
+        e.set_footer(text=f"あなたの残高: {ui.pelica(balance)}")
         return e
 
     def _auction_embed(self, guild_id: int, user_id: int) -> discord.Embed:
@@ -748,19 +838,24 @@ class ShopCog(commands.Cog):
         if not inv and not prof["daily_boost"] and not prof["insurance"]:
             return ui.embed("🎒 持ち物", "まだ何も持っていません。「🛍️ ショップ」の画面で、景品を買えます。", ui.INFO)
         equipped = {prof[slot] for slot in shop_slots()}
-        e = ui.embed("🎒 持ち物", color=ui.INFO)
+        e = ui.embed(
+            "🎒 持ち物",
+            "下の選択肢から、身につける・使う品を選びます。【装備中】は、いま身につけている品です。",
+            ui.INFO,
+        )
         for k in shop.KIND_LABEL:
             lines = []
             for it in shop.of_kind(k, include_limited=True):
                 if it.id in inv:
                     mark = " 【装備中】" if it.id in equipped else ""
                     lines.append(
-                        f"{it.value if k in (shop.CARD_ICON, shop.COLLECTION) else ''}{it.name}"
+                        "・"
+                        + f"{it.value if k in (shop.CARD_ICON, shop.COLLECTION) else ''}{it.name}"
                         + (f" ×{inv[it.id]}" if not it.unique else "")
                         + mark
                     )
             if lines:
-                e.add_field(name=shop.KIND_LABEL[k], value="　".join(lines)[:1024], inline=False)
+                e.add_field(name=shop.KIND_LABEL[k], value="\n".join(lines)[:1024], inline=False)
         active = []
         if prof["daily_boost"]:
             active.append(f"デイリー2倍券（次のデイリーが2倍）×{prof['daily_boost']}")
