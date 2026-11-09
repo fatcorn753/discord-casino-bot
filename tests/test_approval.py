@@ -355,6 +355,7 @@ def test_owner_commands_are_dm_only_and_not_in_other_groups():
         "サーバー許可",
         "サーバー取消",
         "付与",
+        "残高設定",
         "お知らせ",
         "発言削除",
         "抽選",
@@ -824,3 +825,42 @@ def test_pachinko_stats_command_is_owner_only_and_scopes_to_the_chosen_guild(tmp
         "🎰 パチンコ統計（全サーバー・全期間）",
         "❌ サーバーが見つかりません",
     ]
+
+
+def test_set_balance_command_sets_exact_amount_for_owner_only(tmp_path):
+    from core.economy import INITIAL_BALANCE
+
+    cog, eco, guild, bot = make_admin(tmp_path)
+
+    async def fetch(uid):
+        if uid == 42:
+            return SimpleNamespace(id=42, bot=False, mention="<@42>", display_name="友達")
+        if uid == 43:
+            return SimpleNamespace(id=43, bot=True, mention="<@43>", display_name="bot")
+        raise discord.NotFound(SimpleNamespace(status=404, reason="x"), "unknown member")
+
+    guild.fetch_member = fetch
+    log = []
+    asyncio.run(cog.set_balance.callback(cog, dm(FRIEND, log), "5", "42", 100))
+    assert log == [("send", "❌ 権限がありません")] and eco.balance(42) == INITIAL_BALANCE
+    log.clear()
+    asyncio.run(cog.set_balance.callback(cog, dm(OWNER, log), "5", "42", 100_000, "テスト"))
+    assert log == [("send", "✅ 残高を設定しました")] and eco.balance(42) == 100_000
+    log.clear()
+    asyncio.run(cog.set_balance.callback(cog, dm(OWNER, log), "5", "42", 0))  # 減らすこともできる
+    assert eco.balance(42) == 0
+    log.clear()
+    for args in (("5", "43"), ("5", "44")):
+        asyncio.run(cog.set_balance.callback(cog, dm(OWNER, log), *args, 1000))
+    assert [t for _, t in log] == ["❌ Bot には設定できません", "❌ そのサーバーにいません"]
+
+
+def test_economy_set_balance_exact_and_validated(tmp_path):
+    from core.economy import INITIAL_BALANCE
+
+    eco = Economy(str(tmp_path / "t.db"))
+    assert eco.set_balance(42, 10_000, "テスト") == (INITIAL_BALANCE, 10_000)
+    assert eco.set_balance(42, 0, "テスト") == (10_000, 0) and eco.balance(42) == 0
+    assert eco.set_balance(42, 0, "テスト") == (0, 0)  # 同じ額なら、何も変わらない
+    with pytest.raises(ValueError):
+        eco.set_balance(42, -1, "テスト")

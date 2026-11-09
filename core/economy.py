@@ -259,6 +259,17 @@ class Economy(
             self._apply(user_id, amount, reason)
             return self._balance(user_id)
 
+    def set_balance(self, user_id: int, amount: int, reason: str) -> tuple:
+        """残高を amount ちょうどにする（管理者用。差額は台帳に残る）。(変更前, 変更後) を返す。収入ではないので、天引きしない。"""
+        if amount < 0:
+            raise ValueError("amount は 0 以上にしてください")
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            before = self._balance(user_id)
+            if amount != before:
+                self._apply(user_id, amount - before, reason)
+            return before, self._balance(user_id)
+
     def debit_up_to(self, user_id: int, amount: int, reason: str) -> int:
         """残高の範囲で amount を引く。実際に引けた額を返す（チンチロの倍払いなど）。"""
         if amount <= 0:

@@ -422,6 +422,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
         "サーバー許可",
         "サーバー取消",
         "付与",
+        "残高設定",
         "お知らせ",
         "発言削除",
         "抽選",

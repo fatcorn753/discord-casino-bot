@@ -280,27 +280,11 @@ class ApprovalCog(commands.Cog):
             if not m.bot and (cur in m.display_name.lower() or cur in m.name.lower())
         ][:25]  # キャッシュにいる人だけ。出なければIDを貼る
 
-    @group.command(name="付与", description="[管理者] 指定したサーバーの指定した人に、ペリカを付与する")
-    @app_commands.rename(guild_id="サーバー", user_id="ユーザー", amount="金額", reason="理由")
-    @app_commands.describe(
-        guild_id="ペリカを渡すサーバー（候補から選ぶ）",
-        user_id="渡す相手（名前の候補が出なければ、ユーザーIDを貼る）",
-        amount="付与する額（1〜10,000,000）",
-        reason="台帳に残す理由（なくてもよい）",
-    )
-    async def grant(
-        self,
-        interaction: discord.Interaction,
-        guild_id: str,
-        user_id: str,
-        amount: app_commands.Range[int, 1, 10_000_000],
-        reason: str = "",
-    ):
-        if not await self._owner_only(interaction):
-            return
+    async def _pick_member(self, interaction: discord.Interaction, guild_id: str, user_id: str, verb: str):
+        """管理コマンドで、サーバーと相手を確かめる。問題があれば、その場で返信して None（呼び出し側は何もせず戻る）。"""
         guild = await self._pick_guild(interaction, guild_id)
         if guild is None:
-            return
+            return None
         uid = parse_user_id(user_id)
         if uid is None:
             return await interaction.response.send_message(
@@ -322,8 +306,33 @@ class ApprovalCog(commands.Cog):
             )
         if member.bot:
             return await interaction.response.send_message(
-                embed=ui.error_embed("Bot には付与できません"), ephemeral=True
+                embed=ui.error_embed(f"Bot には{verb}できません"), ephemeral=True
             )
+        return guild, member
+
+    @group.command(name="付与", description="[管理者] 指定したサーバーの指定した人に、ペリカを付与する")
+    @app_commands.rename(guild_id="サーバー", user_id="ユーザー", amount="金額", reason="理由")
+    @app_commands.describe(
+        guild_id="ペリカを渡すサーバー（候補から選ぶ）",
+        user_id="渡す相手（名前の候補が出なければ、ユーザーIDを貼る）",
+        amount="付与する額（1〜10,000,000）",
+        reason="台帳に残す理由（なくてもよい）",
+    )
+    async def grant(
+        self,
+        interaction: discord.Interaction,
+        guild_id: str,
+        user_id: str,
+        amount: app_commands.Range[int, 1, 10_000_000],
+        reason: str = "",
+    ):
+        if not await self._owner_only(interaction):
+            return
+        picked = await self._pick_member(interaction, guild_id, user_id, "付与")
+        if picked is None:
+            return
+        guild, member = picked
+        uid = member.id
         balance = self.bot.economy.for_guild(guild.id).credit(uid, amount, f"付与（管理）{reason}".strip())
         await interaction.response.send_message(
             embed=ui.ok_embed(
@@ -336,6 +345,44 @@ class ApprovalCog(commands.Cog):
 
     grant.autocomplete("guild_id")(guild_autocomplete)
     grant.autocomplete("user_id")(user_autocomplete)
+
+    @group.command(name="残高設定", description="[管理者] 指定したサーバーの指定した人の残高を、指定した額にする")
+    @app_commands.rename(guild_id="サーバー", user_id="ユーザー", amount="金額", reason="理由")
+    @app_commands.describe(
+        guild_id="対象のサーバー（候補から選ぶ）",
+        user_id="対象の人（名前の候補が出なければ、ユーザーIDを貼る）",
+        amount="残高をこの額にする（0〜1,000,000,000）",
+        reason="台帳に残す理由（なくてもよい）",
+    )
+    async def set_balance(
+        self,
+        interaction: discord.Interaction,
+        guild_id: str,
+        user_id: str,
+        amount: app_commands.Range[int, 0, 1_000_000_000],
+        reason: str = "",
+    ):
+        if not await self._owner_only(interaction):
+            return
+        picked = await self._pick_member(interaction, guild_id, user_id, "設定")
+        if picked is None:
+            return
+        guild, member = picked
+        before, after = self.bot.economy.for_guild(guild.id).set_balance(
+            member.id, amount, f"残高の設定（管理）{reason}".strip()
+        )
+        await interaction.response.send_message(
+            embed=ui.ok_embed(
+                "残高を設定しました",
+                f"{guild.name} の {member.mention}（{member.display_name}）の残高を "
+                f"**{ui.pelica(before)} → {ui.pelica(after)}** にしました（差額は台帳に残ります）。"
+                + (f"\n理由: {reason}" if reason else ""),
+            ),
+            ephemeral=True,
+        )
+
+    set_balance.autocomplete("guild_id")(guild_autocomplete)
+    set_balance.autocomplete("user_id")(user_autocomplete)
 
     # ---- 特別イベント ---- #
     def _event_targets(self, guild_id: Optional[str]) -> list:
