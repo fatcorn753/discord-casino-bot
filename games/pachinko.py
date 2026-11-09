@@ -280,6 +280,14 @@ STORIES = {
         ("🔥 **プレミアムリーチ**", "画面が燃えている…！！"),
     ],
 }
+# 復活演出: いったん「外れた」ように見せて、そこから当たりに変わる（当たったときだけの演出。当落には関係しない）。格が高いほど出やすい
+REVIVE_CHANCE = {NORMAL: 0.10, SUPER: 0.25, PREMIUM: 0.30}
+REVIVE_TEXT = [
+    ("それでも!!!", "…諦めない…！！"),
+    ("と、思っていたのか", "…画面が震えている…！！"),
+    ("まだ終わっていない…！", "…リールが動き出す…！"),
+    ("ここからだ…！！", "…運命が書き換わる…！"),
+]
 PSEUDO_COUNTS = {SUPER: [0, 0, 1, 2], PREMIUM: [2, 3, 3, 4]}  # 擬似連の回数の候補（格ごと。当たり外れとは無関係に選ぶ）
 
 
@@ -298,6 +306,19 @@ def _pseudo_cycles(rng: random.Random, count: int) -> list:
         )
         frames.append(_text_frame("", (SPINNING,) * 3, "再回転！", mood))
     return frames
+
+
+def _revive_frames(rng: random.Random, sym: str, full: bool = False) -> list:
+    """復活演出のコマ: 左右が揃ったまま、3つ目がずれて止まる（外れ）→ セリフ → 再回転（full なら全回転と名乗る）→ （呼び出し側が）出目。"""
+    other = rng.choice([x for x in REEL_SYMBOLS if x != sym])
+    line, sub = rng.choice(REVIVE_TEXT)
+    return [
+        _text_frame("", (sym, sym, other), "…**外れた**…", "blue"),
+        _text_frame("", (sym, sym, other), f"**{line}**", "red"),
+        _text_frame(
+            "🔥🔥 **復活！全回転！！** 🔥🔥\n" if full else "💥 **復活！！** 💥\n", (SPINNING,) * 3, sub, "gold"
+        ),
+    ]
 
 
 def spin_frames(rng: random.Random, spin: SpinInfo, label: str = "") -> list:
@@ -329,6 +350,7 @@ def spin_frames(rng: random.Random, spin: SpinInfo, label: str = "") -> list:
     frames.append(
         _text_frame("", (sym, sym, SPINNING), "**リーチ！**", "blue")
     )  # ④ リーチ。ここから出目が決まるまで、左右は変えない
+    revive = rng.random() < REVIVE_CHANCE[tier]
     title, sub = rng.choice(STORIES[tier])
     if tier == NORMAL:
         frames.append(_text_frame(f"{title}\n", (sym, sym, SPINNING), sub, mood))
@@ -336,13 +358,18 @@ def spin_frames(rng: random.Random, spin: SpinInfo, label: str = "") -> list:
             frames.append(
                 _text_frame("", (sym, sym, SPINNING), rng.choice(["ざわ… ざわ…", "じわ… じわ…", "…どっちだ…"]), mood)
             )
+        if revive:
+            frames += _revive_frames(rng, sym)
     else:
         frames.append(_text_frame(f"{title}\n", (sym, sym, SPINNING), sub, "red"))  # 発展
         if rng.random() < 0.7:  # カットインは、ある回とない回がある
             frames.append(
                 _text_frame("🗯️ **カットイン！** 🗯️\n" + rng.choice(CUTIN[tier]) + "\n", (sym, sym, SPINNING), "", mood)
             )
-        if tier == PREMIUM:
+        if revive:  # スローのあと、いったん外れて、復活する
+            frames.append(_text_frame("⚡ スローになった… ⚡\n", (sym, sym, SPINNING), "…ここで決まる…！", mood))
+            frames += _revive_frames(rng, sym, tier == PREMIUM)
+        elif tier == PREMIUM:
             frames.append(
                 _text_frame("🔥🔥 **全回転！！** 🔥🔥\n", (SPINNING,) * 3, "すべての絵柄が光る…！！", "gold")
             )  # 全回転のあとは、すぐ出目

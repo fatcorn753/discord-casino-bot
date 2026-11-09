@@ -324,6 +324,14 @@ def test_reels_follow_the_rules_of_a_real_machine_in_every_script():
                     for i, r in enumerate(reels[:-1]):
                         if r is None:
                             continue
+                        if (
+                            "外れた" in frames[i].text
+                        ):  # 復活演出: 左右が揃ったまま3つ目がずれて止まり、そのあと再回転して、最後に揃う
+                            assert tier and r[0] == r[1] != r[2] and pachinko.SPINNING not in r and reach is not None
+                            assert reels[i + 1] == r and "復活" in frames[i + 2].text and i + 3 == len(frames) - 1
+                            assert reels[i + 2] == [pachinko.SPINNING] * 3
+                            full_spin_before_last = True
+                            break
                         stopped = pachinko.SPINNING not in r
                         assert not (stopped and len(set(r)) == 1), frames[i].text  # 途中で3つ揃って見えない
                         assert not (stopped and r[0] == r[1]), frames[i].text  # 止まったコマが、リーチに見えない
@@ -377,3 +385,40 @@ def test_pseudo_chain_counts_do_not_depend_on_the_result():
                 sum(1 for f in pachinko.spin_frames(rng, spin) if "擬似連" in f.text and "再回転" not in f.text)
             )
     assert counts[True] == counts[False] == {0, 1, 2}  # 回数は、当たり外れと無関係
+
+
+def test_revival_scene_appears_only_in_hits_with_a_reach_and_more_often_for_higher_tiers():
+    rng = random.Random(33)
+
+    def share(tier, n=1500):
+        return (
+            sum(
+                "外れた" in "\n".join(f.text for f in pachinko.spin_frames(rng, hit_spin(tier), "1回転目"))
+                for _ in range(n)
+            )
+            / n
+        )
+
+    assert share("") == 0  # リーチなしのサプライズ当たりには、復活はない
+    for tier, chance in pachinko.REVIVE_CHANCE.items():
+        assert abs(share(tier) - chance) < 0.05
+    assert (
+        pachinko.REVIVE_CHANCE[pachinko.NORMAL]
+        < pachinko.REVIVE_CHANCE[pachinko.SUPER]
+        < pachinko.REVIVE_CHANCE[pachinko.PREMIUM]
+    )
+    lines = set()
+    for _ in range(600):
+        for f in pachinko.spin_frames(rng, hit_spin(pachinko.PREMIUM), "1回転目"):
+            lines.update(t for t, _ in pachinko.REVIVE_TEXT if f"**{t}**" in f.text)
+    assert {"それでも!!!", "と、思っていたのか"} <= lines  # 台詞は、回ごとに選ぶ
+
+
+def test_a_miss_never_gets_a_revival_scene():
+    rng = random.Random(5)
+    for _ in range(300):
+        result = pachinko.roll_set(rng)
+        if result.mult:
+            continue
+        text = "\n".join(f.text for f in play_pa.single_frames(rng, result))
+        assert "…**外れた**…" not in text and "復活" not in text
