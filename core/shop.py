@@ -29,7 +29,13 @@ INSURANCE = "insurance"
 STREAK_GUARD = "streak_guard"
 HORSE_VOUCHER = "horse_voucher"
 CARROT = "carrot"
-AUTO_USED = (STREAK_GUARD, HORSE_VOUCHER, CARROT)  # 「使う」を押さなくてよい（持っているだけ・別の画面で使う）消耗品
+LABOR_DRINK = "labor_drink"
+AUTO_USED = (
+    STREAK_GUARD,
+    HORSE_VOUCHER,
+    CARROT,
+    LABOR_DRINK,
+)  # 「使う」を押さなくてよい（持っているだけ・別の画面で使う）消耗品
 # 保険券で戻る額の上限。券の値段（2,000）より小さくして、買って使うほど増える（期待値がプラスになる）ことがないようにする
 INSURANCE_CAP = 1_000
 
@@ -113,6 +119,13 @@ CATALOG = [
         desc="受け取れなかった日を1日ぶん埋める（持つだけで自動で使われる）",
     ),
     Item(
+        LABOR_DRINK,
+        "栄養ドリンク",
+        CONSUMABLE,
+        100,
+        desc="地下作業の疲労を60回復する（`/地下 作業` の画面で飲む）",
+    ),
+    Item(
         HORSE_VOUCHER,
         "競走馬（購入券）",
         RACING,
@@ -187,6 +200,7 @@ MARKS = {
     STREAK_GUARD: "🔥",
     HORSE_VOUCHER: "🐎",
     CARROT: "🥕",
+    LABOR_DRINK: "🥤",
     "skin_kuro": "🕴️",
     "skin_gold_dice": "🎲",
     "skin_glass_dice": "💅",

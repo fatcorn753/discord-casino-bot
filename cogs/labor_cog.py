@@ -26,26 +26,10 @@ def fatigue_label(fatigue: float) -> str:
     return "元気" if fatigue < 25 else "ふつう" if fatigue < 50 else "疲れ気味" if fatigue < 75 else "ぐったり"
 
 
-def next_goal(state: dict) -> str:
-    """初めての人にも、次に何をすればよいかが分かる、ひとこと。"""
-    bal, first = state["balance"], lab.worker_cost("apprentice", state["apprentice"])
-    if state["workers"] == 0:
-        if bal >= first:
-            return f"💡 **{first:,}ペリカ** あるので、「👷 作業員」から見習いを雇えます。雇うと、放置でも稼ぎます。"
-        return f"💡 あと **{first - bal:,}ペリカ** で、最初の作業員（見習い）を雇えます。まずは「働く」を押して稼ごう。"
-    cost = lab.upgrade_cost(state["pick"])
-    if cost is not None and bal >= cost:
-        return f"💡 **{cost:,}ペリカ** あるので、ツルハシを強化できます（1回の稼ぎが増えます）。"
-    if state["workers"] < state["slots"] and bal >= lab.worker_cost("apprentice", state["apprentice"]):
-        return "💡 まだ、作業員を雇う枠があります。「👷 作業員」を見てみよう。"
-    return ""
-
-
 def panel_embed(state: dict, note: str = "") -> discord.Embed:
-    """作業の画面。上に、直前の結果。つぎに、お金と疲労。最後に、次の目標。"""
+    """作業の画面。上に、直前の結果。つぎに、お金と疲労。"""
     fat = state["fatigue"]
-    head = [x for x in (note, next_goal(state)) if x]
-    e = ui.embed("⛏ 地下作業", "\n".join(head) if head else "「働く」を押すと、ペリカが貯まります。", ui.DARK)
+    e = ui.embed("⛏ 地下作業", note or "「働く」を押すと、ペリカが貯まります。", ui.DARK)
     e.add_field(name="💴 手元", value=ui.pelica(state["balance"]), inline=True)
     e.add_field(name="🎒 未受け取り", value=f"**{ui.pelica(state['pot_total'])}**", inline=True)
     e.add_field(name="📅 今日の稼ぎ", value=ui.pelica(state["day_earned"]), inline=True)
@@ -89,17 +73,21 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
         + (f"\n稼ぎ ×{lab.WAGE_MULT['low']}・1日に {lab.QUIT_PER_DAY:.0%} で1人ずつ辞める" if wage == "low" else ""),
         inline=True,
     )
-    e.add_field(name="\u200b", value="\u200b", inline=True)
+    e.add_field(
+        name="🔁 自動更新",
+        value="**オン**\n切れたら、貯まった稼ぎから契約料を払う" if state["renew"] else "**オフ**\n切れたら、退職する",
+        inline=True,
+    )
     for k in lab.WORKERS:
-        nxt = lab.worker_cost(k, state[k])
         gain = f"{lab.WORKER_RATE[k]}/時" if k != "foreman" else f"全員の稼ぎ +{lab.FOREMAN_BONUS:.0%}"
+        until = f"\n契約が切れる: <t:{int(state['expires'][k])}:R>" if state["expires"].get(k) else ""
         e.add_field(
             name=f"{lab.WORKER_MARK[k]} {lab.WORKER_NAME[k]} ×{state[k]}",
-            value=f"{gain}\n次の1人 **{nxt:,}**",
+            value=f"{gain}\n契約料 **{lab.contract_fee(k):,}**（{lab.CONTRACT_DAYS}日）{until}",
             inline=True,
         )
     e.set_footer(
-        text=f"貯まるのは最大{lab.STOCK_HOURS:.0f}時間分。解雇してもお金は戻りません。同じ種類は、雇うほど値段が上がります。"
+        text=f"契約は{lab.CONTRACT_DAYS}日ごと。貯まるのは最大{lab.STOCK_HOURS:.0f}時間分。解雇しても契約料は戻りません。"
     )
     return e
 
@@ -162,9 +150,17 @@ class LaborView(discord.ui.View):
             )
             wage.callback = self._wage
             self.add_item(wage)
+            renew = discord.ui.Button(
+                label="自動更新: " + ("オン" if s["renew"] else "オフ"),
+                emoji="🔁",
+                style=discord.ButtonStyle.success if s["renew"] else discord.ButtonStyle.secondary,
+                row=0,
+            )
+            renew.callback = self._renew
+            self.add_item(renew)
             full = s["workers"] >= s["slots"]
             for k in lab.WORKERS:
-                cost = lab.worker_cost(k, s[k])
+                cost = lab.contract_fee(k)
                 b = discord.ui.Button(
                     label=f"{lab.WORKER_NAME[k]}を雇う {cost:,}",
                     emoji=lab.WORKER_MARK[k],
@@ -204,7 +200,15 @@ class LaborView(discord.ui.View):
         work.callback = self._work
         hire = discord.ui.Button(label="作業員", emoji="👷", style=discord.ButtonStyle.secondary, row=0)
         hire.callback = self._goto("hire")
-        for b in (work, collect, hire):
+        drink = discord.ui.Button(
+            label=f"ドリンク ×{s['drinks']}" if s["drinks"] else "ドリンク（ショップで買える）",
+            emoji="🥤",
+            style=discord.ButtonStyle.secondary,
+            row=0,
+            disabled=s["drinks"] <= 0 or s["fatigue"] < 1,
+        )
+        drink.callback = self._drink
+        for b in (work, collect, hire, drink):
             self.add_item(b)
         for tool in lab.TOOLS:
             cost = lab.upgrade_cost(s[tool])
@@ -238,6 +242,12 @@ class LaborView(discord.ui.View):
             return await self._show(interaction, "" if r.get("quiet") else f"⚠ {r['reason']}")
         await self._show(interaction, f"⛏ **+{r['pay']:,}**")
 
+    async def _drink(self, interaction: discord.Interaction):
+        ok, reason = self.eco().labor_drink(self.user_id, time.time(), today(self.bot))
+        await self._show(
+            interaction, f"🥤 ぐいっと飲んだ。疲労が {lab.DRINK_RECOVER:.0f} 回復した！" if ok else f"⚠ {reason}"
+        )
+
     async def _collect(self, interaction: discord.Interaction):
         amount = self.eco().labor_collect(self.user_id, time.time(), today(self.bot))
         await self._show(interaction, f"💰 **{amount:,}** ペリカを、まとめて手元に移しました。" if amount else "")
@@ -263,6 +273,16 @@ class LaborView(discord.ui.View):
         kind = interaction.data["values"][0]
         ok, reason = self.eco().labor_dismiss(self.user_id, kind, time.time(), today(self.bot))
         await self._show(interaction, f"**{lab.WORKER_NAME[kind]}** を解雇した。" if ok else f"⚠ {reason}")
+
+    async def _renew(self, interaction: discord.Interaction):
+        want = not self.state["renew"]
+        self.eco().labor_set_renew(self.user_id, want, time.time(), today(self.bot))
+        await self._show(
+            interaction,
+            "🔁 自動更新を **オン** にした。契約が切れたら、貯まった稼ぎから契約料を払います。"
+            if want
+            else "🔁 自動更新を **オフ** にした。契約が切れた作業員は、退職します。",
+        )
 
     async def _dorm(self, interaction: discord.Interaction):
         ok, reason = self.eco().labor_dorm(self.user_id, time.time(), today(self.bot))

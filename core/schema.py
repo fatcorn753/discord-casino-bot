@@ -177,8 +177,17 @@ def create_tables(conn: sqlite3.Connection) -> None:
             dorm         INTEGER NOT NULL DEFAULT 0,   -- 寮の段（1段ごとに、雇える人数 +1）
             wage         TEXT NOT NULL DEFAULT 'normal',
             idle_at      REAL NOT NULL DEFAULT 0,      -- 作業員の稼ぎを、最後に数えた時刻
+            renew        INTEGER NOT NULL DEFAULT 1,   -- 作業員の契約の自動更新（1=オン）
             PRIMARY KEY (guild_id, user_id)
         );
+        CREATE TABLE IF NOT EXISTS labor_workers (    -- 雇っている作業員（1人1行。契約の期限つき）
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id   INTEGER NOT NULL,
+            user_id    INTEGER NOT NULL,
+            kind       TEXT NOT NULL,
+            expires_at REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS labor_workers_owner ON labor_workers (guild_id, user_id);
         CREATE TABLE IF NOT EXISTS seized_items (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id  INTEGER NOT NULL,
@@ -526,9 +535,11 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         ("dorm", "INTEGER NOT NULL DEFAULT 0"),
         ("wage", "TEXT NOT NULL DEFAULT 'normal'"),
         ("idle_at", "REAL NOT NULL DEFAULT 0"),
+        ("renew", "INTEGER NOT NULL DEFAULT 1"),
     ):
         if col not in ls:
             conn.execute(f"ALTER TABLE labor ADD COLUMN {col} {ddl}")
+    _migrate_labor_counts(conn)
     if "grace_until" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN grace_until REAL")
     ps = {r["name"] for r in conn.execute("PRAGMA table_info(play_state)")}
@@ -586,6 +597,27 @@ _SYMBOL_TABLES = {
         "guild_id, user_id, units, entry_value, margin",
     ),
 }
+
+
+def _migrate_labor_counts(conn: sqlite3.Connection, now: float = None) -> None:
+    """作業員を「人数の列」で持っていた版から、契約つきの1人1行の表（labor_workers）へ移す。いまの人は、今から7日の契約にする（何度動かしても安全）。"""
+    import time
+
+    now = time.time() if now is None else now
+    for r in conn.execute(
+        "SELECT guild_id, user_id, apprentice, miner, craftsman, foreman FROM labor "
+        "WHERE apprentice>0 OR miner>0 OR craftsman>0 OR foreman>0"
+    ).fetchall():
+        for kind in ("apprentice", "miner", "craftsman", "foreman"):
+            for _ in range(r[kind]):
+                conn.execute(
+                    "INSERT INTO labor_workers (guild_id, user_id, kind, expires_at) VALUES (?, ?, ?, ?)",
+                    (r["guild_id"], r["user_id"], kind, now + 7 * 86400.0),
+                )
+        conn.execute(
+            "UPDATE labor SET apprentice=0, miner=0, craftsman=0, foreman=0 WHERE guild_id=? AND user_id=?",
+            (r["guild_id"], r["user_id"]),
+        )
 
 
 def _add_symbol_columns(conn: sqlite3.Connection) -> None:

@@ -193,7 +193,7 @@ class Quit(random.Random):  # 必ず辞める
 
 
 def test_worker_numbers():
-    assert lab.worker_cost("apprentice", 0) == 500 and lab.worker_cost("apprentice", 1) == 650
+    assert lab.contract_fee("apprentice") == 340 and lab.contract_fee("craftsman") == 2_700 and lab.CONTRACT_DAYS == 7
     assert lab.slots(0) == 5 and lab.slots(99) == 10 and lab.dorm_cost(5) is None and lab.dorm_cost(0) == 2_000
     counts = {"apprentice": 2, "craftsman": 1}
     assert lab.idle_rate(counts, "normal") == 2 * 10 + 80
@@ -203,14 +203,15 @@ def test_worker_numbers():
     assert lab.idle_hours(0, 100 * H) == lab.STOCK_HOURS and lab.idle_hours(100, 50) == 0
 
 
-def test_hire_costs_pelica_and_grows_in_price(eco):
+def test_hire_costs_the_contract_fee_and_sets_a_7_day_term(eco):
     ok, why = eco.labor_hire(U, "apprentice", T0, DAY)
     assert not ok and "足りません" in why
     eco.credit(U, 5_000, "テスト")
     assert eco.labor_hire(U, "apprentice", T0, DAY) == (True, "")
-    assert eco.balance(U) == 5_000 - 500
+    assert eco.balance(U) == 5_000 - 340
     assert eco.labor_hire(U, "apprentice", T0, DAY) == (True, "")
-    assert eco.balance(U) == 5_000 - 500 - 650  # 同じ種類は、値段が上がる
+    assert eco.balance(U) == 5_000 - 340 - 340  # 同じ種類でも、値段は変わらない
+    assert eco.labor_state(U, T0, DAY)["expires"]["apprentice"] == T0 + 7 * 86400
     assert eco.labor_hire(U, "bogus", T0, DAY)[0] is False
 
 
@@ -314,15 +315,162 @@ def test_hire_embed_shows_prices_slots_and_pending(eco):
     eco.labor_hire(U, "apprentice", T0, DAY)
     state = eco.labor_state(U, T0 + 3 * H, DAY)
     d = text(labor_cog.hire_embed(state))
-    assert "1 / 5人" in d and "見習い" in d and "650" in d and "10/時" in d  # 次の1人は 650
+    assert "1 / 5人" in d and "見習い" in d and "340" in d and "10/時" in d and "自動更新" in d
     assert state["pot_total"] == 30 and "30" in text(labor_cog.panel_embed(state))
 
 
-def test_next_goal_guides_a_new_player(eco):
-    s = eco.labor_state(U, T0, DAY)
-    assert "あと **500ペリカ**" in labor_cog.next_goal(s)  # 手元が足りないときは、あといくらかを出す
-    eco.credit(U, 1_000, "テスト")
-    assert "見習いを雇えます" in labor_cog.next_goal(eco.labor_state(U, T0, DAY))
-    eco.labor_hire(U, "apprentice", T0, DAY)
-    assert "ツルハシ" in labor_cog.next_goal(eco.labor_state(U, T0, DAY))
+def test_fatigue_label_and_no_hints(eco):
     assert labor_cog.fatigue_label(0) == "元気" and labor_cog.fatigue_label(90) == "ぐったり"
+    assert not hasattr(labor_cog, "next_goal")  # 画面に、ヒントは出さない
+    eco.credit(U, 1_000, "テスト")
+    assert "💡" not in text(labor_cog.panel_embed(eco.labor_state(U, T0, DAY)))
+
+
+# ------------------------------ 栄養ドリンク ------------------------------ #
+def buy_drink(eco, qty=1):
+    from core import shop
+
+    it = shop.BY_ID[shop.LABOR_DRINK]
+    return eco.purchase(U, it.id, shop.label(it), it.price, it.unique, qty)
+
+
+def test_drink_is_a_shop_item_and_recovers_fatigue(eco):
+    from core import shop
+
+    item = shop.BY_ID[shop.LABOR_DRINK]
+    assert item.price == 100 and item.kind == shop.CONSUMABLE and shop.LABOR_DRINK in shop.AUTO_USED
+    click(eco, 25)
+    now = T0 + 25 * 1.5
+    ok, why = eco.labor_drink(U, now, DAY)
+    assert not ok and "持っていません" in why  # 買っていない
+    eco.credit(U, 1_000, "テスト")
+    assert buy_drink(eco, 3).ok
+    assert eco.labor_state(U, now, DAY)["drinks"] == 3
+    before = eco.labor_state(U, now, DAY)["fatigue"]
+    assert before > 40 and eco.labor_drink(U, now, DAY) == (True, "")
+    assert eco.labor_state(U, now, DAY)["fatigue"] == pytest.approx(max(0.0, before - lab.DRINK_RECOVER))
+    assert eco.labor_state(U, now, DAY)["drinks"] == 2
+
+
+def test_drink_is_not_wasted_when_not_tired(eco):
+
+    eco.credit(U, 1_000, "テスト")
+    buy_drink(eco, 1)
+    assert eco.labor_drink(U, T0, DAY) == (False, "疲れていません。")
+    assert eco.labor_state(U, T0, DAY)["drinks"] == 1  # 減らない
+
+
+def test_drink_button_in_the_panel(eco):
+    view = make_view(eco)
+    drink = next(c for c in view.children if getattr(c, "emoji", None) and str(c.emoji) == "🥤")
+    assert drink.disabled and "ショップ" in drink.label  # 持っていない
+    eco.credit(U, 1_000, "テスト")
+    buy_drink(eco, 2)
+    now = labor_cog.time.time()
+    for i in range(30):  # 画面は、いまの時刻で読むので、いまの時刻で押す
+        eco.labor_click(U, now - 60 + i * 1.5, labor_cog.today(view.bot))
+    view.refresh()
+    drink = next(c for c in view.children if getattr(c, "emoji", None) and str(c.emoji) == "🥤")
+    assert drink.label == "ドリンク ×2"
+    it = SimpleNamespace(user=SimpleNamespace(id=U), response=Resp(), data={})
+    asyncio.run(view._drink(it))
+    assert eco.labor_state(U, now, labor_cog.today(view.bot))["drinks"] == 1 and it.response.edits
+    assert "回復" in it.response.edits[-1]["embed"].description
+
+
+# ------------------------------ 契約（7日・自動更新） ------------------------------ #
+W = 7 * 86400.0
+
+
+def worker(i, kind, expires):
+    return {"id": i, "kind": kind, "expires_at": expires}
+
+
+def test_settle_plan_no_renewals_needed():
+    plan = lab.settle_plan([worker(1, "apprentice", T0 + W)], "normal", True, T0, T0 + 2 * H, 0, 0)
+    assert plan == {"gain": 20, "pot_spent": 0, "balance_spent": 0, "renewed": [], "removed": [], "quit": []}
+
+
+def test_settle_plan_renews_from_pot_then_balance():
+    now = T0 + 5 * H
+    w = [worker(1, "apprentice", T0 + H)]  # 契約は、1時間で切れた
+    plan = lab.settle_plan(w, "normal", True, T0, now, 0, 0)  # 払えない（稼ぎも手元も 0）… 更新前の稼ぎは、貯まらない
+    assert plan["removed"] == [1] and plan["renewed"] == [] and plan["gain"] == 10  # 切れるまでの1時間分だけ稼いだ
+    paid_pot = lab.settle_plan(
+        [worker(1, "apprentice", T0 + H), worker(2, "apprentice", T0 + 9 * H)], "normal", True, T0, now, 340, 0
+    )
+    assert paid_pot["renewed"] == [(1, now + W)] and paid_pot["pot_spent"] == 340 and paid_pot["balance_spent"] == 0
+    paid_bal = lab.settle_plan(w, "normal", True, T0, now, 100, 1_000)
+    assert paid_bal["pot_spent"] == 100 and paid_bal["balance_spent"] == 240 and paid_bal["removed"] == []
+
+
+def test_settle_plan_renew_off_removes_expired_workers():
+    plan = lab.settle_plan([worker(1, "miner", T0 + H)], "normal", False, T0, T0 + 4 * H, 9_999, 9_999)
+    assert plan["removed"] == [1] and plan["pot_spent"] == 0 and plan["balance_spent"] == 0 and plan["gain"] == 35
+
+
+def test_workers_leave_when_contract_ends_and_nothing_pays_for_renewal(eco):
+    eco.credit(U, 340, "テスト")
+    eco.labor_hire(U, "apprentice", T0, DAY)  # 手元は 0。1週間、見に来なかった（稼ぎは、12時間分しか数えない）
+    now = T0 + W + H
+    s = eco.labor_state(U, now, DAY)
+    assert s["apprentice"] == 0 and s["renew_fee"] == 0  # 契約料を払えないので、退職
+    eco.labor_collect(U, now, DAY)
+    assert eco.labor_state(U, now, DAY)["workers"] == 0
+
+
+def test_auto_renew_pays_from_the_pot_when_you_visit_regularly(eco):
+    eco.credit(U, 5_000, "テスト")
+    eco.labor_hire(U, "miner", T0, DAY)  # 1時間 35。契約料 1,200
+    for k in range(1, 17):  # 10時間ごとに見に来る（クリックでも、決算される）
+        eco.labor_click(U, T0 + k * 10 * H, DAY)
+    balance_before = eco.balance(U)
+    now = T0 + W + H  # 契約が切れた直後
+    after = eco.labor_state(U, now, DAY)
+    assert after["miner"] == 1 and after["expires"]["miner"] == now + W and after["renew_fee"] == 1_200
+    got = eco.labor_collect(U, now, DAY)
+    assert got > 1_200 and eco.balance(U) == balance_before + got  # 契約料は、稼ぎから引かれた（手元は減らない）
+    assert not any(
+        "契約の更新" in r["reason"] for r in eco._conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))
+    )
+
+
+def test_renewal_fee_comes_from_balance_when_the_pot_is_empty(eco):
+    eco.credit(U, 6_200, "テスト")
+    eco.labor_hire(U, "miner", T0, DAY)  # 契約料 1,200。手元に 5,000 残る
+    now = T0 + W + H  # 1週間、見に来なかった（pot は 0）
+    eco.labor_collect(U, now, DAY)
+    assert eco.labor_state(U, now, DAY)["miner"] == 1
+    assert eco.balance(U) == 5_000 - 1_200 + 35 * 12  # 手元から契約料が引かれ、更新した作業員の、12時間分の稼ぎが入る
+    assert any(
+        "契約の更新" in r["reason"] for r in eco._conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))
+    )
+
+
+def test_renew_toggle_off_lets_contract_lapse(eco):
+    eco.credit(U, 2_000, "テスト")
+    eco.labor_hire(U, "apprentice", T0, DAY)
+    assert eco.labor_state(U, T0, DAY)["renew"] == 1
+    assert eco.labor_set_renew(U, False, T0 + H, DAY) == (True, "")
+    assert eco.labor_state(U, T0 + H, DAY)["renew"] == 0
+    assert eco.labor_state(U, T0 + W + 2 * H, DAY)["apprentice"] == 0  # 切れて、更新されずに退職
+
+
+def test_dismiss_removes_the_earliest_expiring_worker(eco):
+    eco.credit(U, 5_000, "テスト")
+    eco.labor_hire(U, "apprentice", T0, DAY)
+    eco.labor_hire(U, "apprentice", T0 + 3 * 86400, DAY)
+    assert eco.labor_dismiss(U, "apprentice", T0 + 3 * 86400, DAY) == (True, "")
+    assert eco.labor_state(U, T0 + 3 * 86400, DAY)["expires"]["apprentice"] == T0 + 3 * 86400 + W  # 古い契約から消える
+
+
+def test_old_count_columns_migrate_to_contracts(eco):
+    from core import schema
+
+    eco._conn.execute("INSERT OR IGNORE INTO labor (guild_id, user_id) VALUES (?, ?)", (eco._g(), U))
+    eco._conn.execute("UPDATE labor SET apprentice=2, miner=1 WHERE guild_id=? AND user_id=?", (eco._g(), U))
+    schema._migrate_labor_counts(eco._conn, T0)
+    schema._migrate_labor_counts(eco._conn, T0)  # 二度動かしても、増えない
+    s = eco.labor_state(U, T0, DAY)
+    assert s["apprentice"] == 2 and s["miner"] == 1 and s["expires"]["miner"] == T0 + W
+    assert eco._conn.execute("SELECT apprentice+miner c FROM labor WHERE user_id=?", (U,)).fetchone()["c"] == 0
