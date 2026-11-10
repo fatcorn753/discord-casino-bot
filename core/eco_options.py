@@ -300,6 +300,15 @@ class OptionMixin:
         now = time.time() if now is None else now
         with self._lock, self._conn:
             self._ensure(user_id)
+            held = self._conn.execute(
+                "SELECT kind, symbol, side FROM options WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
+                (option_id, self._g(), user_id),
+            ).fetchone()
+            if (
+                held and held["side"] != "short" and held["kind"] == "call"
+            ):  # 持っているコールは、ストップ安では売れない
+                if reason := self._pin_reason(held["symbol"], "sell_call"):
+                    return False, reason
             return self._option_close_locked(user_id, option_id, now)
 
     # ------------------------------------------------------------------ #

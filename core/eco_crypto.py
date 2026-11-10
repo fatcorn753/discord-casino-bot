@@ -38,6 +38,29 @@ class CryptoMixin:
                 (symbol, ts, price, event),
             )
 
+    def market_fair_get(self, symbol: str) -> Optional[float]:
+        """裏の理論価格。まだ無ければ None。"""
+        with self._lock:
+            r = self._conn.execute("SELECT fair FROM market_fair WHERE symbol=?", (symbol,)).fetchone()
+            return r["fair"] if r else None
+
+    def market_fair_set(self, symbol: str, fair: float, pin: int, ts: float) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO market_fair (symbol, fair, pin, ts) VALUES (?, ?, ?, ?)",
+                (symbol, fair, pin, ts),
+            )
+
+    def market_pin(self, symbol: str) -> int:
+        """いま張り付いているか（1 ストップ高 / -1 ストップ安 / 0 なし）。"""
+        with self._lock:
+            r = self._conn.execute("SELECT pin FROM market_fair WHERE symbol=?", (symbol,)).fetchone()
+            return r["pin"] if r else 0
+
+    def _pin_reason(self, symbol: str, action: str) -> str:
+        """張り付き中で、この売買が約定しないなら、その理由。通るなら空文字。（ユーザーの売買だけ。ロスカットなどの強制決済は、張り付き価格で執行する）"""
+        return market_mod.pin_lock_reason(symbol, self.market_pin(symbol), action)
+
     def market_history(self, since: float, symbol: str = DEFAULT) -> list:
         """since（UNIX時間）以降の価格の列 [(時刻, 価格, 出来事), ...]。古い順。"""
         with self._lock:
@@ -90,6 +113,8 @@ class CryptoMixin:
             self._ensure(user_id)
             if amount <= 0 or price <= 0:
                 return CryptoResult(False, "金額が正しくありません。")
+            if reason := self._pin_reason(symbol, "buy_spot"):
+                return CryptoResult(False, reason, balance=self._balance(user_id))
             if self._debt(user_id) > 0:
                 return CryptoResult(
                     False,
@@ -122,6 +147,8 @@ class CryptoMixin:
     def crypto_sell(self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT) -> "CryptoResult":
         """units 口を売る（None なら全部）。受け取る額は手数料を引いたもの。"""
         with self._lock, self._conn:
+            if reason := self._pin_reason(symbol, "sell_spot"):
+                return CryptoResult(False, reason)
             reason = self._collateral_drop_reason(user_id, symbol, units, price)
             if reason:
                 return CryptoResult(False, reason)
@@ -334,6 +361,8 @@ class CryptoMixin:
             self._ensure(user_id)
             if leverage not in self.MARGIN_LEVERAGES or units < 1 or price <= 0:
                 return CryptoResult(False, "指定が正しくありません。")
+            if side == "long" and (reason := self._pin_reason(symbol, "open_long")):
+                return CryptoResult(False, reason, balance=self._balance(user_id))
             if self._debt(user_id) > 0:
                 return CryptoResult(
                     False,
@@ -456,6 +485,8 @@ class CryptoMixin:
         """units 口を決済する（None なら全部）。担保 + 損益が戻る。担保を超えた損失は、借金になりうる。"""
         with self._lock, self._conn:
             self._ensure(user_id)
+            if reason := self._pin_reason(symbol, "close_long" if side == "long" else "cover_short"):
+                return CryptoResult(False, reason, balance=self._balance(user_id))
             return self._margin_close_locked(
                 user_id, side, units, price, f"{self.SIDE_NAME[side]}決済", symbol, owe=True, taxable=True
             )

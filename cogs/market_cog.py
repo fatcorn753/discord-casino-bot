@@ -187,7 +187,8 @@ class MarketCog(commands.Cog):
 
     def step_prices(self) -> tuple:
         """全銘柄の価格を1つ進めて、(新しい価格 {銘柄: 価格}, 有事の出来事) を返す。"""
-        prices = self._prices()
+        prices = self._prices()  # 画面に出ている価格（値幅制限のかかったもの）
+        fair = {k: self.eco.market_fair_get(k) or p for k, p in prices.items()}  # 裏の理論価格（制限なしで動く）
         last_ts = max((self.eco.market_latest(k) or (0,))[0] for k in prices)
         now = time.time()
         announced = self.eco.event_step(now, RNG)  # ボラティリティ予告の抽選
@@ -195,11 +196,18 @@ class MarketCog(commands.Cog):
             print(
                 f"ボラティリティ予告: {announced['symbol']} {market_events.LEAD_MIN}分後から{market_events.DURATION_MIN}分"
             )
-        new, event = market.next_prices(prices, RNG, self.eco.vol_multipliers(now))
-        new = {k: round(v, 2) for k, v in market.limit_to_day(new, self._day_reference(now)).items()}  # 値幅制限
+        new_fair, event = market.next_prices(fair, RNG, self.eco.vol_multipliers(now))
+        ref = self._day_reference(now)
+        new = {
+            k: round(v, 2) for k, v in market.limit_to_day(new_fair, ref).items()
+        }  # 値幅制限（理論価格は、外へ突き抜けてよい）
+        pins = market.pin_states(
+            new_fair, ref
+        )  # 理論価格が値幅の外なら、張り付き（翌日も、次の値幅の端に張り付く＝2連ストップ）
         ts = max(time.time(), last_ts + 0.001)  # 時計が戻っても、記録の順序を崩さない
         for key, price in new.items():
             self.eco.market_set(ts, price, event, key)
+            self.eco.market_fair_set(key, new_fair[key], pins.get(key, 0), ts)
         return new, event
 
     async def cog_load(self):
@@ -272,6 +280,7 @@ class MarketCog(commands.Cog):
             f"現在 **{market.pel(s['last'])}**　{arrow} **{s['change']:+.1f}%**（{label}）\n"
             f"高値 {market.fmt(s['high'])}　安値 {market.fmt(s['low'])}"
             + (f"\n**{EVENT_TEXT[last_event]}**" if last_event else "")
+            + self.pin_lines(symbol)
         )
         e = ui.embed(f"{sym.emoji} {title_prefix}{sym.name}（{label}）", body, color)
         e.add_field(name="🔗 ほかの銘柄との連動（直近24時間）", value=self.correlation_lines(symbol), inline=False)
@@ -307,6 +316,14 @@ class MarketCog(commands.Cog):
             note = f"{TICK_MINUTES}分ごとに値が動きます"
         e.set_footer(text=f"{note} ｜ 売買の手数料はありません ｜ ゲーム内の通貨です")
         return e
+
+    def pin_lines(self, symbol: str) -> str:
+        """ストップ高・ストップ安に張り付き中なら、その表示と、約定しない売買。"""
+        pin = self.eco.market_pin(symbol)
+        if not pin:
+            return ""
+        locked = "・".join(market.PIN_ACTION_TEXT[a] for a in market.PIN_LOCKS[pin])
+        return f"\n**{market.PIN_MARK[pin]}に張り付き中**　約定しない売買: {locked}"
 
     def correlation_table(self) -> str:
         """4銘柄どうしの連動を、行列の表にする（直近24時間。まだデータが少ないところは —）。"""

@@ -79,6 +79,43 @@ def limit_to_day(prices: dict, reference: dict, limit: float = DAILY_LIMIT) -> d
     return out
 
 
+def pin_states(fair: dict, reference: dict, limit: float = DAILY_LIMIT) -> dict:
+    """理論価格が値幅の外にある銘柄の、張り付きの向き {銘柄: 1（ストップ高）/ -1（ストップ安）/ 0}。基準のない銘柄は 0。"""
+    out = {}
+    for key, price in fair.items():
+        ref = reference.get(key)
+        out[key] = 0 if not ref else 1 if price >= ref * (1 + limit) else -1 if price <= ref * (1 - limit) else 0
+    return out
+
+
+# 張り付き中に、約定しなくなる売買（買い手・売り手がいないため）。逆張りの売買と、利益確定は通る
+PIN_LOCKS = {
+    -1: ("sell_spot", "close_long", "sell_call"),  # ストップ安: 売りが殺到して買い手がいない
+    1: ("buy_spot", "open_long", "cover_short"),  # ストップ高: 買いが殺到して売り手がいない
+}
+PIN_ACTION_TEXT = {
+    "sell_spot": "現物の売却",
+    "close_long": "買い建て（ロング）の決済",
+    "sell_call": "コールの売却",
+    "buy_spot": "現物の買い",
+    "open_long": "買い建て（ロング）の新規",
+    "cover_short": "空売りの買い戻し",
+}
+
+
+def pin_lock_reason(symbol: str, pin: int, action: str) -> str:
+    """張り付き中に action が約定しないなら、その理由。通るなら空文字。"""
+    if action not in PIN_LOCKS.get(pin, ()):
+        return ""
+    name = BY_KEY[symbol].name
+    if pin < 0:
+        return f"🚨 {name} は**ストップ安に張り付いています**。{PIN_ACTION_TEXT[action]}は、買い手がいなくて約定しません（下げが止まるまで、待つしかありません）。"
+    return f"🚀 {name} は**ストップ高に張り付いています**。{PIN_ACTION_TEXT[action]}は、売り手がいなくて約定しません（上げが止まるまで、待つしかありません）。"
+
+
+PIN_MARK = {1: "🚀 ストップ高", -1: "🚨 ストップ安"}
+
+
 # 利益への帝愛の税（キャピタルゲイン税）。現物の売却と信用建玉の決済で、利益が出たときだけ、その利益から天引きする。超過累進（段ごとに税率がかわる）
 GAINS_TAX_BRACKETS = ((10_000, 0.0), (100_000, 0.03), (1_000_000, 0.07), (None, 0.12))  # (段の上限, 税率)
 

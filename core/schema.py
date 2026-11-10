@@ -269,6 +269,12 @@ def create_tables(conn: sqlite3.Connection) -> None:
             event  INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (symbol, ts)
         );
+        CREATE TABLE IF NOT EXISTS market_fair (       -- 裏の理論価格（値幅制限に関係なく動く）と、ストップ高・安の張り付き。全サーバー共通
+            symbol TEXT PRIMARY KEY,
+            fair   REAL NOT NULL,
+            pin    INTEGER NOT NULL DEFAULT 0,          -- 1 ストップ高に張り付き / -1 ストップ安に張り付き / 0 なし
+            ts     REAL NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS crypto (            -- 銘柄ごとの現物の保有
             guild_id INTEGER NOT NULL,
             user_id  INTEGER NOT NULL,
