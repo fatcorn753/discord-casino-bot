@@ -526,6 +526,51 @@ class CryptoMixin:
                     out.append((symbol, side, spot * (1 + sign * hi), notional))
         return out
 
+    def margin_interest(self, now: float) -> list:
+        """全サーバーの建玉に、信用金利（信用買いは借入金利、空売りは貸株料）を数えて、貯まった分を担保から引く。[(サーバー, ユーザー, 銘柄, 向き, 引いた額)]。
+
+        引いた金利は、帝愛の銀行に入る（預金者の利回りになる）。担保が足りなければ、担保の分だけ。
+        """
+        done = []
+        with self._lock, self._conn:
+            for side, table in self._MARGIN_TABLE.items():
+                rate = market_mod.BORROW_RATE_PER_DAY[side]
+                for r in self._conn.execute(
+                    f"SELECT guild_id, user_id, symbol, entry_value, margin, interest_at, accrued FROM {table}"
+                ).fetchall():
+                    key = (r["guild_id"], r["user_id"], r["symbol"])
+                    if r["interest_at"] <= 0:  # 数え始め（金利の列がなかった頃の建玉は、ここから数える）
+                        self._conn.execute(
+                            f"UPDATE {table} SET interest_at=? WHERE guild_id=? AND user_id=? AND symbol=?", (now, *key)
+                        )
+                        continue
+                    base = market_mod.margin_interest_base(side, r["entry_value"], r["margin"])
+                    accrued = r["accrued"] + base * rate * max(0.0, now - r["interest_at"]) / 86400.0
+                    charge = 0
+                    if accrued >= market_mod.INTEREST_MIN_CHARGE:
+                        charge = min(int(accrued), r["margin"])
+                        accrued -= int(accrued)
+                    self._conn.execute(
+                        f"UPDATE {table} SET margin=margin-?, accrued=?, interest_at=? "
+                        "WHERE guild_id=? AND user_id=? AND symbol=?",
+                        (charge, accrued, now, *key),
+                    )
+                    if charge > 0:
+                        try:
+                            view = self.for_guild(r["guild_id"])
+                        except ValueError:
+                            continue
+                        name = market_mod.BY_KEY[r["symbol"]].name
+                        view._ledger(
+                            r["user_id"],
+                            0,
+                            view._balance(r["user_id"]),
+                            f"帝愛の信用金利（{self.SIDE_NAME[side]} {name}）担保から-{charge:,}",
+                        )
+                        view._bank_income(charge, teiai.TAX_YIELD_SHARE)
+                        done.append((r["guild_id"], r["user_id"], r["symbol"], side, charge))
+        return done
+
     def margin_losscut(self, prices: dict) -> list:
         """全サーバーの口座を調べ、維持率が LOSSCUT_RATIO を下回る口座を、連鎖ロスカットする。prices は {銘柄: いまの価格}。[(サーバー, ユーザー, 銘柄, 向き, 損失)]。"""
         done = []

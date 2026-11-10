@@ -98,6 +98,19 @@ def capital_gains_tax(profit: int) -> int:
     return int(tax)
 
 
+# 信用取引の金利（日利）。建玉を持っている間、担保から引いて、帝愛の銀行（預金者の利回り）に納める。株を借りて売る側（空売り）の受取金利は、いまは付けない
+BORROW_RATE_PER_DAY = {
+    "long": 0.001,
+    "short": 0.0005,
+}  # 信用買い: 借りている額（建てた総額 − 担保）に 0.1%。空売り: 貸株料として、建てた総額に 0.05%
+INTEREST_MIN_CHARGE = 10  # 引く金利が、この額に貯まるまでは、数えるだけで、担保から引かない（履歴を細かくしすぎない）
+
+
+def margin_interest_base(side: str, entry_value: float, margin: int) -> float:
+    """金利をかける元の額。信用買いは借りている額、空売りは建てた総額（貸株料）。"""
+    return max(0.0, entry_value - margin) if side == "long" else max(0.0, entry_value)
+
+
 def correlation(a: str, b: str) -> float:
     """銘柄 a と b の相関。同じ銘柄は 1。"""
     if a == b:

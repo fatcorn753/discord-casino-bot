@@ -213,6 +213,7 @@ class MarketCog(commands.Cog):
     async def tick(self):
         try:
             prices, _event = self.step_prices()
+            self.eco.margin_interest(time.time())  # 信用金利を、担保から引く（そのあとで、維持率を調べる）
             for guild_id, user_id, symbol, side, loss in self.eco.margin_losscut(prices):
                 print(f"{Economy.SIDE_NAME[side]}をロスカット: guild={guild_id} user={user_id} {symbol} 損失={loss:,}")
             self.eco.market_prune(time.time() - KEEP_DAYS * 86400)

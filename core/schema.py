@@ -269,6 +269,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
             units       INTEGER NOT NULL,         -- 売り建てた口数
             entry_value REAL NOT NULL,            -- 建てたときの総額（口数×価格）。損益 = これ − いまの総額
             margin      INTEGER NOT NULL,         -- 預けた担保
+            interest_at REAL NOT NULL DEFAULT 0,  -- 信用金利（貸株料）を、ここまで数えた時刻
+            accrued     REAL NOT NULL DEFAULT 0,  -- 数えたが、まだ担保から引いていない金利（小数）
             PRIMARY KEY (guild_id, user_id, symbol)
         );
         CREATE TABLE IF NOT EXISTS crypto_long (       -- 銘柄ごとの信用買い（レバレッジをかけた買い建て。空売りと同じ形）
@@ -278,6 +280,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
             units       INTEGER NOT NULL,         -- 買い建てた口数
             entry_value REAL NOT NULL,            -- 建てたときの総額（口数×価格）。損益 = いまの総額 − これ
             margin      INTEGER NOT NULL,         -- 預けた担保
+            interest_at REAL NOT NULL DEFAULT 0,  -- 信用金利（借入金利）を、ここまで数えた時刻
+            accrued     REAL NOT NULL DEFAULT 0,  -- 数えたが、まだ担保から引いていない金利（小数）
             PRIMARY KEY (guild_id, user_id, symbol)
         );
         CREATE TABLE IF NOT EXISTS teiai_bank (        -- 帝愛銀行の手元（サーバーごとに1行）
@@ -562,6 +566,11 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE labor_workers ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0")
         conn.execute("UPDATE labor_workers SET legacy=1")  # この列を足す前に雇われていた人は、すべて旧ルールの契約
         _refund_legacy_contracts(conn)
+    for table in ("crypto_short", "crypto_long"):  # 信用金利の列（建玉の数え始めの時刻と、まだ引いていない端数）
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if cols and "interest_at" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN interest_at REAL NOT NULL DEFAULT 0")
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN accrued REAL NOT NULL DEFAULT 0")
     if "debt_interest_at" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN debt_interest_at REAL NOT NULL DEFAULT 0")
     if "grace_until" not in us:

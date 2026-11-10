@@ -204,3 +204,67 @@ def test_order_long_is_refused_when_ratio_is_too_low(eco, monkeypatch):
     asyncio.run(MarketCog.order.callback(cog, it, choice("numa"), 4_000, choice("long"), choice(5)))
     assert it.sent[-1]["ephemeral"] and "維持率" in it.sent[-1]["embed"].description
     assert eco.for_guild(G).long_positions(U) == []
+
+
+# ----------------------------- 信用金利（借入金利・貸株料） ----------------------------- #
+T0 = 1_800_000_000.0
+DAY_S = 86_400.0
+
+
+def test_margin_interest_base_and_rates():
+    assert market.margin_interest_base("long", 40_000.0, 8_000) == 32_000  # 借りている額
+    assert market.margin_interest_base("long", 5_000.0, 6_000) == 0  # 担保のほうが多ければ、借入なし
+    assert market.margin_interest_base("short", 40_000.0, 8_000) == 40_000  # 空売りは、建てた総額
+    assert market.BORROW_RATE_PER_DAY["long"] > market.BORROW_RATE_PER_DAY["short"] > 0
+
+
+def test_long_interest_is_taken_from_the_margin_after_a_day_and_goes_to_depositors(eco):
+    a = eco.for_guild(G)
+    a.credit(U, 100_000, "テスト")
+    a.credit(2, 20_000, "テスト")
+    a.bank_deposit(2, 20_000, 1.0)
+    assert a.long_open(U, 40_000, 1000, 5, "cs").ok
+    margin0 = a.margin_position(U, "cs", "long")[2]
+    assert eco.margin_interest(T0) == []  # 数え始め
+    deposit0 = a.deposit_of(2)
+    done = eco.margin_interest(T0 + DAY_S)
+    borrowed = 40_000 - margin0
+    expected = int(borrowed * market.BORROW_RATE_PER_DAY["long"])
+    assert [(d[0], d[1], d[3], d[4]) for d in done] == [(G, U, "long", expected)]
+    assert a.margin_position(U, "cs", "long")[2] == margin0 - expected
+    assert a.deposit_of(2) == deposit0 + expected  # 預金者の利回り
+    assert any("信用金利" in x["reason"] for x in eco._conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,)))
+
+
+def test_short_pays_a_borrow_fee_on_the_whole_position_and_small_amounts_wait(eco):
+    a = eco.for_guild(G)
+    a.credit(U, 100_000, "テスト")
+    assert a.short_open(U, 10_000, 1000, 1, "cs").ok  # 建玉 10,000・担保 10,000
+    eco.margin_interest(T0)
+    assert eco.margin_interest(T0 + 3_600) == []  # 1時間: 0.2 ペリカ。10に貯まるまで、引かない
+    m = a.margin_position(U, "cs", "short")[2]
+    done = eco.margin_interest(T0 + 40 * DAY_S)  # 40日ぶん: 貸株料 0.05% × 10,000 × 40 = 200
+    assert done and done[0][4] == pytest.approx(200, abs=1)
+    assert a.margin_position(U, "cs", "short")[2] == m - done[0][4]
+
+
+def test_interest_never_takes_more_than_the_margin_and_no_double_charge(eco):
+    a = eco.for_guild(G)
+    a.credit(U, 100_000, "テスト")
+    assert a.short_open(U, 10_000, 1000, 1, "cs").ok
+    eco.margin_interest(T0)
+    eco.margin_interest(T0 + 10_000 * DAY_S)  # 非常に長い間
+    assert a.margin_position(U, "cs", "short")[2] >= 0
+    again = eco.margin_interest(T0 + 10_000 * DAY_S)  # 同じ時刻に、もう一度: 追加で引かれない
+    assert again == []
+
+
+def test_old_positions_without_the_interest_columns_get_them_on_startup(tmp_path):
+    path = str(tmp_path / "old.db")
+    e = Economy(path, strict=True)
+    e._conn.execute("ALTER TABLE crypto_long DROP COLUMN interest_at")
+    e._conn.execute("ALTER TABLE crypto_long DROP COLUMN accrued")
+    e._conn.commit()
+    again = Economy(path, strict=True)
+    cols = {r["name"] for r in again._conn.execute("PRAGMA table_info(crypto_long)")}
+    assert {"interest_at", "accrued"} <= cols
