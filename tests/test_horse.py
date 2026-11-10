@@ -378,3 +378,33 @@ def test_auction_horse_price_falls_and_only_katagi_with_room_can_buy(eco):
     eco._conn.execute("UPDATE users SET balance=0, debt=20000 WHERE user_id=?", (W,))
     assert eco.bankrupt(W)[0]
     assert "3 頭" in eco.auction_buy_horse(V, other).reason  # すでに3頭
+
+
+# ----------------------------- 臨時レースは、出走予定の馬も出せる ----------------------------- #
+def test_a_horse_scheduled_for_a_regular_race_can_still_enter_a_special_race(eco):
+    hid = make_horse(eco, U)
+    regular = eco.race_ensure_scheduled(NOW, 9.0)
+    assert eco.race_register(U, hid, regular, NOW + 1) == (True, "")  # 定時に出走予定
+    special = open_race(eco)
+    assert eco.race_register(U, hid, special, NOW + 2) == (True, "")  # 臨時にも出せる
+    assert eco.race_withdraw(U, hid, special, NOW + 3)[0]  # 臨時だけを取り下げても、定時はそのまま
+    assert [e["race_id"] for e in eco.race_entries(regular, registered_only=True)] == [regular]
+
+
+def test_a_horse_in_a_special_race_can_enter_a_regular_race_but_two_regular_races_stay_exclusive(eco):
+    hid = make_horse(eco, U)
+    special = open_race(eco)
+    assert eco.race_register(U, hid, special, NOW + 1)[0]
+    regular = eco.race_ensure_scheduled(NOW, 9.0)
+    assert eco.race_register(U, hid, regular, NOW + 2)[0]  # 臨時に出ていても、定時に出せる
+    second_special = open_race(eco, NOW + 3)
+    assert eco.race_register(U, hid, second_special, NOW + 4)[0]  # 臨時どうしも、重ねて出せる
+    start = eco.race_get(regular)["start_at"]
+    eco._conn.execute(
+        "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, created) "
+        "VALUES (?, 'regular', ?, ?, ?, 'entry', ?)",
+        (eco._g(), start + 43200, start + 43000, start + 43100, NOW),
+    )
+    other_regular = eco._conn.execute("SELECT MAX(id) FROM horse_races").fetchone()[0]
+    ok, why = eco.race_register(U, hid, other_regular, NOW + 5)
+    assert not ok and "ほかのレースに出走予定" in why  # 定時どうしは、これまでどおり、重ねて出せない

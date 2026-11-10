@@ -196,11 +196,16 @@ class HorseMixin:
                 return False, "出走枠が埋まりました。"
             if any(e["name"] == h["name"] for e in rows):
                 return False, "同じ名前の馬がすでに出走します。"
-            busy = self._conn.execute(
-                "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
-                "WHERE e.horse_id=? AND r.status IN ('entry','betting')",
-                (horse_id,),
-            ).fetchone()
+            # 出走予定の馬は、ほかのレースに出せない。ただし、臨時レースは別（出走予定の馬も出せる。臨時に出ていても、定時に出せる）
+            busy = (
+                None
+                if race["kind"] == "special"
+                else self._conn.execute(
+                    "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
+                    "WHERE e.horse_id=? AND r.status IN ('entry','betting') AND r.kind='regular'",
+                    (horse_id,),
+                ).fetchone()
+            )
             if busy:
                 return False, "この馬は、ほかのレースに出走予定です。"
             fee = horse_mod.ENTRY_FEE
