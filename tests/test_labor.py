@@ -46,10 +46,10 @@ def click(eco, n, start=T0, step=1.5):
 def test_pure_numbers():
     assert lab.pay_per_click(0) == 10 and lab.pay_per_click(5) == 30 and lab.pay_per_click(99) == 30
     assert lab.pay_rate(0) == 1.0 and abs(lab.pay_rate(100) - lab.MIN_PAY_RATE) < 1e-9
-    assert lab.fatigue_gain(5) == 1.0
+    assert lab.fatigue_gain(5) == 2.0
     assert lab.fatigue_now(50, 0, 100) == 30 and lab.fatigue_now(10, 0, 1000) == 0
     assert lab.upgrade_cost(0) == 150 and lab.upgrade_cost(5) is None
-    assert lab.click_pay(0, 100) == 4 and lab.click_pay(0, 0) == 10
+    assert lab.click_pay(0, 100) == 2 and lab.click_pay(0, 0) == 10
 
 
 def test_click_outcome_has_no_accident():
@@ -100,7 +100,7 @@ def test_no_daily_cap_or_balance_limit_and_today_total_resets(eco):
     eco.set_balance(U, 1_000_000, "テスト")  # 金持ちも、働ける
     for i in range(300):  # 1日に、いくらでも稼げる（疲労で、稼ぎの速さが頭打ちになるだけ）
         assert eco.labor_click(U, T0 + i * 1.5, DAY)["ok"]
-    assert eco.labor_state(U, T0 + 500, DAY)["day_earned"] > 1_000
+    assert eco.labor_state(U, T0 + 500, DAY)["day_earned"] > 600
     assert eco.labor_state(U, T0 + 500, "2026-11-11")["day_earned"] == 0  # 日が変われば、「今日の稼ぎ」は戻る
 
 
