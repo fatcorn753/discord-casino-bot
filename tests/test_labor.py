@@ -336,7 +336,7 @@ def test_fatigue_label_and_no_hints(eco):
     assert "💡" not in text(labor_cog.panel_embed(eco.labor_state(U, T0, DAY)))
 
 
-# ------------------------------ ドリンコ ------------------------------ #
+# ------------------------------ 栄養ドリンコ ------------------------------ #
 def buy_drink(eco, qty=1):
     from core import shop
 
@@ -381,7 +381,7 @@ def test_drink_button_in_the_panel(eco):
         eco.labor_click(U, now - 60 + i * 1.5, labor_cog.today(view.bot))
     view.refresh()
     drink = next(c for c in view.children if getattr(c, "emoji", None) and str(c.emoji) == "🥤")
-    assert drink.label == "ドリンコ ×2"
+    assert drink.label == "栄養ドリンコ ×2"
     it = SimpleNamespace(user=SimpleNamespace(id=U), response=Resp(), data={})
     asyncio.run(view._drink(it))
     assert eco.labor_state(U, now, labor_cog.today(view.bot))["drinks"] == 1 and it.response.edits
