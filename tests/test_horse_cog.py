@@ -108,7 +108,9 @@ def test_scheduled_flow_announces_closes_with_odds_runs_animation_and_settles(se
     assert eco.race_get(race["id"])["status"] == "done"
     assert len(chan.retired) == 2 and "発売終了" in chan.retired[1][1]["embed"].title  # 出馬表の投稿も、書き換えた
     assert "R>" not in chan.retired[1][1]["embed"].description
-    assert len(chan.sent) == sent_before + 3  # 次のレースの申し込み開始・アニメーションのメッセージ・結果
+    assert (
+        len(chan.sent) == sent_before + 2
+    )  # アニメーションのメッセージ・結果（次のレースの申し込みは、1時間後に始まる）
     assert "発走" in chan.sent[-2]["embed"].title
     assert len(chan.edits) >= 5 and "ゴール" in chan.edits[-1]["embed"].description
     assert "結果" in chan.sent[-1]["embed"].title and eco.horse_get(hid)["races"] == 1

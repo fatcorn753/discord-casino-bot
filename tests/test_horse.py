@@ -144,12 +144,18 @@ def test_favorite_and_longshot_spread_is_reasonable():
     assert 0.2 < sum(tops) / len(tops) < 0.6 and sum(bottoms) / len(bottoms) < 0.05
 
 
-def test_race_slots_are_two_a_day_in_local_time():
+def test_race_slots_are_every_three_hours_eight_a_day_in_local_time():
     tz = 9.0
     base = datetime.datetime(2026, 11, 9, 11, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=tz))).timestamp()
     slots = Economy.race_slots(base, tz)
     local = [datetime.datetime.fromtimestamp(s, datetime.timezone(datetime.timedelta(hours=tz))) for s in slots[:3]]
-    assert [(x.day, x.hour) for x in local] == [(9, 12), (9, 20), (10, 12)]
+    assert [(x.day, x.hour) for x in local] == [(9, 12), (9, 15), (9, 18)]
+    day = [
+        s
+        for s in slots
+        if datetime.datetime.fromtimestamp(s, datetime.timezone(datetime.timedelta(hours=tz))).day == 10
+    ]
+    assert len(day) == 8
 
 
 # ----------------------------- 馬 ----------------------------- #
@@ -273,8 +279,12 @@ def test_registration_rules_withdraw_and_close(eco):
     assert not eco.race_register(U, a, rid, NOW + 3)[0]
 
 
-def test_scheduled_race_is_created_once_per_slot(eco):
-    first = eco.race_ensure_scheduled(NOW, 9.0)
+def test_scheduled_race_opens_two_hours_before_the_start_and_is_created_once_per_slot(eco):
+    start = Economy.race_slots(NOW, 9.0)[0]
+    assert (
+        eco.race_ensure_scheduled(start - h.ENTRY_OPEN_MIN * 60 - 1, 9.0) is None
+    )  # まだ、申し込みを始める時刻ではない
+    first = eco.race_ensure_scheduled(start - h.ENTRY_OPEN_MIN * 60, 9.0)
     assert first is not None and eco.race_ensure_scheduled(NOW, 9.0) is None
     race = eco.race_get(first)
     assert race["kind"] == "regular" and race["entry_close"] == race["start_at"] - h.ENTRY_LEAD_MIN * 60

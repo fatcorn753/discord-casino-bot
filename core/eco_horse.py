@@ -127,9 +127,11 @@ class HorseMixin:
         return sorted(out)
 
     def race_ensure_scheduled(self, now: float, tz_hours: float, channel_id: int = 0) -> Optional[int]:
-        """次の定時レースが無ければ作る（申し込み受付を始める）。作ったレースの番号を返す。"""
+        """次の定時レースが、申し込みを始める時刻になっていて、まだ無ければ作る（申し込み受付を始める）。作ったレースの番号を返す。"""
         with self._lock, self._conn:
             start = self.race_slots(now, tz_hours)[0]
+            if now < start - horse_mod.ENTRY_OPEN_MIN * 60:  # まだ、申し込みを始める時刻ではない
+                return None
             if self._conn.execute(
                 "SELECT 1 FROM horse_races WHERE guild_id=? AND kind='regular' AND start_at=?", (self._g(), start)
             ).fetchone():
