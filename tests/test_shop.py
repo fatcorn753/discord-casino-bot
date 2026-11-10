@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import time
 from types import SimpleNamespace
 
 import discord
@@ -544,3 +545,75 @@ def test_auction_screen_and_buy_flow(cog, eco):
     it.user = SimpleNamespace(id=2)
     run(cog.buy_auction(it, "title_regular", 1))
     assert "競売で買いました" in it.sent[0]["embed"].title and "title_regular" in eco.inventory(2)
+
+
+# ----------------------------- 在庫（1人ずつ別々） ----------------------------- #
+DRINK = shop.LABOR_DRINK
+T0 = 1_800_000_000.0
+
+
+def buy_at(eco, qty, now, uid=1):
+    it = shop.BY_ID[DRINK]
+    return eco.purchase(uid, it.id, shop.label(it), it.price, it.unique, qty, now)
+
+
+def test_stock_math_is_pure_and_capped_at_the_max():
+    rule = shop.STOCK_RULES[DRINK]
+    assert shop.stock_now(rule, 3.0, T0, T0 + 3600) == pytest.approx(3.0 + rule.per_hour)  # 1時間で per_hour ぶん
+    assert shop.stock_now(rule, 3.0, T0, T0 + 99 * 3600) == rule.max  # 上限まで
+    assert shop.stock_now(rule, 3.0, T0, T0 - 100) == 3.0  # 時計が戻っても、減らない
+    assert shop.next_refill_at(rule, float(rule.max), T0) is None  # 満タンなら、次の補充はない
+    assert shop.next_refill_at(rule, 3.0, T0) == pytest.approx(T0 + 3600 / rule.per_hour)
+
+
+def test_everyone_starts_with_a_full_stock_and_buying_reduces_only_their_own(eco):
+    rule = shop.STOCK_RULES[DRINK]
+    eco.credit(1, 100_000, "テスト")
+    eco.credit(2, 100_000, "テスト")
+    assert eco.shop_stock(1, DRINK, T0)["stock"] == rule.max and eco.shop_stock(2, DRINK, T0)["stock"] == rule.max
+    assert buy_at(eco, 4, T0, 1).ok
+    assert eco.shop_stock(1, DRINK, T0)["stock"] == rule.max - 4
+    assert eco.shop_stock(2, DRINK, T0)["stock"] == rule.max  # 別の人の在庫は、減らない
+    assert eco.shop_stock(1, "title_rookie", T0) is None  # 在庫のない品は、None
+
+
+def test_buying_more_than_the_stock_is_refused_and_changes_nothing(eco):
+    rule = shop.STOCK_RULES[DRINK]
+    eco.credit(1, 100_000, "テスト")
+    assert buy_at(eco, rule.max, T0).ok
+    before = eco.balance(1)
+    res = buy_at(eco, 1, T0)
+    assert not res.ok and "在庫が足りません" in res.reason and "補充" in res.reason
+    assert eco.balance(1) == before and eco.inventory(1)[DRINK] == rule.max
+    res = buy_at(eco, rule.max + 1, T0 + 10 * 3600)  # 補充されて満タンでも、上限を超えては買えない
+    assert not res.ok
+
+
+def test_stock_refills_over_time_and_keeps_the_fraction(eco):
+    rule = shop.STOCK_RULES[DRINK]
+    eco.credit(1, 100_000, "テスト")
+    assert buy_at(eco, rule.max, T0).ok  # 0にする
+    half = 1800 / 3600 * rule.per_hour  # 30分ぶん
+    assert eco.shop_stock(1, DRINK, T0 + 1800)["stock"] == int(half)
+    s = eco.shop_stock(1, DRINK, T0 + 900)  # 15分: まだ整数に届かない（0.5個）
+    assert s["stock"] == 0 and s["next_at"] == pytest.approx(T0 + 1800)
+    assert buy_at(eco, 1, T0 + 1800).ok  # 30分たつと、1本買える
+    assert eco.shop_stock(1, DRINK, T0 + 1800)["stock"] == 0
+    assert eco.shop_stock(1, DRINK, T0 + 1800 + 3600 * 5)["stock"] == rule.max  # 買ってから5時間で満タン
+
+
+def test_a_failed_purchase_does_not_use_up_the_stock(eco):
+    eco.set_balance(1, 0, "テスト")
+    res = buy_at(eco, 3, T0)  # ペリカが足りない
+    assert not res.ok and "足りません" in res.reason
+    assert eco.shop_stock(1, DRINK, T0)["stock"] == shop.STOCK_RULES[DRINK].max
+
+
+def test_shop_screen_shows_the_players_own_stock(eco):
+    from types import SimpleNamespace as NS
+
+    eco.credit(1, 100_000, "テスト")
+    buy_at(eco, 3, time.time())
+    cog = shop_cog.ShopCog(NS(economy=NS(for_guild=lambda g: eco)))
+    text = "\n".join(f.value for f in cog._catalog_embed(0, 1, "item").fields)
+    assert "📦 在庫 7/10" in text

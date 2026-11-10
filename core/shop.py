@@ -122,7 +122,7 @@ CATALOG = [
         LABOR_DRINK,
         "栄養ドリンコ",
         CONSUMABLE,
-        100,
+        300,
         desc="地下作業の疲労を60回復する（`/地下 作業` の画面で飲む）",
     ),
     Item(
@@ -255,3 +255,27 @@ def collection_value(inventory: dict) -> tuple:
     """持っているコレクションの (商品の並び, 資産価値)。資産価値は、買った値段の合計。"""
     owned = [i for i in of_kind(COLLECTION) if inventory.get(i.id, 0) > 0]
     return owned, sum(i.price for i in owned)
+
+
+# ---------------------------------------------------------------- #
+# 在庫（買える数）。1人ずつ別々に持ち、買うと減り、時間で補充される。買い占めを防ぐ
+# ---------------------------------------------------------------- #
+@dataclass(frozen=True)
+class Stock:
+    max: int  # 在庫の上限（最初は、満タン）
+    per_hour: float  # 1時間に補充される数
+
+
+STOCK_RULES = {LABOR_DRINK: Stock(max=10, per_hour=2.0)}  # 栄養ドリンコ: 10本まで、30分に1本ずつ補充
+
+
+def stock_now(rule: Stock, stock: float, updated: float, now: float) -> float:
+    """最後に記録してから時間がたった、いまの在庫（小数。上限まで）。"""
+    return min(float(rule.max), stock + max(0.0, now - updated) / 3600.0 * rule.per_hour)
+
+
+def next_refill_at(rule: Stock, stock: float, now: float) -> Optional[float]:
+    """次に1つ増える時刻（在庫が小数のとき、整数に届く時刻）。満タンなら None。"""
+    if stock >= rule.max:
+        return None
+    return now + (1.0 - (stock - int(stock))) / rule.per_hour * 3600.0

@@ -350,7 +350,7 @@ def test_drink_is_a_shop_item_and_recovers_fatigue(eco):
     from core import shop
 
     item = shop.BY_ID[shop.LABOR_DRINK]
-    assert item.price == 100 and item.kind == shop.CONSUMABLE and shop.LABOR_DRINK in shop.AUTO_USED
+    assert item.price == 300 and item.kind == shop.CONSUMABLE and shop.LABOR_DRINK in shop.AUTO_USED
     click(eco, 25)
     now = T0 + 25 * 1.5
     ok, why = eco.labor_drink(U, now, DAY)

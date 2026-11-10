@@ -84,13 +84,20 @@ SECTION_NAME = {
 }
 
 
-def item_line(item, inv: dict) -> str:
-    """売り場の1行: 持っていれば ✅、値段をそろえて、名前。説明があれば、次の行に。"""
+def stock_text(stock: dict) -> str:
+    """在庫の表示（1人ずつ別々）。例: 在庫 3/10（次の補充 <t:…:R>）。"""
+    text = f"在庫 {stock['stock']}/{stock['max']}"
+    return text + (f"（次の補充 <t:{int(stock['next_at'])}:R>）" if stock["next_at"] else "")
+
+
+def item_line(item, inv: dict, stock: dict = None) -> str:
+    """売り場の1行: 持っていれば ✅、値段をそろえて、名前。説明があれば、次の行に。在庫のある品は、このプレイヤーの在庫も。"""
     icon = item.value if item.kind in (shop.CARD_ICON, shop.COLLECTION) else item.mark
     mark = "✅" if item.unique and inv.get(item.id, 0) > 0 else "▫️"
     line = f"{mark} `{item.price:>10,}`　{icon}{item.name}"
     if item.kind in (shop.CONSUMABLE, shop.RACING) and inv.get(item.id, 0) > 0:
         line += f"　（持っている: {inv[item.id]}）"
+    line += f"\n　　📦 {stock_text(stock)}" if stock else ""
     return line + (f"\n　　└ {item.desc}" if item.desc else "")
 
 
@@ -263,7 +270,9 @@ class ShopView(discord.ui.View):
         self.add_item(go)
         items = tab_items(self.tab) if self.tab != "home" else []
         if items:
-            inv = self.cog.bot.economy.for_guild(self.guild_id).inventory(self.user_id)
+            eco = self.cog.bot.economy.for_guild(self.guild_id)
+            inv = eco.inventory(self.user_id)
+            stocks = {i.id: eco.shop_stock(self.user_id, i.id) for i in items if i.id in shop.STOCK_RULES}
             mixed = len(TABS[self.tab][1]) > 1
             buy = discord.ui.Select(
                 placeholder="買う景品を選ぶ（安い順）",
@@ -273,7 +282,9 @@ class ShopView(discord.ui.View):
                         label=("✅ " if i.unique and inv.get(i.id, 0) > 0 else "")
                         + (shop.label(i) if mixed else i.name)[:90],
                         value=i.id,
-                        description=f"{i.price:,}ペリカ" + (f"　{i.desc}" if i.desc else "")[:60],
+                        description=f"{i.price:,}ペリカ"
+                        + (f"　在庫 {stocks[i.id]['stock']}/{stocks[i.id]['max']}" if stocks.get(i.id) else "")
+                        + (f"　{i.desc}" if i.desc else "")[:60],
                         emoji=i.mark or None,
                     )
                     for i in items[:25]
@@ -607,12 +618,19 @@ class ShopCog(commands.Cog):
         else:
             e = ui.embed(f"{TABS[tab][0]}", TAB_NOTE[tab] + "\n価格はペリカ。✅ は持っている品です。", ui.GOLD)
             items = tab_items(tab)
+            stocks = {
+                i.id: eco.shop_stock(user_id, i.id) for i in items if i.id in shop.STOCK_RULES
+            }  # 1人ずつ別々の在庫
             if tab in ("title", "collection"):  # 値段の段階ごとに、まとめる
                 low = 0
                 for limit, name in TIERS:
                     group = [i for i in items if i.price >= low and (limit is None or i.price < limit)]
                     if group:
-                        e.add_field(name=name, value="\n".join(item_line(i, inv) for i in group)[:1024], inline=False)
+                        e.add_field(
+                            name=name,
+                            value="\n".join(item_line(i, inv, stocks.get(i.id)) for i in group)[:1024],
+                            inline=False,
+                        )
                     low = limit if limit is not None else low
             else:
                 for kind in TABS[tab][1]:
@@ -623,7 +641,7 @@ class ShopCog(commands.Cog):
                             f"\n✅ 持っている: {'・'.join(owned)}" if owned else ""
                         )
                     else:
-                        value = "\n".join(item_line(i, inv) for i in group)
+                        value = "\n".join(item_line(i, inv, stocks.get(i.id)) for i in group)
                     if group:
                         e.add_field(name=SECTION_NAME[kind], value=value[:1024], inline=False)
         e.set_footer(text=f"あなたの残高: {ui.pelica(balance)}")
@@ -790,6 +808,16 @@ class ShopCog(commands.Cog):
                 return await interaction.response.send_message(
                     embed=ui.error_embed(
                         "買えませんでした", "すでに持っています。「🎒 持ち物」の画面で身につけられます。"
+                    ),
+                    ephemeral=True,
+                )
+            stock = self.g(interaction).shop_stock(uid, it.id)
+            if stock is not None and qty > stock["stock"]:  # 確認ボタンを出す前に、在庫を調べる
+                return await interaction.response.send_message(
+                    embed=ui.error_embed(
+                        "在庫が足りません",
+                        f"**{it.name}** の在庫は、いま {stock['stock']}個 です（{stock_text(stock)}）。\n"
+                        "在庫は1人ずつ別々で、時間がたつと補充されます。",
                     ),
                     ephemeral=True,
                 )

@@ -3,8 +3,10 @@
 表の定義は core/economy.py の _init_schema にある。
 """
 
+import time
 from typing import Optional
 
+from core import shop as shop_mod
 from core import teiai
 from core.eco_types import CONSUMABLE_EFFECTS, PurchaseResult
 
@@ -20,15 +22,53 @@ class ShopMixin:
     def _ensure_profile(self, user_id: int) -> None:
         self._conn.execute("INSERT OR IGNORE INTO profile (guild_id, user_id) VALUES (?, ?)", (self._g(), user_id))
 
+    def shop_stock(self, user_id: int, item_id: str, now: Optional[float] = None) -> Optional[dict]:
+        """在庫のある品の、このプレイヤーの在庫 {stock: 買える数, max, next_at: 次に1つ増える時刻（満タンなら None）}。在庫のない品は None。
+
+        読み取りだけ（記録がなければ、満タン）。
+        """
+        rule = shop_mod.STOCK_RULES.get(item_id)
+        if rule is None:
+            return None
+        now = time.time() if now is None else now
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT stock, updated FROM shop_stock WHERE guild_id=? AND user_id=? AND item_id=?",
+                (self._g(), user_id, item_id),
+            ).fetchone()
+        exact = shop_mod.stock_now(rule, row["stock"], row["updated"], now) if row else float(rule.max)
+        return {
+            "stock": int(exact + 1e-9),
+            "exact": exact,
+            "max": rule.max,
+            "next_at": shop_mod.next_refill_at(rule, exact, now),
+        }
+
     def purchase(
-        self, user_id: int, item_id: str, label: str, price: int, unique: bool, qty: int = 1
+        self,
+        user_id: int,
+        item_id: str,
+        label: str,
+        price: int,
+        unique: bool,
+        qty: int = 1,
+        now: Optional[float] = None,
     ) -> PurchaseResult:
-        """購入。支払い・持ち物の追加を1回の処理で行う。持っているもの（消耗品以外）は買えない。"""
+        """購入。支払い・持ち物の追加を1回の処理で行う。持っているもの（消耗品以外）は買えない。在庫のある品は、在庫の数まで。"""
         if qty < 1 or price <= 0:
             return PurchaseResult(False, "個数と値段は1以上にしてください。")
         total = price * qty
+        now = time.time() if now is None else now
         with self._lock, self._conn:
             self._ensure(user_id)
+            stock = self.shop_stock(user_id, item_id, now)
+            if stock is not None and qty > stock["stock"]:
+                when = f"（次の補充: <t:{int(stock['next_at'])}:R>）" if stock["next_at"] else ""
+                return PurchaseResult(
+                    False,
+                    f"在庫が足りません（いまの在庫: {stock['stock']}個）{when}。在庫は1人ずつ別々で、時間がたつと補充されます。",
+                    self._balance(user_id),
+                )
             have = self._conn.execute(
                 "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=?", (self._g(), user_id, item_id)
             ).fetchone()
@@ -47,6 +87,12 @@ class ShopMixin:
                     self._balance(user_id),
                 )
             self._apply(user_id, -total, f"購入:{label}" + (f"×{qty}" if qty > 1 else ""))
+            if stock is not None:  # 在庫を減らす（減らしたあとの在庫と、その時刻を記録する）
+                self._conn.execute(
+                    "INSERT INTO shop_stock (guild_id, user_id, item_id, stock, updated) VALUES (?, ?, ?, ?, ?) "
+                    "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET stock=excluded.stock, updated=excluded.updated",
+                    (self._g(), user_id, item_id, stock["exact"] - qty, now),
+                )
             self._conn.execute(
                 "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty",

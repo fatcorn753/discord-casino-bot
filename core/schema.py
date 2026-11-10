@@ -33,6 +33,15 @@ INVENTORY_DDL = """
         qty      INTEGER NOT NULL,
         PRIMARY KEY (guild_id, user_id, item_id)
     )"""
+SHOP_STOCK_DDL = """
+    CREATE TABLE IF NOT EXISTS shop_stock (        -- ショップの在庫（買える数）。1人ずつ別々。時間で補充される（core/shop.py の STOCK_RULES）
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        item_id  TEXT    NOT NULL,
+        stock    REAL    NOT NULL,                  -- updated の時点の在庫（小数）
+        updated  REAL    NOT NULL,
+        PRIMARY KEY (guild_id, user_id, item_id)
+    )"""
 PROFILE_DDL = """
     CREATE TABLE IF NOT EXISTS profile (
         guild_id    INTEGER NOT NULL,
@@ -59,6 +68,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
     """表と索引を、無ければ作る（あれば何もしない）。"""
     conn.execute(USERS_DDL)
     conn.execute(INVENTORY_DDL)
+    conn.execute(SHOP_STOCK_DDL)
     conn.execute(PROFILE_DDL)
     conn.executescript(
         """
@@ -276,6 +286,11 @@ def create_tables(conn: sqlite3.Connection) -> None:
             loaned   REAL NOT NULL DEFAULT 0,          -- 地下融資に回している額（時間がたつと現金に戻る）
             ts       REAL NOT NULL DEFAULT 0           -- 融資の回収を、ここまで反映した時刻
         );
+        CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛の胴元の口座（サーバーごとに1行）。ピンハネが入る。銀行の手元（預金の準備）とは別
+            guild_id INTEGER PRIMARY KEY,
+            balance  INTEGER NOT NULL DEFAULT 0,       -- いまの残高
+            skimmed  INTEGER NOT NULL DEFAULT 0        -- これまでに、ピンハネで入った額の合計
+        );
         CREATE TABLE IF NOT EXISTS teiai_deposits (    -- 帝愛への預金（人ごと）
             guild_id INTEGER NOT NULL,
             user_id  INTEGER NOT NULL,
@@ -286,11 +301,6 @@ def create_tables(conn: sqlite3.Connection) -> None:
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id  INTEGER NOT NULL,
             buyer_id  INTEGER NOT NULL,
-        CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛の胴元の口座（サーバーごとに1行）。ピンハネが入る。銀行の手元（預金の準備）とは別
-            guild_id INTEGER PRIMARY KEY,
-            balance  INTEGER NOT NULL DEFAULT 0,       -- いまの残高
-            skimmed  INTEGER NOT NULL DEFAULT 0        -- これまでに、ピンハネで入った額の合計
-        );
             target_id INTEGER NOT NULL,
             stake     INTEGER NOT NULL,               -- 掛け金
             odds      REAL    NOT NULL,               -- 買ったときのオッズ（配当の見込み = 掛け金 × オッズ）
