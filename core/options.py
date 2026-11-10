@@ -15,7 +15,7 @@ from core import market, market_events
 OPTION_HOURS = 6  # 満期までの時間（固定）
 STRIKE_OTM = 0.05  # 権利行使価格のずれ（コール = 現在値 ×1.05、プット = 現在値 ×0.95）
 TICK_SECONDS = 60  # 価格が動く間隔（cogs/market_cog.py の TICK_MINUTES と同じ）
-SPREAD = 0.05  # 買値は公正価格の +5%、売値は −5%
+SPREAD = 0.015  # 買値は公正価格の +1.5%、売値は −1.5%（往復で約3%。ルーレット・パチンコ並みの控除）
 PAYOUT_CAP_MULT = 50  # 配当の上限（掛け金の何倍までか）
 MIN_PREMIUM = 100  # 1回の掛け金の下限
 MAX_OPEN_PREMIUM = 20_000  # 1人が同時に持てる、有効なオプションの掛け金の合計の上限
