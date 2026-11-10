@@ -65,6 +65,18 @@ def factor(direction: int, size: float) -> float:
     return math.exp(direction * math.log1p(size))
 
 
+def jump_variance() -> float:
+    """決算の発表で、対数価格が動く大きさの2乗の期待値 E[ln(1+size)²]（ふつうの決算と大サプライズを、確率で混ぜたもの）。
+
+    オプションの値段に、決算を含む期間の分として足す（足さないと、決算をまたぐオプションが、ただ同然になる）。
+    """
+
+    def mean_sq(lo: float, hi: float, n: int = 200) -> float:
+        return sum(math.log1p(lo + (hi - lo) * (i + 0.5) / n) ** 2 for i in range(n)) / n
+
+    return (1 - SURPRISE_PROB) * mean_sq(*SIZE_RANGE) + SURPRISE_PROB * mean_sq(*SURPRISE_RANGE)
+
+
 def memo_direction(direction: int, rng, truth: float = MEMO_TRUTH) -> int:
     """噂が言う方向。truth の確率で本当の方向、それ以外はガセ（逆）。"""
     return direction if rng.random() < truth else -direction

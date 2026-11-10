@@ -282,3 +282,40 @@ def test_shop_panel_has_a_market_tab_and_buying_shows_the_memo_privately(eco, mo
     assert sent and sent[-1]["ephemeral"] is True and "極秘メモ" in sent[-1]["embed"].description
     assert "insider_memo" not in eco.for_guild(10).inventory(1)  # 持ち物には増えない
     assert not cog.bot.sessions.is_active(1)
+
+
+# ----------------------------- オプションの値付けと、メモの価値 ----------------------------- #
+def test_options_across_an_earnings_release_cost_much_more_so_a_blind_straddle_is_not_free_money():
+    from core import options as opt
+
+    base = opt.total_variance("teio", 6 * 3600, 0.0, [])
+    jump = {"symbol": "teio", "jump_at": 3600.0, "jump_var": ea.jump_variance()}
+    with_jump = opt.total_variance("teio", 6 * 3600, 0.0, [jump])
+    assert with_jump == pytest.approx(base + ea.jump_variance()) and with_jump > 20 * base
+    late = {**jump, "jump_at": 7 * 3600.0}  # 満期のあとの発表は、入らない
+    assert opt.total_variance("teio", 6 * 3600, 0.0, [late]) == pytest.approx(base)
+    other = {**jump, "symbol": "numa"}
+    assert opt.total_variance("teio", 6 * 3600, 0.0, [other]) == pytest.approx(base)  # 別の銘柄の決算は入らない
+    rng = random.Random(1)
+    total = 0.0
+    n = 6000
+    for _ in range(n):
+        p = ea.plan(1.7e9, TZ, rng)
+        st = min(130.0, max(70.0, 100 * ea.factor(p["direction"], p["size"])))
+        pc = opt.fair_price("call", 100.0, 102.0, with_jump) * (1 + opt.SPREAD)
+        pp = opt.fair_price("put", 100.0, 98.0, with_jump) * (1 + opt.SPREAD)
+        pay = min(max(0.0, st - 102.0), pc * opt.PAYOUT_CAP_MULT) + min(max(0.0, 98.0 - st), pp * opt.PAYOUT_CAP_MULT)
+        total += pay / (pc + pp) - 1
+    assert total / n < 0.05  # 情報なしで、コールとプットを両方買っても、平均では増えない（スプレッドの分、むしろ減る）
+
+
+def test_following_the_memo_profits_most_of_the_time_and_on_average():
+    rng = random.Random(2)
+    rets = []
+    for truth in (ea.SHOP_TRUTH,) * 6000:
+        p = ea.plan(1.7e9, TZ, rng)
+        hint = ea.memo_direction(p["direction"], rng, truth)
+        shown = min(1.3, max(0.7, ea.factor(p["direction"], p["size"])))  # 画面の価格は ±30% まで
+        rets.append((shown - 1) * hint)
+    win = sum(r > 0 for r in rets) / len(rets)
+    assert 0.77 < win < 0.83 and sum(rets) / len(rets) > 0.05  # 勝率は約8割・平均で +5% 以上

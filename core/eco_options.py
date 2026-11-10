@@ -24,6 +24,10 @@ def name_of(row) -> str:
 class OptionMixin:
     """オプションの売買と決済。"""
 
+    def _option_events(self, now: float) -> list:
+        """オプションの値付けに入れる出来事: ボラティリティ予告 + 満期までにある決算の発表（OPTION_HOURS の間）。"""
+        return self.market_events(now) + self.earnings_jumps(now, opt.OPTION_HOURS * 3600)
+
     def _price_at(self, symbol: str, ts: float) -> Optional[float]:
         """ts 以前の、最後の価格（満期の価格）。その前の記録がなければ、いまの価格。"""
         r = self._conn.execute(
@@ -84,7 +88,7 @@ class OptionMixin:
             spot2 = prices.get(symbol2) if kind == opt.PAIR else None
             if spot is None or (kind == opt.PAIR and spot2 is None):
                 return False, "まだ価格がありません。"
-            seconds, events = opt.OPTION_HOURS * 3600, self.market_events(now)
+            seconds, events = opt.OPTION_HOURS * 3600, self._option_events(now)
             if kind == opt.PAIR:
                 strike = spot
                 rate = opt.pair_ask_rate(symbol, symbol2, seconds, now, events)
@@ -164,7 +168,7 @@ class OptionMixin:
             if units < 1:
                 return False, "その証拠金では 1口も売れません。証拠金を増やしてください。"
             margin = math.ceil(round(units * per_margin, 6))
-            bid = opt.bid_per_unit(kind, symbol, spot, strike, seconds, now, self.market_events(now))
+            bid = opt.bid_per_unit(kind, symbol, spot, strike, seconds, now, self._option_events(now))
             premium = int(bid * units)
             if self._balance(user_id) < margin:
                 return False, f"証拠金が足りません（{margin:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。"
@@ -208,7 +212,7 @@ class OptionMixin:
         if row["expiry"] <= now:
             return opt.intrinsic(row["kind"], row["units"], spot, row["strike"])
         ask = opt.ask_per_unit(
-            row["kind"], row["symbol"], spot, row["strike"], row["expiry"] - now, now, self.market_events(now)
+            row["kind"], row["symbol"], spot, row["strike"], row["expiry"] - now, now, self._option_events(now)
         )
         return math.ceil(round(ask * row["units"], 6))
 
@@ -233,14 +237,14 @@ class OptionMixin:
                     spot2 / row["spot2"],
                     row["expiry"] - now,
                     now,
-                    self.market_events(now),
+                    self._option_events(now),
                 )
                 value = int(rate * row["units"])
         elif row["expiry"] <= now:
             value = opt.intrinsic(row["kind"], row["units"], spot, row["strike"])
         else:
             bid = opt.bid_per_unit(
-                row["kind"], row["symbol"], spot, row["strike"], row["expiry"] - now, now, self.market_events(now)
+                row["kind"], row["symbol"], spot, row["strike"], row["expiry"] - now, now, self._option_events(now)
             )
             value = int(bid * row["units"])
         return min(value, row["premium"] * opt.PAYOUT_CAP_MULT)

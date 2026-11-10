@@ -28,6 +28,17 @@ class EarningsMixin:
             self._conn.execute("DELETE FROM earnings WHERE released=1 AND release_at<?", (now - 30 * 86400,))
             return {**p, "id": cur.lastrowid}
 
+    def earnings_jumps(self, now: float, seconds: float) -> list:
+        """now から seconds 秒の間に発表がある決算を、オプションの値付け用の形にする（対象・発表の時刻・分散）。方向は入れない。"""
+        with self._lock:
+            return [
+                {"symbol": r["symbol"], "jump_at": r["release_at"], "jump_var": ea.jump_variance()}
+                for r in self._conn.execute(
+                    "SELECT symbol, release_at FROM earnings WHERE released=0 AND release_at>? AND release_at<=?",
+                    (now, now + seconds),
+                )
+            ]
+
     def earnings_upcoming(self, now: Optional[float] = None) -> Optional[dict]:
         """みんなに告知ずみの、発表前の決算（対象と時刻だけ。方向と大きさは入れない）。月曜 9:00 までは None。"""
         now = time.time() if now is None else now

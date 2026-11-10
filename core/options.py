@@ -47,7 +47,7 @@ def jump_variance_per_tick(symbol: str) -> float:
 
 
 def total_variance(symbol: str, seconds: float, now: float = 0.0, events=()) -> float:
-    """いまから seconds 秒後までの、対数価格の分散の合計（1分ごとの揺れ + 有事 + 市場イベント）。
+    """いまから seconds 秒後までの、対数価格の分散の合計（1分ごとの揺れ + 有事 + 市場イベント + 決算）。
 
     events（core/market_events.py のボラティリティ予告）と時間が重なる分は、揺れが factor² 倍になる。
     その増え分は、予告の直後は一部（PRICED_AT_ANNOUNCE）だけ、開始に近づくほど全部が、値段に織り込まれる。
@@ -57,6 +57,10 @@ def total_variance(symbol: str, seconds: float, now: float = 0.0, events=()) -> 
     base = market.COVARIANCE[index][index]
     total = ticks * (base + jump_variance_per_tick(symbol))
     for ev in events:
+        if "jump_var" in ev:  # 決算の発表（満期までに発表があれば、その分の分散が丸ごと足される）
+            if ev["symbol"] == symbol and now < ev["jump_at"] <= now + seconds:
+                total += ev["jump_var"]
+            continue
         if ev["symbol"] == symbol:
             total += market_events.extra_variance_ticks(ev, now, seconds, TICK_SECONDS) * base * (ev["factor"] ** 2 - 1)
     return total
@@ -134,6 +138,10 @@ def pair_variance(a: str, b: str, seconds: float, now: float = 0.0, events=()) -
     jump = market.EVENT_PROB * mean_sq * (scale(a) - scale(b)) ** 2
     total = ticks * (saa + sbb - 2 * sab + jump)
     for ev in events:
+        if "jump_var" in ev:  # 決算の発表（A と B は独立に動くので、どちらの分も差の分散に足される）
+            if ev["symbol"] in (a, b) and now < ev["jump_at"] <= now + seconds:
+                total += ev["jump_var"]
+            continue
         m, weight = ev["factor"], market_events.extra_variance_ticks(ev, now, seconds, TICK_SECONDS)
         if ev["symbol"] == a:
             total += weight * ((m * m - 1) * saa - 2 * (m - 1) * sab)
