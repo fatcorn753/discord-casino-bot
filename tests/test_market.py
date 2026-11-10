@@ -644,3 +644,41 @@ def test_step_prices_never_drops_below_the_limit_from_24_hours_ago(eco):
     cog.step_prices()
     for sym in market.SYMBOLS:
         assert eco.market_latest(sym.key)[1] >= sym.start * 0.70 - 0.01
+
+
+# ----------------------------- 期待成長率（drift） ----------------------------- #
+def test_drift_is_small_positive_and_below_the_normal_bond_yield():
+    bond_per_day = 0.04 / 3  # 通常債: 72時間で +4%
+    for sym in market.SYMBOLS:
+        assert 0 < sym.drift < bond_per_day
+    assert market.drift_per_minute(market.CS, market.CS.start) == pytest.approx(market.CS.drift / 1440)
+    assert market.drift_per_minute(market.CS, market.CS.start / 2) == pytest.approx(
+        market.CS.drift / 1440
+    )  # 安いときは、弱めない
+
+
+def test_drift_fades_out_as_the_price_rises_toward_the_band_and_stops_there():
+    cs = market.CS
+    full = market.drift_per_minute(cs, cs.start)
+    mid = market.drift_per_minute(cs, cs.start * 2)
+    top = market.drift_per_minute(cs, cs.start * market.DRIFT_BAND)
+    assert full > mid > 0 and top == 0.0  # 開始価格の DRIFT_BAND 倍で、成長しなくなる
+    assert market.drift_per_minute(cs, cs.start * market.DRIFT_BAND * 3) == 0.0
+
+
+def test_a_step_without_any_shock_moves_the_price_by_exactly_the_drift(monkeypatch):
+    class Calm:
+        @staticmethod
+        def gauss(mu, sigma):
+            return 0.0
+
+        @staticmethod
+        def random():
+            return 1.0  # 有事なし
+
+    prices = {s.key: s.start for s in market.SYMBOLS}
+    with_drift, _ = market.next_prices(prices, Calm)
+    monkeypatch.setattr(market, "drift_per_minute", lambda sym, price: 0.0)
+    without, _ = market.next_prices(prices, Calm)
+    for sym in market.SYMBOLS:
+        assert with_drift[sym.key] / without[sym.key] == pytest.approx(math.exp(sym.drift / 1440), rel=1e-4)

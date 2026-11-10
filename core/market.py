@@ -1,6 +1,6 @@
 """証券の市場（CSトークン・TEIO重工・NUMAバイオ・GOLD地金）。価格の動き・売買の計算・文字のチャート。Discord と DB に依存しない純粋なロジック。
 
-価格は全サーバー共通。4銘柄が1分ごとに、相関をもって動く（分散共分散行列とコレスキー分解）。どの銘柄も期待値は変わらない（平均への引き戻しなどの偏りも入れない）ので、先を読んで儲けることはできない。
+価格は全サーバー共通。4銘柄が1分ごとに、相関をもって動く（分散共分散行列とコレスキー分解）。値動きの向きは読めない（平均への引き戻しなどの偏りは入れない）。ただし、銘柄ごとに、ごく小さな期待成長率（drift。1日で GOLD 0.3%〜NUMA 1.0%、通常債の約1.3%/日より控えめ）がある。リスクを取って株を持つ理由になる。
 売買の手数料は今はかけていない（FEE_RATE で変えられる）。ペリカも銘柄も、現実のお金とは関係ない。
 """
 
@@ -25,14 +25,17 @@ class Symbol:
     emoji: str
     start: float  # 開始価格
     sigma: float  # 1分あたりの値動きの大きさ
+    drift: float = 0.0  # 1日あたりの期待成長率（対数。リスクプレミアム）。0 なら、期待値が変わらない（マルチンゲール）
 
 
 # 銘柄。値動きの大きさ σ と、銘柄どうしの相関 ρ は、ここの数字だけで決まる（調整はここを書き換える）
 # 1日（1,440分）の標準偏差は σ × √1440 ≒ 38σ。現実の値動きに少しスリルを足した水準にしてある
-CS = Symbol("cs", "CSトークン", "🪙", 1_000.0, 0.0012)  # 標準（1日の標準偏差 約4.6%。主要な暗号資産ほど）
-TEIO = Symbol("teio", "TEIO重工", "🏭", 1_200.0, 0.0007)  # 大型株（1日 約2.7%）。CSとは正相関だが、連れ安しすぎない
-NUMA = Symbol("numa", "NUMAバイオ", "🧪", 400.0, 0.0022)  # 仕手株（1日 約8.3%）。ほかとはほぼ無相関
-GOLD = Symbol("gold", "GOLD地金", "🥇", 3_000.0, 0.0004)  # 避難先（1日 約1.5%）。CS・TEIOと逆相関
+CS = Symbol("cs", "CSトークン", "🪙", 1_000.0, 0.0012, 0.008)  # 標準（1日の標準偏差 約4.6%。主要な暗号資産ほど）
+TEIO = Symbol(
+    "teio", "TEIO重工", "🏭", 1_200.0, 0.0007, 0.007
+)  # 大型株（1日 約2.7%）。CSとは正相関だが、連れ安しすぎない
+NUMA = Symbol("numa", "NUMAバイオ", "🧪", 400.0, 0.0022, 0.010)  # 仕手株（1日 約8.3%）。ほかとはほぼ無相関
+GOLD = Symbol("gold", "GOLD地金", "🥇", 3_000.0, 0.0004, 0.003)  # 避難先（1日 約1.5%）。CS・TEIOと逆相関
 SYMBOLS = (CS, TEIO, NUMA, GOLD)
 BY_KEY = {s.key: s for s in SYMBOLS}
 DEFAULT = CS.key
@@ -49,6 +52,19 @@ CORRELATION = {
 NAME = CS.name
 START_PRICE = CS.start
 SIGMA = CS.sigma
+
+
+# 期待成長率（drift）は、通常債（72時間で+4%＝1日約1.3%）より控えめにしてある。債券は1人30,000までしか持てないが、株には上限がないので、
+# 大きな資産を運用する先になる。際限なく値上がりしてペリカが増えすぎないよう、開始価格の DRIFT_BAND 倍に近づくほど、成長率は弱まり、0 になる
+DRIFT_BAND = 8.0
+
+
+def drift_per_minute(sym: "Symbol", price: float) -> float:
+    """いまの価格での、1分あたりの期待成長率（対数）。開始価格より高いほど弱まり、DRIFT_BAND 倍で 0（それ以上は、成長しない）。"""
+    if sym.drift <= 0 or price <= sym.start:
+        return sym.drift / 1440.0
+    fade = max(0.0, 1.0 - math.log(price / sym.start) / math.log(DRIFT_BAND))
+    return sym.drift * fade / 1440.0
 
 
 DAILY_LIMIT = 0.30  # 値幅制限。24時間前の価格から、上下にこの割合まで（ストップ高・ストップ安）
@@ -100,7 +116,7 @@ def next_prices(prices: dict, rng: random.Random, vol: Optional[dict] = None) ->
     """1分後の全銘柄の価格と、有事の出来事（+1 急騰 / -1 急落 / 0 なし）。
 
     独立な標準正規乱数 z から、相関のある揺れ ε = L z を作り、P_i ← P_i · exp(-Σ_ii/2 + ε_i) と動かす（Σ = L Lᵀ）。
-    対数の補正（-Σ_ii/2）で、どの銘柄も価格の期待値がちょうど変わらない（マルチンゲール）ので、先を読んで儲けることはできない。
+    対数の補正（-Σ_ii/2）で、揺れだけでは価格の期待値が変わらない。そこに、銘柄ごとの期待成長率（drift_per_minute）を足す。
     市場イベント（vol = {銘柄: 倍率}）で、その銘柄の揺れだけが m 倍になる（-m²Σ/2 の補正で、期待値は変わらない）。
     有事は、全銘柄が同じ向きに動く（逆相関のヘッジが効かなくなる）。大きさは、CSトークンの ±3〜8% に、銘柄の値動きの大きさの比をかけたもの。急騰と急落は同じ確率で、打ち消し合う。
     """
@@ -118,7 +134,7 @@ def next_prices(prices: dict, rng: random.Random, vol: Optional[dict] = None) ->
         m = (vol or {}).get(
             sym.key, 1.0
         )  # 市場イベントで、この銘柄の値動きが m 倍（補正も m² 倍にして、期待値は変えない）
-        factor = math.exp(-m * m * COVARIANCE[i][i] / 2 + m * shock[i]) * panic
+        factor = math.exp(drift_per_minute(sym, prices[sym.key]) - m * m * COVARIANCE[i][i] / 2 + m * shock[i]) * panic
         new = round(prices[sym.key] * factor, 2)  # 低い価格でも動きが止まらないよう、小数2桁まで持つ
         out[sym.key] = min(MAX_PRICE, max(MIN_PRICE, new))
     return out, event
