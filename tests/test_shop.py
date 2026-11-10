@@ -519,6 +519,19 @@ def test_auction_price_falls_daily_and_stops_at_floor():
     assert teiai.auction_rate(0, 0) == teiai.AUCTION_START
     assert round(teiai.auction_rate(0, day), 2) == 0.8
     assert teiai.auction_rate(0, 30 * day) == teiai.AUCTION_FLOOR > teiai.SEIZE_RATE
+    assert (
+        teiai.AUCTION_FLOOR == 0.7 and round(teiai.auction_rate(0, 2 * day), 2) == 0.7
+    )  # 2日で70%に着いて、そこで止まる
+    assert round(teiai.auction_rate(0, 3 * day), 2) == 0.7
+
+
+def test_unsold_items_stay_on_the_shelf_at_the_floor_price(eco):
+    _seized(eco)
+    month = 30 * 86400
+    now = time.time() + month
+    shelf = {e["item_id"]: e for e in eco.auction_list(now)}
+    assert shelf[shop.STREAK_GUARD]["qty"] == 2  # 1か月たっても、売れ残りは棚に残る
+    assert shelf[shop.STREAK_GUARD]["price"] == round(16_000 * teiai.AUCTION_FLOOR)
 
 
 def test_auction_buy_moves_item_pays_bank_and_blocks_non_katagi(eco):

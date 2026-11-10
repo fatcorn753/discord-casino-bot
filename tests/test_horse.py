@@ -6,7 +6,7 @@ import random
 import pytest
 
 from core import horse as h
-from core import shop
+from core import shop, teiai
 from core.economy import INITIAL_BALANCE, Economy
 
 U, V, W = 1, 2, 3
@@ -492,7 +492,7 @@ def test_auction_horse_price_falls_and_only_katagi_with_room_can_buy(eco):
     assert eco.bankrupt(U)[0]
     listed_at = eco.horse_get(hid)["listed_at"]
     day = 86400
-    assert eco.horse_auction_price(listed_at, listed_at + 5 * day) == round(eco.HORSE_PRICE * 0.6)  # 下限
+    assert eco.horse_auction_price(listed_at, listed_at + 5 * day) == round(eco.HORSE_PRICE * teiai.AUCTION_FLOOR)  # 下限（70%）
     eco.credit(V, 100_000, "テスト")
     assert not eco.auction_buy_horse(U, hid).ok  # 破産者は買えない
     res = eco.auction_buy_horse(V, hid, listed_at)
