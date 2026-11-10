@@ -489,12 +489,15 @@ def test_streak_guard_price_and_use_message(cog, eco):
 # ----------------------------- 帝愛の競売 ----------------------------- #
 from core import teiai  # noqa: E402
 
+CARD = next(i.id for i in shop.CATALOG if i.kind == shop.CARD_COLOR and not i.limited)
+
 
 def _seized(eco, uid=1):
     """uid が品物を買って、破産する。"""
     eco.credit(uid, 100_000, "テスト")
     assert buy(eco, shop.STREAK_GUARD, qty=2, uid=uid).ok
-    assert buy(eco, "title_regular", uid=uid).ok
+    assert buy(eco, "title_regular", uid=uid).ok  # 称号は、没収するだけで、競売に出さない
+    assert buy(eco, CARD, uid=uid).ok
     eco._conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (uid,))
     eco._owe(uid, 500, "テスト")
     assert eco.bankrupt(uid)[0]
@@ -503,9 +506,12 @@ def _seized(eco, uid=1):
 def test_bankruptcy_lists_seized_items_but_not_collection_or_limited(eco):
     _seized(eco)
     listed = {e["item_id"]: e for e in eco.auction_list()}
-    assert listed[shop.STREAK_GUARD]["qty"] == 2 and "title_regular" in listed
+    assert listed[shop.STREAK_GUARD]["qty"] == 2 and CARD in listed
     assert listed[shop.STREAK_GUARD]["price"] == round(16_000 * teiai.AUCTION_START)
-    assert not any(shop.BY_ID[i].kind == shop.COLLECTION or shop.BY_ID[i].limited for i in listed)
+    assert not any(
+        shop.BY_ID[i].kind in (shop.COLLECTION, shop.TITLE) or shop.BY_ID[i].limited for i in listed
+    )  # 称号・コレクション・限定品は出ない（称号は、そのまま没収）
+    assert "title_regular" not in listed and "title_regular" not in eco.inventory(1)
 
 
 def test_auction_price_falls_daily_and_stops_at_floor():
@@ -525,14 +531,17 @@ def test_auction_buy_moves_item_pays_bank_and_blocks_non_katagi(eco):
     assert not any(e["item_id"] == shop.STREAK_GUARD for e in eco.auction_list())
     assert eco.bank_status()["cash"] > cash_before  # 売上は帝愛の収入
     # 破産者（カタギでない）は、買えない。持っているものは買えない
-    assert not eco.auction_buy(1, "title_regular").ok
-    assert eco.auction_buy(2, "title_regular").ok and not eco.auction_buy(2, "title_regular").ok
+    assert not eco.auction_buy(1, CARD).ok
+    assert eco.auction_buy(2, CARD).ok and not eco.auction_buy(2, CARD).ok
 
 
 def test_auction_buy_rejects_missing_or_unaffordable(eco):
     _seized(eco, uid=1)
     assert not eco.auction_buy(2, shop.STREAK_GUARD, qty=3).ok  # 在庫は2
-    assert "足りません" in eco.auction_buy(2, "title_regular").reason or eco.balance(2) >= 4000
+    eco.balance(2)
+    eco._conn.execute("UPDATE users SET balance=100 WHERE user_id=2")
+    res = eco.auction_buy(2, CARD)
+    assert not res.ok and "足りません" in res.reason  # 払えないときは、買えない
 
 
 def test_auction_screen_and_buy_flow(cog, eco):
@@ -543,8 +552,8 @@ def test_auction_screen_and_buy_flow(cog, eco):
     assert "連続守り券" in text and "×2" in text
     it = FakeInteraction()
     it.user = SimpleNamespace(id=2)
-    run(cog.buy_auction(it, "title_regular", 1))
-    assert "競売で買いました" in it.sent[0]["embed"].title and "title_regular" in eco.inventory(2)
+    run(cog.buy_auction(it, CARD, 1))
+    assert "競売で買いました" in it.sent[0]["embed"].title and CARD in eco.inventory(2)
 
 
 # ----------------------------- 在庫（1人ずつ別々） ----------------------------- #
@@ -617,3 +626,15 @@ def test_shop_screen_shows_the_players_own_stock(eco):
     cog = shop_cog.ShopCog(NS(economy=NS(for_guild=lambda g: eco)))
     text = "\n".join(f.value for f in cog._catalog_embed(0, 1, "item").fields)
     assert "📦 在庫 7/10" in text
+
+
+def test_titles_are_confiscated_not_auctioned_and_old_title_listings_are_purged(eco):
+    _seized(eco)
+    assert not any(shop.BY_ID[e["item_id"]].kind == shop.TITLE for e in eco.auction_list())
+    with eco._lock, eco._conn:  # 古い版が出品していた称号
+        eco._conn.execute(
+            "INSERT INTO seized_items (guild_id, item_id, qty, listed_at) VALUES (?, ?, 1, 0)", (eco._g(), "title_zawa")
+        )
+        assert eco._purge_unlistable_auctions() == 1
+    assert "title_zawa" not in {e["item_id"] for e in eco.auction_list()}
+    assert shop.STREAK_GUARD in {e["item_id"] for e in eco.auction_list()}  # 出せる品は、残る

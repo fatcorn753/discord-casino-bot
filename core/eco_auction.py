@@ -14,9 +14,14 @@ from core.eco_types import PurchaseResult
 
 
 def listable(item_id: str) -> bool:
-    """競売に出せる品か（限定品とコレクションは出さない）。"""
+    """競売に出せる品か。限定品・コレクション・称号は出さない（称号は、差し押さえたらそのまま没収する）。"""
     item = shop_mod.BY_ID.get(item_id)
-    return item is not None and not item.limited and item.kind != shop_mod.COLLECTION and item.price > 0
+    return (
+        item is not None
+        and not item.limited
+        and item.kind not in (shop_mod.COLLECTION, shop_mod.TITLE)
+        and item.price > 0
+    )
 
 
 class AuctionMixin:
@@ -26,6 +31,14 @@ class AuctionMixin:
                 "INSERT INTO seized_items (guild_id, item_id, qty, listed_at) VALUES (?, ?, ?, ?)",
                 (self._g(), item_id, qty, now),
             )
+
+    def _purge_unlistable_auctions(self) -> int:
+        """競売の棚から、いまは競売に出さない品（称号など）の出品を消す（全サーバー）。消した行数を返す。"""
+        ids = [r["item_id"] for r in self._conn.execute("SELECT DISTINCT item_id FROM seized_items")]
+        gone = [i for i in ids if not listable(i)]
+        for item_id in gone:
+            self._conn.execute("DELETE FROM seized_items WHERE item_id=?", (item_id,))
+        return len(gone)
 
     def auction_price(self, item_id: str, listed_at: float, now: Optional[float] = None) -> int:
         """1つあたりの、いまの値段（ペリカ）。"""

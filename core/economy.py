@@ -196,6 +196,7 @@ class Economy(
         with self._lock, self._conn:
             schema.create_tables(self._conn)
             schema.add_missing_columns(self._conn)
+            self._purge_unlistable_auctions()  # 競売に出せなくなった品（称号）が、古い出品に残っていたら消す
 
     # ------------------------------------------------------------------ #
     # 内部                                                                #
