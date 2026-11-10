@@ -317,3 +317,24 @@ def test_stake_modal_buys_every_selected_horse_and_announces_once(setup):
     assert "合計" in sent[-1]["embed"].description
     posts = [m["content"] for m in chan.sent if "content" in m and "🎫" in m["content"]]
     assert len(posts) == 1 and "複勝" in posts[0] and "3枠" in posts[0] and "6枠" in posts[0]
+
+
+def test_entry_card_in_the_channel_is_redrawn_when_registrations_change(setup):
+    eco, chan, guild, bot, cog = setup
+    eco.credit(U, 100_000, "テスト")
+    eco._conn.execute(
+        "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, 1)", (eco._g(), U, shop.HORSE_VOUCHER)
+    )
+    ok, hid = eco.horse_create(U, "ライブホース", "栗毛", "🟥")
+    assert ok
+    rid = eco.race_create_special(1_700_000_000.0, 5, 5, chan.id)
+    eco.race_set_message(rid, chan.id, 777)
+    assert eco.race_register(U, hid, rid, 1_700_000_001.0)[0]
+    interaction = SimpleNamespace(guild=guild, guild_id=0, user=SimpleNamespace(id=U))
+    asyncio.run(views.refresh_entry_card(interaction, eco, rid))
+    mid, kw = chan.retired[-1]
+    assert mid == 777 and "ライブホース" in kw["embed"].description
+    assert eco.race_withdraw(U, hid, rid, 1_700_000_002.0)[0]
+    asyncio.run(views.refresh_entry_card(interaction, eco, rid))
+    assert "ライブホース" not in chan.retired[-1][1]["embed"].description
+

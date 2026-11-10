@@ -31,6 +31,20 @@ def race_title(eco, race: dict) -> str:
     return f"🏇 第{eco.race_number(race['id'])}競走" + ("（臨時）" if race["kind"] == "special" else "")
 
 
+async def refresh_entry_card(interaction: discord.Interaction, eco, race_id: int) -> None:
+    """申し込み・取り下げのあと、チャンネルの出馬表（申し込み中）を、いまの申し込みに書き換える。失敗しても、申し込みには影響しない。"""
+    race = eco.race_get(race_id)
+    if race is None or race["status"] != "entry" or not race["message_id"] or not race["channel_id"]:
+        return
+    channel = interaction.guild.get_channel(race["channel_id"]) if interaction.guild else None
+    if channel is None:
+        return
+    try:
+        await channel.get_partial_message(race["message_id"]).edit(embed=card_embed(eco, race))
+    except discord.HTTPException:  # 消されていても、進行には関係ない
+        pass
+
+
 def when(ts: float) -> str:
     return f"<t:{int(ts)}:t>（<t:{int(ts)}:R>）"
 
@@ -626,6 +640,7 @@ class Stable(discord.ui.View):
                 embed=ui.error_embed("申し込めません", reason), ephemeral=True
             )
         await self._redraw(interaction)
+        await refresh_entry_card(interaction, eco, race["id"])
 
     async def _on_withdraw(self, interaction: discord.Interaction):
         eco = self.eco(interaction)
@@ -640,6 +655,7 @@ class Stable(discord.ui.View):
                 embed=ui.error_embed("取り下げられません", reason), ephemeral=True
             )
         await self._redraw(interaction)
+        await refresh_entry_card(interaction, eco, race["id"])
 
     async def _on_new(self, interaction: discord.Interaction):
         await interaction.response.send_modal(NameModal(self))
