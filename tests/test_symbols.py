@@ -349,7 +349,9 @@ def test_empty_holdings_has_no_buttons(eco):
     cog = make_cog(eco)
     it = It()
     asyncio.run(MarketCog.holdings.callback(cog, it))
-    assert "まだ持っていません" in it.sent[-1]["embed"].description and it.sent[-1]["view"] is None
+    assert (
+        "まだ持っていません" in it.sent[-1]["embed"].description and "view" not in it.sent[-1]
+    )  # view=None は渡さない
 
 
 def test_board_without_symbol_shows_summary_with_switcher_and_with_symbol_posts_a_live_chart(eco):

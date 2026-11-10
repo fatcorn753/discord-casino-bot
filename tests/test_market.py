@@ -744,3 +744,10 @@ def test_forced_sales_do_not_pay_the_gains_tax(eco):
     with eco._lock, eco._conn:  # 強制執行などが使う売却（taxable を付けない）
         forced = a._crypto_sell_locked(U, None, 1300, "cs")
     assert forced.ok and forced.profit > 50_000 and forced.tax == 0
+
+
+def test_holdings_without_buttons_does_not_pass_view_none(cog):
+    """保有が無くてボタンも無いとき、view=None を渡さない（本物の discord.py は None で落ちる）。"""
+    it = It()
+    run(MarketCog.holdings.callback(cog, it))
+    assert it.sent[-1].get("view", 0) is not None

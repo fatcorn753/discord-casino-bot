@@ -1214,7 +1214,9 @@ class MarketCog(commands.Cog):
         uid, gid = interaction.user.id, interaction.guild.id
         embed = self.holdings_embed(uid, gid)
         view = HoldingsView(self, uid, gid)
-        await interaction.response.send_message(embed=embed, view=view if view.children else None, ephemeral=True)
+        # ボタンが無いときは、view を渡さない（None を渡すと discord.py が落ちる）
+        kwargs = {"view": view} if view.children else {}
+        await interaction.response.send_message(embed=embed, ephemeral=True, **kwargs)
 
     # ------------------------------ 決済 ------------------------------ #
     async def _position_autocomplete(self, interaction: discord.Interaction, current: str):
