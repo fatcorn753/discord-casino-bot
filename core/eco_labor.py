@@ -70,6 +70,14 @@ class LaborMixin:
                 )
             ]
 
+    @staticmethod
+    def _relics_of(row: dict) -> dict:
+        """受け取る前の発掘品 {品のID: 個数}。"""
+        try:
+            return {k: int(n) for k, n in json.loads(row.get("relics") or "{}").items() if k in shop_mod.BY_ID}
+        except (ValueError, AttributeError):
+            return {}
+
     def _workers_of(self, user_id: int) -> list:
         return [
             dict(r)
@@ -109,6 +117,11 @@ class LaborMixin:
                 self._conn.execute("DELETE FROM labor_workers WHERE id=?", (wid,))
             row["pot"] += plan["gain"] - plan["pot_spent"]
             row["pot_workers"] = min(row["pot"], max(0, row["pot_workers"] + plan["gain"] - plan["pot_spent"]))
+            if plan["relics"]:
+                held = self._relics_of(row)
+                for k, n in plan["relics"].items():
+                    held[k] = held.get(k, 0) + n
+                row["relics"] = json.dumps(held)
             if plan["ores"]:
                 found = self._ores_of(row)
                 for k, n in plan["ores"].items():
@@ -124,7 +137,7 @@ class LaborMixin:
     def _labor_save(self, user_id: int, row: dict) -> None:
         self._conn.execute(
             "UPDATE labor SET pick=?, glove=?, fatigue=?, fatigue_at=?, pot=?, day=?, day_earned=?, "
-            "last_click=?, clicks=?, earned_total=?, dorm=?, wage=?, idle_at=?, renew=?, ores=?, pot_workers=? "
+            "last_click=?, clicks=?, earned_total=?, dorm=?, wage=?, idle_at=?, renew=?, ores=?, pot_workers=?, relics=? "
             "WHERE guild_id=? AND user_id=?",
             (
                 row["pick"],
@@ -143,6 +156,7 @@ class LaborMixin:
                 row["renew"],
                 row.get("ores", ""),
                 row["pot_workers"],
+                row.get("relics", ""),
                 self._g(),
                 user_id,
             ),
@@ -206,6 +220,7 @@ class LaborMixin:
                     "wage": "normal",
                     "renew": 1,
                     "ores": "",
+                    "relics": "",
                 }
             )
             row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now)
@@ -233,6 +248,7 @@ class LaborMixin:
             row["workers"] = len(stay)
             row["slots"] = labor_mod.slots(row["dorm"])
             row["rate"] = labor_mod.idle_rate(self._counts(row), row["wage"])
+            row["relics"] = self._relics_of(row)  # 決算ずみの発掘品
             row["ores"] = self._ores_of(row)  # 決算ずみの鉱石（見込みの分は、掘るまで分からない）
             row["idle_pending"] = plan["gain"]  # まだ数えていない、作業員の稼ぎ（見込み）
             row["pot_total"] = row["pot"] + plan["gain"] - plan["pot_spent"]
@@ -338,16 +354,25 @@ class LaborMixin:
     def labor_collect(self, user_id: int, now: Optional[float] = None, day: str = "", detail: bool = False):
         """受け取る前の稼ぎから、帝愛のピンハネを引いて、残高に移す。移した額（借金の天引きの前）を返す。
 
-        detail=True なら {amount（移した額）, skimmed（帝愛のピンハネ）, ores（掘った鉱石）}。
+        detail=True なら {amount（移した額）, skimmed（帝愛のピンハネ）, ores（掘った鉱石）, relics（見つけた発掘品）}。
+        発掘品は、ペリカにならず、持ち物に入る（稼ぎが 0 でも、受け取れる）。
         """
         now = time.time() if now is None else now
         with self._lock, self._conn:
             row = self._labor_row(user_id, now, day)
             ores = self._ores_of(row)
+            relics = self._relics_of(row)
             row["skimmed"] = 0
             amount = self._labor_flush(user_id, row)
+            for item_id, n in relics.items():
+                self._conn.execute(
+                    "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty",
+                    (self._g(), user_id, item_id, n),
+                )
+            row["relics"] = ""
             self._labor_save(user_id, row)
-            return {"amount": amount, "skimmed": row["skimmed"], "ores": ores} if detail else amount
+            return {"amount": amount, "skimmed": row["skimmed"], "ores": ores, "relics": relics} if detail else amount
 
     def labor_drink(self, user_id: int, now: Optional[float] = None, day: str = "") -> tuple:
         """栄養ドリンコを1本飲んで、疲労を DRINK_RECOVER 回復する。(ok, 理由) を返す。疲れていなければ、減らさない。"""

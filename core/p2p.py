@@ -1,6 +1,6 @@
 """プレイヤー間の取引（定価の市場と競り）の数字と決まり。Discord と DB に依存しない純粋なロジック。
 
-- 売れるもの: 競走馬と、消耗品・見た目の品（カードの色とアイコン・演出・名前の色）。称号・コレクション・限定品・帝愛市の品は売れない。
+- 売れるもの: 競走馬と、消耗品・見た目の品（カードの色とアイコン・演出・名前の色）、発掘品。称号・コレクション・限定品・帝愛市の品は売れない。
 - 売り方: 定価（出した値段で、すぐ買える）と、競り（入札で値段が上がる。締切の時点で、最高値の人が買う）。
 - 手数料: 売り手の受け取りから FEE_RATE を引き、帝愛銀行の収入にする。
 - 送金の抜け道をふさぐ: 値段は、品の定価の幅に収める。同じ2人の取引は、1日の合計に上限がある。
@@ -40,18 +40,24 @@ SLOT_OF_KIND = {
 
 
 def tradable(item_id: str) -> bool:
-    """市場で売れる品か。"""
+    """市場で売れる品か。発掘品は、買えない限定品だが、取引できる（取引のために掘る品）。"""
     item = shop.BY_ID.get(item_id)
-    return item is not None and item.kind in TRADABLE_KINDS and not item.limited and item.price > 0
+    if item is None:
+        return False
+    if item.kind == shop.RELIC:
+        return item_id in shop.RELIC_VALUE
+    return item.price > 0 and item.kind in TRADABLE_KINDS and not item.limited
 
 
 def price_range(kind: str, item_id: str = "", qty: int = 1) -> tuple:
     """出品の値段（ペリカ）の幅 (下限, 上限)。品は定価 × 個数 の割合、馬は決まった幅。"""
     if kind == "horse":
         return HORSE_PRICE_RANGE
-    base = shop.BY_ID[item_id].price * max(1, qty)
+    base = shop.RELIC_VALUE.get(item_id, shop.BY_ID[item_id].price) * max(1, qty)  # 発掘品は、目安の価値
     lo, hi = ITEM_PRICE_RANGE
-    return max(MIN_PRICE, math.ceil(base * lo)), math.floor(base * hi)
+    return max(MIN_PRICE, math.ceil(base * lo)), min(
+        PAIR_DAILY_LIMIT, math.floor(base * hi)
+    )  # 上限は、同じ相手との1日の上限まで
 
 
 def fee_of(price: int) -> int:

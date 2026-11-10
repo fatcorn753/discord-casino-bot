@@ -4,8 +4,8 @@
 - 疲労: 押すたびに溜まり、溜まるほど1回の稼ぎが減る。時間で自然に回復する（事故も、休憩もない）
 - 工具: ツルハシ（稼ぎ）・手袋（疲労の溜まりにくさ）を、稼いだペリカで強化する
 1日の上限や、手元の制限はない（連打は、手間がかかるので、続かない）。稼ぎの速さは、疲労で自然に頭打ちになる。
-作業員は、7日の契約で雇う（自動更新）。基本給だけでは契約料に届かず（赤字）、働いた1時間ごとに鉱石を掘り、
-レア鉱石を引けば大きく黒字になる。期待値は、契約料の100%未満（運の勝負）。
+作業員は、1日の契約で雇う（自動更新）。基本給だけでは契約料に届かず（赤字）、働いた1時間ごとに鉱石を掘り、
+レア鉱石を引けば大きく黒字になる。期待値は、契約料の100%未満（運の勝負）。1日で結果が分かる。
 """
 
 import math
@@ -76,35 +76,42 @@ def click_outcome(pick: int, glove: int, fatigue: float) -> dict:
 # ---------------------------------------------------------------- #
 # 雇用（作業員）。放置でも稼げる。数字はここだけを直せばよい
 # ---------------------------------------------------------------- #
-WORKERS = ("apprentice", "miner", "craftsman", "foreman")
-WORKER_NAME = {"apprentice": "見習い", "miner": "坑夫", "craftsman": "職人", "foreman": "監督"}
-WORKER_MARK = {"apprentice": "🧒", "miner": "👷", "craftsman": "🧑‍🔧", "foreman": "🕴️"}
+WORKERS = ("apprentice", "miner", "craftsman", "archaeologist", "foreman")
+WORKER_NAME = {
+    "apprentice": "見習い",
+    "miner": "坑夫",
+    "craftsman": "職人",
+    "archaeologist": "発掘員",
+    "foreman": "監督",
+}
+WORKER_MARK = {"apprentice": "🧒", "miner": "👷", "craftsman": "🧑‍🔧", "archaeologist": "🧑‍🔬", "foreman": "🕴️"}
 WORKER_RATE = {
-    "apprentice": 0.6,
-    "miner": 3.35,
-    "craftsman": 7.85,
+    "apprentice": 1.8,
+    "miner": 10.05,
+    "craftsman": 23.55,
+    "archaeologist": 0,
     "foreman": 0,
-}  # 基本給（1時間）。毎日受け取る人の、契約料の約5割（監督は掘らない）
-CONTRACT_DAYS = 7  # 契約の期間（日）。切れたら、自動更新（オンの場合）か、退職
-# 契約料（雇うときと、更新のときに払う）。毎日受け取る人が、契約の1週間（168時間）に稼ぐ、基本給（約5割）と鉱石の期待値（約3.5割）の合計を上回る
-CONTRACT_FEE = {"apprentice": 340, "miner": 1_200, "craftsman": 2_700, "foreman": 1_500}
+}  # 基本給（1時間）。毎日受け取る人の、契約料の約3割（監督は掘らない）
+CONTRACT_DAYS = 1  # 契約の期間（日）。切れたら、自動更新（オンの場合）か、退職。1日で、勝ち負けが分かる
+# 契約料（雇うときと、更新のときに払う）。毎日受け取る人が、契約の1日（24時間）に稼ぐ、基本給（約3割）と鉱石の期待値（約5割）の合計を上回る
+CONTRACT_FEE = {"apprentice": 150, "miner": 520, "craftsman": 1_160, "archaeologist": 2_400, "foreman": 640}
 FOREMAN_LUCK = 0.25  # 監督1人ごとに、レア鉱石の出やすさが増える割合（基本給は増えない）
 
 COAL_P = 0.40  # 石炭が出る確率（働いた1時間ごと。見習いでも、半分近い時間で何か掘れる）
 
 # 鉱石。働いた1時間ごとに1回、掘る（外れもある）。(id, 名前, 印, 出る確率, 売値)。確率は、ORE_POWER=1 の作業員のもの
 ORES = (
-    ("copper", "銅", "🟤", 0.06, 20),
-    ("silver", "銀", "⚪", 0.015, 80),
-    ("gold", "金", "🟡", 0.003, 400),
-    ("diamond", "ダイヤ", "💎", 0.0004, 3_000),
-    ("legend", "伝説の鉱石", "🌟", 0.00004, 30_000),
+    ("copper", "銅", "🟤", 0.06, 60),
+    ("silver", "銀", "⚪", 0.015, 240),
+    ("gold", "金", "🟡", 0.003, 1_200),
+    ("diamond", "ダイヤ", "💎", 0.0004, 9_000),
+    ("legend", "伝説の鉱石", "🌟", 0.00004, 90_000),
     (
         "coal",
         "石炭",
         "⚫",
         COAL_P,
-        1,
+        3,
     ),  # ありふれた鉱石。出やすさは、作業員の種類・監督に関係なく同じ（鉱石が全く出ない、をなくす）
 )
 FLAT = ("coal",)  # 出やすさに ORE_POWER・監督の運をかけない鉱石
@@ -113,7 +120,22 @@ ORE_MARK = {o[0]: o[2] for o in ORES}
 ORE_VALUE = {o[0]: o[4] for o in ORES}
 ORE_BIG = ("diamond", "legend")  # 公開で知らせる当たり
 # 作業員の種類ごとの、鉱石の出やすさ（確率にかける。契約料に比例して、期待値は契約料の約3.5割）
-ORE_POWER = {"apprentice": 0.12, "miner": 0.415, "craftsman": 0.95, "foreman": 0.0}
+ORE_POWER = {"apprentice": 0.12, "miner": 0.415, "craftsman": 0.95, "archaeologist": 0.0, "foreman": 0.0}
+
+# 発掘品（コレクション用の宝石・化石・遺物）。発掘員だけが、働いた1時間ごとに1回、探す（基本給も鉱石もない。ペリカにはならず、持ち物になる）。
+# 売値は決まっていない。`/取引` で、プレイヤーどうしが売り買いする。value は、取引の値段の幅の目安（定価の0.1〜5倍。同じ2人の取引の上限は10万）
+# (id, 名前, 印, 出る確率（1時間ごと）, 目安の価値)。ふつうの鉱石と別の作業員が掘る。ペリカを新しく作らない（買い手が払う）
+RELICS = (
+    ("fossil", "三葉虫の化石", "🐚", 0.020, 1_500),
+    ("bone", "恐竜の骨", "🦴", 0.010, 4_000),
+    ("meteor", "隕石の欠片", "☄️", 0.004, 10_000),
+    ("vase", "古代文明の壺", "🏺", 0.0016, 25_000),
+    ("crown", "王家の黄金冠", "👑", 0.0004, 60_000),
+    ("tear", "竜の涙", "🔮", 0.0001, 100_000),
+)
+RELIC_ID = {r[0]: f"relic_{r[0]}" for r in RELICS}  # ショップの品のID（core/shop.py）
+RELIC_BIG = ("crown", "tear")  # 公開で知らせる当たり
+RELIC_POWER = {"apprentice": 0.0, "miner": 0.0, "craftsman": 0.0, "archaeologist": 1.0, "foreman": 0.0}
 
 SLOTS_BASE = 5  # 雇える人数（監督も数える）
 DORM_COST = (2_000, 6_000, 15_000, 40_000, 100_000)  # 寮を1段上げる値段。1段ごとに +1人
@@ -180,6 +202,31 @@ def roll_ores(kind: str, hours: float, luck: float, rng) -> dict:
     return found
 
 
+def roll_relics(kind: str, hours: float, luck: float, rng) -> dict:
+    """作業員1人が hours 時間ぶん働いて掘り当てた発掘品 {id: 個数}（発掘員だけ）。端数の時間は、確率で1回にする。監督の運が効く。"""
+    power = RELIC_POWER.get(kind, 0.0)
+    found: dict = {}
+    if power <= 0:
+        return found
+    n = int(hours)
+    if hours > n and rng.random() < hours - n:
+        n += 1
+    scale = power * (1 + luck)
+    for _ in range(n):
+        x = rng.random()
+        for rid, _, _, p, _ in RELICS:
+            x -= p * scale
+            if x < 0:
+                found[rid] = found.get(rid, 0) + 1
+                break
+    return found
+
+
+def relic_ev(luck: float = 0.0) -> float:
+    """発掘員1人の、1時間あたりの発掘品の価値の期待値（目安の価値で数える）。"""
+    return sum(p * v * RELIC_POWER["archaeologist"] * (1 + luck) for _, _, _, p, v in RELICS)
+
+
 def ore_gain(found: dict) -> int:
     return sum(ORE_VALUE[k] * n for k, n in found.items())
 
@@ -235,7 +282,8 @@ def settle_plan(
     gain = idle_rate(counts_of(staying), wage) * hours
     luck = foreman_luck(counts_of(staying)["foreman"])
     ores: dict = {}
-    finds: list = []  # 掘り出しの履歴 [(時刻, 作業員の種類, 鉱石, 個数)]。抽選は1時間ごとなので、時刻は、その時間枠の終わりにそろえる
+    relics: dict = {}  # 発掘員が見つけた発掘品 {ショップの品のID: 個数}
+    finds: list = []  # 掘り出しの履歴 [(時刻, 作業員の種類, 鉱石か発掘品のID, 個数)]。抽選は1時間ごとなので、時刻は、その時間枠の終わりにそろえる
 
     def dig(kind, h, begin):
         slots = max(1, math.ceil(h))
@@ -244,6 +292,12 @@ def settle_plan(
             for _ in range(n):
                 at = min(now, begin + (1 + int(rng.random() * slots)) * 3600.0)
                 finds.append((at, kind, k, 1))
+        for k, n in roll_relics(kind, h, luck, rng).items():
+            item_id = RELIC_ID[k]
+            relics[item_id] = relics.get(item_id, 0) + n
+            for _ in range(n):
+                at = min(now, begin + (1 + int(rng.random() * slots)) * 3600.0)
+                finds.append((at, kind, item_id, 1))
 
     for w in staying:
         dig(w["kind"], hours, start)
@@ -259,6 +313,7 @@ def settle_plan(
     return {
         "gain": int(gain) + ore_gain(ores),
         "ores": ores,
+        "relics": relics,
         "finds": finds,
         "pot_spent": pot_spent,
         "balance_spent": balance_spent,

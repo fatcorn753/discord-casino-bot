@@ -397,7 +397,11 @@ class ShopView(discord.ui.View):
     def _build_inventory(self) -> None:
         eco = self.cog.bot.economy.for_guild(self.guild_id)
         inv = eco.inventory(self.user_id)
-        owned = [i for i in (shop.BY_ID.get(item_id) for item_id in inv) if i is not None and i.kind != shop.COLLECTION]
+        owned = [
+            i
+            for i in (shop.BY_ID.get(item_id) for item_id in inv)
+            if i is not None and i.kind not in (shop.COLLECTION, shop.RELIC)  # 持っているだけの品は、選択肢に出さない
+        ]
         if owned:
             use = discord.ui.Select(
                 placeholder="身につける・使う景品を選ぶ",
@@ -961,7 +965,7 @@ class ShopCog(commands.Cog):
                     mark = " 【装備中】" if it.id in equipped else ""
                     lines.append(
                         "・"
-                        + f"{it.value if k in (shop.CARD_ICON, shop.COLLECTION) else ''}{it.name}"
+                        + f"{it.value if k in (shop.CARD_ICON, shop.COLLECTION, shop.RELIC) else ''}{it.name}"
                         + (f" ×{inv[it.id]}" if not it.unique else "")
                         + mark
                     )
@@ -1015,6 +1019,14 @@ class ShopCog(commands.Cog):
             active = self.g(interaction).get_profile(uid)[EFFECT_OF_ITEM[it.id]]
             return await interaction.response.send_message(
                 embed=ui.ok_embed("使いました", f"**{it.name}**: {it.desc}\n有効な枚数: **{active}枚**"), ephemeral=True
+            )
+        if it.kind == shop.RELIC:
+            return await interaction.response.send_message(
+                embed=ui.ok_embed(
+                    "発掘品です",
+                    f"**{it.name}** は、持っているだけで飾りになります（使う品ではありません）。`/取引 出品` で、売れます。",
+                ),
+                ephemeral=True,
             )
         if it.kind == shop.COLLECTION:
             return await interaction.response.send_message(

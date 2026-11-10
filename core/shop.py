@@ -4,9 +4,12 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Optional
 
+from core import labor
+
 TITLE, CARD_COLOR, CARD_ICON, CONSUMABLE, COLOR_ROLE = "title", "card_color", "card_icon", "consumable", "color_role"
 RACING = "racing"  # 競馬の品（購入券・にんじん）。買うと持ち物に増え、`/競馬 厩舎` で使う（枚数が増える品なので、消耗品と同じ扱い）
 SKIN_DICE, SKIN_TABLE, COLLECTION = "skin_dice", "skin_table", "collection"
+RELIC = "relic"  # 発掘品（発掘員が掘る）。買えない。持っているだけで飾りになり、`/取引` で売り買いする
 MARKET = "market"  # 帝愛市の品（裏情報メモなど）。持ち物には増えず、買うと、その場で効果が出る
 
 KIND_LABEL = {
@@ -16,6 +19,7 @@ KIND_LABEL = {
     CONSUMABLE: "🎟️ 消耗品",
     RACING: "🐎 競馬",
     MARKET: "🕴️ 帝愛市",
+    RELIC: "🏺 発掘品",
     COLOR_ROLE: "🌈 名前の色（ロール）",
     SKIN_DICE: "🎲 演出（チンチロ用）",
     SKIN_TABLE: "🃏 演出（パチンコ・ブラックジャック用）",
@@ -59,7 +63,7 @@ class Item:
     @property
     def unique(self) -> bool:
         """一度買えば持ち続けるもの（消耗品以外）。"""
-        return self.kind not in (CONSUMABLE, RACING, MARKET)
+        return self.kind not in (CONSUMABLE, RACING, MARKET, RELIC)
 
 
 def _colors(prefix: str, kind: str, price: int, items: list) -> list:
@@ -241,6 +245,23 @@ MARKS = {
     "role_white": "⚪",
 }
 CATALOG = [dataclasses.replace(i, mark=MARKS.get(i.id, "")) for i in CATALOG]
+# 発掘品（買えない限定品。ショップの値段は 0）。数字と出る確率は core/labor.py の RELICS。取引の値段の幅の目安は RELIC_VALUE
+CATALOG += [
+    Item(
+        labor.RELIC_ID[rid],
+        name,
+        RELIC,
+        0,
+        mark,
+        desc="発掘員が見つける、コレクション用の発掘品。持っているだけで飾りになり、`/取引` で売り買いできる",
+        limited=True,
+        mark=mark,
+    )
+    for rid, name, mark, _p, _value in labor.RELICS
+]
+RELIC_VALUE = {
+    labor.RELIC_ID[rid]: value for rid, _n, _m, _p, value in labor.RELICS
+}  # 目安の価値（取引の値段の幅の元）
 BY_ID = {i.id: i for i in CATALOG}
 BY_NAME = {}
 for _i in CATALOG:
@@ -263,7 +284,7 @@ def find_all(key: str) -> list:
 
 def label(item: Item) -> str:
     """一覧・候補に出す表示名（種類が分かる形）。"""
-    icon = item.value if item.kind in (CARD_ICON, COLLECTION) else ""
+    icon = item.value if item.kind in (CARD_ICON, COLLECTION) else item.mark if item.kind == RELIC else ""
     return f"{KIND_LABEL[item.kind].split(' ', 1)[1]}：{icon}{item.name}"
 
 

@@ -12,7 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core import labor as lab
-from core import teiai, ui
+from core import shop, teiai, ui
 
 VIEW_TIMEOUT = 900  # 画面が反応する時間（秒）。過ぎたら、`/地下 作業` で開き直す
 
@@ -32,11 +32,24 @@ def ore_text(found: dict) -> str:
     return "　".join(f"{lab.ORE_MARK[k]}{lab.ORE_NAME[k]}×{found[k]}" for k in order if found.get(k))
 
 
+def relic_text(found: dict) -> str:
+    """見つけた発掘品の一覧（目安の価値の高い順）。"""
+    order = sorted(found, key=lambda i: -shop.RELIC_VALUE.get(i, 0))
+    return "　".join(f"{shop.BY_ID[i].mark}{shop.BY_ID[i].name}×{found[i]}" for i in order if found.get(i))
+
+
+def _find_label(f: dict) -> str:
+    """掘り出し1つの表示（鉱石は売値、発掘品は目安の価値）。"""
+    if f["ore"] in shop.RELIC_VALUE:
+        item = shop.BY_ID[f["ore"]]
+        return f"{item.mark}{item.name}（目安 {shop.RELIC_VALUE[f['ore']]:,}）"
+    return f"{lab.ORE_MARK[f['ore']]}{lab.ORE_NAME[f['ore']]}（{lab.ORE_VALUE[f['ore']]:,}）"
+
+
 def finds_text(finds: list) -> str:
     """最近の掘り出し（石炭は除く）。いつ・どの作業員が・何を掘ったか。"""
     return "\n".join(
-        f"<t:{int(f['at'])}:R>　{lab.WORKER_MARK[f['kind']]}{lab.WORKER_NAME[f['kind']]} が "
-        f"{lab.ORE_MARK[f['ore']]}{lab.ORE_NAME[f['ore']]}（{lab.ORE_VALUE[f['ore']]:,}）"
+        f"<t:{int(f['at'])}:R>　{lab.WORKER_MARK[f['kind']]}{lab.WORKER_NAME[f['kind']]} が {_find_label(f)}"
         for f in finds
     )
 
@@ -74,6 +87,8 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     )
     if state.get("ores"):
         e.add_field(name="💎 作業員の掘り出し", value=ore_text(state["ores"]), inline=False)
+    if state.get("relics"):
+        e.add_field(name="🏺 発掘品（受け取ると持ち物に入る）", value=relic_text(state["relics"]), inline=False)
     if state.get("finds"):
         e.add_field(name="📜 最近の掘り出し", value=finds_text(state["finds"]), inline=False)
     e.set_footer(
@@ -114,11 +129,14 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
         inline=True,
     )
     for k in lab.WORKERS:
-        gain = (
-            f"基本給 {lab.WORKER_RATE[k]:g}/時 ＋ 鉱石"
-            if k != "foreman"
-            else f"レア鉱石が出やすい +{lab.FOREMAN_LUCK:.0%}"
-        )
+        if k == "foreman":
+            gain = f"レア鉱石・発掘品が出やすい +{lab.FOREMAN_LUCK:.0%}"
+        elif k == "archaeologist":
+            gain = (
+                "基本給・鉱石はなし。1時間に1回、**発掘品**（化石・遺物）を探す（ペリカにはならず、`/取引` で売れる）"
+            )
+        else:
+            gain = f"基本給 {lab.WORKER_RATE[k]:g}/時 ＋ 鉱石"
         until = f"\n契約が切れる: <t:{int(state['expires'][k])}:R>" if state["expires"].get(k) else ""
         e.add_field(
             name=f"{lab.WORKER_MARK[k]} {lab.WORKER_NAME[k]} ×{state[k]}",
@@ -173,7 +191,7 @@ class LaborView(discord.ui.View):
             emoji="💰",
             style=discord.ButtonStyle.success,
             row=0,
-            disabled=s["pot_total"] <= 0,
+            disabled=s["pot_total"] <= 0 and not s["relics"],  # 発掘品だけでも、受け取れる
         )
         collect.callback = self._collect
         if self.tab == "hire":
@@ -289,13 +307,20 @@ class LaborView(discord.ui.View):
 
     async def _collect(self, interaction: discord.Interaction):
         got = self.eco().labor_collect(self.user_id, time.time(), today(self.bot), detail=True)
-        amount, found = got["amount"], got["ores"]
+        amount, found, relics = got["amount"], got["ores"], got["relics"]
         note = f"💰 **{amount:,}** ペリカを、まとめて手元に移しました。" if amount else ""
         if got["skimmed"]:
             note += f"\n🎗️ ピンハネされた **{got['skimmed']:,}** ペリカは、慈善団体に寄付されます（稼ぎの{teiai.LABOR_SKIM_RATE:.0%}）"
         if found:
             note += f"\n💎 掘り出し: {ore_text(found)}"
+        if relics:
+            note += f"\n🏺 発掘品が持ち物に入りました: {relic_text(relics)}"
         await self._show(interaction, note)
+        big_relics = {i: n for i, n in relics.items() if i.removeprefix("relic_") in lab.RELIC_BIG}
+        if big_relics:  # 大当たりの発掘品も、みんなに知らせる
+            await interaction.followup.send(
+                f"🎉 {interaction.user.mention} の発掘員が、**{relic_text(big_relics)}** を掘り当てた！"
+            )
         big = {k: n for k, n in found.items() if k in lab.ORE_BIG}
         if big:  # 大当たりは、みんなに知らせる
             await interaction.followup.send(

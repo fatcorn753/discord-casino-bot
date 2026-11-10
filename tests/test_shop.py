@@ -29,7 +29,7 @@ def test_catalog_is_consistent():
     assert all(i.price > 0 for i in shop.CATALOG if not i.limited)  # 売り物には値段がある
     assert all(i.price == 0 for i in shop.CATALOG if i.limited)
     for kind in shop.KIND_LABEL:
-        assert shop.of_kind(kind), kind
+        assert shop.of_kind(kind, include_limited=kind == shop.RELIC), kind  # 発掘品は、買えない限定品だけ
     # 色ロールの色は 0x000000（Discord では「色なし」扱い）にしない
     assert all(i.value != 0 for i in shop.of_kind(shop.COLOR_ROLE))
     assert shop.find("title_zawa") is shop.find("ざわ…ざわ…")

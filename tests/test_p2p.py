@@ -48,7 +48,12 @@ def horse(eco, uid=S, name="ホース"):
 def test_only_consumables_and_cosmetics_are_tradable():
     assert p2p.tradable(CARROT) and p2p.tradable(CARD) and p2p.tradable(shop.GOLD_CARROT)
     assert not p2p.tradable("title_regular") and not p2p.tradable(shop.INSIDER_MEMO)
-    assert not any(p2p.tradable(i.id) for i in shop.CATALOG if i.kind in (shop.COLLECTION, shop.TITLE) or i.limited)
+    assert not any(
+        p2p.tradable(i.id)
+        for i in shop.CATALOG
+        if i.kind in (shop.COLLECTION, shop.TITLE) or (i.limited and i.kind != shop.RELIC)
+    )
+    assert all(p2p.tradable(i.id) for i in shop.CATALOG if i.kind == shop.RELIC)  # 発掘品は、買えないが、取引できる
     assert not p2p.tradable("ない品")
 
 
@@ -351,3 +356,25 @@ def test_bid_through_the_modal_and_settlement_announces_the_winner(cog, eco, mon
     monkeypatch.setattr(eco, "p2p_settle", lambda now=None: eco.__class__.p2p_settle(eco, NOW + 5_000))
     asyncio.run(cog._settle_guild(guild))
     assert chan.sent and "落札" in chan.sent[0]["embed"].title and f"<@{B}>" in chan.sent[0]["embed"].description
+
+
+# ----------------------------- 発掘品の取引（#24） ----------------------------- #
+def test_relics_can_be_traded_within_their_reference_value_range(eco):
+    rid = "relic_vase"
+    value = shop.RELIC_VALUE[rid]
+    give(eco, S, rid, 2)
+    lo, hi = p2p.price_range("item", rid, 1)
+    assert lo == max(p2p.MIN_PRICE, int(value * 0.10)) and hi == min(p2p.PAIR_DAILY_LIMIT, value * 5)
+    assert not eco.p2p_list(S, "item", rid, 1, "fixed", lo - 1, None, NOW)[0]  # 安すぎる
+    ok, lid = eco.p2p_list(S, "item", rid, 1, "fixed", value, None, NOW)
+    assert ok and eco.inventory(S)[rid] == 1
+    assert eco.p2p_buy(B, lid, NOW + 1)[0] and eco.inventory(B)[rid] == 1  # 発掘品は、いくつでも持てる
+    ok, lid2 = eco.p2p_list(S, "item", rid, 1, "auction", value, 6, NOW)
+    assert ok and eco.p2p_bid(B, lid2, value, NOW + 10)[0]
+    assert eco.p2p_settle(NOW + 7 * 3600)[0][1] == "sold" and eco.inventory(B)[rid] == 2
+
+
+def test_the_most_valuable_relic_still_fits_under_the_pair_cap(eco):
+    top = max(shop.RELIC_VALUE, key=shop.RELIC_VALUE.get)
+    lo, hi = p2p.price_range("item", top, 1)
+    assert hi <= p2p.PAIR_DAILY_LIMIT and lo < shop.RELIC_VALUE[top] <= hi
