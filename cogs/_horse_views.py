@@ -155,6 +155,48 @@ def card_view(race_id: int, betting: bool) -> discord.ui.View:
     return view
 
 
+class RetireView(discord.ui.View):
+    """引退の確認。戦績に応じて、引退金をもらう（戦績が悪いと、引退費用を払う）。"""
+
+    def __init__(self, stable: "Stable", user_id: int, horse: dict, value: int):
+        super().__init__(timeout=300)
+        self.stable, self.user_id, self.horse, self.value = stable, user_id, horse, value
+        ok = discord.ui.Button(label="🎌 引退させる", style=discord.ButtonStyle.danger)
+        ok.callback = self._on_ok
+        self.add_item(ok)
+
+    def embed(self) -> discord.Embed:
+        h = self.horse
+        if self.value >= 0:
+            money = f"引退金 **+{ui.pelica(self.value)}** をもらえます。"
+        else:
+            money = f"引退費用 **{ui.pelica(-self.value)}** を払います。"
+        return ui.embed(
+            "🎌 引退",
+            f"{h['silks']} **{h['name']}** を引退させます。\n戦績 {h['races']}戦{h['wins']}勝（3着以内 {h['places']}）\n{money}\n"
+            "引退した馬は、もう戻りません。",
+            ui.INFO,
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    async def _on_ok(self, interaction: discord.Interaction):
+        eco = self.stable.eco(interaction)
+        ok, result = eco.horse_retire(interaction.user.id, self.horse["id"])
+        if not ok:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("引退させられません", result), ephemeral=True
+            )
+        self.stop()
+        remaining = eco.horse_list(interaction.user.id)
+        self.stable.horse_id = remaining[0]["id"] if remaining else None  # 厩舎の画面で選んでいた馬は、もういない
+        text = f"引退金 +{ui.pelica(result)}" if result >= 0 else f"引退費用 {ui.pelica(-result)}"
+        await interaction.response.edit_message(
+            embed=ui.ok_embed("引退しました", f"**{self.horse['name']}** は引退しました。{text}"), view=None
+        )
+
+
 # ---------------------------------------------------------------- #
 # 馬券を買う
 # ---------------------------------------------------------------- #
@@ -597,6 +639,7 @@ class Stable(discord.ui.View):
             ("🏁 出走を申し込む", discord.ButtonStyle.success, self._on_enter, not horses, 3),
             ("↩️ 申し込みを取り下げる", discord.ButtonStyle.secondary, self._on_withdraw, not horses, 3),
             ("🐴 新しい馬を迎える", discord.ButtonStyle.secondary, self._on_new, False, 4),
+            ("🎌 引退させる", discord.ButtonStyle.danger, self._on_retire, not horses, 4),
         ]
         for label, style, cb, disabled, row in buttons:
             b = discord.ui.Button(label=label, style=style, disabled=disabled, row=row)
@@ -632,6 +675,17 @@ class Stable(discord.ui.View):
         if not ok:
             return await interaction.response.send_message(embed=ui.error_embed("動かせません", result), ephemeral=True)
         await self._redraw(interaction)
+
+    async def _on_retire(self, interaction: discord.Interaction):
+        eco = self.eco(interaction)
+        horse = eco.horse_get(self.horse_id)
+        if horse is None or horse["owner_id"] != interaction.user.id:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("引退させられません", "自分の馬を選んでください。"), ephemeral=True
+            )
+        value = horse_mod.retire_value(horse["races"], horse["wins"], horse["places"])
+        view = RetireView(self, interaction.user.id, horse, value)
+        await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
     def _next_entry_race(self, eco):
         return next((r for r in eco.race_open() if r["status"] == "entry"), None)

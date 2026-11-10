@@ -410,3 +410,42 @@ def test_card_posts_from_the_command_are_rewritten_when_betting_closes(setup, mo
     assert any(mid == 900 and "締め切りました" in kw["embed"].description for mid, kw in chan.retired)
     assert rid not in cog._posts
 
+
+class _It:
+    def __init__(self, uid, values=None):
+        self.user = SimpleNamespace(id=uid)
+        self.guild_id = 0
+        self.data = {"values": values or []}
+        self.sent, self.edited = [], []
+        self.response = SimpleNamespace(send_message=self._send, edit_message=self._edit)
+
+    async def _send(self, *a, **kw):
+        self.sent.append(kw)
+
+    async def _edit(self, **kw):
+        self.edited.append(kw)
+
+
+def _stable_with_horse(setup):
+    eco, chan, guild, bot, cog = setup
+    eco.credit(U, 100_000, "テスト")
+    eco._conn.execute(
+        "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, 1)", (eco._g(), U, shop.HORSE_VOUCHER)
+    )
+    ok, hid = eco.horse_create(U, "ホースA", "鹿毛", "🟦")
+    assert ok
+    return eco, bot, views.Stable(bot, U, 0), hid
+
+
+def test_retire_view_charges_or_pays_and_updates_the_stable(setup):
+    eco, bot, stable, hid = _stable_with_horse(setup)
+    eco._conn.execute("UPDATE horses SET races=10, wins=3, places=5 WHERE id=?", (hid,))
+    horse = eco.horse_get(hid)
+    value = h.retire_value(10, 3, 5)
+    view = views.RetireView(stable, U, horse, value)
+    assert "引退金" in view.embed().description
+    before = eco.balance(U)
+    it = _It(U)
+    asyncio.run(view._on_ok(it))
+    assert eco.balance(U) == before + value and "引退しました" in it.edited[0]["embed"].title
+    assert eco.horse_list(U) == [] and stable.horse_id is None

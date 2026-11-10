@@ -87,6 +87,18 @@ def valid_stats(stats: dict) -> bool:
     )
 
 
+RETIRE_WIN = 8_000  # 引退金: 1勝ごと
+RETIRE_PLACE = 3_000  # 3着以内（勝ちを除く）1回ごと
+RETIRE_LOSS = 1_500  # 3着に入れなかった1回ごとの、引退費用
+RETIRE_MAX, RETIRE_FEE_MAX = 100_000, 20_000  # 引退金の上限・引退費用の上限
+
+
+def retire_value(races: int, wins: int, places: int) -> int:
+    """引退のとき、もらう額（マイナスなら払う額）。戦績が良いほど増え、悪いと引退費用になる。"""
+    value = wins * RETIRE_WIN + max(0, places - wins) * RETIRE_PLACE - max(0, races - places) * RETIRE_LOSS
+    return max(-RETIRE_FEE_MAX, min(RETIRE_MAX, value))
+
+
 def move_points(stats: dict, src: str, dst: str, carrots: int = 1) -> tuple:
     """にんじん carrots 本ぶん、src から dst へポイントを動かす。(成功か, 理由か新しいステータス)。"""
     if src == dst or src not in STAT_KEYS or dst not in STAT_KEYS:

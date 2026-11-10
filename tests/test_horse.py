@@ -181,6 +181,40 @@ def test_carrot_moves_five_points_and_is_consumed(eco):
     assert sum(eco.horse_get(hid)[k] for k in h.STAT_KEYS) == h.STAT_TOTAL
 
 
+def test_retire_value_rewards_a_good_record_and_charges_for_a_bad_one():
+    assert h.retire_value(0, 0, 0) == 0
+    assert h.retire_value(10, 5, 8) > h.retire_value(10, 1, 3) > 0 > h.retire_value(10, 0, 1)
+    assert h.retire_value(100, 100, 100) == h.RETIRE_MAX and h.retire_value(100, 0, 0) == -h.RETIRE_FEE_MAX
+
+
+def test_retire_pays_or_charges_and_removes_the_horse(eco):
+    good = make_horse(eco, U, "良い馬")
+    eco._conn.execute("UPDATE horses SET races=10, wins=4, places=7 WHERE id=?", (good,))
+    before = eco.balance(U)
+    ok, value = eco.horse_retire(U, good)
+    assert ok and value == h.retire_value(10, 4, 7) > 0 and eco.balance(U) > before
+    assert eco.horse_list(U) == [] and not eco.horse_retire(U, good)[0]  # もう持っていない
+    bad = make_horse(eco, U, "弱い馬")
+    eco._conn.execute("UPDATE horses SET races=10, wins=0, places=1 WHERE id=?", (bad,))
+    before = eco.balance(U)
+    ok, value = eco.horse_retire(U, bad)
+    assert ok and value < 0 and eco.balance(U) == before + value  # 引退費用を払う
+
+
+def test_retire_is_refused_for_other_owners_scheduled_horses_and_when_the_fee_cannot_be_paid(eco):
+    hid = make_horse(eco, U)
+    assert not eco.horse_retire(V, hid)[0]
+    rid = open_race(eco)
+    assert eco.race_register(U, hid, rid, NOW + 1)[0]
+    ok, why = eco.horse_retire(U, hid)
+    assert not ok and "出走予定" in why
+    eco.race_withdraw(U, hid, rid, NOW + 2)
+    eco._conn.execute("UPDATE horses SET races=20, wins=0, places=0 WHERE id=?", (hid,))
+    eco._conn.execute("UPDATE users SET balance=100 WHERE guild_id=? AND user_id=?", (eco._g(), U))
+    ok, why = eco.horse_retire(U, hid)
+    assert not ok and "足りません" in why and eco.horse_get(hid)["owner_id"] == U
+
+
 def test_closing_entries_copies_the_record_and_gives_npcs_one(eco):
     hid = make_horse(eco, U)
     eco._conn.execute("UPDATE horses SET races=6, wins=2, places=4 WHERE id=?", (hid,))

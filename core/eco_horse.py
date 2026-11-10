@@ -83,6 +83,36 @@ class HorseMixin:
             )
             return True, result
 
+    def horse_retire(self, user_id: int, horse_id: int) -> tuple:
+        """馬を引退させる。戦績に応じて、引退金をもらう（戦績が悪いと、引退費用を払う）。(成功か, 理由かもらった額（払ったらマイナス）)。
+
+        出走予定（申し込み中・発売中）の馬は、引退できない。引退した馬は、持ち馬から消える（owner_id=-2）。
+        """
+        with self._lock, self._conn:
+            h = self.horse_get(horse_id)
+            if h is None or h["owner_id"] != user_id:
+                return False, "自分の馬を選んでください。"
+            busy = self._conn.execute(
+                "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
+                "WHERE e.horse_id=? AND r.status IN ('entry','betting')",
+                (horse_id,),
+            ).fetchone()
+            if busy:
+                return False, "出走予定のレースが終わるまで、引退できません。"
+            value = horse_mod.retire_value(h["races"], h["wins"], h["places"])
+            self._ensure(user_id)
+            if value < 0 and self._balance(user_id) < -value:
+                return False, f"引退費用 {-value:,}ペリカ が足りません（残高 {self._balance(user_id):,}ペリカ）。"
+            if value:
+                self._apply(
+                    user_id,
+                    value,
+                    f"競馬:引退{'金' if value > 0 else '費用'}（{h['name']}）",
+                    income=max(0, value),
+                )
+            self._conn.execute("UPDATE horses SET owner_id=-2 WHERE id=?", (horse_id,))
+            return True, value
+
     # ---------------------------------------------------------------- #
     # レースの用意                                                      #
     # ---------------------------------------------------------------- #
