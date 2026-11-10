@@ -608,7 +608,7 @@ def test_teiai_skims_the_labor_earnings_when_collected(eco, monkeypatch):
     assert got["skimmed"] == skim and got["amount"] == pot - skim
     assert eco.balance(U) == pot - skim  # 手元に入るのは、ピンハネの残り
     assert any(
-        "帝愛のピンハネ（地下作業" in r["reason"]
+        "慈善団体への寄付（地下作業" in r["reason"]
         for r in eco._conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))
     )
 
@@ -635,3 +635,25 @@ def test_the_skim_applies_to_everyone_and_the_debt_withholding_takes_its_share_o
     net = pot - int(pot * 0.10)
     assert got["amount"] == net
     assert eco.debt(U) == debt_before - int(net * teiai.REPAY_RATE)  # 借金の天引きは、ピンハネの残りにかかる
+
+
+def test_the_default_skim_is_one_percent_and_the_screens_call_it_a_charity_donation(eco, monkeypatch):
+    monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.01)
+    assert teiai.labor_skim(10_000) == 100
+    monkeypatch.setattr(lab, "roll_ores", lambda kind, h, luck, rng: {"diamond": 1} if h > 0 else {})
+    eco.credit(U, 5_000, "テスト")
+    eco.labor_hire(U, "miner", T0, DAY)
+    view = make_view(eco)
+    assert "慈善団体" in labor_cog.panel_embed(eco.labor_state(U, T0, DAY)).footer.text
+    sent = []
+
+    async def send(content, **kw):
+        sent.append(content)
+
+    it = SimpleNamespace(
+        user=SimpleNamespace(id=U, mention="<@1>"), response=Resp(), data={}, followup=SimpleNamespace(send=send)
+    )
+    monkeypatch.setattr(labor_cog.time, "time", lambda: T0 + H)
+    asyncio.run(view._collect(it))
+    desc = it.response.edits[-1]["embed"].description
+    assert "慈善団体に寄付されます" in desc and "30" in desc  # ダイヤ3,000の1%

@@ -58,7 +58,7 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     if state.get("ores"):
         e.add_field(name="💎 作業員の掘り出し", value=ore_text(state["ores"]), inline=False)
     e.set_footer(
-        text=f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します（帝愛が{teiai.LABOR_SKIM_RATE:.0%}ピンハネ）。"
+        text=f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します（{teiai.LABOR_SKIM_RATE:.0%}は、慈善団体に寄付されます）。"
     )
     return e
 
@@ -273,7 +273,7 @@ class LaborView(discord.ui.View):
         amount, found = got["amount"], got["ores"]
         note = f"💰 **{amount:,}** ペリカを、まとめて手元に移しました。" if amount else ""
         if got["skimmed"]:
-            note += f"\n🕴️ 帝愛にピンハネされた: **{got['skimmed']:,}**（稼ぎの{teiai.LABOR_SKIM_RATE:.0%}）"
+            note += f"\n🎗️ ピンハネされた **{got['skimmed']:,}** ペリカは、慈善団体に寄付されます（稼ぎの{teiai.LABOR_SKIM_RATE:.0%}）"
         if found:
             note += f"\n💎 掘り出し: {ore_text(found)}"
         await self._show(interaction, note)

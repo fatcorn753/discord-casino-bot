@@ -125,7 +125,9 @@ class LaborMixin:
         skimmed = teiai.labor_skim(amount)  # 地下労働なので、帝愛がピンハネする（借金の有無に関わらず）
         net = amount - skimmed
         if skimmed:
-            self._ledger(user_id, 0, self._balance(user_id), f"帝愛のピンハネ（地下作業 {skimmed:,}ペリカ）")
+            self._ledger(
+                user_id, 0, self._balance(user_id), f"慈善団体への寄付（地下作業のピンハネ {skimmed:,}ペリカ）"
+            )
             self._house_income(skimmed)  # 帝愛の胴元の口座に入る
         self._apply(user_id, net, "地下作業:稼ぎ", income=net)
         row["pot"] = 0
