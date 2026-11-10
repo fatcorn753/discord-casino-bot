@@ -144,18 +144,20 @@ def test_favorite_and_longshot_spread_is_reasonable():
     assert 0.2 < sum(tops) / len(tops) < 0.6 and sum(bottoms) / len(bottoms) < 0.05
 
 
-def test_race_slots_are_every_three_hours_eight_a_day_in_local_time():
+def test_race_slots_are_four_a_day_between_9_and_midnight_in_local_time():
     tz = 9.0
     base = datetime.datetime(2026, 11, 9, 11, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=tz))).timestamp()
     slots = Economy.race_slots(base, tz)
     local = [datetime.datetime.fromtimestamp(s, datetime.timezone(datetime.timedelta(hours=tz))) for s in slots[:3]]
-    assert [(x.day, x.hour) for x in local] == [(9, 12), (9, 15), (9, 18)]
+    assert [(x.day, x.hour) for x in local] == [(9, 13), (9, 17), (9, 21)]
     day = [
         s
         for s in slots
         if datetime.datetime.fromtimestamp(s, datetime.timezone(datetime.timedelta(hours=tz))).day == 10
     ]
-    assert len(day) == 8
+    assert len(day) == 4
+    hours = {datetime.datetime.fromtimestamp(s, datetime.timezone(datetime.timedelta(hours=tz))).hour for s in day}
+    assert hours == {9, 13, 17, 21} and all(9 <= x < 24 for x in hours)  # 9時から0時までの間だけ
 
 
 # ----------------------------- 馬 ----------------------------- #
@@ -492,7 +494,9 @@ def test_auction_horse_price_falls_and_only_katagi_with_room_can_buy(eco):
     assert eco.bankrupt(U)[0]
     listed_at = eco.horse_get(hid)["listed_at"]
     day = 86400
-    assert eco.horse_auction_price(listed_at, listed_at + 5 * day) == round(eco.HORSE_PRICE * teiai.AUCTION_FLOOR)  # 下限（70%）
+    assert eco.horse_auction_price(listed_at, listed_at + 5 * day) == round(
+        eco.HORSE_PRICE * teiai.AUCTION_FLOOR
+    )  # 下限（70%）
     eco.credit(V, 100_000, "テスト")
     assert not eco.auction_buy_horse(U, hid).ok  # 破産者は買えない
     res = eco.auction_buy_horse(V, hid, listed_at)
@@ -507,32 +511,40 @@ def test_auction_horse_price_falls_and_only_katagi_with_room_can_buy(eco):
 
 
 # ----------------------------- 臨時レースは、出走予定の馬も出せる ----------------------------- #
+def _regular_race(eco):
+    """申し込みを始める時刻（発走の2時間前）の定時レースを作って、(レース番号, その時刻) を返す。"""
+    opens = Economy.race_slots(NOW, 9.0)[0] - h.ENTRY_OPEN_MIN * 60
+    race = eco.race_ensure_scheduled(opens, 9.0)
+    assert race is not None
+    return race, opens
+
+
 def test_a_horse_scheduled_for_a_regular_race_can_still_enter_a_special_race(eco):
     hid = make_horse(eco, U)
-    regular = eco.race_ensure_scheduled(NOW, 9.0)
-    assert eco.race_register(U, hid, regular, NOW + 1) == (True, "")  # 定時に出走予定
-    special = open_race(eco)
-    assert eco.race_register(U, hid, special, NOW + 2) == (True, "")  # 臨時にも出せる
-    assert eco.race_withdraw(U, hid, special, NOW + 3)[0]  # 臨時だけを取り下げても、定時はそのまま
+    regular, opens = _regular_race(eco)
+    special = eco.race_create_special(opens, 10, 10)
+    assert eco.race_register(U, hid, regular, opens + 1) == (True, "")  # 定時に出走予定
+    assert eco.race_register(U, hid, special, opens + 2) == (True, "")  # 臨時にも出せる
+    assert eco.race_withdraw(U, hid, special, opens + 3)[0]  # 臨時だけを取り下げても、定時はそのまま
     assert [e["race_id"] for e in eco.race_entries(regular, registered_only=True)] == [regular]
 
 
 def test_a_horse_in_a_special_race_can_enter_a_regular_race_but_two_regular_races_stay_exclusive(eco):
     hid = make_horse(eco, U)
-    special = open_race(eco)
-    assert eco.race_register(U, hid, special, NOW + 1)[0]
-    regular = eco.race_ensure_scheduled(NOW, 9.0)
-    assert eco.race_register(U, hid, regular, NOW + 2)[0]  # 臨時に出ていても、定時に出せる
-    second_special = open_race(eco, NOW + 3)
-    assert eco.race_register(U, hid, second_special, NOW + 4)[0]  # 臨時どうしも、重ねて出せる
+    regular, opens = _regular_race(eco)
+    special = eco.race_create_special(opens, 10, 10)
+    assert eco.race_register(U, hid, special, opens + 1)[0]
+    assert eco.race_register(U, hid, regular, opens + 2)[0]  # 臨時に出ていても、定時に出せる
+    second_special = eco.race_create_special(opens + 3, 10, 10)
+    assert eco.race_register(U, hid, second_special, opens + 4)[0]  # 臨時どうしも、重ねて出せる
     start = eco.race_get(regular)["start_at"]
     eco._conn.execute(
         "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, created) "
         "VALUES (?, 'regular', ?, ?, ?, 'entry', ?)",
-        (eco._g(), start + 43200, start + 43000, start + 43100, NOW),
+        (eco._g(), start + 43200, start + 43000, start + 43100, opens),
     )
     other_regular = eco._conn.execute("SELECT MAX(id) FROM horse_races").fetchone()[0]
-    ok, why = eco.race_register(U, hid, other_regular, NOW + 5)
+    ok, why = eco.race_register(U, hid, other_regular, opens + 5)
     assert not ok and "ほかのレースに出走予定" in why  # 定時どうしは、これまでどおり、重ねて出せない
 
 
