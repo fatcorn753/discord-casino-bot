@@ -143,7 +143,7 @@ def test_card_embed_for_each_stage_and_bet_panel(setup):
     race = eco.race_get(rid)
     assert "出走受付中" in views.card_embed(eco, race).title
     field = eco.race_close_entries(rid, random.Random(1))
-    eco.race_set_odds(rid, h.make_odds(field["runners"], field["track"], sims=200, seed=1))
+    eco.race_set_odds(rid, h.make_odds(field["runners"]))
     race = eco.race_get(rid)
     card = views.card_embed(eco, race)
     assert "発売中" in card.title and card.description.count("単勝") >= h.FIELD_SIZE
@@ -188,7 +188,7 @@ def test_bet_panel_builds_for_every_kind_and_shows_the_odds(setup):
     eco, chan, guild, bot, cog = setup
     rid = eco.race_create_special(1_700_000_000.0, 1, 1)
     field = eco.race_close_entries(rid, random.Random(1))
-    eco.race_set_odds(rid, h.make_all_odds(field["runners"], field["track"], sims=200, seed=1))
+    eco.race_set_odds(rid, h.make_all_odds(field["runners"]))
     race = {**eco.race_get(rid), "guild_id": 0}
     panel = views.BetPanel(SimpleNamespace(economy=SimpleNamespace(for_guild=lambda g: eco)), V, race)
     selects = {}
@@ -240,7 +240,7 @@ def test_bet_is_announced_publicly_in_the_race_channel(setup):
 def _open_race(eco):
     rid = eco.race_create_special(1_700_000_000.0, 1, 1)
     field = eco.race_close_entries(rid, random.Random(1))
-    eco.race_set_odds(rid, h.make_all_odds(field["runners"], field["track"], sims=200, seed=1))
+    eco.race_set_odds(rid, h.make_all_odds(field["runners"]))
     race = eco.race_get(rid)
     return rid, race, race["bet_close"] - 10
 

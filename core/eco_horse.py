@@ -256,6 +256,7 @@ class HorseMixin:
                 rows.append(
                     (e["horse_id"], e["owner_id"], h["name"], h["coat"], h["silks"])
                     + tuple(h[k] for k in horse_mod.STAT_KEYS)
+                    + (h.get("races", 0), h.get("wins", 0), h.get("places", 0))  # 戦績のコピー（オッズに使う）
                 )
             self._conn.execute("DELETE FROM horse_entries WHERE race_id=?", (race_id,))
             taken = {r[2] for r in rows}
@@ -278,17 +279,20 @@ class HorseMixin:
                         silks,
                     )
                     + tuple(s[k] for k in horse_mod.STAT_KEYS)
+                    + horse_mod.npc_record(rng)
                 )
             rng.shuffle(rows)
             runners = []
             for lane, row in enumerate(rows, start=1):
                 form = horse_mod.random_form(rng)
                 self._conn.execute(
-                    "INSERT INTO horse_entries (race_id, lane, horse_id, owner_id, name, coat, silks, speed, stamina, power, guts, form) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO horse_entries (race_id, lane, horse_id, owner_id, name, coat, silks, speed, stamina, power, guts, "
+                    "races, wins, places, form) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (race_id, lane) + row + (form,),
                 )
-                runners.append(horse_mod.Runner(lane, row[2], row[5], row[6], row[7], row[8], form))
+                runners.append(
+                    horse_mod.Runner(lane, row[2], row[5], row[6], row[7], row[8], form, row[9], row[10], row[11])
+                )
             track = horse_mod.random_track(rng)
             self._conn.execute(
                 "UPDATE horse_races SET status='betting', distance=?, going=? WHERE id=?",

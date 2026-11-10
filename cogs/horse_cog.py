@@ -7,7 +7,6 @@
 """
 
 import asyncio
-import random
 import time
 
 import discord
@@ -236,11 +235,7 @@ class HorseCog(commands.Cog):
         if field is None:
             return
         await self._retire(guild, eco, race)  # 申し込みの投稿（race は、まだ entry のときの値）
-        seed = random.SystemRandom().randrange(2**31)
-        odds = await asyncio.to_thread(
-            horse_mod.make_all_odds, field["runners"], field["track"], horse_mod.ODDS_SIMS, seed
-        )
-        eco.race_set_odds(race["id"], odds)  # シミュレーションは重いので、別スレッドで走らせる
+        eco.race_set_odds(race["id"], horse_mod.make_all_odds(field["runners"]))  # 戦績から決める（計算は軽い）
         race = eco.race_get(race["id"])
         channel = await self._channel(guild, eco, race)
         if channel is not None:

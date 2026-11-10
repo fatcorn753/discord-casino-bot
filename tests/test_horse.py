@@ -84,15 +84,54 @@ def test_the_stronger_build_wins_more_often_but_not_always():
     assert 0.55 < win[0] < 0.97  # 強い馬が有利だが、負けることもある
 
 
-def test_odds_keep_the_house_edge_and_round_down():
-    rng = random.Random(5)
-    runners = field(rng)
-    track = h.Track(1800, "良")
-    odds = h.make_odds(runners, track, sims=2000, seed=2)
-    win, place = h.estimate(runners, track, sims=6000, seed=99)  # 別の乱数で、本当の確率に近い値を出す
-    for (ow, op), w, p in zip(odds, win, place):
+def _record_runner(lane, races, wins, places, form=0, **stats):
+    s = {"speed": 50, "stamina": 50, "power": 50, "guts": 50, **stats}
+    return h.Runner(lane, f"r{lane}", s["speed"], s["stamina"], s["power"], s["guts"], form, races, wins, places)
+
+
+def test_odds_follow_the_record_keep_the_house_edge_and_round_down():
+    runners = [
+        _record_runner(i + 1, 10, w, p) for i, (w, p) in enumerate([(6, 9), (3, 6), (2, 5), (1, 4)] + [(0, 2)] * 4)
+    ]
+    odds = h.make_odds(runners)
+    for ow, op in odds:
         assert ow == int(ow * 10) / 10 and 1.0 <= ow <= h.MAX_ODDS and 1.0 <= op <= h.MAX_ODDS
-        assert w * ow < 1.0 and p * op < 1.0  # 控除があるので、買い続けても増えない（推定のぶれを含めても）
+    wins = [o[0] for o in odds]
+    assert wins == sorted(wins)  # 戦績がよい順に、オッズが低い
+    assert (
+        sum((1 - h.TAKEOUT) / o for o in wins) <= 1.05
+    )  # 控除ぶん、勝つ確率の見積もりの合計は 1 を超えない（切り捨ての余裕だけ）
+
+
+def test_a_first_run_horse_pays_more_than_an_average_veteran():
+    runners = [_record_runner(1, 0, 0, 0)] + [_record_runner(i, 8, 1, 3) for i in range(2, 9)]
+    odds = h.make_all_odds(runners)
+    assert odds["win"]["1"] > odds["win"]["2"] and odds["place"]["1"] > odds["place"]["2"]
+
+
+def test_few_runs_pull_the_record_toward_the_average():
+    lucky_once = [_record_runner(1, 1, 1, 1)] + [_record_runner(i, 10, 1, 3) for i in range(2, 9)]
+    proven = [_record_runner(1, 10, 10, 10)] + [_record_runner(i, 10, 1, 3) for i in range(2, 9)]
+    assert (
+        h.make_all_odds(lucky_once)["win"]["1"] > h.make_all_odds(proven)["win"]["1"]
+    )  # 1戦1勝より、10戦10勝のほうが低い
+
+
+def test_form_moves_the_odds_but_stats_do_not():
+    base = [_record_runner(i, 8, 1, 3) for i in range(1, 9)]
+    good = [_record_runner(1, 8, 1, 3, form=1)] + base[1:]
+    bad = [_record_runner(1, 8, 1, 3, form=-1)] + base[1:]
+    strong = [_record_runner(1, 8, 1, 3, speed=80, stamina=40, power=40, guts=40)] + base[1:]
+    flat = h.make_all_odds(base)["win"]["1"]
+    assert h.make_all_odds(good)["win"]["1"] < flat < h.make_all_odds(bad)["win"]["1"]  # 好調ほど低い
+    assert h.make_all_odds(strong)["win"]["1"] == flat  # ステータスは、オッズに入らない
+
+
+def test_npc_records_are_plausible():
+    rng = random.Random(3)
+    for _ in range(200):
+        races, wins, places = h.npc_record(rng)
+        assert 0 <= wins <= places <= races <= 12
 
 
 def test_favorite_and_longshot_spread_is_reasonable():
@@ -136,6 +175,18 @@ def test_carrot_moves_five_points_and_is_consumed(eco):
     assert sum(eco.horse_get(hid)[k] for k in h.STAT_KEYS) == h.STAT_TOTAL
 
 
+def test_closing_entries_copies_the_record_and_gives_npcs_one(eco):
+    hid = make_horse(eco, U)
+    eco._conn.execute("UPDATE horses SET races=6, wins=2, places=4 WHERE id=?", (hid,))
+    rid = open_race(eco)
+    assert eco.race_register(U, hid, rid, NOW + 1)[0]
+    eco.race_close_entries(rid, random.Random(2))
+    rows = eco.race_entries(rid)
+    mine = next(e for e in rows if e["horse_id"] == hid)
+    assert (mine["races"], mine["wins"], mine["places"]) == (6, 2, 4)
+    assert all(e["wins"] <= e["places"] <= e["races"] for e in rows)
+
+
 # ----------------------------- レースの流れ ----------------------------- #
 def open_race(eco, now=NOW):
     return eco.race_create_special(now, 10, 10)
@@ -152,7 +203,7 @@ def test_full_race_flow_pays_bettors_and_owners_and_is_settled_once(eco):
     )
     field_ = eco.race_close_entries(rid, random.Random(1))
     assert len(field_["runners"]) == h.FIELD_SIZE
-    eco.race_set_odds(rid, h.make_odds(field_["runners"], field_["track"], sims=500, seed=1))
+    eco.race_set_odds(rid, h.make_odds(field_["runners"]))
     entries = eco.race_entries(rid)
     assert (
         sorted(e["lane"] for e in entries) == list(range(1, 9)) and sum(1 for e in entries if e["owner_id"] == U) == 1
@@ -178,7 +229,7 @@ def test_bet_rules(eco):
     eco.credit(V, 100_000, "テスト")
     assert "まだ" in eco.race_bet(V, rid, "win", 1, 100, NOW + 1)[1]  # 締切前（発売前）は買えない
     field_ = eco.race_close_entries(rid, random.Random(2))
-    eco.race_set_odds(rid, h.make_odds(field_["runners"], field_["track"], sims=300, seed=1))
+    eco.race_set_odds(rid, h.make_odds(field_["runners"]))
     assert "締め切りました" in eco.race_bet(V, rid, "win", 1, 100, NOW + 10_000)[1]
     assert "賭け金" in eco.race_bet(V, rid, "win", 1, 50, NOW + 700)[1]
     assert "賭け金" in eco.race_bet(V, rid, "win", 1, h.MAX_STAKE + 1, NOW + 700)[1]
@@ -248,7 +299,7 @@ def test_combo_keys_and_hits():
 def test_all_odds_cover_every_combination_and_never_exceed_the_cap():
     rng = random.Random(11)
     runners = field(rng)
-    odds = h.make_all_odds(runners, h.Track(1600, "良"), sims=600, seed=3)
+    odds = h.make_all_odds(runners)
     assert {k: len(v) for k, v in odds.items()} == {
         "win": 8,
         "place": 8,
@@ -263,16 +314,12 @@ def test_all_odds_cover_every_combination_and_never_exceed_the_cap():
     assert sum(odds["wide"].values()) < sum(odds["quinella"].values())
 
 
-def test_combo_odds_keep_the_house_edge():
-    rng = random.Random(5)
-    runners = field(rng)
-    track = h.Track(1800, "稍重")
-    odds = h.make_all_odds(runners, track, sims=4000, seed=2)
-    truth = h.estimate_all(runners, track, sims=12000, seed=77)
-    worst = max(truth[k].get(key, 0.0) * o for k in odds for key, o in odds[k].items())
-    assert (
-        worst < 1.05
-    )  # 推定のぶれの範囲で、買い続けると増える馬券はない（本当の確率も推定なので、少しだけ余裕を見る）
+def test_combo_odds_are_consistent_with_the_single_win_odds():
+    runners = [_record_runner(i + 1, 10, w, w + 2) for i, w in enumerate([5, 3, 2, 1, 1, 0, 0, 0])]
+    odds = h.make_all_odds(runners)
+    # 強い馬が絡む組み合わせほど、オッズが低い（馬連 1-2 は、馬連 7-8 より低い）
+    assert odds["quinella"]["1-2"] < odds["quinella"]["7-8"]
+    assert odds["exacta"]["1>2"] < odds["exacta"]["2>1"]  # 強い馬が先着のほうが、起こりやすい
 
 
 def test_distances_and_goings_have_more_variety_and_stay_balanced():
@@ -291,7 +338,7 @@ def test_distances_and_goings_have_more_variety_and_stay_balanced():
 def _race_with_odds(eco, now=NOW):
     rid = eco.race_create_special(now, 10, 10)
     field_ = eco.race_close_entries(rid, random.Random(4))
-    eco.race_set_odds(rid, h.make_all_odds(field_["runners"], field_["track"], sims=300, seed=1))
+    eco.race_set_odds(rid, h.make_all_odds(field_["runners"]))
     return rid
 
 

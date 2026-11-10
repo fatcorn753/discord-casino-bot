@@ -23,6 +23,13 @@ def stat_lines(stats: dict) -> str:
     return "\n".join(f"`{horse_mod.STAT_NAMES[k]:<4}` {stats[k]:>2} {bar(stats[k])}" for k in horse_mod.STAT_KEYS)
 
 
+def record_text(e: dict) -> str:
+    """戦績（オッズの元）。初出走は、そう書く。"""
+    if not e.get("races"):
+        return "初出走"
+    return f"{e['races']}戦{e['wins']}勝（3着内{e['places']}）"
+
+
 def stat_short(e: dict) -> str:
     return f"速{e['speed']} ス{e['stamina']} パ{e['power']} 根{e['guts']}"
 
@@ -81,11 +88,11 @@ def card_embed(eco, race: dict, closed: bool = False) -> discord.Embed:
         else:
             head = [
                 f"コース: **{track.label}**　発走: {when(race['start_at'])}",
-                f"馬券の発売: **{when(race['bet_close'])}** まで（単勝=1着・複勝=3着以内。**賭けた時点のオッズで確定**）",
+                f"馬券の発売: **{when(race['bet_close'])}** まで（単勝=1着・複勝=3着以内。**オッズは戦績で決まり、賭けた時点で確定**）",
             ]
         rows = [
             f"`{e['lane']}` {e['silks']} **{e['name']}** {horse_mod.FORM_MARK[e['form']]}　"
-            f"単勝 **{e['odds_win']:.1f}** 複勝 **{e['odds_place']:.1f}**\n　└ {stat_short(e)}"
+            f"単勝 **{e['odds_win']:.1f}** 複勝 **{e['odds_place']:.1f}**\n　└ {record_text(e)}　{stat_short(e)}"
             + (f"　馬主 <@{e['owner_id']}>" if e["owner_id"] else "")
             for e in entries
         ]

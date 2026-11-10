@@ -4,9 +4,12 @@
   にんじん1本で、CARROT_POINTS 点を、あるステータスから別のステータスへ動かせる。
 - コースは、距離（短・中・長）と馬場（良・稍重・重）。短距離はスピード、長距離はスタミナ、重い馬場はパワーが効く。
 - レースは、1ティックごとに全馬が進み、毎ティックの運（ノイズ）と、レース全体の運がある。結果は、シード（乱数）で決まる。
-- オッズは、同じ出走馬を何千回も走らせて勝率・3着以内率を出し、控除（TAKEOUT）を引いて決める。
+- オッズは、出走馬の**戦績**（出走数・勝ち数・3着以内の数）で決める。出走が少ない馬は平均に寄せ、初出走は高めにし、調子（◎○△）で動かす。
+  ステータスはオッズに入らない（実際の強さと戦績のずれが、狙い目になる）。控除（TAKEOUT）を引く。
+  レースの結果は、ステータスのシミュレーションで決まる（estimate は、その本当の確率を調べる検証用）。
 """
 
+import itertools
 import math
 import random
 from dataclasses import dataclass
@@ -17,6 +20,7 @@ STAT_TOTAL = 200  # 4つの合計（固定）
 STAT_MIN, STAT_MAX = 20, 80
 DEFAULT_STATS = {"speed": 50, "stamina": 50, "power": 50, "guts": 50}
 CARROT_POINTS = 5  # にんじん1本で動かせるポイント
+
 
 FIELD_SIZE = 8  # 1レースの出走頭数
 NAME_MAX = 12
@@ -33,10 +37,7 @@ FORM_MARK = {1: "◎", 0: "○", -1: "△"}  # 調子（毎レース、ランダ
 FORM_MULT = {1: 1.015, 0: 1.0, -1: 0.985}
 
 TAKEOUT = 0.15  # 控除率（オッズは、公正な倍率の 1 - TAKEOUT 倍）
-ODDS_SIMS = 8000  # オッズを決めるためのシミュレーション回数（多いほど、推定のぶれが小さい。別スレッドで走らせる）
-ODDS_MARGIN_Z = (
-    1.5  # 推定のぶれの分だけ、確率を多めに見積もる（オッズが甘くなって、買い続けると増える馬券ができるのを防ぐ）
-)
+ODDS_SIMS = 8000  # estimate（本当の確率を調べる検証用）の、シミュレーション回数
 MAX_ODDS = 99.9
 MIN_STAKE, MAX_STAKE = 100, 10_000  # 1回の賭け金
 MAX_RACE_STAKE = 30_000  # 1人が1レースに賭けられる合計
@@ -59,6 +60,9 @@ class Runner:
     power: int
     guts: int
     form: int = 0  # 1 ◎ / 0 ○ / -1 △
+    races: int = 0  # 戦績（オッズに使う。レースの結果には効かない）
+    wins: int = 0
+    places: int = 0  # 3着以内（1着を含む）
 
     def stat(self, key: str) -> int:
         return getattr(self, key)
@@ -187,17 +191,6 @@ def estimate(runners: list, track: Track, sims: int = ODDS_SIMS, seed: int = 0) 
     return [w / sims for w in win], [p / sims for p in place]
 
 
-def odds_from(prob: float, sims: int = ODDS_SIMS, floor: float = 1.0) -> float:
-    """公正な倍率（1/確率）から控除を引いた倍率。小数1桁に切り捨てる（切り上げると、期待値が1を超えかねない）。
-
-    prob は sims 回のシミュレーションで数えた割合。その誤差（標準偏差）の ODDS_MARGIN_Z 倍を足して、確率を多めに見積もる。
-    """
-    if prob <= 0:
-        return MAX_ODDS
-    prob = min(1.0, prob + ODDS_MARGIN_Z * math.sqrt(prob * (1 - prob) / sims))
-    return max(floor, min(MAX_ODDS, math.floor((1 - TAKEOUT) / prob * 10) / 10))
-
-
 def estimate_all(runners: list, track: Track, sims: int = ODDS_SIMS, seed: int = 0) -> dict:
     """単勝・複勝と、組み合わせの馬券の確率を、1回のシミュレーションの繰り返しでまとめて数える。
 
@@ -221,49 +214,108 @@ def estimate_all(runners: list, track: Track, sims: int = ODDS_SIMS, seed: int =
     return {k: {key: n / sims for key, n in d.items()} for k, d in counts.items()}
 
 
-def combo_odds_from(prob: float, sims: int = ODDS_SIMS) -> float:
-    """組み合わせの馬券のオッズ（控除 COMBO_TAKEOUT・上限 MAX_COMBO_ODDS。確率の見積もりは odds_from と同じ考え方）。"""
+# ---- 戦績で決めるオッズ ----
+RECORD_PRIOR_RUNS = (
+    4  # 戦績を信じる強さ（この回数ぶんの「平均的な成績」を足して薄める。出走が少ない馬ほど、平均に寄る）
+)
+FIRST_RUN_FACTOR = 0.75  # 初出走の馬は、確率をこの倍率で見積もる（オッズが高くなる）
+FORM_ODDS = {1: 1.15, 0: 1.0, -1: 0.85}  # 調子による、確率の補正（◎ は低く、△ は高くなる）
+PLACE_CAP = 0.95  # 3着以内率の上限
+
+
+def npc_record(rng: random.Random) -> tuple:
+    """帝愛の馬の、作りものの戦績 (出走数, 勝ち数, 3着以内の数)。強さとは関係なく、平均的な成績のまわりでばらつく。"""
+    races = rng.randint(0, 12)
+    wins = sum(rng.random() < 1 / FIELD_SIZE for _ in range(races))
+    places = wins + sum(rng.random() < 2 / (FIELD_SIZE - 1) for _ in range(races - wins))
+    return races, wins, places
+
+
+def _win_weights(runners: list) -> list:
+    """勝つ確率の見積もり（合計 1）。戦績の勝率を平均に寄せ、初出走は下げ、調子で補正する。"""
+    n = len(runners)
+    prior = 1 / n
+    raw = []
+    for r in runners:
+        p = (r.wins + RECORD_PRIOR_RUNS * prior) / (r.races + RECORD_PRIOR_RUNS)
+        if r.races == 0:
+            p *= FIRST_RUN_FACTOR
+        raw.append(p * FORM_ODDS[r.form])
+    total = sum(raw)
+    return [x / total for x in raw]
+
+
+def _place_probs(runners: list) -> list:
+    """3着以内に入る確率の見積もり（合計はほぼ 3）。"""
+    n = len(runners)
+    prior = min(3, n) / n
+    raw = []
+    for r in runners:
+        p = (r.places + RECORD_PRIOR_RUNS * prior) / (r.races + RECORD_PRIOR_RUNS)
+        if r.races == 0:
+            p *= FIRST_RUN_FACTOR
+        raw.append(p * FORM_ODDS[r.form])
+    scale = min(3, n) / sum(raw)
+    return [min(PLACE_CAP, x * scale) for x in raw]
+
+
+def _odds(prob: float, takeout: float, cap: float) -> float:
+    """確率から、控除を引いた倍率（小数1桁に切り捨て・1.0 倍以上・cap 以下）。"""
     if prob <= 0:
-        return MAX_COMBO_ODDS
-    prob = min(
-        1.0, prob + (ODDS_MARGIN_Z + 0.5) * math.sqrt(prob * (1 - prob) / sims)
-    )  # 当たりにくいぶん、ぶれが大きいので多めに
-    return max(1.0, min(MAX_COMBO_ODDS, math.floor((1 - COMBO_TAKEOUT) / prob * 10) / 10))
+        return cap
+    return max(1.0, min(cap, math.floor((1 - takeout) / prob * 10) / 10))
 
 
-def make_all_odds(runners: list, track: Track, sims: int = ODDS_SIMS, seed: int = 0) -> dict:
-    """{"win": {枠: オッズ}, "place": {枠: オッズ}, "quinella": {キー: オッズ}, …}。全部の組み合わせを持つ（当たらなかったものは上限）。"""
-    probs = estimate_all(runners, track, sims, seed)
+def make_all_odds(runners: list) -> dict:
+    """戦績で決めた、全部の馬券のオッズ。{"win": {枠: オッズ}, "place": {枠: オッズ}, "quinella": {キー: オッズ}, …}。
+
+    単勝は勝つ確率の見積もり、複勝は3着以内率の見積もり。組み合わせの馬券は、勝つ確率から、着順の確率（強い馬ほど先に決まる）を
+    計算して出す。
+    """
     lanes = [r.lane for r in runners]
+    win = dict(zip(lanes, _win_weights(runners)))
+    place = dict(zip(lanes, _place_probs(runners)))
+
+    def first_two(a: int, b: int) -> float:  # a が1着・b が2着
+        return win[a] * win[b] / (1 - win[a])
+
+    def top3(a: int, b: int, c: int) -> float:  # a・b・c が、この順に1〜3着
+        return first_two(a, b) * win[c] / (1 - win[a] - win[b])
+
+    def trio(a: int, b: int, c: int) -> float:
+        return sum(top3(*p) for p in itertools.permutations((a, b, c)))
+
     out = {
-        "win": {str(x): odds_from(probs["win"].get(str(x), 0.0), sims) for x in lanes},
-        "place": {str(x): odds_from(probs["place"].get(str(x), 0.0), sims) for x in lanes},
+        "win": {str(x): _odds(win[x], TAKEOUT, MAX_ODDS) for x in lanes},
+        "place": {str(x): _odds(place[x], TAKEOUT, MAX_ODDS) for x in lanes},
     }
     pairs = [(a, b) for a in lanes for b in lanes if a < b]
     out["quinella"] = {
-        combo_key("quinella", p): combo_odds_from(probs["quinella"].get(combo_key("quinella", p), 0.0), sims)
+        combo_key("quinella", p): _odds(first_two(*p) + first_two(p[1], p[0]), COMBO_TAKEOUT, MAX_COMBO_ODDS)
         for p in pairs
     }
     out["wide"] = {
-        combo_key("wide", p): combo_odds_from(probs["wide"].get(combo_key("wide", p), 0.0), sims) for p in pairs
+        combo_key("wide", p): _odds(
+            sum(trio(p[0], p[1], c) for c in lanes if c not in p), COMBO_TAKEOUT, MAX_COMBO_ODDS
+        )
+        for p in pairs
     }
     out["exacta"] = {
-        combo_key("exacta", (a, b)): combo_odds_from(probs["exacta"].get(combo_key("exacta", (a, b)), 0.0), sims)
+        combo_key("exacta", (a, b)): _odds(first_two(a, b), COMBO_TAKEOUT, MAX_COMBO_ODDS)
         for a in lanes
         for b in lanes
         if a != b
     }
-    trios = [(a, b, c) for a in lanes for b in lanes for c in lanes if a < b < c]
     out["trio"] = {
-        combo_key("trio", t): combo_odds_from(probs["trio"].get(combo_key("trio", t), 0.0), sims) for t in trios
+        combo_key("trio", t): _odds(trio(*t), COMBO_TAKEOUT, MAX_COMBO_ODDS) for t in itertools.combinations(lanes, 3)
     }
     return out
 
 
-def make_odds(runners: list, track: Track, sims: int = ODDS_SIMS, seed: int = 0) -> list:
+def make_odds(runners: list) -> list:
     """[(単勝のオッズ, 複勝のオッズ)] を、出走馬の並びで返す。"""
-    win, place = estimate(runners, track, sims, seed)
-    return [(odds_from(w, sims), odds_from(p, sims)) for w, p in zip(win, place)]
+    odds = make_all_odds(runners)
+    return [(odds["win"][str(r.lane)], odds["place"][str(r.lane)]) for r in runners]
 
 
 def payout(stake: int, odds: float) -> int:
