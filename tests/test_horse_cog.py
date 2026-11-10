@@ -353,3 +353,17 @@ def test_long_races_run_several_laps_and_show_the_lap():
     assert "周目" not in lane_text(entries, [0.5, 0.2])  # 1周のレースは、これまでどおり
     done = lane_text(entries, [1.0, 0.9], laps=2)
     assert "全2周" in done
+
+
+def test_result_embed_lists_every_winner_even_when_the_net_is_a_loss(setup):
+    eco, chan, guild, bot, cog = setup
+    rid = eco.race_create_special(1_700_000_000.0, 1, 1)
+    race = eco.race_get(rid)
+    bets = [
+        {"user_id": U, "stake": 1000, "payout": 0},
+        {"user_id": U, "stake": 1000, "payout": 1500},  # 当たったが、合計は赤字
+        {"user_id": V, "stake": 500, "payout": 0},
+    ]
+    embed = horse_cog.result_embed(eco, {"race": race, "bets": bets, "prizes": {}})
+    text = next(f.value for f in embed.fields if f.name == "払い戻し")
+    assert f"<@{U}>" in text and "1,500" in text and "-500" in text and f"<@{V}>" not in text

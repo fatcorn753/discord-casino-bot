@@ -107,14 +107,18 @@ def result_embed(eco, result: dict) -> discord.Embed:
     e = card_embed(eco, {**result["race"], "status": "done"})
     bets = result["bets"]
     if bets:
-        net_by_user = {}
+        # 的中した人は、収支がマイナスでも載せる（何頭もまとめて買うと、当たっても収支は赤字になりやすい。払い戻しは入っている）
+        paid, staked = {}, {}
         for b in bets:
-            net_by_user[b["user_id"]] = net_by_user.get(b["user_id"], 0) + b["payout"] - b["stake"]
-        winners = sorted((n, u) for u, n in net_by_user.items() if n > 0)[::-1][:8]
+            paid[b["user_id"]] = paid.get(b["user_id"], 0) + b["payout"]
+            staked[b["user_id"]] = staked.get(b["user_id"], 0) + b["stake"]
+        winners = sorted(((pay, u) for u, pay in paid.items() if pay > 0), reverse=True)[:8]
         total_stake = sum(b["stake"] for b in bets)
         total_pay = sum(b["payout"] for b in bets)
         lines = [f"馬券 {len(bets)}枚（賭け金 {ui.pelica(total_stake)}・払い戻し {ui.pelica(total_pay)}）"]
-        lines += [f"💰 <@{u}> **+{n:,}**" for n, u in winners] or ["的中者はいませんでした。"]
+        lines += [
+            f"💰 <@{u}> 払い戻し **{pay:,}**（賭け金 {staked[u]:,}・収支 {pay - staked[u]:+,}）" for pay, u in winners
+        ] or ["的中者はいませんでした。"]
         e.add_field(name="払い戻し", value="\n".join(lines), inline=False)
     if result["prizes"]:
         e.add_field(
