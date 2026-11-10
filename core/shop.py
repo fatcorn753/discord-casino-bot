@@ -120,7 +120,7 @@ CATALOG = [
     ),
     Item(
         LABOR_DRINK,
-        "栄養ドリンク",
+        "ドリンコ",
         CONSUMABLE,
         100,
         desc="地下作業の疲労を60回復する（`/地下 作業` の画面で飲む）",

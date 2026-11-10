@@ -247,7 +247,7 @@ class LaborMixin:
             return {"amount": amount, "ores": ores} if detail else amount
 
     def labor_drink(self, user_id: int, now: Optional[float] = None, day: str = "") -> tuple:
-        """栄養ドリンクを1本飲んで、疲労を DRINK_RECOVER 回復する。(ok, 理由) を返す。疲れていなければ、減らさない。"""
+        """ドリンコを1本飲んで、疲労を DRINK_RECOVER 回復する。(ok, 理由) を返す。疲れていなければ、減らさない。"""
         now = time.time() if now is None else now
         with self._lock, self._conn:
             row = self._labor_row(user_id, now, day)
@@ -256,7 +256,7 @@ class LaborMixin:
                 return False, "疲れていません。"
             if not self._consume(user_id, shop_mod.LABOR_DRINK):
                 self._labor_save(user_id, row)
-                return False, "栄養ドリンクを持っていません（ショップの消耗品で買えます）。"
+                return False, "ドリンコを持っていません（ショップの消耗品で買えます）。"
             row["fatigue"] = max(0.0, row["fatigue"] - labor_mod.DRINK_RECOVER)
             self._labor_save(user_id, row)
             return True, ""

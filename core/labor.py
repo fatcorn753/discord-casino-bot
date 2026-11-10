@@ -25,7 +25,7 @@ GAIN_CUT_PER_LEVEL = 0.4  # 手袋1段ごとの軽減（最大で 1.0）
 MIN_PAY_RATE = 0.4  # 疲労が満タンのときの、稼ぎの割合（空のときは 1.0）
 RECOVER_PER_SEC = 0.2  # 疲労の自然回復（100 回復するのに約8分）
 
-DRINK_RECOVER = 60.0  # 栄養ドリンク（ショップ）1本で回復する疲労
+DRINK_RECOVER = 60.0  # ドリンコ（ショップ）1本で回復する疲労
 CLICK_INTERVAL = 1.0  # 連打の最短間隔（秒）
 
 

@@ -219,7 +219,7 @@ class LaborView(discord.ui.View):
         hire = discord.ui.Button(label="作業員", emoji="👷", style=discord.ButtonStyle.secondary, row=0)
         hire.callback = self._goto("hire")
         drink = discord.ui.Button(
-            label=f"ドリンク ×{s['drinks']}" if s["drinks"] else "ドリンク（ショップで買える）",
+            label=f"ドリンコ ×{s['drinks']}" if s["drinks"] else "ドリンコ（ショップで買える）",
             emoji="🥤",
             style=discord.ButtonStyle.secondary,
             row=0,
