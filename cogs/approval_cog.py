@@ -13,10 +13,17 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs._admin_embeds import LEVEL_NAME, bulk_preview_lines, pachinko_stats_embed, rtp_table_embed
+from cogs._admin_embeds import (
+    LEVEL_NAME,
+    bulk_preview_lines,
+    click_history_embed,
+    pachinko_stats_embed,
+    rtp_table_embed,
+)
 from cogs._admin_purge import can_read_history
 from cogs._admin_views import AnnounceModal, PurgeConfirm, QuizBulkConfirm
 from core import approval, events, quizimport, ui
+from core import labor as labor_mod
 from games import rtplevel
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -542,6 +549,39 @@ class ApprovalCog(commands.Cog):
         await interaction.response.send_message(embed=pachinko_stats_embed(data, scope), ephemeral=True)
 
     pachinko_stats.autocomplete("guild_id")(guild_autocomplete)
+
+    # ---- 地下作業の記録 ---- #
+    @group.command(
+        name="クリック履歴", description="[管理者] 「働く」を押した記録（1時間ごと）を見る。自動操作の疑いの確認用"
+    )
+    @app_commands.rename(guild_id="サーバー", user_id="ユーザー", hours="時間")
+    @app_commands.describe(
+        guild_id="見るサーバー（候補から選ぶ）",
+        user_id="見る相手（名前の候補が出なければ、ユーザーIDを貼る）",
+        hours="さかのぼる時間（1〜336。省略で24）",
+    )
+    async def click_history(
+        self,
+        interaction: discord.Interaction,
+        guild_id: str,
+        user_id: str,
+        hours: app_commands.Range[int, 1, 336] = 24,
+    ):
+        if not await self._owner_only(interaction):
+            return
+        picked = await self._pick_member(interaction, guild_id, user_id, "確認")
+        if picked is None:
+            return
+        guild, member = picked
+        eco = self.bot.economy.for_guild(guild.id)
+        report = labor_mod.click_report(eco.labor_click_hours(member.id, time.time() - hours * 3600))
+        tz = float(self.bot.config.get("utc_offset_hours", 9))
+        await interaction.response.send_message(
+            embed=click_history_embed(f"{guild.name} の {member.display_name}", report, tz, hours), ephemeral=True
+        )
+
+    click_history.autocomplete("guild_id")(guild_autocomplete)
+    click_history.autocomplete("user_id")(user_autocomplete)
 
     # ---- 競馬 ---- #
     @group.command(

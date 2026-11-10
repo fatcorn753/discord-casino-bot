@@ -266,3 +266,45 @@ def settle_plan(
         "removed": removed,
         "quit": quit_ids,
     }
+
+
+# ---- 自動操作の疑いを確かめる（持ち主用の記録の集計。決めつけず、数字を見せるだけ）----
+CLICK_GAP_MAX = 600.0  # 前の押下からこれ以内なら、「続けて押している」間隔として数える（秒）
+
+
+def click_report(hours: list) -> dict:
+    """1時間ごとの記録 [{hour, clicks, pay, gaps, sum_gap, sum_gap2, min_gap}]（古い順）を、画面用に集計する。
+
+    {clicks, pay, active_hours（押した時間の数）, longest_run（休まず押し続けた連続の時間数）, rows: [{hour, clicks, pay, mean_gap, cv, min_gap}]}。
+    cv（変動係数）= 間隔の標準偏差 ÷ 平均。人間が手で押すと、ふつう 0.3 以上にばらつく。0.1 を下回るのは、機械的な規則正しさ。
+    """
+    rows = []
+    for h in hours:
+        mean = h["sum_gap"] / h["gaps"] if h["gaps"] else None
+        cv = None
+        if mean and h["gaps"] >= 2:
+            var = max(0.0, h["sum_gap2"] / h["gaps"] - mean * mean)
+            cv = math.sqrt(var) / mean
+        rows.append(
+            {
+                "hour": h["hour"],
+                "clicks": h["clicks"],
+                "pay": h["pay"],
+                "mean_gap": mean,
+                "cv": cv,
+                "min_gap": h["min_gap"],
+            }
+        )
+    longest = run = 0
+    prev = None
+    for r in rows:
+        run = run + 1 if prev is not None and r["hour"] == prev + 1 else 1
+        longest = max(longest, run)
+        prev = r["hour"]
+    return {
+        "clicks": sum(r["clicks"] for r in rows),
+        "pay": sum(r["pay"] for r in rows),
+        "active_hours": len(rows),
+        "longest_run": longest,
+        "rows": rows,
+    }

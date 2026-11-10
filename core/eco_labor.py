@@ -284,6 +284,7 @@ class LaborMixin:
                 return {"ok": False, "reason": "押すのが早すぎます。", "quiet": True}
             out = labor_mod.click_outcome(row["pick"], row["glove"], row["fatigue"])
             pay = out["pay"]
+            row["last_click_before"] = row["last_click"]
             row.update(
                 fatigue=out["fatigue"],
                 last_click=now,
@@ -292,8 +293,47 @@ class LaborMixin:
                 day_earned=row["day_earned"] + pay,
                 earned_total=row["earned_total"] + pay,
             )
+            self._labor_log_click(user_id, now, pay, now - row["last_click_before"])
             self._labor_save(user_id, row)
             return {"ok": True, "pay": pay}
+
+    CLICK_LOG_DAYS = 14  # 押した記録（1時間ごと）を残す日数
+
+    def _labor_log_click(self, user_id: int, now: float, pay: int, gap: float) -> None:
+        """「働く」の1回を、1時間ごとの記録に足す（押した回数・稼ぎ・間隔の集計）。"""
+        hour = int(now // 3600)
+        near = 0.0 < gap <= labor_mod.CLICK_GAP_MAX
+        self._conn.execute(
+            "INSERT INTO labor_click_hours (guild_id, user_id, hour, clicks, pay, gaps, sum_gap, sum_gap2, min_gap) "
+            "VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?) ON CONFLICT(guild_id, user_id, hour) DO UPDATE SET "
+            "clicks=clicks+1, pay=pay+excluded.pay, gaps=gaps+excluded.gaps, sum_gap=sum_gap+excluded.sum_gap, "
+            "sum_gap2=sum_gap2+excluded.sum_gap2, min_gap=CASE WHEN excluded.min_gap IS NULL THEN min_gap "
+            "WHEN min_gap IS NULL OR excluded.min_gap<min_gap THEN excluded.min_gap ELSE min_gap END",
+            (
+                self._g(),
+                user_id,
+                hour,
+                pay,
+                1 if near else 0,
+                gap if near else 0.0,
+                gap * gap if near else 0.0,
+                gap if near else None,
+            ),
+        )
+        if hour % 24 == 0:  # 古い記録は、1日1回ほど掃除する
+            self._conn.execute("DELETE FROM labor_click_hours WHERE hour<?", (hour - self.CLICK_LOG_DAYS * 24,))
+
+    def labor_click_hours(self, user_id: int, since: float) -> list:
+        """since 以降の、1時間ごとの押した記録（古い順）。"""
+        with self._lock:
+            return [
+                dict(r)
+                for r in self._conn.execute(
+                    "SELECT hour, clicks, pay, gaps, sum_gap, sum_gap2, min_gap FROM labor_click_hours "
+                    "WHERE guild_id=? AND user_id=? AND hour>=? ORDER BY hour",
+                    (self._g(), user_id, int(since // 3600)),
+                )
+            ]
 
     def labor_collect(self, user_id: int, now: Optional[float] = None, day: str = "", detail: bool = False):
         """受け取る前の稼ぎから、帝愛のピンハネを引いて、残高に移す。移した額（借金の天引きの前）を返す。

@@ -433,6 +433,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
         "イベント",
         "還元率",
         "パチンコ統計",
+        "クリック履歴",
     }
     quiz = next(p for p in payloads if p["name"] == "クイズ")
     assert {o["name"] for o in quiz["options"]} == {"挑戦", "出題", "取り下げ"}  # サーバー内のクイズに管理者用は出ない

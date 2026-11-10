@@ -206,6 +206,18 @@ def create_tables(conn: sqlite3.Connection) -> None:
             qty      INTEGER NOT NULL DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS labor_finds_owner ON labor_finds (guild_id, user_id, at);
+        CREATE TABLE IF NOT EXISTS labor_click_hours (  -- 「働く」を押した記録（1時間ごとの集計）。自動操作の疑いを、持ち主が確かめるためのもの
+            guild_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            hour     INTEGER NOT NULL,                -- epoch秒 ÷ 3600
+            clicks   INTEGER NOT NULL DEFAULT 0,
+            pay      INTEGER NOT NULL DEFAULT 0,
+            gaps     INTEGER NOT NULL DEFAULT 0,      -- 間隔を数えた回数（前の押下から10分以内のもの）
+            sum_gap  REAL NOT NULL DEFAULT 0,
+            sum_gap2 REAL NOT NULL DEFAULT 0,         -- 間隔の2乗の合計（ばらつきを出す）
+            min_gap  REAL,
+            PRIMARY KEY (guild_id, user_id, hour)
+        );
         CREATE TABLE IF NOT EXISTS labor_workers (    -- 雇っている作業員（1人1行。契約の期限つき）
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id   INTEGER NOT NULL,

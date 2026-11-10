@@ -750,3 +750,57 @@ def test_finds_log_keeps_only_the_latest_entries(eco, monkeypatch):
         eco.labor_collect(U, T0 + i * H, DAY)
     count = eco._conn.execute("SELECT COUNT(*) FROM labor_finds WHERE user_id=?", (U,)).fetchone()[0]
     assert count == 5
+
+
+# ----------------------------- 押した記録（自動操作の確認用） ----------------------------- #
+def test_each_click_is_logged_per_hour_with_gap_statistics(eco):
+    eco.credit(U, 1_000, "テスト")
+    t = T0
+    for gap in (3.0, 3.0, 3.0, 3.0):  # 機械のように、きっちり3秒おき
+        eco.labor_click(U, t, DAY)
+        t += gap
+    rows = eco.labor_click_hours(U, T0 - 10)
+    assert len(rows) == 1 and rows[0]["clicks"] == 4 and rows[0]["gaps"] == 3  # 最初の1回は、前の押下がない
+    report = lab.click_report(rows)
+    assert report["clicks"] == 4 and report["active_hours"] == 1
+    assert report["rows"][0]["mean_gap"] == pytest.approx(3.0) and report["rows"][0]["cv"] == pytest.approx(
+        0.0, abs=1e-6
+    )
+    assert report["rows"][0]["min_gap"] == pytest.approx(3.0)
+
+
+def test_human_like_gaps_have_a_large_variation_and_rejected_clicks_are_not_logged(eco):
+    eco.credit(U, 1_000, "テスト")
+    t = T0
+    for gap in (1.2, 4.0, 2.0, 9.0, 1.5, 6.0):
+        eco.labor_click(U, t, DAY)
+        t += gap
+    assert not eco.labor_click(U, t - 6.0 + 0.2, DAY)["ok"]  # 直前の押下から0.2秒後の連打は、記録しない
+    report = lab.click_report(eco.labor_click_hours(U, T0 - 10))
+    assert report["clicks"] == 6 and report["rows"][0]["cv"] > 0.3
+
+
+def test_click_report_finds_the_longest_unbroken_run_and_ignores_long_gaps():
+    def hour(h, clicks=100):
+        return {
+            "hour": h,
+            "clicks": clicks,
+            "pay": 10,
+            "gaps": clicks - 1,
+            "sum_gap": 200.0,
+            "sum_gap2": 400.0,
+            "min_gap": 2.0,
+        }
+
+    report = lab.click_report([hour(1), hour(2), hour(3), hour(7), hour(8)])
+    assert report["active_hours"] == 5 and report["longest_run"] == 3
+    assert lab.click_report([])["longest_run"] == 0 and lab.click_report([])["rows"] == []
+
+
+def test_click_log_keeps_working_across_hours(eco):
+    eco.credit(U, 1_000, "テスト")
+    eco.labor_click(U, T0, DAY)
+    eco.labor_click(U, T0 + 3700, DAY)  # 次の時間
+    rows = eco.labor_click_hours(U, T0 - 10)
+    assert [r["clicks"] for r in rows] == [1, 1] and rows[1]["hour"] == rows[0]["hour"] + 1
+    assert eco.labor_click_hours(U, T0 + 3700) == [rows[1]]  # since より前は出ない

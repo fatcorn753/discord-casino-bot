@@ -364,6 +364,7 @@ def test_owner_commands_are_dm_only_and_not_in_other_groups():
         "イベント",
         "還元率",
         "パチンコ統計",
+        "クリック履歴",
     }
     assert app_commands  # noqa
 

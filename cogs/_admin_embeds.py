@@ -1,5 +1,7 @@
 """運営コマンド（`/運営`）が出す埋め込みの組み立て。Discord への送受信はしない。"""
 
+import datetime
+
 import discord
 
 from core import ui
@@ -96,5 +98,33 @@ def rtp_table_embed(levels: dict, title: str) -> discord.Embed:
     e = ui.embed(title, "\n".join(lines), ui.INFO)
     e.set_footer(
         text="レベル1〜6。3が標準。1段階で還元率が約4ポイント動きます。勝ち分だけが増減します（ユーザーには見せません）"
+    )
+    return e
+
+
+def click_history_embed(name: str, report: dict, tz_hours: float, hours: int) -> discord.Embed:
+    """「働く」を押した記録（1時間ごと）。自動操作の疑いを、持ち主が見て判断するための数字。決めつけはしない。"""
+    tz = datetime.timezone(datetime.timedelta(hours=tz_hours))
+    rows = report["rows"]
+    if not rows:
+        return ui.embed(f"🕵️ {name} の「働く」の記録", f"過去{hours}時間に、押した記録はありません。", ui.INFO)
+    mech = sum(1 for r in rows if r["cv"] is not None and r["clicks"] >= 100 and r["cv"] < 0.1)
+    lines = [
+        f"押した回数 **{report['clicks']:,}回**　稼ぎ **{report['pay']:,}ペリカ**",
+        f"押した時間 **{report['active_hours']}時間**（過去{hours}時間のうち）　休まず押し続けた最長 **{report['longest_run']}時間**",
+        f"押す間隔が機械的に規則正しい時間（100回以上・ばらつき 0.1 未満）: **{mech}時間**",
+        "",
+        "**1時間ごと**（間隔のばらつき = 標準偏差 ÷ 平均。人間が手で押すと、ふつう 0.3 以上）",
+    ]
+    for r in rows[-24:]:
+        at = datetime.datetime.fromtimestamp(r["hour"] * 3600, tz)
+        gap = f"平均{r['mean_gap']:.2f}秒" if r["mean_gap"] else "—"
+        cv = f"ばらつき{r['cv']:.2f}" if r["cv"] is not None else "—"
+        low = f"最短{r['min_gap']:.2f}秒" if r["min_gap"] is not None else ""
+        mark = " ⚠️" if r["cv"] is not None and r["clicks"] >= 100 and r["cv"] < 0.1 else ""
+        lines.append(f"`{at:%m/%d %H時}` {r['clicks']:>4}回　{gap}　{cv}　{low}{mark}")
+    e = ui.embed(f"🕵️ {name} の「働く」の記録", "\n".join(lines)[:4000], ui.INFO)
+    e.set_footer(
+        text="目安です。人間でも、規則的に押す人はいます。24時間ずっと押し続けていないか、時間のあき方を見てください。"
     )
     return e
