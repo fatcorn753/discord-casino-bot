@@ -28,6 +28,10 @@ _REAL_ROLL = lab.roll_ores
 def no_ores(monkeypatch):
     """ふつうのテストは、鉱石を掘らない（稼ぎを一定にする）。鉱石のテストは、_REAL_ROLL を戻して使う。"""
     monkeypatch.setattr(lab, "roll_ores", lambda *a, **k: {})
+    for kind, rate in (("apprentice", 1.0), ("miner", 3.75), ("craftsman", 8.25)):
+        monkeypatch.setitem(
+            lab.WORKER_RATE, kind, rate
+        )  # 基本給の数字を固定して、計算の仕組みだけを確かめる（本物の数字は、専用のテストで）
     monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.0)  # 帝愛のピンハネは、専用のテストで確かめる
 
 
@@ -294,7 +298,8 @@ def test_foreman_raises_rare_ore_chance_not_the_wage(eco):
     base = eco.labor_state(U, T0, DAY)["rate"]
     eco.labor_hire(U, "foreman", T0, DAY)
     assert eco.labor_state(U, T0, DAY)["rate"] == base
-    assert lab.ore_ev("craftsman", lab.foreman_luck(1)) == pytest.approx(lab.ore_ev("craftsman") * 1.25)
+    coal = lab.COAL_P * 1  # 石炭は、監督の運に関係ない
+    assert lab.ore_ev("craftsman", lab.foreman_luck(1)) - coal == pytest.approx((lab.ore_ev("craftsman") - coal) * 1.25)
 
 
 def test_hire_tab_buttons_hire_and_dismiss_through_the_panel(eco):
@@ -503,7 +508,8 @@ class Fixed(random.Random):
         return self.vals.pop(0) if self.vals else 1.0
 
 
-def test_ore_numbers_are_a_losing_bet_on_average():
+def test_ore_numbers_are_a_losing_bet_on_average(monkeypatch):
+    monkeypatch.undo()  # 本物の基本給・鉱石の数字で確かめる
     for kind in ("apprentice", "miner", "craftsman"):
         week_hours = lab.STOCK_HOURS * 7  # 毎日1回受け取る人の、1週間の働き
         mean = (lab.WORKER_RATE[kind] + lab.ore_ev(kind)) * week_hours
@@ -524,7 +530,7 @@ def test_roll_ores_follows_the_table_and_foreman_luck():
     assert _REAL_ROLL("miner", 1, 0.5, Fixed(just_over)) == {"copper": 1}  # 運がいいと、同じ値でも銅に収まる
     assert _REAL_ROLL("foreman", 99, 0.5, Fixed(0.0)) == {}  # 監督は掘らない
     legend = _REAL_ROLL(
-        "craftsman", 1, 0.0, Fixed(sum(o[3] for o in lab.ORES[:-1]) * lab.ORE_POWER["craftsman"] + 1e-9)
+        "craftsman", 1, 0.0, Fixed(sum(o[3] for o in lab.ORES[:-2]) * lab.ORE_POWER["craftsman"] + 1e-9)
     )
     assert legend == {"legend": 1}
     assert lab.ore_gain({"gold": 2, "diamond": 1}) == 2 * 400 + 3_000
@@ -657,3 +663,24 @@ def test_the_default_skim_is_one_percent_and_the_screens_call_it_a_charity_donat
     asyncio.run(view._collect(it))
     desc = it.response.edits[-1]["embed"].description
     assert "慈善団体に寄付されます" in desc and "30" in desc  # ダイヤ3,000の1%
+
+
+def test_cheap_coal_shows_up_often_for_every_worker_and_ignores_power_and_luck():
+    assert lab.COAL_P >= 0.3 and lab.ORE_VALUE["coal"] <= 2
+    for kind in ("apprentice", "miner", "craftsman"):
+        any_per_hour = lab.COAL_P + sum(p * lab.ORE_POWER[kind] for o, _, _, p, v in lab.ORES if o not in lab.FLAT)
+        assert any_per_hour >= 0.4  # 1時間に、4割以上の確率で、何か掘れる
+    rng = random.Random(3)
+    for kind in ("apprentice", "craftsman"):
+        n = 4000
+        coal = sum(_REAL_ROLL(kind, 1, 0.0, rng).get("coal", 0) for _ in range(n)) / n
+        assert abs(coal - lab.COAL_P) < 0.03  # 作業員の種類で変わらない
+    boosted = sum(_REAL_ROLL("apprentice", 1, 2.0, rng).get("coal", 0) for _ in range(4000)) / 4000
+    assert abs(boosted - lab.COAL_P) < 0.03  # 監督の運でも変わらない
+    assert _REAL_ROLL("foreman", 50, 0.0, rng) == {}  # 監督は、掘らない
+    assert [k for k in lab.ORE_VALUE][:1] == ["copper"] and lab.ORE_VALUE["coal"] < lab.ORE_VALUE["copper"]
+
+
+def test_ore_text_lists_the_most_valuable_first():
+    text = labor_cog.ore_text({"coal": 5, "diamond": 1, "copper": 2})
+    assert text.index("ダイヤ") < text.index("銅") < text.index("石炭")

@@ -79,15 +79,17 @@ WORKERS = ("apprentice", "miner", "craftsman", "foreman")
 WORKER_NAME = {"apprentice": "見習い", "miner": "坑夫", "craftsman": "職人", "foreman": "監督"}
 WORKER_MARK = {"apprentice": "🧒", "miner": "👷", "craftsman": "🧑‍🔧", "foreman": "🕴️"}
 WORKER_RATE = {
-    "apprentice": 1.0,
-    "miner": 3.75,
-    "craftsman": 8.25,
+    "apprentice": 0.6,
+    "miner": 3.35,
+    "craftsman": 7.85,
     "foreman": 0,
 }  # 基本給（1時間）。毎日受け取る人の、契約料の約5割（監督は掘らない）
 CONTRACT_DAYS = 7  # 契約の期間（日）。切れたら、自動更新（オンの場合）か、退職
 # 契約料（雇うときと、更新のときに払う）。毎日受け取る人が、契約の1週間（168時間）に稼ぐ、基本給（約5割）と鉱石の期待値（約3.5割）の合計を上回る
 CONTRACT_FEE = {"apprentice": 340, "miner": 1_200, "craftsman": 2_700, "foreman": 1_500}
 FOREMAN_LUCK = 0.25  # 監督1人ごとに、レア鉱石の出やすさが増える割合（基本給は増えない）
+
+COAL_P = 0.40  # 石炭が出る確率（働いた1時間ごと。見習いでも、半分近い時間で何か掘れる）
 
 # 鉱石。働いた1時間ごとに1回、掘る（外れもある）。(id, 名前, 印, 出る確率, 売値)。確率は、ORE_POWER=1 の作業員のもの
 ORES = (
@@ -96,7 +98,15 @@ ORES = (
     ("gold", "金", "🟡", 0.003, 400),
     ("diamond", "ダイヤ", "💎", 0.0004, 3_000),
     ("legend", "伝説の鉱石", "🌟", 0.00004, 30_000),
+    (
+        "coal",
+        "石炭",
+        "⚫",
+        COAL_P,
+        1,
+    ),  # ありふれた鉱石。出やすさは、作業員の種類・監督に関係なく同じ（鉱石が全く出ない、をなくす）
 )
+FLAT = ("coal",)  # 出やすさに ORE_POWER・監督の運をかけない鉱石
 ORE_NAME = {o[0]: o[1] for o in ORES}
 ORE_MARK = {o[0]: o[2] for o in ORES}
 ORE_VALUE = {o[0]: o[4] for o in ORES}
@@ -145,7 +155,9 @@ def idle_rate(counts: dict, wage: str) -> float:
 
 def ore_ev(kind: str, luck: float = 0.0) -> float:
     """作業員1人の、1時間あたりの鉱石の期待値（ペリカ）。"""
-    return ORE_POWER[kind] * (1 + luck) * sum(p * v for _, _, _, p, v in ORES)
+    if ORE_POWER[kind] <= 0:
+        return 0.0
+    return sum(p * v * (1 if oid in FLAT else ORE_POWER[kind] * (1 + luck)) for oid, _, _, p, v in ORES)
 
 
 def roll_ores(kind: str, hours: float, luck: float, rng) -> dict:
@@ -155,10 +167,12 @@ def roll_ores(kind: str, hours: float, luck: float, rng) -> dict:
         n += 1
     scale = ORE_POWER[kind] * (1 + luck)
     found: dict = {}
+    if ORE_POWER[kind] <= 0:  # 監督は掘らない
+        return found
     for _ in range(n):
         x = rng.random()
-        for oid, _, _, p, _ in ORES:  # 小さい確率の区間を順に重ねる
-            x -= p * scale
+        for oid, _, _, p, _ in ORES:  # 小さい確率の区間を順に重ねる（石炭は、最後）
+            x -= p * (1 if oid in FLAT else scale)
             if x < 0:
                 found[oid] = found.get(oid, 0) + 1
                 break

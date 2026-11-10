@@ -28,7 +28,7 @@ def fatigue_label(fatigue: float) -> str:
 
 def ore_text(found: dict) -> str:
     """掘った鉱石の一覧（価値の高い順）。"""
-    order = [o[0] for o in reversed(lab.ORES)]
+    order = sorted(lab.ORE_VALUE, key=lambda k: -lab.ORE_VALUE[k])  # 高い順
     return "　".join(f"{lab.ORE_MARK[k]}{lab.ORE_NAME[k]}×{found[k]}" for k in order if found.get(k))
 
 
