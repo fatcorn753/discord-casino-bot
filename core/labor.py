@@ -21,9 +21,9 @@ BASE_PAY = 10  # 工具なしの、1回の稼ぎ
 PAY_PER_LEVEL = 4  # ツルハシ1段ごとの加算（最大 30）
 FATIGUE_MAX = 100.0
 FATIGUE_GAIN = 3.0  # 工具なしの、1回で溜まる疲労
-GAIN_CUT_PER_LEVEL = 0.2  # 手袋1段ごとの軽減（5段で 1.0。疲労の溜まりは 3.0 → 2.0）
+GAIN_CUT_PER_LEVEL = 0.4  # 手袋1段ごとの軽減（最大で 1.0）
 MIN_PAY_RATE = 0.2  # 疲労が満タンのときの、稼ぎの割合（空のときは 1.0）
-RECOVER_PER_SEC = 0.2  # 疲労の自然回復（100 回復するのに約8分）
+RECOVER_PER_SEC = 0.1  # 疲労の自然回復（100 回復するのに約17分）
 
 DRINK_RECOVER = 60.0  # 栄養ドリンコ（ショップ）1本で回復する疲労
 CLICK_INTERVAL = 1.0  # 連打の最短間隔（秒）

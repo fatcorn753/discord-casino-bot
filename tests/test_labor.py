@@ -48,8 +48,8 @@ def click(eco, n, start=T0, step=1.5):
 def test_pure_numbers():
     assert lab.pay_per_click(0) == 10 and lab.pay_per_click(5) == 30 and lab.pay_per_click(99) == 30
     assert lab.pay_rate(0) == 1.0 and abs(lab.pay_rate(100) - lab.MIN_PAY_RATE) < 1e-9
-    assert lab.fatigue_gain(5) == 2.0
-    assert lab.fatigue_now(50, 0, 100) == 30 and lab.fatigue_now(10, 0, 1000) == 0
+    assert lab.fatigue_gain(5) == 1.0
+    assert lab.fatigue_now(50, 0, 100) == 40 and lab.fatigue_now(10, 0, 1000) == 0
     assert lab.upgrade_cost(0) == 150 and lab.upgrade_cost(5) is None
     assert lab.click_pay(0, 100) == 2 and lab.click_pay(0, 0) == 10
 
