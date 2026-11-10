@@ -50,12 +50,17 @@ def total_variance(symbol: str, seconds: float, now: float = 0.0, events=()) -> 
     """いまから seconds 秒後までの、対数価格の分散の合計（1分ごとの揺れ + 有事 + 市場イベント + 決算）。
 
     events（core/market_events.py のボラティリティ予告）と時間が重なる分は、揺れが factor² 倍になる。
-    その増え分は、予告の直後は一部（PRICED_AT_ANNOUNCE）だけ、開始に近づくほど全部が、値段に織り込まれる。
+    予告が出た瞬間に、全部が値段に織り込まれる（公知の情報で儲けられない）。予告のない平時（events に予告がない）は、
+    「これから予告が出る」期待の分（平均で EVENT_FACTOR²−1 倍の揺れを、expected_event_ticks 刻みぶん）を、最初から足す。
     """
     ticks = max(0.0, seconds) / TICK_SECONDS
     index = [s.key for s in market.SYMBOLS].index(symbol)
     base = market.COVARIANCE[index][index]
     total = ticks * (base + jump_variance_per_tick(symbol))
+    if not any(
+        "jump_var" not in ev and ev["symbol"] == symbol for ev in events
+    ):  # この銘柄に予告がない間は、将来の予告の期待を、最初から織り込む
+        total += market_events.expected_event_ticks(seconds, TICK_SECONDS) * base * (market_events.FACTOR**2 - 1)
     for ev in events:
         if "jump_var" in ev:  # 決算の発表（満期までに発表があれば、その分の分散が丸ごと足される）
             if ev["symbol"] == symbol and now < ev["jump_at"] <= now + seconds:
@@ -137,6 +142,12 @@ def pair_variance(a: str, b: str, seconds: float, now: float = 0.0, events=()) -
     scale = lambda k: min(market.EVENT_SCALE_MAX, market.BY_KEY[k].sigma / market.CS.sigma)  # noqa: E731
     jump = market.EVENT_PROB * mean_sq * (scale(a) - scale(b)) ** 2
     total = ticks * (saa + sbb - 2 * sab + jump)
+    if a != b and not any(
+        "jump_var" not in ev and ev["symbol"] in (a, b) for ev in events
+    ):  # A・B に予告がない間は、将来の予告の期待を織り込む（同じ銘柄どうしは、差が 0）
+        weight = market_events.expected_event_ticks(seconds, TICK_SECONDS)
+        m = market_events.FACTOR
+        total += weight * ((m * m - 1) * saa - 2 * (m - 1) * sab) + weight * ((m * m - 1) * sbb - 2 * (m - 1) * sab)
     for ev in events:
         if "jump_var" in ev:  # 決算の発表（A と B は独立に動くので、どちらの分も差の分散に足される）
             if ev["symbol"] in (a, b) and now < ev["jump_at"] <= now + seconds:

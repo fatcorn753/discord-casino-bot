@@ -3,8 +3,8 @@
 どのイベントも、勝ち負けの八百長ではない。「大きく動く」ことは分かっても、上がるか下がるかは分からない。
 - ボラティリティ予告: ある銘柄の値動きの大きさ σ が、予告から LEAD_MIN 分後に始まり、DURATION_MIN 分間だけ FACTOR 倍になる。
   価格の動きは、-m²Σ/2 の補正をつけて、期待値は変わらない（マルチンゲールのまま）。向きはランダム
-- オプションの値段（core/options.py）には、予告を少しずつ織り込む。予告の直後は PRICED_AT_ANNOUNCE の割合だけ、開始に近づくほど全部になる。
-  早く気づいて仕込めば得で、遅いほど値段が上がっている
+- オプションの値段（core/options.py）は、予告が出た瞬間に、イベントを全部織り込む（公知の情報なので、先回りの両建て（ストラドル）が儲からない）。
+  予告が出ていない平時も、「これから予告が出る」期待の分（expected_event_ticks）を、最初から値段に織り込む（無裁定）
 - 相関崩壊の警報: 強く連動する2銘柄の、直近 ALERT_WINDOW 分の値動きの差が、ふだんの揺れの Z_ALERT 倍（σ）以上に開いたら、市況に出す
 """
 
@@ -19,7 +19,9 @@ DURATION_MIN = 20  # 続く分
 FACTOR = 2.0  # 値動きの大きさ σ の倍率
 ANNOUNCE_PROB = 1 / 300  # 1分ごとに、新しい予告が出る確率（約5時間に1回）
 COOLDOWN_MIN = 60  # 終わってから、次の予告が出るまでの最短の分
-PRICED_AT_ANNOUNCE = 0.4  # 予告の直後に、オプションの値段が、イベントを織り込んでいる割合（開始までに 1.0 になる）
+PRICED_AT_ANNOUNCE = (
+    1.0  # 予告の直後に、オプションの値段が、イベントを織り込んでいる割合（公知の情報なので、予告の瞬間に 1.0）
+)
 KEEP_DAYS = 7  # 終わったイベントの記録を残す日数
 
 ALERT_WINDOW = 60  # 相関崩壊を調べる、直近の分
@@ -57,12 +59,23 @@ def multiplier(events: list, symbol: str, now: float) -> float:
 
 
 def priced_weight(ev: dict, now: float) -> float:
-    """オプションの値段が、そのイベントを織り込んでいる割合（予告の直後 PRICED_AT_ANNOUNCE → 開始で 1）。"""
+    """オプションの値段が、そのイベントを織り込んでいる割合（予告の直後から PRICED_AT_ANNOUNCE。いまは 1 で、予告の瞬間に全部）。"""
     if now >= ev["start_ts"]:
         return 1.0
     span = max(1.0, ev["start_ts"] - ev["announce_ts"])
     progress = max(0.0, min(1.0, (now - ev["announce_ts"]) / span))
     return PRICED_AT_ANNOUNCE + (1 - PRICED_AT_ANNOUNCE) * progress
+
+
+def expected_event_ticks(seconds: float, tick_seconds: float) -> float:
+    """平時に、満期までの seconds 秒のあいだに、ある1銘柄が（まだ予告のない）イベントに当たる、1分ごとの刻みの数の期待値。
+
+    予告は、1分ごとに ANNOUNCE_PROB の確率で出る（ただし、前のイベントが終わって COOLDOWN_MIN 分たつまでは出ない）。
+    1回の周期は、予告の待ち 1/ANNOUNCE_PROB + 予告から終了まで（LEAD_MIN + DURATION_MIN）+ 冷却 COOLDOWN_MIN 分。
+    イベントの対象は、全銘柄から一様に選ばれるので、1銘柄あたりは、その 1/銘柄数。
+    """
+    cycle = 1 / ANNOUNCE_PROB + LEAD_MIN + DURATION_MIN + COOLDOWN_MIN
+    return seconds / tick_seconds * DURATION_MIN / cycle / len(market.SYMBOLS)
 
 
 def extra_variance_ticks(ev: dict, now: float, seconds: float, tick_seconds: float) -> float:
@@ -116,7 +129,7 @@ def event_text(ev: dict, now: float) -> str:
         )
     return (
         f"📢 **予告**　{sym.emoji}{sym.name} の値動きが、<t:{int(ev['start_ts'])}:R> から {DURATION_MIN}分間、**{ev['factor']:g}倍**になります。"
-        "上がるか下がるかは分かりませんが、大きく動きます。オプションの値段は、開始に近づくほど上がります。"
+        "上がるか下がるかは分かりませんが、大きく動きます。オプションの値段には、もう織り込まれています。"
     )
 
 

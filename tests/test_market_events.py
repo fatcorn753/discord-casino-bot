@@ -52,11 +52,16 @@ def test_phases_and_multiplier_follow_the_timeline():
     )
 
 
-def test_priced_weight_rises_from_the_announce_level_to_one_at_the_start():
-    ev = event()
-    assert market_events.priced_weight(ev, ev["announce_ts"]) == pytest.approx(market_events.PRICED_AT_ANNOUNCE)
-    mid = market_events.priced_weight(ev, ev["announce_ts"] + market_events.LEAD_MIN * 30)
-    assert market_events.PRICED_AT_ANNOUNCE < mid < 1.0 and market_events.priced_weight(ev, ev["start_ts"]) == 1.0
+def test_priced_weight_is_one_from_the_moment_of_the_announcement():
+    ev = market_events.plan_event(1_000.0, __import__("random").Random(1))
+    assert market_events.priced_weight(ev, ev["announce_ts"]) == 1.0  # 公知の情報は、予告の瞬間に全部織り込む
+    assert market_events.priced_weight(ev, ev["start_ts"]) == 1.0
+
+
+def test_expected_event_ticks_is_a_small_per_symbol_share_of_the_window():
+    ticks = market_events.expected_event_ticks(6 * 3600, 60)
+    assert 3.0 < ticks < 6.0  # 6時間のうち、1銘柄が予告に当たる刻みの期待値（約4.5分）
+    assert market_events.expected_event_ticks(0, 60) == 0.0
 
 
 # ----------------------------- 値動きへの反映（期待値は変わらない）----------------------------- #
@@ -111,15 +116,26 @@ def test_vol_multipliers_only_while_the_event_is_active(root):
 
 
 # ----------------------------- オプションの値段への織り込み ----------------------------- #
-def test_option_price_rises_as_the_announced_event_approaches():
+def test_announced_event_is_fully_priced_at_once_and_does_not_rise_as_it_approaches():
     ev = event()
     args = ("call", "numa", 400.0, 420.0, 6 * 3600)
     none = opt.ask_per_unit(*args, now=NOW, events=())
     at_announce = opt.ask_per_unit(*args, now=NOW, events=[ev])
     near_start = opt.ask_per_unit(*args, now=ev["start_ts"] - 1, events=[ev])
-    assert none < at_announce < near_start  # 予告の直後は、まだ安い（それでも、予告なしよりは高い）
-    full = opt.ask_per_unit(*args, now=ev["start_ts"], events=[ev])
-    assert near_start <= full
+    assert at_announce > none  # 予告が出た瞬間に、全部織り込む
+    assert near_start == pytest.approx(
+        at_announce, rel=0.02
+    )  # 開始に近づいても、値段は（時間の経過の分を除いて）上がらない
+
+
+def test_peacetime_prices_already_include_the_expected_future_announcements():
+    """予告のない平時も、「これから予告が出る」期待の分だけ、揺れが大きく見積もられている（無裁定）。"""
+    base = opt.total_variance("numa", 6 * 3600, 0.0, [event("cs")])  # numa に予告がない
+    own = opt.total_variance("numa", 6 * 3600, 0.0, [event("numa")])
+    ticks = 6 * 3600 / opt.TICK_SECONDS
+    plain = ticks * (market.COVARIANCE[2][2] + opt.jump_variance_per_tick("numa"))
+    assert base > plain  # 平時の期待の分が、足されている
+    assert own != base  # 自分の銘柄の予告があれば、その予告を明示的に数える
 
 
 def test_an_event_on_another_symbol_does_not_change_the_price():
@@ -127,13 +143,13 @@ def test_an_event_on_another_symbol_does_not_change_the_price():
     assert opt.ask_per_unit(*args, now=NOW, events=[event("numa")]) == opt.ask_per_unit(*args, now=NOW, events=())
 
 
-def test_buying_right_after_the_announcement_is_cheaper_than_later(root):
+def test_no_front_running_buying_right_after_the_announcement_costs_the_same_as_just_before_the_start(root):
     eco = root.for_guild(G)
     eco.credit(U, 20_000, "テスト")
     ev = root.event_step(time.time(), force=event(announce=time.time()))
     ok, early = eco.option_buy(U, opt.CALL, "numa", 1_000, ev["announce_ts"])
     ok, late = eco.option_buy(U, opt.CALL, "numa", 1_000, ev["start_ts"] - 1)
-    assert early["units"] > late["units"]  # 同じ掛け金で、予告の直後のほうが、たくさん買える
+    assert early["units"] == pytest.approx(late["units"], rel=0.03)  # 予告の直後に仕込んでも、安く買えない
 
 
 # ----------------------------- 相関崩壊の警報 ----------------------------- #
