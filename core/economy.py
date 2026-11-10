@@ -37,6 +37,7 @@ from core.eco_labor import LaborMixin
 from core.eco_loans import LoanMixin
 from core.eco_market_events import MarketEventMixin
 from core.eco_options import OptionMixin
+from core.eco_p2p import P2PMixin
 from core.eco_pachinko import PachinkoMixin
 from core.eco_quiz import QuizMixin
 from core.eco_raffle import RaffleMixin
@@ -75,6 +76,7 @@ class Economy(
     OptionMixin,
     MarketEventMixin,
     EarningsMixin,
+    P2PMixin,
 ):
     DAILY_BASE = 1000
     DAILY_STREAK_BONUS = 100  # 連続1日ごとの加算

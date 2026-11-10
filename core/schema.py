@@ -227,6 +227,25 @@ def create_tables(conn: sqlite3.Connection) -> None:
             legacy     INTEGER NOT NULL DEFAULT 0   -- 1 = 鉱石版より前の契約（起動時に、契約料を返して解約した）
         );
         CREATE INDEX IF NOT EXISTS labor_workers_owner ON labor_workers (guild_id, user_id);
+        CREATE TABLE IF NOT EXISTS market_listings (   -- プレイヤー間の市場の出品（定価と競り）。出した品・馬は、出品中は預かる
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id   INTEGER NOT NULL,
+            seller_id  INTEGER NOT NULL,
+            kind       TEXT NOT NULL,                  -- item / horse
+            ref        TEXT NOT NULL,                  -- 品のID、または馬の番号
+            qty        INTEGER NOT NULL DEFAULT 1,
+            mode       TEXT NOT NULL,                  -- fixed（定価）/ auction（競り）
+            price      INTEGER NOT NULL,               -- 定価、または競りの開始価格（まとめて1つの値段）
+            bid        INTEGER NOT NULL DEFAULT 0,     -- いまの最高入札額（預かり中）
+            bidder_id  INTEGER NOT NULL DEFAULT 0,
+            created    REAL NOT NULL,
+            end_at     REAL NOT NULL,                  -- 競りの締切 / 定価の有効期限
+            status     TEXT NOT NULL DEFAULT 'active', -- active / sold / cancelled / expired
+            buyer_id   INTEGER NOT NULL DEFAULT 0,
+            sold_price INTEGER NOT NULL DEFAULT 0,
+            closed_at  REAL
+        );
+        CREATE INDEX IF NOT EXISTS market_listings_active ON market_listings (guild_id, status, end_at);
         CREATE TABLE IF NOT EXISTS seized_items (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id  INTEGER NOT NULL,

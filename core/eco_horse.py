@@ -37,9 +37,7 @@ class HorseMixin:
             return False, "毛色と勝負服の色を、選び直してください。"
         with self._lock, self._conn:
             self._ensure(user_id)
-            owned = self._conn.execute(
-                "SELECT COUNT(*) FROM horses WHERE guild_id=? AND owner_id=?", (self._g(), user_id)
-            ).fetchone()[0]
+            owned = self._horse_count(user_id)  # 出品中の馬も数える
             if owned >= horse_mod.MAX_HORSES:
                 return False, f"持てる馬は {horse_mod.MAX_HORSES} 頭までです。"
             if not self._consume(user_id, HORSE_VOUCHER):
@@ -640,9 +638,7 @@ class HorseMixin:
             ).fetchone()
             if row is None:
                 return PurchaseResult(False, "その馬は、もう売れてしまいました。", self._balance(user_id))
-            owned = self._conn.execute(
-                "SELECT COUNT(*) FROM horses WHERE guild_id=? AND owner_id=?", (self._g(), user_id)
-            ).fetchone()[0]
+            owned = self._horse_count(user_id)  # 出品中の馬も数える
             if owned >= horse_mod.MAX_HORSES:
                 return PurchaseResult(False, f"持てる馬は {horse_mod.MAX_HORSES} 頭までです。", self._balance(user_id))
             price = self.horse_auction_price(row["listed_at"], now)
