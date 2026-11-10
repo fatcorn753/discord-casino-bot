@@ -42,6 +42,34 @@ class LaborMixin:
         except (ValueError, AttributeError):
             return {}
 
+    FINDS_KEEP = 40  # 1人ぶん残す、掘り出しの履歴の数
+
+    def _labor_log_finds(self, user_id: int, finds: list) -> None:
+        """掘り出しの履歴を書く（古いものは、FINDS_KEEP 件まで残して消す）。"""
+        if not finds:
+            return
+        self._conn.executemany(
+            "INSERT INTO labor_finds (guild_id, user_id, at, kind, ore, qty) VALUES (?, ?, ?, ?, ?, ?)",
+            [(self._g(), user_id, at, kind, ore, n) for at, kind, ore, n in finds],
+        )
+        self._conn.execute(
+            "DELETE FROM labor_finds WHERE guild_id=? AND user_id=? AND id NOT IN "
+            "(SELECT id FROM labor_finds WHERE guild_id=? AND user_id=? ORDER BY at DESC, id DESC LIMIT ?)",
+            (self._g(), user_id, self._g(), user_id, self.FINDS_KEEP),
+        )
+
+    def labor_finds(self, user_id: int, limit: int = 6) -> list:
+        """最近の掘り出し（石炭は除く）。新しい順。[{at, kind, ore}]。"""
+        with self._lock:
+            return [
+                dict(r)
+                for r in self._conn.execute(
+                    "SELECT at, kind, ore FROM labor_finds WHERE guild_id=? AND user_id=? AND ore NOT IN (%s) "
+                    "ORDER BY at DESC, id DESC LIMIT ?" % ",".join("?" * len(labor_mod.FLAT)),
+                    (self._g(), user_id, *labor_mod.FLAT, limit),
+                )
+            ]
+
     def _workers_of(self, user_id: int) -> list:
         return [
             dict(r)
@@ -86,6 +114,7 @@ class LaborMixin:
                 for k, n in plan["ores"].items():
                     found[k] = found.get(k, 0) + n
                 row["ores"] = json.dumps(found)
+            self._labor_log_finds(user_id, plan["finds"])
             row["day_earned"] += plan["gain"]
             row["earned_total"] += plan["gain"]
             workers = self._workers_of(user_id)
@@ -220,6 +249,7 @@ class LaborMixin:
                 (self._g(), user_id, shop_mod.LABOR_DRINK),
             ).fetchone()
             row["drinks"] = inv["qty"] if inv else 0
+            row["finds"] = self.labor_finds(user_id)
             return row
 
     def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> dict:

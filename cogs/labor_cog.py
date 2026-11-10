@@ -32,6 +32,15 @@ def ore_text(found: dict) -> str:
     return "　".join(f"{lab.ORE_MARK[k]}{lab.ORE_NAME[k]}×{found[k]}" for k in order if found.get(k))
 
 
+def finds_text(finds: list) -> str:
+    """最近の掘り出し（石炭は除く）。いつ・どの作業員が・何を掘ったか。"""
+    return "\n".join(
+        f"<t:{int(f['at'])}:R>　{lab.WORKER_MARK[f['kind']]}{lab.WORKER_NAME[f['kind']]} が "
+        f"{lab.ORE_MARK[f['ore']]}{lab.ORE_NAME[f['ore']]}（{lab.ORE_VALUE[f['ore']]:,}）"
+        for f in finds
+    )
+
+
 def pot_text(state: dict) -> str:
     """未受け取りの額。作業員がいるときは、そのうち作業員が稼いだ分（鉱石の売値を含む）も見せる。"""
     text = f"**{ui.pelica(state['pot_total'])}**"
@@ -65,6 +74,8 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     )
     if state.get("ores"):
         e.add_field(name="💎 作業員の掘り出し", value=ore_text(state["ores"]), inline=False)
+    if state.get("finds"):
+        e.add_field(name="📜 最近の掘り出し", value=finds_text(state["finds"]), inline=False)
     e.set_footer(
         text=f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します（{teiai.LABOR_SKIM_RATE:.0%}は、慈善団体に寄付されます）。"
     )

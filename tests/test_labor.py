@@ -408,6 +408,7 @@ def test_settle_plan_no_renewals_needed():
     assert plan == {
         "gain": 2,
         "ores": {},
+        "finds": [],
         "pot_spent": 0,
         "balance_spent": 0,
         "renewed": [],
@@ -720,3 +721,32 @@ def test_uncollected_hides_the_worker_part_when_there_are_no_workers(eco):
     assert "作業員" not in field.value
 
 
+def test_finds_are_logged_with_time_and_worker_and_shown_without_coal(eco, monkeypatch):
+    from cogs.labor_cog import panel_embed
+
+    monkeypatch.setattr(
+        lab, "roll_ores", lambda kind, h, luck, rng: {"copper": 1, "coal": 3, "diamond": 1} if h > 0 else {}
+    )
+    eco.credit(U, 10_000, "テスト")
+    eco.labor_hire(U, "miner", T0, DAY)
+    eco.labor_click(U, T0 + 3 * H, DAY)  # 触れると決算される
+    finds = eco.labor_state(U, T0 + 3 * H, DAY)["finds"]
+    assert sorted(f["ore"] for f in finds) == ["copper", "diamond"]  # 石炭は出さない
+    assert all(T0 < f["at"] <= T0 + 3 * H and f["kind"] == "miner" for f in finds)  # 時刻は、働いた時間のあいだ
+    assert eco.labor_state(U, T0 + 3 * H, DAY)["finds"] == finds  # 読むだけでは増えない
+    field = next(f for f in panel_embed(eco.labor_state(U, T0 + 3 * H, DAY)).fields if f.name.startswith("📜"))
+    assert "坑夫" in field.value and "ダイヤ" in field.value and "石炭" not in field.value
+    eco.labor_collect(U, T0 + 3 * H, DAY)
+    assert len(eco.labor_state(U, T0 + 3 * H, DAY)["finds"]) == 2  # 受け取っても、履歴は残る
+
+
+def test_finds_log_keeps_only_the_latest_entries(eco, monkeypatch):
+    monkeypatch.setattr(lab, "roll_ores", lambda kind, h, luck, rng: {"copper": 1} if h > 0 else {})
+    monkeypatch.setattr(type(eco), "FINDS_KEEP", 5)
+    eco.credit(U, 50_000, "テスト")
+    eco.labor_hire(U, "miner", T0, DAY)
+    for i in range(1, 9):
+        eco.labor_click(U, T0 + i * H, DAY)
+        eco.labor_collect(U, T0 + i * H, DAY)
+    count = eco._conn.execute("SELECT COUNT(*) FROM labor_finds WHERE user_id=?", (U,)).fetchone()[0]
+    assert count == 5

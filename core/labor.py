@@ -8,6 +8,7 @@
 レア鉱石を引けば大きく黒字になる。期待値は、契約料の100%未満（運の勝負）。
 """
 
+import math
 import random
 
 TOOLS = ("pick", "glove")
@@ -198,7 +199,7 @@ def settle_plan(
     - 払えない・オフなら、退職する（切れるまでの分だけ稼ぐ）
     低賃金なら、残った人から、確率で辞める人も出る。
     作業員は、働いた1時間ごとに鉱石を掘る（監督がいるほど、レア鉱石が出やすい）。売値は、gain に入る。
-    {gain, ores: {鉱石: 個数}, pot_spent, balance_spent, renewed: [(id, 新しい期限)], removed: [id], quit: [id]} を返す。
+    {gain, ores: {鉱石: 個数}, finds: [(時刻, 作業員の種類, 鉱石, 個数)], pot_spent, balance_spent, renewed: [(id, 新しい期限)], removed: [id], quit: [id]} を返す。
     rng は、random() を持つもの（鉱石・辞める人の抽選。省略なら本物の乱数）。
     """
     rng = rng or random.SystemRandom()
@@ -234,18 +235,23 @@ def settle_plan(
     gain = idle_rate(counts_of(staying), wage) * hours
     luck = foreman_luck(counts_of(staying)["foreman"])
     ores: dict = {}
+    finds: list = []  # 掘り出しの履歴 [(時刻, 作業員の種類, 鉱石, 個数)]。抽選は1時間ごとなので、時刻は、その時間枠の終わりにそろえる
 
-    def dig(kind, h):
+    def dig(kind, h, begin):
+        slots = max(1, math.ceil(h))
         for k, n in roll_ores(kind, h, luck, rng).items():
             ores[k] = ores.get(k, 0) + n
+            for _ in range(n):
+                at = min(now, begin + (1 + int(rng.random() * slots)) * 3600.0)
+                finds.append((at, kind, k, 1))
 
     for w in staying:
-        dig(w["kind"], hours)
+        dig(w["kind"], hours, start)
     for w in expired:  # 退職する人は、切れるまでの分だけ働く
         if w["id"] in removed:
             worked = max(0.0, min(now, w["expires_at"]) - start) / 3600.0
             gain += WORKER_RATE[w["kind"]] * WAGE_MULT.get(wage, 1.0) * worked
-            dig(w["kind"], worked)
+            dig(w["kind"], worked, start)
     quit_ids = []
     if wage == "low" and hours > 0:
         p = QUIT_PER_DAY * hours / 24.0
@@ -253,6 +259,7 @@ def settle_plan(
     return {
         "gain": int(gain) + ore_gain(ores),
         "ores": ores,
+        "finds": finds,
         "pot_spent": pot_spent,
         "balance_spent": balance_spent,
         "renewed": renewed,

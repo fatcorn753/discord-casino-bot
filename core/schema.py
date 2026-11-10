@@ -196,6 +196,16 @@ def create_tables(conn: sqlite3.Connection) -> None:
             ores         TEXT NOT NULL DEFAULT '',     -- 受け取る前の稼ぎに含まれる鉱石（JSON {鉱石: 個数}）
             PRIMARY KEY (guild_id, user_id)
         );
+        CREATE TABLE IF NOT EXISTS labor_finds (      -- 作業員の掘り出しの履歴（古いものは消す）
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            at       REAL NOT NULL,
+            kind     TEXT NOT NULL,                   -- 掘った作業員の種類
+            ore      TEXT NOT NULL,
+            qty      INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS labor_finds_owner ON labor_finds (guild_id, user_id, at);
         CREATE TABLE IF NOT EXISTS labor_workers (    -- 雇っている作業員（1人1行。契約の期限つき）
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id   INTEGER NOT NULL,
