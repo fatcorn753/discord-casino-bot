@@ -133,6 +133,8 @@ class HorseCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self._busy = set()  # いま処理しているサーバー（二重に走らせない）
+        self._posts = {}  # レースの番号 → `/競馬 出馬表` で出した投稿 [(チャンネル, メッセージ)]（締切で書き換える）
+        self._bet_closed = set()  # 馬券の締切で、投稿を書き換え済みのレース
 
     async def cog_load(self):
         self.bot.add_dynamic_items(RaceButton)
@@ -173,6 +175,11 @@ class HorseCog(commands.Cog):
             embed=card_embed(eco, race),
             view=card_view(race["id"], race["status"] == "betting"),
         )
+        try:  # 締切や発走で書き換えられるように、覚えておく（再起動すると忘れる）
+            msg = await interaction.original_response()
+            self._posts.setdefault(race["id"], []).append((msg.channel.id, msg.id))
+        except discord.HTTPException:
+            pass
 
     # ------------------------------ 開催 ------------------------------ #
     async def start_special(
@@ -211,16 +218,21 @@ class HorseCog(commands.Cog):
             eco.race_set_message(race_id, channel.id, msg.id)
 
     async def _retire(self, guild: discord.Guild, eco, race: dict) -> None:
-        """締切後の古い投稿を、ボタンなしで「締め切りました」の表示に書き換える（残ると、締切の「◯秒前」が増え続ける）。"""
-        channel = guild.get_channel(race["channel_id"]) if race["channel_id"] else None
-        if channel is None or not race["message_id"]:
-            return
-        try:
-            await channel.get_partial_message(race["message_id"]).edit(
-                embed=card_embed(eco, race, closed=True), view=None
-            )
-        except discord.HTTPException as exc:  # 消されていても、進行には関係ない
-            logthrottle.warn(("horse-retire", channel.id), f"競馬の古い投稿を書き換えられません: {exc!r}")
+        """締切後の古い投稿を、ボタンなしで「締め切りました」の表示に書き換える（残ると、締切の「◯秒前」が増え続ける）。
+
+        チャンネルへの告知のほか、`/競馬 出馬表` で出した投稿（self._posts）も同じように書き換える。
+        """
+        targets = [(race["channel_id"], race["message_id"])] if race["message_id"] else []
+        targets += self._posts.pop(race["id"], [])
+        embed = card_embed(eco, race, closed=True)
+        for channel_id, message_id in targets:
+            channel = guild.get_channel(channel_id) if channel_id else None
+            if channel is None:
+                continue
+            try:
+                await channel.get_partial_message(message_id).edit(embed=embed, view=None)
+            except discord.HTTPException as exc:  # 消されていても、進行には関係ない
+                logthrottle.warn(("horse-retire", channel.id), f"競馬の古い投稿を書き換えられません: {exc!r}")
 
     async def _close_entries(self, guild: discord.Guild, eco, race: dict) -> None:
         field = eco.race_close_entries(race["id"])
@@ -283,7 +295,7 @@ class HorseCog(commands.Cog):
         await self._post(channel, embed=result_embed(eco, result))
 
     # ------------------------------ 定時の確認 ------------------------------ #
-    @tasks.loop(seconds=20)
+    @tasks.loop(seconds=5)  # 締切・発走の表示を、すぐ書き換えるために短くする
     async def tick(self):
         try:
             await self.run_once()
@@ -312,6 +324,13 @@ class HorseCog(commands.Cog):
                         await self._close_entries(guild, eco, race)
                     elif race["status"] == "betting" and now >= race["start_at"]:
                         await self._run(guild, eco, race)
+                    elif (
+                        race["status"] == "betting" and now >= race["bet_close"] and race["id"] not in self._bet_closed
+                    ):
+                        self._bet_closed.add(
+                            race["id"]
+                        )  # 馬券の締切で、投稿を「締め切りました」に書き換える（発走まで、「◯秒前」が増えるのを防ぐ）
+                        await self._retire(guild, eco, race)
             except Exception as exc:  # 1サーバーの失敗で、ほかを止めない
                 print(f"競馬を処理できません: guild={guild.id}: {exc!r}")
             finally:

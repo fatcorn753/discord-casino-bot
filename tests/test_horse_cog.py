@@ -367,3 +367,43 @@ def test_result_embed_lists_every_winner_even_when_the_net_is_a_loss(setup):
     embed = horse_cog.result_embed(eco, {"race": race, "bets": bets, "prizes": {}})
     text = next(f.value for f in embed.fields if f.name == "払い戻し")
     assert f"<@{U}>" in text and "1,500" in text and "-500" in text and f"<@{V}>" not in text
+
+
+def test_when_drops_the_relative_time_once_it_has_passed(monkeypatch):
+    monkeypatch.setattr(views.time, "time", lambda: 1000.0)
+    assert ":R>" in views.when(1100.0)
+    assert ":R>" not in views.when(900.0) and "<t:900:t>" in views.when(900.0)
+
+
+def test_bet_close_rewrites_the_post_once_before_the_start(setup, monkeypatch):
+    eco, chan, guild, bot, cog = setup
+    rid, race, _ = _open_race(eco)
+    eco.race_set_message(rid, chan.id, 321)
+    monkeypatch.setattr("cogs.horse_cog.time.time", lambda: race["bet_close"] + 1)
+    asyncio.run(cog.run_once())
+    asyncio.run(cog.run_once())  # 2回目は、もう書き換えない
+    closed = [kw for mid, kw in chan.retired if mid == 321 and "締め切りました" in kw["embed"].description]
+    assert len(closed) == 1 and closed[0]["view"] is None
+
+
+def test_card_posts_from_the_command_are_rewritten_when_betting_closes(setup, monkeypatch):
+    eco, chan, guild, bot, cog = setup
+    rid, race, _ = _open_race(eco)
+
+    async def send_message(**kw):
+        return None
+
+    async def original_response():
+        return SimpleNamespace(id=900, channel=chan)
+
+    interaction = SimpleNamespace(
+        guild_id=0,
+        response=SimpleNamespace(send_message=send_message),
+        original_response=original_response,
+    )
+    asyncio.run(HorseCog.card.callback(cog, interaction))
+    assert cog._posts[rid] == [(chan.id, 900)]
+    monkeypatch.setattr("cogs.horse_cog.time.time", lambda: race["bet_close"] + 1)
+    asyncio.run(cog.run_once())
+    assert any(mid == 900 and "締め切りました" in kw["embed"].description for mid, kw in chan.retired)
+    assert rid not in cog._posts

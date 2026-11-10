@@ -46,6 +46,9 @@ async def refresh_entry_card(interaction: discord.Interaction, eco, race_id: int
 
 
 def when(ts: float) -> str:
+    """時刻と「◯分後」。過ぎた時刻は、「◯秒前」が増え続けて紛らわしいので、時刻だけにする。"""
+    if time.time() >= ts:
+        return f"<t:{int(ts)}:t>"
     return f"<t:{int(ts)}:t>（<t:{int(ts)}:R>）"
 
 
