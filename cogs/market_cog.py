@@ -12,7 +12,7 @@ from discord.ext import commands, tasks
 
 from cogs._amount import balance_choices, own_balance, typed_amount
 from cogs.bond_cog import KIND_CHOICES, describe_done, due_text
-from core import bonds, logthrottle, market, market_events, ui
+from core import approval, bonds, earnings, logthrottle, market, market_events, ui
 from core import options as opt
 from core.confirm import confirm_action
 from core.eco_options import name_of
@@ -152,6 +152,7 @@ def tax_line(res) -> str:
 class MarketCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self._earnings_results = []  # 発表した決算（チャンネルへの投稿待ち）
 
     def g(self, interaction: discord.Interaction):
         return self.bot.economy.for_guild(interaction.guild.id)
@@ -196,7 +197,15 @@ class MarketCog(commands.Cog):
             print(
                 f"ボラティリティ予告: {announced['symbol']} {market_events.LEAD_MIN}分後から{market_events.DURATION_MIN}分"
             )
+        tz = float(self.bot.config.get("utc_offset_hours", 9))
+        self.eco.earnings_ensure(now, tz)  # 次の決算（毎週火曜13:30）を決めておく
         new_fair, event = market.next_prices(fair, RNG, self.eco.vol_multipliers(now))
+        for r in self.eco.earnings_release_due(
+            now
+        ):  # 決算の発表: 理論価格が、一気に動く（値幅制限は、画面の価格にだけかかる）
+            hit = new_fair[r["symbol"]] * earnings.factor(r["direction"], r["size"])
+            new_fair[r["symbol"]] = min(market.MAX_PRICE, max(market.MIN_PRICE, round(hit, 2)))
+            self._earnings_results.append(r)
         ref = self._day_reference(now)
         new = {
             k: round(v, 2) for k, v in market.limit_to_day(new_fair, ref).items()
@@ -229,12 +238,60 @@ class MarketCog(commands.Cog):
         except Exception as exc:
             print(f"価格の更新に失敗: {exc!r}")
             return
+        try:
+            await self._earnings_posts()
+        except Exception as exc:
+            print(f"決算の告知に失敗: {exc!r}")
         now, cache = time.time(), {}
         for post in self.eco.live_chart_posts():
             try:
                 await self._refresh_post(post, now, cache)
             except Exception as exc:  # 1つのチャンネルの失敗で、他の更新を止めない
                 print(f"チャートの更新に失敗: {post}: {exc!r}")
+
+    async def _earnings_posts(self) -> None:
+        """決算の予告（月曜9:00）と発表の結果を、各サーバーの告知チャンネルに投稿する。"""
+        from cogs.weekly_cog import announce_channel
+
+        now = time.time()
+        embeds = []
+        for r in self.eco.earnings_to_announce(now):
+            sym = market.BY_KEY[r["symbol"]]
+            embeds.append(
+                ui.embed(
+                    "📣 今週の決算発表",
+                    f"{sym.emoji} **{sym.name}** の決算発表は、<t:{int(r['release_at'])}:F>（<t:{int(r['release_at'])}:R>）。\n"
+                    "結果は、発表の瞬間まで、だれにも分かりません。好決算なら急騰、悪決算なら急落、サプライズなら値幅制限を突き抜けます。",
+                    ui.INFO,
+                )
+            )
+        results, self._earnings_results = self._earnings_results, []
+        for r in results:
+            sym = market.BY_KEY[r["symbol"]]
+            pin = self.eco.market_pin(r["symbol"])
+            good = r["direction"] > 0
+            embeds.append(
+                ui.embed(
+                    f"📊 {sym.name} 決算発表: {'好決算！' if good else '悪決算…'}",
+                    f"{sym.emoji} **{sym.name}** の決算は、**{'市場予想を大きく上回りました' if good else '市場予想を大きく下回りました'}**"
+                    f"（理論価格 {r['direction'] * r['size']:+.0%}）。"
+                    + (f"\n**{market.PIN_MARK[pin]}に張り付いています！**" if pin else ""),
+                    ui.OK if good else ui.ERROR,
+                )
+            )
+        if not embeds:
+            return
+        for guild in list(self.bot.guilds):
+            if not approval.is_allowed(self.eco, self.bot.config, guild.id, 0):
+                continue
+            channel = announce_channel(guild, self.eco.for_guild(guild.id))
+            if channel is None:
+                continue
+            for embed in embeds:
+                try:
+                    await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+                except discord.HTTPException as exc:
+                    logthrottle.warn(("earnings-post", guild.id), f"決算の投稿に失敗: guild={guild.id}: {exc!r}")
 
     @tick.before_loop
     async def _before_tick(self):
@@ -345,6 +402,14 @@ class MarketCog(commands.Cog):
         ev = market_events.current(self.eco.market_events(now), now)
         return market_events.event_text(ev, now) if ev else ""
 
+    def earnings_lines(self) -> str:
+        """今週の決算発表の予告（月曜9:00から、発表まで）。なければ空文字。"""
+        ev = self.eco.earnings_upcoming(time.time())
+        if ev is None:
+            return ""
+        sym = market.BY_KEY[ev["symbol"]]
+        return f"📣 {sym.emoji} **{sym.name}** の決算発表: <t:{int(ev['release_at'])}:F>（<t:{int(ev['release_at'])}:R>）\n好決算なら急騰、悪決算なら急落。サプライズなら、値幅制限を突き抜ける。"
+
     def alert_lines(self) -> str:
         """相関崩壊の警報（連動する2銘柄の値動きの差が開いたもの）。なければ空文字。"""
         since = time.time() - (market_events.ALERT_WINDOW + 5) * 60
@@ -387,6 +452,7 @@ class MarketCog(commands.Cog):
         body = "\n".join(lines) + "\n\n**銘柄どうしの連動（直近24時間の1分ごとの値動き）**\n" + self.correlation_table()
         e = ui.embed("📈 市況（全銘柄）", body + "\n下のメニューで、銘柄と期間のチャートを見られます。", ui.GOLD)
         for name, text in (
+            ("📣 決算発表", self.earnings_lines()),
             ("⚡ 市場イベント", self.event_lines()),
             ("🔀 相関崩壊の警報", self.alert_lines()),
             ("🎯 ロスカットが密集しているところ", self.cut_lines(guild_id) if guild_id else ""),

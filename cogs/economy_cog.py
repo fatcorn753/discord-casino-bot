@@ -2,6 +2,7 @@
 
 import datetime
 import math
+import time
 from typing import Optional
 
 import discord
@@ -202,6 +203,7 @@ class EconomyCog(commands.Cog):
         self.g(interaction).take_notices(
             interaction.user.id
         )  # 種銭などの一言は、上の行で出したので、たまらないように取り除く
+        memo = self.g(interaction).earnings_memo(interaction.user.id, time.time())  # 確率で、決算の裏情報メモが届く
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "デイリーボーナス",
@@ -209,6 +211,8 @@ class EconomyCog(commands.Cog):
                 f"🕛 次のボーナスは **{next_slot_label(self.bot)}**（<t:{int(next_slot(self.bot).timestamp())}:R>）から。6時間ごと（0・6・12・18時）に受け取れます。",
             )
         )
+        if memo:  # 本人にだけ見える
+            await interaction.followup.send(embed=ui.embed("🕴️ 黒服の噂話", memo, ui.DARK), ephemeral=True)
 
     @group.command(name="返済", description="帝愛への借金を、手元のペリカから返す（金額を省くと、返せる限り全額）")
     @app_commands.rename(amount="金額")

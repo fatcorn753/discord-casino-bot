@@ -29,6 +29,7 @@ from core.eco_bank import BankMixin
 from core.eco_bonds import BondMixin
 from core.eco_crypto import CryptoMixin
 from core.eco_debt import DebtMixin
+from core.eco_earnings import EarningsMixin
 from core.eco_events import EventMixin
 from core.eco_guild import GuildMixin
 from core.eco_horse import HorseMixin
@@ -73,6 +74,7 @@ class Economy(
     LaborMixin,
     OptionMixin,
     MarketEventMixin,
+    EarningsMixin,
 ):
     DAILY_BASE = 1000
     DAILY_STREAK_BONUS = 100  # 連続1日ごとの加算

@@ -362,6 +362,23 @@ def create_tables(conn: sqlite3.Connection) -> None:
             end_ts      REAL NOT NULL,
             factor      REAL NOT NULL                 -- 値動きの大きさ σ の倍率
         );
+        CREATE TABLE IF NOT EXISTS earnings (           -- 定期決算（毎週火曜13:30）。市場は全サーバー共通なので、サーバーに属さない
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            symbol      TEXT NOT NULL,
+            announce_at REAL NOT NULL,                -- 予告の時刻（月曜9:00）
+            release_at  REAL NOT NULL,                -- 発表の時刻
+            direction   INTEGER NOT NULL,             -- 1 好決算 / -1 悪決算（発表まで、だれにも分からない）
+            size        REAL NOT NULL,                -- 理論価格の動きの大きさ
+            announced   INTEGER NOT NULL DEFAULT 0,
+            released    INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS earnings_memos (     -- 届けた裏情報メモ（1つの決算に、1人1回まで）
+            event_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            hint     INTEGER NOT NULL,                -- 噂の方向（本当とは限らない）
+            PRIMARY KEY (event_id, guild_id, user_id)
+        );
         CREATE TABLE IF NOT EXISTS quiz_questions (     -- クイズの問題（全サーバー共通。持ち主が登録する）
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             question    TEXT    NOT NULL,
