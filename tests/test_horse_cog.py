@@ -366,7 +366,7 @@ def test_result_embed_lists_every_winner_even_when_the_net_is_a_loss(setup):
     ]
     embed = horse_cog.result_embed(eco, {"race": race, "bets": bets, "prizes": {}})
     text = next(f.value for f in embed.fields if f.name == "払い戻し")
-    assert f"<@{U}>" in text and "1,500" in text and "-500" in text and f"<@{V}>" not in text
+    assert f"<@{U}>" in text and "1,500" in text and "収支" not in text and f"<@{V}>" not in text
 
 
 def test_when_drops_the_relative_time_once_it_has_passed(monkeypatch):
@@ -407,3 +407,4 @@ def test_card_posts_from_the_command_are_rewritten_when_betting_closes(setup, mo
     asyncio.run(cog.run_once())
     assert any(mid == 900 and "締め切りました" in kw["embed"].description for mid, kw in chan.retired)
     assert rid not in cog._posts
+
