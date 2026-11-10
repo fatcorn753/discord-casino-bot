@@ -22,7 +22,7 @@ DEFAULT_STATS = {"speed": 50, "stamina": 50, "power": 50, "guts": 50}
 CARROT_POINTS = 5  # にんじん1本で動かせるポイント
 
 GOLD_CARROT_POINTS = 5  # 金にんじん1本で、2か所に5点ずつ（合計10点）増やせる
-GOLD_CARROT_MAX = 5  # 1頭に使える金にんじんの数（合計 +50 点まで）
+GOLD_CARROT_MAX = 1  # 1頭に使える金にんじんの数（合計 +10 点まで）
 
 FIELD_SIZE = 8  # 1レースの出走頭数
 NAME_MAX = 12

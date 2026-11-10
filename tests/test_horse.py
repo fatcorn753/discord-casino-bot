@@ -181,37 +181,39 @@ def test_carrot_moves_five_points_and_is_consumed(eco):
     assert sum(eco.horse_get(hid)[k] for k in h.STAT_KEYS) == h.STAT_TOTAL
 
 
-def test_gold_carrot_adds_ten_points_in_two_picks_and_is_capped(eco):
+def test_gold_carrot_adds_ten_points_in_two_picks(eco):
     hid = make_horse(eco)
     assert "金にんじん" in eco.horse_gold_carrot(U, hid, "speed", "guts")[1]  # 持っていない
-    give(eco, U, shop.GOLD_CARROT, 7)
+    give(eco, U, shop.GOLD_CARROT, 3)
+    assert not eco.horse_gold_carrot(V, hid, "speed", "guts")[0]  # 他人の馬には使えない
     ok, stats = eco.horse_gold_carrot(U, hid, "speed", "guts")
     assert ok and stats["speed"] == 55 and stats["guts"] == 55
     assert sum(stats.values()) == h.STAT_TOTAL + 10 and eco.horse_get(hid)["bonus"] == 10
-    ok, stats = eco.horse_gold_carrot(U, hid, "speed", "speed")  # 同じところに2回
-    assert ok and stats["speed"] == 65
-    assert not eco.horse_gold_carrot(V, hid, "speed", "guts")[0]  # 他人の馬には使えない
-    ok, why = eco.horse_gold_carrot(
-        U, hid, "speed", "speed"
-    )  # 1つのステータスは 80 まで（65+10=75 は OK、その次は不可）
-    assert ok
-    ok, why = eco.horse_gold_carrot(U, hid, "speed", "speed")
-    assert not ok and "最高" in why and eco.inventory(U)[shop.GOLD_CARROT] == 4  # 失敗では減らない
+    other = make_horse(eco, U, "二頭目")
+    ok, stats = eco.horse_gold_carrot(U, other, "speed", "speed")  # 同じところに2回
+    assert ok and stats["speed"] == 60 and eco.inventory(U)[shop.GOLD_CARROT] == 1
 
 
-def test_gold_carrot_is_limited_per_horse(eco):
+def test_gold_carrot_is_limited_to_one_per_horse(eco):
     hid = make_horse(eco)
-    give(eco, U, shop.GOLD_CARROT, 10)
-    for first, second in [
-        ("speed", "guts"),
-        ("stamina", "power"),
-        ("speed", "guts"),
-        ("stamina", "power"),
-        ("guts", "speed"),
-    ]:
-        assert eco.horse_gold_carrot(U, hid, first, second)[0]
+    give(eco, U, shop.GOLD_CARROT, 3)
+    assert eco.horse_gold_carrot(U, hid, "speed", "guts")[0]
     ok, why = eco.horse_gold_carrot(U, hid, "power", "power")
-    assert not ok and "5 本まで" in why
+    assert not ok and "1 本まで" in why and eco.inventory(U)[shop.GOLD_CARROT] == 2  # 失敗では減らない
+    assert eco.horse_get(hid)["bonus"] == 10
+
+
+def test_gold_carrot_cannot_push_one_stat_over_the_max(eco):
+    hid = make_horse(eco)
+    give(eco, U, shop.GOLD_CARROT, 1)
+    eco._conn.execute("UPDATE horses SET speed=75 WHERE id=?", (hid,))
+    ok, why = eco.horse_gold_carrot(U, hid, "speed", "guts")  # 75+5=80 は OK
+    assert ok
+    other = make_horse(eco, U, "二頭目")
+    give(eco, U, shop.GOLD_CARROT, 1)
+    eco._conn.execute("UPDATE horses SET speed=75 WHERE id=?", (other,))
+    ok, why = eco.horse_gold_carrot(U, other, "speed", "speed")  # 75+10=85 は不可
+    assert not ok and "最高" in why
 
 
 def test_retire_value_rewards_a_good_record_and_charges_for_a_bad_one():
