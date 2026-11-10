@@ -395,6 +395,43 @@ class HorseMixin:
                 "name": label,
             }
 
+    def race_bet_many(self, user_id: int, race_id: int, kind: str, lanes: list, stake: int, now: float) -> tuple:
+        """単勝・複勝を、何頭かまとめて買う（1頭ごとに stake ずつ、別々の馬券になる）。(成功か, 理由か馬券の辞書の並び)。
+
+        先に、合計の賭け金（レースの上限・残高）を確かめてから買う。それでも途中で買えなくなったら、そこまでの馬券は残る。
+        """
+        if kind not in horse_mod.MULTI_KINDS:
+            return False, "まとめて買えるのは、単勝と複勝だけです。"
+        lanes = list(dict.fromkeys(lanes))  # 同じ枠は1回だけ
+        if not lanes:
+            return False, "馬を選んでください。"
+        if not horse_mod.MIN_STAKE <= stake <= horse_mod.MAX_STAKE:
+            return False, f"賭け金は {horse_mod.MIN_STAKE:,}〜{horse_mod.MAX_STAKE:,}ペリカ にしてください。"
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            spent = self._conn.execute(
+                "SELECT COALESCE(SUM(stake), 0) FROM horse_bets WHERE race_id=? AND user_id=?", (race_id, user_id)
+            ).fetchone()[0]
+            total = stake * len(lanes)
+            if spent + total > horse_mod.MAX_RACE_STAKE:
+                return (
+                    False,
+                    f"1つのレースに賭けられるのは、合計 {horse_mod.MAX_RACE_STAKE:,}ペリカ までです"
+                    f"（今回は {total:,}、すでに {spent:,}）。",
+                )
+            if self._balance(user_id) < total:
+                return (
+                    False,
+                    f"残高が足りません（合計 {total:,}ペリカ 必要。いまの残高: {self._balance(user_id):,}ペリカ）。",
+                )
+            bought = []
+            for lane in lanes:
+                ok, result = self.race_bet(user_id, race_id, kind, lane, stake, now)
+                if not ok:
+                    return False, f"{result}（先の {len(bought)} 頭ぶんは買えています）" if bought else result
+                bought.append(result)
+            return True, bought
+
     # ---------------------------------------------------------------- #
     # 発走・精算                                                        #
     # ---------------------------------------------------------------- #

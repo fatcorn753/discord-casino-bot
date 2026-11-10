@@ -235,3 +235,85 @@ def test_bet_is_announced_publicly_in_the_race_channel(setup):
     asyncio.run(panel.announce_bet(interaction, "3", result))
     text = chan.sent[-1]["content"]
     assert f"<@{V}>" in text and "単勝" in text and "アルファ" in text and "4.2" in text
+
+
+def _open_race(eco):
+    rid = eco.race_create_special(1_700_000_000.0, 1, 1)
+    field = eco.race_close_entries(rid, random.Random(1))
+    eco.race_set_odds(rid, h.make_all_odds(field["runners"], field["track"], sims=200, seed=1))
+    race = eco.race_get(rid)
+    return rid, race, race["bet_close"] - 10
+
+
+def test_win_and_place_select_several_horses_at_once(setup):
+    eco, chan, guild, bot, cog = setup
+    rid, race, now = _open_race(eco)
+    panel = views.BetPanel(
+        SimpleNamespace(economy=SimpleNamespace(for_guild=lambda g: eco)), V, {**race, "guild_id": 0}
+    )
+    for kind in h.MULTI_KINDS:
+        panel.kind = kind
+        panel._build(eco)
+        sel = [c for c in panel.children if isinstance(c, views.discord.ui.Select)][1]
+        assert (sel.min_values, sel.max_values) == (1, len(eco.race_entries(rid)))  # 何頭でも選べる
+    panel.multi = [5, 2, 7]
+    assert panel.picked() == [2, 5, 7]
+    text = panel.embed(eco).description
+    assert "3頭" in text and "2枠" in text and "5枠" in text and "7枠" in text
+
+
+def test_race_bet_many_buys_one_ticket_per_horse_with_the_same_stake_each(setup):
+    eco, chan, guild, bot, cog = setup
+    eco.credit(V, 10_000, "テスト")
+    rid, race, now = _open_race(eco)
+    before = eco.balance(V)
+    ok, bought = eco.race_bet_many(V, rid, "place", [2, 5, 7, 5], 500, now)  # 重複した枠は1回だけ
+    assert ok and [b["lane"] for b in bought] == [2, 5, 7] and all(b["stake"] == 500 for b in bought)
+    assert eco.balance(V) == before - 1_500 and len(eco.race_bets(V, rid)) == 3
+    assert {b["kind"] for b in eco.race_bets(V, rid)} == {"place"}
+    assert eco.race_bet_many(V, rid, "quinella", [1, 2], 500, now)[0] is False  # まとめ買いは、単勝・複勝だけ
+    assert eco.race_bet_many(V, rid, "place", [], 500, now)[0] is False
+
+
+def test_race_bet_many_checks_the_total_before_buying_anything(setup):
+    eco, chan, guild, bot, cog = setup
+    eco.set_balance(V, 1_000, "テスト")
+    rid, race, now = _open_race(eco)
+    ok, why = eco.race_bet_many(V, rid, "place", [1, 2, 3], 500, now)  # 合計 1,500 で足りない
+    assert not ok and "足りません" in why and eco.balance(V) == 1_000 and eco.race_bets(V, rid) == []
+    eco.set_balance(V, 100_000, "テスト")
+    ok, why = eco.race_bet_many(V, rid, "place", list(range(1, 9)), h.MAX_STAKE, now)  # 合計が1レースの上限を超える
+    assert not ok and "合計" in why and eco.race_bets(V, rid) == []
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_stake_modal_buys_every_selected_horse_and_announces_once(setup):
+    eco, chan, guild, bot, cog = setup
+    bot.get_cog = lambda name: cog
+    eco.credit(V, 10_000, "テスト")
+    before = eco.balance(V)
+    rid, race, now = _open_race(eco)
+    panel = views.BetPanel(bot, V, {**race, "guild_id": 0})
+    panel.kind, panel.multi = "place", [3, 6]
+    modal = views.StakeModal(panel)
+    assert "1頭あたり" in modal.stake.label
+    modal.stake._value = "400"
+    sent = []
+
+    class Resp:
+        async def send_message(self, **kw):
+            sent.append(kw)
+
+    it = SimpleNamespace(guild=guild, guild_id=0, user=SimpleNamespace(id=V), response=Resp())
+    import time as _t
+
+    orig = _t.time
+    _t.time = lambda: now
+    try:
+        asyncio.run(modal.on_submit(it))
+    finally:
+        _t.time = orig
+    assert len(eco.race_bets(V, rid)) == 2 and eco.balance(V) == before - 800
+    assert "合計" in sent[-1]["embed"].description
+    posts = [m["content"] for m in chan.sent if "content" in m and "🎫" in m["content"]]
+    assert len(posts) == 1 and "複勝" in posts[0] and "3枠" in posts[0] and "6枠" in posts[0]
