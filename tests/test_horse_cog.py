@@ -437,6 +437,26 @@ def _stable_with_horse(setup):
     return eco, bot, views.Stable(bot, U, 0), hid
 
 
+def test_gold_carrot_view_applies_only_when_use_is_pressed(setup):
+    eco, bot, stable, hid = _stable_with_horse(setup)
+    eco._conn.execute(
+        "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, 1)", (eco._g(), U, shop.GOLD_CARROT)
+    )
+    view = views.GoldCarrotView(stable, U)
+    asyncio.run(view._make_pick("first")(_It(U, ["power"])))
+    asyncio.run(view._make_pick("second")(_It(U, ["guts"])))
+    assert eco.horse_get(hid)["power"] == 50  # 選んだだけでは、反映しない
+    it = _It(U)
+    asyncio.run(view._on_use(it))
+    horse = eco.horse_get(hid)
+    assert (
+        horse["power"] == 55
+        and horse["guts"] == 55
+        and horse["bonus"] == 10
+        and "使いました" in it.edited[0]["embed"].title
+    )
+
+
 def test_retire_view_charges_or_pays_and_updates_the_stable(setup):
     eco, bot, stable, hid = _stable_with_horse(setup)
     eco._conn.execute("UPDATE horses SET races=10, wins=3, places=5 WHERE id=?", (hid,))

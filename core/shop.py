@@ -29,11 +29,13 @@ INSURANCE = "insurance"
 STREAK_GUARD = "streak_guard"
 HORSE_VOUCHER = "horse_voucher"
 CARROT = "carrot"
+GOLD_CARROT = "gold_carrot"
 LABOR_DRINK = "labor_drink"
 AUTO_USED = (
     STREAK_GUARD,
     HORSE_VOUCHER,
     CARROT,
+    GOLD_CARROT,
     LABOR_DRINK,
 )  # 「使う」を押さなくてよい（持っているだけ・別の画面で使う）消耗品
 # 保険券で戻る額の上限。券の値段（2,000）より小さくして、買って使うほど増える（期待値がプラスになる）ことがないようにする
@@ -139,6 +141,13 @@ CATALOG = [
         1_000,
         desc="馬のステータスを5点動かす（`/競馬 厩舎`）",
     ),
+    Item(
+        GOLD_CARROT,
+        "金にんじん",
+        RACING,
+        50_000,
+        desc="馬のステータスの合計を10点増やす。5点ずつ、好きなところへ（`/競馬 厩舎`・1頭に5本まで）",
+    ),
     # ゲーム演出の変更品（装備すると、結果画面のタイトル・飾り・地の文が変わる。勝率と配当は変わらない）。見た目は core/skins.py
     Item("skin_kuro", "黒服の立会い", SKIN_DICE, 30_000, desc="黒服が立ち会い、実況する"),
     Item("skin_gold_dice", "黄金の賽", SKIN_DICE, 150_000, desc="黄金の賽の演出になる"),
@@ -200,6 +209,7 @@ MARKS = {
     STREAK_GUARD: "🔥",
     HORSE_VOUCHER: "🐎",
     CARROT: "🥕",
+    GOLD_CARROT: "🥇",
     LABOR_DRINK: "🥤",
     "skin_kuro": "🕴️",
     "skin_gold_dice": "🎲",

@@ -155,6 +155,62 @@ def card_view(race_id: int, betting: bool) -> discord.ui.View:
     return view
 
 
+class GoldCarrotView(discord.ui.View):
+    """金にんじんの振り分け。5点ずつ、2か所を選んでから「使う」を押す（押すまで、反映しない）。"""
+
+    def __init__(self, stable: "Stable", user_id: int):
+        super().__init__(timeout=300)
+        self.stable, self.user_id = stable, user_id
+        self.horse_id = stable.horse_id
+        self.first = self.second = "speed"
+        self._build()
+
+    def embed(self) -> discord.Embed:
+        horse = self.stable.eco_for().horse_get(self.horse_id)
+        text = f"**{horse['name']}** に、金にんじん1本を使います。選んだ2か所に、{horse_mod.GOLD_CARROT_POINTS}点ずつ足します（同じところを2回選べば、+{2 * horse_mod.GOLD_CARROT_POINTS}）。\n"
+        text += f"いまのステータス:\n{stat_lines(horse)}\n"
+        text += f"**{horse_mod.STAT_NAMES[self.first]}** +{horse_mod.GOLD_CARROT_POINTS}　**{horse_mod.STAT_NAMES[self.second]}** +{horse_mod.GOLD_CARROT_POINTS}"
+        return ui.embed("🥇 金にんじん", text, ui.GOLD)
+
+    def _build(self) -> None:
+        self.clear_items()
+        for attr, row, label in (("first", 0, "1つ目の5点"), ("second", 1, "2つ目の5点")):
+            select = discord.ui.Select(
+                placeholder=f"{label}（いま: {horse_mod.STAT_NAMES[getattr(self, attr)]}）",
+                row=row,
+                options=[
+                    discord.SelectOption(label=horse_mod.STAT_NAMES[k], value=k, default=k == getattr(self, attr))
+                    for k in horse_mod.STAT_KEYS
+                ],
+            )
+            select.callback = self._make_pick(attr)
+            self.add_item(select)
+        use = discord.ui.Button(label="🥇 使う", style=discord.ButtonStyle.success, row=2)
+        use.callback = self._on_use
+        self.add_item(use)
+
+    def _make_pick(self, attr: str):
+        async def callback(interaction: discord.Interaction):
+            setattr(self, attr, interaction.data["values"][0])
+            self._build()
+            await interaction.response.edit_message(embed=self.embed(), view=self)
+
+        return callback
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    async def _on_use(self, interaction: discord.Interaction):
+        eco = self.stable.eco(interaction)
+        ok, result = eco.horse_gold_carrot(interaction.user.id, self.horse_id, self.first, self.second)
+        if not ok:
+            return await interaction.response.send_message(embed=ui.error_embed("使えません", result), ephemeral=True)
+        self.stop()
+        await interaction.response.edit_message(
+            embed=ui.ok_embed("金にんじんを使いました", f"{stat_lines(result)}"), view=None
+        )
+
+
 class RetireView(discord.ui.View):
     """引退の確認。戦績に応じて、引退金をもらう（戦績が悪いと、引退費用を払う）。"""
 
@@ -569,8 +625,9 @@ class Stable(discord.ui.View):
         e = ui.embed(
             "🐴 厩舎",
             f"購入券 **{inv.get(shop.HORSE_VOUCHER, 0)}枚**　🥕 にんじん **{inv.get(shop.CARROT, 0)}本**　"
-            f"（ショップで買えます。馬は {horse_mod.MAX_HORSES} 頭まで）\n"
-            f"ステータスの合計は **{horse_mod.STAT_TOTAL}** で固定。にんじん1本で、{horse_mod.CARROT_POINTS}点を別のステータスへ動かせます。",
+            f"🥇 金にんじん **{inv.get(shop.GOLD_CARROT, 0)}本**　（ショップで買えます。馬は {horse_mod.MAX_HORSES} 頭まで）\n"
+            f"ステータスの合計は **{horse_mod.STAT_TOTAL}**。にんじん1本で、{horse_mod.CARROT_POINTS}点を別のステータスへ動かせます。"
+            f"金にんじん1本で、合計が {2 * horse_mod.GOLD_CARROT_POINTS} 点増えます（5点ずつ好きなところへ。1頭に {horse_mod.GOLD_CARROT_MAX} 本まで）。",
             ui.INFO,
         )
         open_races = {r["id"]: r for r in eco.race_open()}
@@ -639,6 +696,7 @@ class Stable(discord.ui.View):
             ("🏁 出走を申し込む", discord.ButtonStyle.success, self._on_enter, not horses, 3),
             ("↩️ 申し込みを取り下げる", discord.ButtonStyle.secondary, self._on_withdraw, not horses, 3),
             ("🐴 新しい馬を迎える", discord.ButtonStyle.secondary, self._on_new, False, 4),
+            ("🥇 金にんじんを使う", discord.ButtonStyle.primary, self._on_gold, not horses, 4),
             ("🎌 引退させる", discord.ButtonStyle.danger, self._on_retire, not horses, 4),
         ]
         for label, style, cb, disabled, row in buttons:
@@ -675,6 +733,10 @@ class Stable(discord.ui.View):
         if not ok:
             return await interaction.response.send_message(embed=ui.error_embed("動かせません", result), ephemeral=True)
         await self._redraw(interaction)
+
+    async def _on_gold(self, interaction: discord.Interaction):
+        view = GoldCarrotView(self, interaction.user.id)
+        await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
     async def _on_retire(self, interaction: discord.Interaction):
         eco = self.eco(interaction)

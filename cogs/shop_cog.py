@@ -955,6 +955,7 @@ class ShopCog(commands.Cog):
                 shop.STREAK_GUARD: "持っているだけで、デイリーを受け取れなかった日があったとき、次のデイリーで自動で使われます（1枚で1日ぶん）。",
                 shop.HORSE_VOUCHER: "`/競馬 厩舎` で使います（名前と見た目を決めて、競走馬を迎えます）。",
                 shop.CARROT: "`/競馬 厩舎` で使います（馬のステータスを、5ポイント動かします）。",
+                shop.GOLD_CARROT: "`/競馬 厩舎` で使います（馬のステータスの合計を、10ポイント増やします）。",
                 shop.LABOR_DRINK: "`/地下 作業` の画面の「🥤 栄養ドリンコ」で飲みます（疲労を60回復します）。",
             }[it.id]
             return await interaction.response.send_message(

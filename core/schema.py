@@ -105,6 +105,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             wins      INTEGER NOT NULL DEFAULT 0,
             places    INTEGER NOT NULL DEFAULT 0,   -- 3着以内
             earnings  INTEGER NOT NULL DEFAULT 0,   -- 賞金の合計
+            bonus     INTEGER NOT NULL DEFAULT 0,   -- 金にんじんで増えた、ステータス合計の増加分
             created   REAL NOT NULL,
             listed_at REAL                          -- 破産で差し押さえられて、帝愛の競売に出た時刻（owner_id=-1 のとき）
         );
@@ -534,6 +535,9 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         "SELECT id FROM quiz_questions WHERE shown_order=''"
     ).fetchall():  # 並びが未設定の古い問題に、1回だけ決めて固定する
         conn.execute("UPDATE quiz_questions SET shown_order=? WHERE id=?", (json.dumps(new_quiz_order()), r["id"]))
+    hs = {r["name"] for r in conn.execute("PRAGMA table_info(horses)")}
+    if "bonus" not in hs:
+        conn.execute("ALTER TABLE horses ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0")
     he = {r["name"] for r in conn.execute("PRAGMA table_info(horse_entries)")}
     for col in ("races", "wins", "places"):
         if col not in he:

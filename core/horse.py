@@ -21,6 +21,8 @@ STAT_MIN, STAT_MAX = 20, 80
 DEFAULT_STATS = {"speed": 50, "stamina": 50, "power": 50, "guts": 50}
 CARROT_POINTS = 5  # にんじん1本で動かせるポイント
 
+GOLD_CARROT_POINTS = 5  # 金にんじん1本で、2か所に5点ずつ（合計10点）増やせる
+GOLD_CARROT_MAX = 5  # 1頭に使える金にんじんの数（合計 +50 点まで）
 
 FIELD_SIZE = 8  # 1レースの出走頭数
 NAME_MAX = 12
@@ -97,6 +99,19 @@ def retire_value(races: int, wins: int, places: int) -> int:
     """引退のとき、もらう額（マイナスなら払う額）。戦績が良いほど増え、悪いと引退費用になる。"""
     value = wins * RETIRE_WIN + max(0, places - wins) * RETIRE_PLACE - max(0, races - places) * RETIRE_LOSS
     return max(-RETIRE_FEE_MAX, min(RETIRE_MAX, value))
+
+
+def add_points(stats: dict, first: str, second: str) -> tuple:
+    """金にんじん1本ぶん、first と second に GOLD_CARROT_POINTS 点ずつ足す（同じステータスでもよい）。(成功か, 理由か新しいステータス)。"""
+    if first not in STAT_KEYS or second not in STAT_KEYS:
+        return False, "増やすステータスを選んでください。"
+    new = dict(stats)
+    for key in (first, second):
+        new[key] += GOLD_CARROT_POINTS
+    for key in (first, second):
+        if new[key] > STAT_MAX:
+            return False, f"{STAT_NAMES[key]} は、これ以上は増やせません（最高 {STAT_MAX}）。"
+    return True, new
 
 
 def move_points(stats: dict, src: str, dst: str, carrots: int = 1) -> tuple:

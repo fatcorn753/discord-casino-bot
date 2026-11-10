@@ -14,7 +14,7 @@ from core import horse as horse_mod
 from core import shop as shop_mod
 from core import teiai
 from core.eco_types import PurchaseResult
-from core.shop import CARROT, HORSE_VOUCHER
+from core.shop import CARROT, GOLD_CARROT, HORSE_VOUCHER
 
 
 class HorseMixin:
@@ -112,6 +112,32 @@ class HorseMixin:
                 )
             self._conn.execute("UPDATE horses SET owner_id=-2 WHERE id=?", (horse_id,))
             return True, value
+
+    def horse_gold_carrot(self, user_id: int, horse_id: int, first: str, second: str) -> tuple:
+        """金にんじん1本で、first と second に5点ずつ足す（ステータスの合計が10点増える。1頭に GOLD_CARROT_MAX 本まで）。"""
+        with self._lock, self._conn:
+            h = self.horse_get(horse_id)
+            if h is None or h["owner_id"] != user_id:
+                return False, "自分の馬を選んでください。"
+            if h["bonus"] >= horse_mod.GOLD_CARROT_MAX * 2 * horse_mod.GOLD_CARROT_POINTS:
+                return False, f"この馬には、金にんじんをもう使えません（1頭に {horse_mod.GOLD_CARROT_MAX} 本まで）。"
+            ok, result = horse_mod.add_points({k: h[k] for k in horse_mod.STAT_KEYS}, first, second)
+            if not ok:
+                return False, result
+            if not self._consume(user_id, GOLD_CARROT):
+                return False, "「金にんじん」を持っていません。ショップで買えます。"
+            self._conn.execute(
+                "UPDATE horses SET speed=?, stamina=?, power=?, guts=?, bonus=bonus+? WHERE id=?",
+                (
+                    result["speed"],
+                    result["stamina"],
+                    result["power"],
+                    result["guts"],
+                    2 * horse_mod.GOLD_CARROT_POINTS,
+                    horse_id,
+                ),
+            )
+            return True, result
 
     # ---------------------------------------------------------------- #
     # レースの用意                                                      #
