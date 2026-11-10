@@ -88,7 +88,6 @@ CONTRACT_DAYS = 7  # 契約の期間（日）。切れたら、自動更新（�
 # 契約料（雇うときと、更新のときに払う）。毎日受け取る人が、契約の1週間（168時間）に稼ぐ、基本給（約5割）と鉱石の期待値（約3.5割）の合計を上回る
 CONTRACT_FEE = {"apprentice": 340, "miner": 1_200, "craftsman": 2_700, "foreman": 1_500}
 FOREMAN_LUCK = 0.25  # 監督1人ごとに、レア鉱石の出やすさが増える割合（基本給は増えない）
-FOREMAN_LUCK_CAP = 1.00  # 監督の加算の上限（4人分）
 
 # 鉱石。働いた1時間ごとに1回、掘る（外れもある）。(id, 名前, 印, 出る確率, 売値)。確率は、ORE_POWER=1 の作業員のもの
 ORES = (
@@ -136,7 +135,7 @@ def dorm_cost(level: int):
 
 
 def foreman_luck(foremen: int) -> float:
-    return min(FOREMAN_LUCK_CAP, FOREMAN_LUCK * max(0, foremen))
+    return FOREMAN_LUCK * max(0, foremen)
 
 
 def idle_rate(counts: dict, wage: str) -> float:

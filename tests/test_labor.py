@@ -208,7 +208,7 @@ def test_worker_numbers():
     assert lab.idle_rate(counts, "normal") == 2 * 1.0 + 8.25
     assert lab.idle_rate(counts, "low") == pytest.approx(10.25 * lab.WAGE_MULT["low"])
     assert lab.idle_rate({**counts, "foreman": 1}, "normal") == 10.25  # 監督は、基本給を増やさない
-    assert lab.foreman_luck(99) == lab.FOREMAN_LUCK_CAP
+    assert lab.foreman_luck(8) == pytest.approx(2.0) and lab.foreman_luck(0) == 0  # 上限はない
     assert lab.idle_hours(0, 100 * H) == lab.STOCK_HOURS and lab.idle_hours(100, 50) == 0
 
 
