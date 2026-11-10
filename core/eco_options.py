@@ -58,8 +58,11 @@ class OptionMixin:
         amount: int,
         now: Optional[float] = None,
         symbol2: Optional[str] = None,
+        strike_pct: Optional[float] = None,
     ) -> tuple:
         """amount（掛け金）の範囲で、買えるだけ買う。ペア・ワラントは、symbol が symbol2 より上がると当たり。
+
+        strike_pct は、権利行使価格を現在値からずらす割合（0.03 で 3%）。省略すると、銘柄ごとの既定値（opt.STRIKE_BY_SYMBOL）。
 
         (成功か, 理由か {id, units, cost, strike, expiry, spot}) を返す。units は、コール・プットは口数、ペアは想定元本（ペリカ）。
         """
@@ -68,6 +71,8 @@ class OptionMixin:
             return False, "指定が正しくありません。"
         if kind == opt.PAIR and (symbol2 not in market_mod.BY_KEY or symbol2 == symbol):
             return False, "ペア・ワラントは、ちがう2つの銘柄を選んでください。"
+        if strike_pct is not None and not 0 < strike_pct <= opt.MAX_TARGET_PCT / 100:
+            return False, f"目標割合は、1〜{opt.MAX_TARGET_PCT}% にしてください。"
         with self._lock, self._conn:
             self._ensure(user_id)
             if amount < opt.MIN_PREMIUM:
@@ -86,7 +91,9 @@ class OptionMixin:
                 units = int(amount / rate) if rate > 0 else 0  # 想定元本（ペリカ）
                 cost = math.ceil(round(units * rate, 6))
             else:
-                strike = opt.strike_for(kind, spot)
+                strike = opt.strike_for(
+                    kind, spot, opt.default_strike_pct(symbol) if strike_pct is None else strike_pct
+                )
                 per_unit = opt.ask_per_unit(kind, symbol, spot, strike, seconds, now, events)
                 units = int(amount / per_unit) if per_unit > 0 else 0
                 cost = math.ceil(round(units * per_unit, 6))
@@ -122,7 +129,15 @@ class OptionMixin:
     # ------------------------------------------------------------------ #
     # 裸売り（コール・プット）
     # ------------------------------------------------------------------ #
-    def option_write(self, user_id: int, kind: str, symbol: str, amount: int, now: Optional[float] = None) -> tuple:
+    def option_write(
+        self,
+        user_id: int,
+        kind: str,
+        symbol: str,
+        amount: int,
+        now: Optional[float] = None,
+        strike_pct: Optional[float] = None,
+    ) -> tuple:
         """帝愛に売って、プレミアムを先にもらう（裸売り）。amount は預ける証拠金の上限。(成功か, 理由か {...}) を返す。
 
         証拠金 = 行使価格 × 口数 × MARGIN_RATE。満期に、売った側の損失を証拠金から払い、足りなければ借金になる。
@@ -131,6 +146,8 @@ class OptionMixin:
         now = time.time() if now is None else now
         if kind not in opt.SHORT_NAMES or symbol not in market_mod.BY_KEY:
             return False, "指定が正しくありません。"
+        if strike_pct is not None and not 0 < strike_pct <= opt.MAX_TARGET_PCT / 100:
+            return False, f"目標割合は、1〜{opt.MAX_TARGET_PCT}% にしてください。"
         with self._lock, self._conn:
             self._ensure(user_id)
             if amount < opt.MIN_PREMIUM:
@@ -140,7 +157,7 @@ class OptionMixin:
             spot = self.latest_prices().get(symbol)
             if spot is None:
                 return False, "まだ価格がありません。"
-            strike = opt.strike_for(kind, spot)
+            strike = opt.strike_for(kind, spot, opt.default_strike_pct(symbol) if strike_pct is None else strike_pct)
             seconds = opt.OPTION_HOURS * 3600
             per_margin = opt.margin_per_unit(strike)
             units = int(amount / per_margin)

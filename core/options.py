@@ -13,7 +13,7 @@ import math
 from core import market, market_events
 
 OPTION_HOURS = 6  # 満期までの時間（固定）
-STRIKE_OTM = 0.05  # 権利行使価格のずれ（コール = 現在値 ×1.05、プット = 現在値 ×0.95）
+STRIKE_OTM = 0.02  # 権利行使価格のずれ（コール = 現在値 ×1.02、プット = 現在値 ×0.98）。6時間の値動き（CSで約2.3%）に合わせた大きさ
 TICK_SECONDS = 60  # 価格が動く間隔（cogs/market_cog.py の TICK_MINUTES と同じ）
 SPREAD = 0.015  # 買値は公正価格の +1.5%、売値は −1.5%（往復で約3%。ルーレット・パチンコ並みの控除）
 PAYOUT_CAP_MULT = 50  # 配当の上限（掛け金の何倍までか）
@@ -74,9 +74,24 @@ def fair_price(kind: str, spot: float, strike: float, variance: float) -> float:
     return strike * phi(-d2) - spot * phi(-d1)
 
 
-def strike_for(kind: str, spot: float) -> float:
+STRIKE_BY_SYMBOL = {
+    "cs": 0.03,
+    "teio": 0.02,
+    "numa": 0.05,
+    "gold": 0.015,
+}  # 目標割合を省略したときの、銘柄ごとのずれ（6時間の値動きの約1〜1.5倍）
+MAX_TARGET_PCT = 50  # 目標割合（%）の上限
+
+
+def default_strike_pct(symbol: str) -> float:
+    """目標割合を省略したときの、その銘柄の権利行使価格のずれ（割合）。"""
+    return STRIKE_BY_SYMBOL.get(symbol, STRIKE_OTM)
+
+
+def strike_for(kind: str, spot: float, pct: float = None) -> float:
     """買った時点の価格から決まる、権利行使価格（小数2桁）。"""
-    return round(spot * (1 + STRIKE_OTM if kind == CALL else 1 - STRIKE_OTM), 2)
+    pct = STRIKE_OTM if pct is None else pct
+    return round(spot * (1 + pct if kind == CALL else 1 - pct), 2)
 
 
 def ask_per_unit(

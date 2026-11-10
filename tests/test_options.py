@@ -68,13 +68,13 @@ def test_ask_is_above_bid_by_the_spread():
 
 
 def test_strikes_are_five_percent_out_of_the_money():
-    assert opt.strike_for("call", 1000.0) == 1050.0 and opt.strike_for("put", 1000.0) == 950.0
+    assert opt.strike_for("call", 1000.0) == 1020.0 and opt.strike_for("put", 1000.0) == 980.0
 
 
 # ----------------------------- 購入 ----------------------------- #
 def test_buy_charges_the_premium_and_records_strike_and_expiry(eco):
     ok, res = eco.option_buy(U, opt.CALL, "cs", 1_000, 5_000.0)
-    assert ok and res["strike"] == 1050.0 and res["expiry"] == 5_000.0 + 6 * HOURS
+    assert ok and res["strike"] == 1030.0 and res["expiry"] == 5_000.0 + 6 * HOURS
     assert 900 < res["cost"] <= 1_000 and eco.balance(U) == INITIAL_BALANCE - res["cost"]
     row = eco.option_list(U)["active"][0]
     assert row["units"] == res["units"] and row["premium"] == res["cost"] and row["kind"] == "call"
@@ -110,21 +110,21 @@ def test_call_pays_the_difference_above_the_strike_and_loss_is_the_premium_only(
     eco.bank_deposit(A, 500_000, 1.0)  # 配当を払える銀行
     ok, res = eco.option_buy(U, opt.CALL, "cs", 1_000, 1.0)
     set_price(
-        eco, "cs", 1060.0, ts=res["expiry"] - 10
-    )  # 満期の直前の価格: 行使価格 1,050 を 10 超える（配当は、掛け金の50倍が上限）
+        eco, "cs", 1070.0, ts=res["expiry"] - 10
+    )  # 満期の直前の価格: 行使価格 1,030 を 40 超える（配当は、掛け金の50倍が上限）
     done = eco.option_settle(res["expiry"] + 1)
     assert [d["status"] for d in done] == ["exercised"]
-    assert done[0]["paid"] == min(int(res["units"] * 10 / market.UNIT), opt.PAYOUT_CAP_MULT * 1_000)
+    assert done[0]["paid"] == min(int(res["units"] * 40 / market.UNIT), opt.PAYOUT_CAP_MULT * 1_000)
     assert eco.option_list(U)["active"] == []
 
 
 def test_put_pays_when_price_falls_and_out_of_the_money_pays_nothing(eco):
     eco.credit(A, 500_000, "テスト")
     eco.bank_deposit(A, 500_000, 1.0)
-    ok, res = eco.option_buy(U, opt.PUT, "cs", 1_000, 1.0)  # 行使価格 950
-    set_price(eco, "cs", 940.0, ts=res["expiry"] - 10)  # 行使価格 950 を 10 下回る
+    ok, res = eco.option_buy(U, opt.PUT, "cs", 1_000, 1.0)  # 行使価格 970
+    set_price(eco, "cs", 930.0, ts=res["expiry"] - 10)  # 行使価格 970 を 40 下回る
     assert eco.option_settle(res["expiry"] + 1)[0]["paid"] == min(
-        int(res["units"] * 10 / market.UNIT), opt.PAYOUT_CAP_MULT * 1_000
+        int(res["units"] * 40 / market.UNIT), opt.PAYOUT_CAP_MULT * 1_000
     )
     ok, res2 = eco.option_buy(U, opt.PUT, "cs", 500, 2.0)  # 買い直し（行使価格 900 の少し下）
     set_price(eco, "cs", 2000.0, ts=res2["expiry"] - 10)  # 上がった: 外れ
@@ -253,3 +253,57 @@ def test_order_put_and_refusals(cog):
         it = It()
         asyncio.run(MarketCog.order.callback(cog, it, *args))
         assert it.sent[-1]["ephemeral"] and "❌" in it.sent[-1]["embed"].title
+
+
+# ----------------------------- 目標割合（当たりの基準を選ぶ） ----------------------------- #
+def test_default_target_follows_each_symbols_volatility():
+    assert set(opt.STRIKE_BY_SYMBOL) == {s.key for s in market.SYMBOLS}
+    # 値動きの大きい銘柄ほど、既定の基準が遠い（GOLD < TEIO < CS < NUMA）
+    order = sorted(opt.STRIKE_BY_SYMBOL, key=opt.STRIKE_BY_SYMBOL.get)
+    assert order == ["gold", "teio", "cs", "numa"]
+    assert opt.default_strike_pct("unknown") == opt.STRIKE_OTM
+    assert opt.strike_for("call", 1000.0, 0.10) == 1100.0 and opt.strike_for("put", 1000.0, 0.10) == 900.0
+
+
+def test_a_chosen_target_sets_the_strike_and_a_farther_one_is_cheaper_per_unit(eco):
+    eco.credit(U, 100_000, "テスト")
+    near = eco.option_buy(U, opt.CALL, "cs", 1_000, 1.0, strike_pct=0.01)[1]
+    far = eco.option_buy(U, opt.CALL, "cs", 1_000, 1.0, strike_pct=0.10)[1]
+    assert near["strike"] == 1010.0 and far["strike"] == 1100.0
+    assert far["units"] > near["units"]  # 遠い基準は、1口が安いので、同じ掛け金で多く買える
+    default = eco.option_buy(U, opt.PUT, "teio", 1_000, 1.0)[1]
+    assert default["strike"] == round(START["teio"] * (1 - opt.default_strike_pct("teio")), 2)
+
+
+def test_target_validation_and_writing_with_a_target(eco):
+    eco.credit(U, 100_000, "テスト")
+    for bad in (0.0, -0.01, 0.51, 1.0):
+        ok, why = eco.option_buy(U, opt.CALL, "cs", 1_000, 1.0, strike_pct=bad)
+        assert not ok and "目標割合" in why
+    eco.credit(A, 50_000, "テスト")
+    eco.bank_deposit(A, 50_000, 1.0)
+    ok, res = eco.option_write(U, opt.CALL, "cs", 5_000, 1.0, strike_pct=0.08)
+    assert ok and res["strike"] == round(START["cs"] * 1.08, 2)
+    assert not eco.option_write(U, opt.CALL, "cs", 5_000, 1.0, strike_pct=0.9)[0]
+
+
+def test_buy_amount_suggests_shares_of_the_balance_only_before_typing(eco):
+    cog = MarketCog(
+        SimpleNamespace(economy=eco.parent if hasattr(eco, "parent") else eco, config={}, sessions=Sessions())
+    )
+    eco.set_balance(U, 8_000, "テスト")
+    it = SimpleNamespace(guild_id=G, user=SimpleNamespace(id=U))
+
+    async def names(current):
+        return [c.name for c in await cog._buy_amount_autocomplete(it, current)]
+
+    got = asyncio.run(names(""))
+    assert any("残高 8,000" in n for n in got)
+    assert [n for n in got if "%" in n] == [
+        "残高の25%（2,000ペリカ）",
+        "残高の50%（4,000ペリカ）",
+        "残高の75%（6,000ペリカ）",
+        "残高の100%（8,000ペリカ）",
+    ]
+    typed = asyncio.run(names("500"))  # 数字を打ち始めたら、割合の候補は出さない
+    assert len(typed) == 1 and "500" in typed[0]

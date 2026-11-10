@@ -136,7 +136,7 @@ def test_write_gives_the_premium_now_and_locks_the_margin(eco):
     fund_bank(eco)
     before = eco.balance(U)
     ok, res = eco.option_write(U, opt.CALL, "cs", 1_000)
-    assert ok and res["strike"] == START["cs"] * 1.05
+    assert ok and res["strike"] == START["cs"] * (1 + opt.default_strike_pct("cs"))
     assert res["margin"] <= 1_000 and res["premium"] > 0
     assert eco.balance(U) == before - res["margin"] + res["premium"]
     row = eco.option_list(U)["active"][0]

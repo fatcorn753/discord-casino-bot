@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from cogs._amount import balance_choices
+from cogs._amount import balance_choices, own_balance, typed_amount
 from cogs.bond_cog import KIND_CHOICES, describe_done, due_text
 from core import bonds, logthrottle, market, market_events, ui
 from core import options as opt
@@ -469,8 +469,15 @@ class MarketCog(commands.Cog):
         return (have if units is None else min(units, have)) * price // market.UNIT
 
     async def _buy_amount_autocomplete(self, interaction: discord.Interaction, current: str):
-        """買うのに使う金額の欄に、残高を見せる。"""
-        return balance_choices(self.bot, interaction, current, 10, 1_000_000)
+        """買うのに使う金額の欄に、残高を見せる。何も打っていない（数字でない）ときは、残高の25・50・75・100%の候補も出す。"""
+        choices = balance_choices(self.bot, interaction, current, 10, 1_000_000)
+        balance = own_balance(self.bot, interaction)
+        if balance is not None and typed_amount(current) is None:
+            for pct in (25, 50, 75, 100):
+                value = min(10_000_000, balance * pct // 100)
+                if value >= 10:
+                    choices.append(app_commands.Choice(name=f"残高の{pct}%（{value:,}ペリカ）", value=value))
+        return choices[:25]
 
     async def _buy(self, interaction: discord.Interaction, symbol: str, amount: int) -> None:
         """現物の購入（手数料なし・小数で買える）。amount ペリカの範囲で買えるだけ買う。"""
@@ -723,11 +730,17 @@ class MarketCog(commands.Cog):
         await self._trade(interaction, run)
 
     async def _option_buy(
-        self, interaction: discord.Interaction, kind: str, symbol: str, amount: int, symbol2: Optional[str] = None
+        self,
+        interaction: discord.Interaction,
+        kind: str,
+        symbol: str,
+        amount: int,
+        symbol2: Optional[str] = None,
+        target: Optional[int] = None,
     ) -> None:
         """爆騰コール・暴落プット・ペア・ワラントを買う。満期は6時間後。損失は掛け金だけ。
 
-        コール・プットの権利行使価格は現在値の ±5%（固定）。ペア・ワラントは、symbol が symbol2 より上がると当たり（基準はなし）。
+        コール・プットの権利行使価格は、現在値の ±目標割合（省略すると、銘柄ごとの既定値）。ペア・ワラントは、symbol が symbol2 より上がると当たり（基準はなし）。
         """
         sym, (name, emoji, _hint) = market.BY_KEY[symbol], opt.KINDS[kind]
         pair = kind == opt.PAIR
@@ -741,6 +754,7 @@ class MarketCog(commands.Cog):
         other = market.BY_KEY[symbol2] if pair else None
         title_sym = f"{sym.name} vs {other.name}" if pair else sym.name
         seconds = opt.OPTION_HOURS * 3600
+        strike_pct = target / 100 if target else opt.default_strike_pct(symbol)  # 目標割合（省略は、銘柄ごとの既定値）
 
         def quote(price: float) -> tuple:
             now = time.time()
@@ -749,7 +763,7 @@ class MarketCog(commands.Cog):
                 rate = opt.pair_ask_rate(sym.key, symbol2, seconds, now, events)
                 units = int(amount / rate) if rate > 0 else 0
                 return price, units, math.ceil(round(units * rate, 6))
-            strike = opt.strike_for(kind, price)
+            strike = opt.strike_for(kind, price, strike_pct)
             per = opt.ask_per_unit(kind, sym.key, price, strike, seconds, now, events)
             units = int(amount / per) if per > 0 else 0
             return strike, units, math.ceil(round(units * per, 6))
@@ -769,7 +783,7 @@ class MarketCog(commands.Cog):
             sign = 1 if kind == opt.CALL else -1
             lines = [
                 f"勝利条件: **{opt.OPTION_HOURS}時間後**の価格が **{market.fmt(strike)}**（現在 {market.fmt(price)} の "
-                f"{sign * opt.STRIKE_OTM * 100:+.0f}%）を{'超える' if kind == opt.CALL else '下回る'}こと"
+                f"{sign * strike_pct * 100:+.1f}%）を{'超える' if kind == opt.CALL else '下回る'}こと"
             ]
             for move in (0.10, 0.20):
                 final = price * (1 + sign * move)
@@ -800,7 +814,7 @@ class MarketCog(commands.Cog):
             if reply is None:
                 return
             res_ok, res = self.g(interaction).option_buy(  # 確認を待つ間に動いた価格で、確定する
-                uid, kind, sym.key, amount, symbol2=symbol2
+                uid, kind, sym.key, amount, symbol2=symbol2, strike_pct=None if pair else strike_pct
             )
             if not res_ok:
                 return await reply(embed=ui.error_embed(f"{name}を買えませんでした", res), ephemeral=True)
@@ -816,15 +830,18 @@ class MarketCog(commands.Cog):
 
         await self._trade(interaction, run)
 
-    async def _option_write(self, interaction: discord.Interaction, kind: str, symbol: str, amount: int) -> None:
+    async def _option_write(
+        self, interaction: discord.Interaction, kind: str, symbol: str, amount: int, target: Optional[int] = None
+    ) -> None:
         """コール・プットの裸売り。帝愛に売って、プレミアムを先にもらう。証拠金（行使価格の20%）を預け、満期に損失を払う。"""
         sym, label = market.BY_KEY[symbol], opt.SHORT_NAMES[kind]
         sign = 1 if kind == opt.CALL else -1
         seconds = opt.OPTION_HOURS * 3600
+        strike_pct = target / 100 if target else opt.default_strike_pct(symbol)
 
         def quote(price: float) -> tuple:
             now = time.time()
-            strike = opt.strike_for(kind, price)
+            strike = opt.strike_for(kind, price, strike_pct)
             units = int(amount / opt.margin_per_unit(strike))
             bid = opt.bid_per_unit(kind, sym.key, price, strike, seconds, now, self.eco.market_events(now))
             return strike, units, math.ceil(round(units * opt.margin_per_unit(strike), 6)), int(bid * units)
@@ -848,7 +865,7 @@ class MarketCog(commands.Cog):
                 f"{label}しますか？（損失が証拠金を超えると借金になります）",
                 f"**{sym.name}** の{'コール' if kind == opt.CALL else 'プット'}を、帝愛に売ります（{opt.OPTION_HOURS}時間満期）。\n"
                 f"今すぐ受け取る **プレミアム {ui.pelica(premium)}**　預ける **証拠金 {ui.pelica(margin)}**\n"
-                f"**{market.fmt(strike)}**（現在の{sign * opt.STRIKE_OTM * 100:+.0f}%）を超えて{cond}と、その差が**あなたの損失**です。"
+                f"**{market.fmt(strike)}**（現在の{sign * strike_pct * 100:+.1f}%）を超えて{cond}と、その差が**あなたの損失**です。"
                 f"価格が{sign * 10:+d}%で損失 約{loss10:,}ペリカ、{sign * 20:+d}%で約{loss20:,}ペリカ。"
                 "**証拠金を超えた分は、帝愛の借金になります。**相場が動かなければ、プレミアムが丸ごと利益です。"
                 "途中で買い戻して閉じることもできます。",
@@ -856,7 +873,7 @@ class MarketCog(commands.Cog):
             )
             if reply is None:
                 return
-            ok, res = self.g(interaction).option_write(uid, kind, sym.key, amount)
+            ok, res = self.g(interaction).option_write(uid, kind, sym.key, amount, strike_pct=strike_pct)
             if not ok:
                 return await reply(embed=ui.error_embed(f"{label}できませんでした", res), ephemeral=True)
             await reply(
@@ -979,13 +996,21 @@ class MarketCog(commands.Cog):
 
     # ------------------------------ 注文 ------------------------------ #
     @group.command(name="注文", description="買う・信用買い・空売り・債券を買う（銘柄と金額を選ぶだけ）")
-    @app_commands.rename(symbol="銘柄", amount="金額", order_type="注文種別", leverage="レバレッジ", counterpart="相手")
+    @app_commands.rename(
+        symbol="銘柄",
+        amount="金額",
+        order_type="注文種別",
+        leverage="レバレッジ",
+        counterpart="相手",
+        target="目標割合",
+    )
     @app_commands.describe(
         symbol="買う銘柄か債券",
         amount="使うペリカ（信用買い・空売りは建てる総額、コール・プット・ペアは掛け金、裸売りは証拠金）",
         order_type="省略すると現物買い（債券は現物買いのみ）",
         leverage="信用買い・空売りの倍率（省略で1倍。大きいほど損益が大きく、強制決済されやすい）",
         counterpart="ペア・ワラントで、比べる相手の銘柄（銘柄が相手より上がると当たり）",
+        target="コール・プットの、当たりの基準（現在値から何%動くか。1〜50。省略すると、銘柄ごとの既定値。大きいほど当たりにくく、当たると大きい）",
     )
     @app_commands.choices(
         symbol=ORDER_CHOICES,
@@ -1011,6 +1036,7 @@ class MarketCog(commands.Cog):
         order_type: Optional[app_commands.Choice[str]] = None,
         leverage: Optional[app_commands.Choice[int]] = None,
         counterpart: Optional[app_commands.Choice[str]] = None,
+        target: Optional[app_commands.Range[int, 1, opt.MAX_TARGET_PCT]] = None,
     ):
         kind = order_type.value if order_type else "spot"
         lev = leverage.value if leverage else 1
@@ -1033,10 +1059,17 @@ class MarketCog(commands.Cog):
                     ),
                     ephemeral=True,
                 )
+            if target is not None and kind in (opt.PAIR,):
+                return await interaction.response.send_message(
+                    embed=ui.error_embed(
+                        "目標割合は、コール・プットだけです", "ペア・ワラントには、行使価格の基準がありません。"
+                    ),
+                    ephemeral=True,
+                )
             if kind in ("scall", "sput"):
-                return await self._option_write(interaction, kind[1:], symbol.value, amount)
+                return await self._option_write(interaction, kind[1:], symbol.value, amount, target)
             return await self._option_buy(
-                interaction, kind, symbol.value, amount, counterpart.value if counterpart else None
+                interaction, kind, symbol.value, amount, counterpart.value if counterpart else None, target
             )
         if kind in ("short", "long"):
             return await self._margin_order(interaction, kind, symbol.value, amount=amount, leverage=lev)
