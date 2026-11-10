@@ -56,6 +56,7 @@ TABS = {
     "card": ("🎴 カード", (shop.CARD_COLOR, shop.CARD_ICON)),
     "item": ("🎟️ 消耗品", (shop.CONSUMABLE,)),
     "horse": ("🐎 競馬", (shop.RACING,)),
+    "market": ("🕴️ 帝愛市", (shop.MARKET,)),
     "style": ("✨ 演出・名前の色", (shop.SKIN_DICE, shop.SKIN_TABLE, shop.COLOR_ROLE)),
     "collection": ("🏆 コレクション", (shop.COLLECTION,)),
 }
@@ -64,6 +65,7 @@ TAB_NOTE = {
     "card": "`/ペリカ 残高` のカードの、色とアイコンです。",
     "item": "使うと減る品です。デイリー2倍券・保険券は「🎒 持ち物」で使い、連続守り券は持っているだけで自動で使われます。栄養ドリンコは、`/地下 作業` の画面で飲みます。",
     "horse": "競走馬を迎える購入券と、ステータスを動かすにんじんです。どちらも `/競馬 厩舎` で使います。馬そのものは、使うと減る品ではありません。",
+    "market": "帝愛が、情報を売る市です。決算の裏情報メモ（確度 80%・2割はガセ）が買えます。持ち物には増えず、買うとその場で、本人にだけ見えます。",
     "style": "ゲーム画面の演出と、名前の色（ロール）です。勝率と配当は変わりません。",
     "collection": "持っているだけで、`/ペリカ 残高` に飾られる自慢の品です。",
 }
@@ -646,7 +648,7 @@ class ShopCog(commands.Cog):
                 ui.GOLD,
             )
             lines = []
-            for key in ("title", "card", "item", "horse", "style", "collection"):
+            for key in ("title", "card", "item", "horse", "market", "style", "collection"):
                 items = tab_items(key)
                 lines.append(
                     f"**{TABS[key][0]}**　{len(items)}種　{items[0].price:,}〜{items[-1].price:,}ペリカ\n　└ {TAB_NOTE[key]}"
@@ -836,6 +838,8 @@ class ShopCog(commands.Cog):
                 ),
                 ephemeral=True,
             )
+        if it.id == shop.INSIDER_MEMO:
+            return await self._buy_insider_memo(interaction, it)
         # 買い物の間は「プレイ中」にする。ゲーム中に残高を減らして倍払いを避ける／確認待ちの間にゲームを始める、を防ぐ
         uid = interaction.user.id
         reason = self.bot.sessions.try_start(uid)
@@ -899,6 +903,40 @@ class ShopCog(commands.Cog):
                 ),
                 ephemeral=True,
             )
+        finally:
+            self.bot.sessions.end(uid)
+
+    async def _buy_insider_memo(self, interaction: discord.Interaction, it) -> None:
+        """帝愛市の、裏情報メモ。持ち物には増えず、買うとその場で、本人にだけメモが見える。"""
+        uid = interaction.user.id
+        reason = self.bot.sessions.try_start(uid)
+        if reason:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("いまは買えません", reason), ephemeral=True
+            )
+        try:
+            eco = self.g(interaction)
+            stock = eco.insider_stock()
+            if stock is None or stock["left"] <= 0:  # 確認ボタンを出す前に、売っているかを調べる
+                why = (
+                    "いま、売れる情報はありません（次の決算が決まるまで、お待ちください）。"
+                    if stock is None
+                    else "この決算の裏情報メモは、売り切れです（サーバーで5枚まで）。"
+                )
+                return await interaction.response.send_message(embed=ui.error_embed("買えません", why), ephemeral=True)
+            ok = await confirm_action(
+                interaction,
+                "購入しますか？",
+                f"**{it.name}**\n{ui.pelica(it.price)} かかります（残り {stock['left']}/{stock['total']} 枚）。\n"
+                "確度は 80% で、2割はガセです。",
+                "買う",
+            )
+            if ok is not True:
+                return
+            done, text = eco.insider_buy(uid)
+            if not done:
+                return await interaction.followup.send(embed=ui.error_embed("買えませんでした", text), ephemeral=True)
+            await interaction.followup.send(embed=ui.embed("🕴️ 裏情報メモ（帝愛市）", text, ui.DARK), ephemeral=True)
         finally:
             self.bot.sessions.end(uid)
 

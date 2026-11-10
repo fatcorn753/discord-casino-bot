@@ -379,6 +379,15 @@ def create_tables(conn: sqlite3.Connection) -> None:
             hint     INTEGER NOT NULL,                -- 噂の方向（本当とは限らない）
             PRIMARY KEY (event_id, guild_id, user_id)
         );
+        CREATE TABLE IF NOT EXISTS earnings_shop (      -- 帝愛市で売った裏情報メモ（1つの決算に、1人1枚・サーバーごとに数が限られる）
+            event_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            hint     INTEGER NOT NULL,
+            price    INTEGER NOT NULL,
+            ts       REAL NOT NULL,
+            PRIMARY KEY (event_id, guild_id, user_id)
+        );
         CREATE TABLE IF NOT EXISTS quiz_questions (     -- クイズの問題（全サーバー共通。持ち主が登録する）
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             question    TEXT    NOT NULL,

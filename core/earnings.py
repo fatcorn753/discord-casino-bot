@@ -15,7 +15,9 @@ SIZE_RANGE = (0.08, 0.22)  # ふつうの決算の、理論価格の動き（±�
 SURPRISE_PROB = 0.15  # 大サプライズの確率
 SURPRISE_RANGE = (0.35, 0.60)  # 大サプライズの動き（値幅制限 ±30% を突き抜ける）
 MEMO_PROB = 0.10  # デイリー1回あたりの、裏情報メモの確率
-MEMO_TRUTH = 0.70  # 噂が、決算の方向と合っている確率
+MEMO_TRUTH = 0.70  # 噂が、決算の方向と合っている確率（デイリーでもらうもの）
+SHOP_TRUTH = 0.80  # 帝愛市で買うメモの確度（お金を払うぶん、少し高い）
+SHOP_STOCK = 5  # 1つの決算に、1つのサーバーで売るメモの数
 
 
 def _local(ts: float, tz_hours: float) -> datetime.datetime:
@@ -63,14 +65,14 @@ def factor(direction: int, size: float) -> float:
     return math.exp(direction * math.log1p(size))
 
 
-def memo_direction(direction: int, rng) -> int:
-    """噂が言う方向。MEMO_TRUTH の確率で本当の方向、それ以外はガセ（逆）。"""
-    return direction if rng.random() < MEMO_TRUTH else -direction
+def memo_direction(direction: int, rng, truth: float = MEMO_TRUTH) -> int:
+    """噂が言う方向。truth の確率で本当の方向、それ以外はガセ（逆）。"""
+    return direction if rng.random() < truth else -direction
 
 
-def memo_text(symbol_name: str, hint: int, release_at: float) -> str:
+def memo_text(symbol_name: str, hint: int, release_at: float, truth: float = MEMO_TRUTH) -> str:
     word = "大幅な上方修正の噂" if hint > 0 else "大幅な下方修正の噂"
     return (
         f"【極秘メモ】<t:{int(release_at)}:F> の {symbol_name} の決算、**{word}**あり…？\n"
-        f"（確度 {MEMO_TRUTH:.0%} ／ ガセの確率 {1 - MEMO_TRUTH:.0%}。信じるかは、あなた次第。周りには黙っておくか、煽るか…）"
+        f"（確度 {truth:.0%} ／ ガセの確率 {1 - truth:.0%}。信じるかは、あなた次第。周りには黙っておくか、煽るか…）"
     )

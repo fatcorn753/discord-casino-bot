@@ -7,6 +7,7 @@ from typing import Optional
 TITLE, CARD_COLOR, CARD_ICON, CONSUMABLE, COLOR_ROLE = "title", "card_color", "card_icon", "consumable", "color_role"
 RACING = "racing"  # 競馬の品（購入券・にんじん）。買うと持ち物に増え、`/競馬 厩舎` で使う（枚数が増える品なので、消耗品と同じ扱い）
 SKIN_DICE, SKIN_TABLE, COLLECTION = "skin_dice", "skin_table", "collection"
+MARKET = "market"  # 帝愛市の品（裏情報メモなど）。持ち物には増えず、買うと、その場で効果が出る
 
 KIND_LABEL = {
     TITLE: "🏷️ 称号",
@@ -14,6 +15,7 @@ KIND_LABEL = {
     CARD_ICON: "🖼️ カードのアイコン",
     CONSUMABLE: "🎟️ 消耗品",
     RACING: "🐎 競馬",
+    MARKET: "🕴️ 帝愛市",
     COLOR_ROLE: "🌈 名前の色（ロール）",
     SKIN_DICE: "🎲 演出（チンチロ用）",
     SKIN_TABLE: "🃏 演出（パチンコ・ブラックジャック用）",
@@ -29,6 +31,7 @@ INSURANCE = "insurance"
 STREAK_GUARD = "streak_guard"
 HORSE_VOUCHER = "horse_voucher"
 CARROT = "carrot"
+INSIDER_MEMO = "insider_memo"
 GOLD_CARROT = "gold_carrot"
 LABOR_DRINK = "labor_drink"
 AUTO_USED = (
@@ -56,7 +59,7 @@ class Item:
     @property
     def unique(self) -> bool:
         """一度買えば持ち続けるもの（消耗品以外）。"""
-        return self.kind not in (CONSUMABLE, RACING)
+        return self.kind not in (CONSUMABLE, RACING, MARKET)
 
 
 def _colors(prefix: str, kind: str, price: int, items: list) -> list:
@@ -142,6 +145,13 @@ CATALOG = [
         desc="馬のステータスを5点動かす（`/競馬 厩舎`）",
     ),
     Item(
+        INSIDER_MEMO,
+        "裏情報メモ（決算）",
+        MARKET,
+        20_000,
+        desc="次の決算の方向についての、極秘メモ。確度 80%（2割はガセ）。決算ごとに1人1枚・サーバーで5枚まで",
+    ),
+    Item(
         GOLD_CARROT,
         "金にんじん",
         RACING,
@@ -210,6 +220,7 @@ MARKS = {
     HORSE_VOUCHER: "🐎",
     CARROT: "🥕",
     GOLD_CARROT: "🥇",
+    INSIDER_MEMO: "🕴️",
     LABOR_DRINK: "🥤",
     "skin_kuro": "🕴️",
     "skin_gold_dice": "🎲",

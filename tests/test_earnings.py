@@ -189,3 +189,96 @@ def test_post_announces_and_reports_results_to_each_allowed_guild(eco, monkeypat
     assert any("今週の決算発表" in t for t in titles) and any("悪決算" in t for t in titles)
     asyncio.run(cog._earnings_posts())
     assert len(sent) == 2  # 告知は1回だけ・結果は出し切った
+
+
+# ----------------------------- 帝愛市（ショップ） ----------------------------- #
+def _event(eco, now, direction=1):
+    with eco._lock, eco._conn:
+        eco._conn.execute(
+            "INSERT INTO earnings (symbol, announce_at, release_at, direction, size) VALUES ('teio', ?, ?, ?, 0.1)",
+            (now - 60, now + 86400, direction),
+        )
+
+
+def test_insider_memo_is_sold_at_the_teiai_market_with_a_stock_limit_and_one_per_person(eco):
+    from core import shop
+
+    a = eco.for_guild(10)
+    now = time.time()
+    assert a.insider_stock(now) is None and not a.insider_buy(1, now)[0]  # 売る情報がない
+    _event(eco, now)
+    price = shop.BY_ID[shop.INSIDER_MEMO].price
+    for uid in range(1, ea.SHOP_STOCK + 1):
+        a.credit(uid, price + 100, "テスト")
+        before = a.balance(uid)
+        ok, text = a.insider_buy(uid, now, SimpleNamespace(random=lambda: 0.0))
+        assert ok and "極秘メモ" in text and "80%" in text and a.balance(uid) == before - price
+    assert a.insider_stock(now)["left"] == 0
+    a.credit(99, price + 100, "テスト")
+    paid_before = a.balance(99)
+    ok, why = a.insider_buy(99, now)
+    assert not ok and "売り切れ" in why and a.balance(99) == paid_before  # 払っていない
+    a.credit(1, price, "テスト")
+    ok, why = a.insider_buy(1, now)
+    assert not ok and "もう買っています" in why
+
+
+def test_insider_memo_is_right_about_eighty_percent_when_bought(eco):
+    a = eco.for_guild(10)
+    rng = random.Random(9)
+    now = time.time()
+    hits = 0
+    for i in range(300):
+        _event(eco, now)
+        a.credit(1000 + i, 50_000, "テスト")
+        ok, text = a.insider_buy(1000 + i, now, rng)
+        assert ok
+        hits += "上方修正" in text
+        with eco._lock, eco._conn:
+            eco._conn.execute("DELETE FROM earnings")
+            eco._conn.execute("DELETE FROM earnings_shop")
+    assert 0.74 < hits / 300 < 0.86  # 本当の方向（好決算＝上方修正）を言う確率は、約8割
+
+
+def test_insider_buy_refuses_debtors_and_the_broke_without_charging(eco):
+    a = eco.for_guild(10)
+    now = time.time()
+    _event(eco, now)
+    a.balance(7)
+    a.debit_up_to(7, a.balance(7) - 50, "テスト")
+    ok, why = a.insider_buy(7, now)
+    assert not ok and "足りません" in why and a.balance(7) == 50
+
+
+def test_shop_panel_has_a_market_tab_and_buying_shows_the_memo_privately(eco, monkeypatch):
+    from cogs import shop_cog
+
+    bot = SimpleNamespace(economy=eco, sessions=Sessions(cooldown=0), get_guild=lambda gid: None, config={})
+    cog = shop_cog.ShopCog(bot)
+    now = time.time()
+    _event(eco, now)
+    eco.for_guild(10).credit(1, 100_000, "テスト")
+
+    async def yes(*a, **k):
+        return True
+
+    monkeypatch.setattr(shop_cog, "confirm_action", yes)
+    sent = []
+
+    class It:
+        user = SimpleNamespace(id=1, display_name="テスト")
+        guild = SimpleNamespace(id=10)
+        guild_id = 10
+
+        def __init__(self):
+            async def send(*a, **kw):
+                sent.append(kw)
+
+            self.response = SimpleNamespace(send_message=send)
+            self.followup = SimpleNamespace(send=send)
+
+    assert "market" in shop_cog.TABS and shop_cog.tab_items("market")[0].name == "裏情報メモ（決算）"
+    asyncio.run(cog.buy_item(It(), "insider_memo", 1))
+    assert sent and sent[-1]["ephemeral"] is True and "極秘メモ" in sent[-1]["embed"].description
+    assert "insider_memo" not in eco.for_guild(10).inventory(1)  # 持ち物には増えない
+    assert not cog.bot.sessions.is_active(1)

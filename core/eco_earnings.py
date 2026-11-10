@@ -9,6 +9,8 @@ from typing import Optional
 
 from core import earnings as ea
 from core import market as market_mod
+from core import shop as shop_mod
+from core import teiai
 
 
 class EarningsMixin:
@@ -87,3 +89,52 @@ class EarningsMixin:
                 (ev["id"], self._g(), user_id, hint),
             )
             return ea.memo_text(market_mod.BY_KEY[ev["symbol"]].name, hint, ev["release_at"])
+
+    def insider_stock(self, now: Optional[float] = None) -> Optional[dict]:
+        """帝愛市の裏情報メモの在庫。{残り, 全部の数}。発表前の決算が無ければ None（売っていない）。"""
+        now = time.time() if now is None else now
+        with self._lock:
+            ev = self._conn.execute(
+                "SELECT id FROM earnings WHERE released=0 AND release_at>? ORDER BY release_at LIMIT 1", (now,)
+            ).fetchone()
+            if ev is None:
+                return None
+            sold = self._conn.execute(
+                "SELECT COUNT(*) FROM earnings_shop WHERE event_id=? AND guild_id=?", (ev["id"], self._g())
+            ).fetchone()[0]
+            return {"left": max(0, ea.SHOP_STOCK - sold), "total": ea.SHOP_STOCK}
+
+    def insider_buy(self, user_id: int, now: Optional[float] = None, rng=None) -> tuple:
+        """帝愛市で、裏情報メモを買う。(成功か, 理由かメモの文)。決算ごとに1人1枚、サーバーで SHOP_STOCK 枚まで。"""
+        now = time.time() if now is None else now
+        rng = rng or random.SystemRandom()
+        price = shop_mod.BY_ID[shop_mod.INSIDER_MEMO].price
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            ev = self._conn.execute(
+                "SELECT id, symbol, direction, release_at FROM earnings WHERE released=0 AND release_at>? "
+                "ORDER BY release_at LIMIT 1",
+                (now,),
+            ).fetchone()
+            if ev is None:
+                return False, "いま、売れる情報はありません（次の決算が決まるまで、お待ちください）。"
+            if self._conn.execute(
+                "SELECT 1 FROM earnings_shop WHERE event_id=? AND guild_id=? AND user_id=?",
+                (ev["id"], self._g(), user_id),
+            ).fetchone():
+                return False, "この決算の裏情報メモは、もう買っています。"
+            stock = self.insider_stock(now)
+            if stock["left"] <= 0:
+                return False, "この決算の裏情報メモは、売り切れです（サーバーで5枚まで）。"
+            if self._debt(user_id) > 0:
+                return False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、買い物はできません。"
+            if self._balance(user_id) < price:
+                return False, f"ペリカが足りません（{price:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。"
+            hint = ea.memo_direction(ev["direction"], rng, ea.SHOP_TRUTH)
+            self._apply(user_id, -price, "購入:裏情報メモ（帝愛市）")
+            self._bank_income(price, teiai.AUCTION_YIELD_SHARE, now)
+            self._conn.execute(
+                "INSERT INTO earnings_shop (event_id, guild_id, user_id, hint, price, ts) VALUES (?, ?, ?, ?, ?, ?)",
+                (ev["id"], self._g(), user_id, hint, price, now),
+            )
+            return True, ea.memo_text(market_mod.BY_KEY[ev["symbol"]].name, hint, ev["release_at"], ea.SHOP_TRUTH)
