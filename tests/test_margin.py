@@ -32,6 +32,9 @@ def set_price(eco, key, price):
 set_price.n = 1
 
 
+OLD_NUMA_RISK_K = 20.0 * 0.012 / market.NUMA.sigma  # NUMA の σ が 0.012 だった頃と、同じ大きさの必要証拠金になる倍率
+
+
 # ----------------------------- 必要証拠金の計算 ----------------------------- #
 def test_required_margin_of_one_symbol_is_risk_k_times_sigma_times_notional():
     got = market.required_margin({"cs": 1000.0})
@@ -42,9 +45,9 @@ def test_required_margin_of_one_symbol_is_risk_k_times_sigma_times_notional():
 
 def test_hedged_positions_need_less_margin_than_the_sum_of_each():
     single = market.required_margin({"cs": 1000.0}) + market.required_margin({"teio": 1000.0})
-    hedged = market.required_margin({"cs": 1000.0, "teio": -1000.0})  # 相関0.85: 値動きが打ち消し合う
+    hedged = market.required_margin({"cs": 1000.0, "teio": -1000.0})  # 相関0.6: 値動きが打ち消し合う
     same_side = market.required_margin({"cs": 1000.0, "teio": 1000.0})
-    assert hedged < 0.5 * single and same_side < single and hedged < same_side
+    assert hedged < 0.6 * single and same_side < single and hedged < same_side
 
 
 # ----------------------------- 信用買い ----------------------------- #
@@ -85,7 +88,8 @@ def test_margin_equity_counts_longs_in_the_ranking(eco):
 
 
 # ----------------------------- 維持率と建玉の受付 ----------------------------- #
-def test_a_position_that_leaves_the_ratio_below_the_open_limit_is_refused(eco):
+def test_a_position_that_leaves_the_ratio_below_the_open_limit_is_refused(eco, monkeypatch):
+    monkeypatch.setattr(market, "RISK_K", OLD_NUMA_RISK_K)  # σ を下げる前の、NUMA の必要証拠金の大きさに合わせる
     a = eco.for_guild(G)
     a.credit(U, 20_000, "テスト")
     price = START["numa"]  # σ 1.2%: 必要証拠金が大きい
@@ -95,7 +99,8 @@ def test_a_position_that_leaves_the_ratio_below_the_open_limit_is_refused(eco):
     assert a.margin_status(U)["ratio"] >= market.OPEN_RATIO
 
 
-def test_spot_and_bonds_count_as_collateral_with_haircuts(eco):
+def test_spot_and_bonds_count_as_collateral_with_haircuts(eco, monkeypatch):
+    monkeypatch.setattr(market, "RISK_K", OLD_NUMA_RISK_K)
     a = eco.for_guild(G)
     a.credit(U, 20_000, "テスト")
     price = START["numa"]
@@ -106,7 +111,8 @@ def test_spot_and_bonds_count_as_collateral_with_haircuts(eco):
     assert a.long_open(U, 10_000, price, 5, "numa").ok  # 代用有価証券が加わって通る
 
 
-def test_collateral_cannot_be_sold_if_the_ratio_would_fall_below_the_open_limit(eco):
+def test_collateral_cannot_be_sold_if_the_ratio_would_fall_below_the_open_limit(eco, monkeypatch):
+    monkeypatch.setattr(market, "RISK_K", OLD_NUMA_RISK_K)
     a = eco.for_guild(G)
     a.credit(U, 20_000, "テスト")
     price = START["numa"]
@@ -188,7 +194,8 @@ def test_order_long_then_holdings_show_the_ratio_and_settle_closes_it(eco):
     assert "売り戻しました" in it.sent[-1]["embed"].title and eco.for_guild(G).long_positions(U) == []
 
 
-def test_order_long_is_refused_when_ratio_is_too_low(eco):
+def test_order_long_is_refused_when_ratio_is_too_low(eco, monkeypatch):
+    monkeypatch.setattr(market, "RISK_K", OLD_NUMA_RISK_K)
     from tests.test_market import It
 
     cog = make_cog(eco)

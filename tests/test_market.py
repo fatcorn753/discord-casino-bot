@@ -2,6 +2,7 @@
 
 import asyncio
 import itertools
+import math
 import random
 import time
 from types import SimpleNamespace
@@ -539,7 +540,10 @@ def test_short_validation(eco):
     assert "借金" in a.short_open(U, 10_000, 100.0, 1).reason  # 借金中は建てられない
 
 
-def test_losscut_closes_accounts_whose_maintenance_ratio_falls_below_100_percent(eco):
+def test_losscut_closes_accounts_whose_maintenance_ratio_falls_below_100_percent(eco, monkeypatch):
+    monkeypatch.setattr(
+        market, "RISK_K", 20.0 * 0.004 / market.CS.sigma
+    )  # CS の σ が 0.004 だった頃と、同じ大きさの必要証拠金
     a = eco.for_guild(G)
     a.short_open(U, 10_000, 100.0, 5)  # 担保200・必要証拠金 80。+12% を超えて有効証拠金が 80 を割るとロスカット
     a.short_open(2, 10_000, 100.0, 1)  # 担保1000。ずっと余裕がある
@@ -603,3 +607,40 @@ def test_short_can_be_sized_by_amount_or_lots_but_not_both(cog):
     it = It()
     run(cog._short(it, "cs", None, None, None))
     assert "どちらか1つ" in it.sent[-1]["embed"].title
+
+
+# ----------------------------- 値動きの大きさと値幅制限 ----------------------------- #
+def test_daily_volatility_is_realistic_and_a_halving_in_a_day_does_not_happen():
+    rng = random.Random(5)
+    days = {k: [] for k in ("cs", "teio", "numa", "gold")}
+    for _ in range(150):  # 1日（1,440分）を、150回
+        prices = {s.key: s.start for s in market.SYMBOLS}
+        start = dict(prices)
+        for _ in range(1440):
+            prices, _ = market.next_prices(prices, rng)
+        for k in days:
+            days[k].append(math.log(prices[k] / start[k]))
+    for k, want in (("gold", 0.015), ("teio", 0.027), ("cs", 0.046), ("numa", 0.083)):
+        sd = (sum(x * x for x in days[k]) / len(days[k])) ** 0.5
+        assert want * 0.6 < sd < want * 1.7, (k, sd)  # 有事ぶんの上振れを見込んだ幅
+    assert min(min(v) for v in days.values()) > math.log(0.5)  # 1日で半値になった試行はない
+
+
+def test_limit_to_day_clamps_each_symbol_to_plus_minus_the_limit_of_the_reference():
+    ref = {"cs": 1000.0, "numa": 400.0}
+    out = market.limit_to_day({"cs": 600.0, "numa": 600.0, "gold": 5.0}, ref, 0.30)
+    assert out["cs"] == pytest.approx(700.0) and out["numa"] == pytest.approx(520.0)  # 下は −30%、上は +30%
+    assert out["gold"] == 5.0  # 基準のない銘柄は、そのまま
+    inside = market.limit_to_day({"cs": 1100.0}, ref, 0.30)
+    assert inside["cs"] == 1100.0
+
+
+def test_step_prices_never_drops_below_the_limit_from_24_hours_ago(eco):
+    cog = MarketCog(SimpleNamespace(economy=eco, sessions=Sessions(), config={}))
+    now = time.time()
+    for sym in market.SYMBOLS:
+        eco.market_set(now - 86_000, sym.start, 0, sym.key)  # 約24時間前
+        eco.market_set(now - 5, sym.start * 0.71, 0, sym.key)  # すでに −29% まで下がっている
+    cog.step_prices()
+    for sym in market.SYMBOLS:
+        assert eco.market_latest(sym.key)[1] >= sym.start * 0.70 - 0.01

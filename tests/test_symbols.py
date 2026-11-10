@@ -56,7 +56,8 @@ def test_simulated_returns_match_the_target_correlation_without_panic(monkeypatc
         for k in new:
             series[k].append(math.log(new[k] / prices[k]))
         prices = {k: v if 100 < v < 10_000 else market.BY_KEY[k].start for k, v in new.items()}
-    for a, b, want in (("cs", "teio", 0.85), ("cs", "gold", -0.6), ("teio", "gold", -0.5)):
+    for a, b in (("cs", "teio"), ("cs", "gold"), ("teio", "gold")):
+        want = market.correlation(a, b)
         assert _corr(series[a], series[b]) == pytest.approx(want, abs=0.02)
 
 

@@ -16,7 +16,7 @@ from core import market
 
 LEAD_MIN = 15  # 予告から、開始までの分
 DURATION_MIN = 20  # 続く分
-FACTOR = 3.0  # 値動きの大きさ σ の倍率
+FACTOR = 2.0  # 値動きの大きさ σ の倍率
 ANNOUNCE_PROB = 1 / 300  # 1分ごとに、新しい予告が出る確率（約5時間に1回）
 COOLDOWN_MIN = 60  # 終わってから、次の予告が出るまでの最短の分
 PRICED_AT_ANNOUNCE = 0.4  # 予告の直後に、オプションの値段が、イベントを織り込んでいる割合（開始までに 1.0 になる）

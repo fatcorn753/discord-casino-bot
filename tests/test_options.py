@@ -106,22 +106,26 @@ def test_open_premium_cap(eco):
 
 # ----------------------------- 満期の決済 ----------------------------- #
 def test_call_pays_the_difference_above_the_strike_and_loss_is_the_premium_only(eco):
-    eco.credit(A, 50_000, "テスト")
-    eco.bank_deposit(A, 50_000, 1.0)  # 配当を払える銀行
+    eco.credit(A, 500_000, "テスト")
+    eco.bank_deposit(A, 500_000, 1.0)  # 配当を払える銀行
     ok, res = eco.option_buy(U, opt.CALL, "cs", 1_000, 1.0)
-    set_price(eco, "cs", 1200.0, ts=res["expiry"] - 10)  # 満期の直前の価格: 行使価格 1,050 を 150 超える
+    set_price(
+        eco, "cs", 1060.0, ts=res["expiry"] - 10
+    )  # 満期の直前の価格: 行使価格 1,050 を 10 超える（配当は、掛け金の50倍が上限）
     done = eco.option_settle(res["expiry"] + 1)
     assert [d["status"] for d in done] == ["exercised"]
-    assert done[0]["paid"] == int(res["units"] * 150 / market.UNIT)
+    assert done[0]["paid"] == min(int(res["units"] * 10 / market.UNIT), opt.PAYOUT_CAP_MULT * 1_000)
     assert eco.option_list(U)["active"] == []
 
 
 def test_put_pays_when_price_falls_and_out_of_the_money_pays_nothing(eco):
-    eco.credit(A, 50_000, "テスト")
-    eco.bank_deposit(A, 50_000, 1.0)
+    eco.credit(A, 500_000, "テスト")
+    eco.bank_deposit(A, 500_000, 1.0)
     ok, res = eco.option_buy(U, opt.PUT, "cs", 1_000, 1.0)  # 行使価格 950
-    set_price(eco, "cs", 900.0, ts=res["expiry"] - 10)
-    assert eco.option_settle(res["expiry"] + 1)[0]["paid"] == int(res["units"] * 50 / market.UNIT)
+    set_price(eco, "cs", 940.0, ts=res["expiry"] - 10)  # 行使価格 950 を 10 下回る
+    assert eco.option_settle(res["expiry"] + 1)[0]["paid"] == min(
+        int(res["units"] * 10 / market.UNIT), opt.PAYOUT_CAP_MULT * 1_000
+    )
     ok, res2 = eco.option_buy(U, opt.PUT, "cs", 500, 2.0)  # 買い直し（行使価格 900 の少し下）
     set_price(eco, "cs", 2000.0, ts=res2["expiry"] - 10)  # 上がった: 外れ
     done = eco.option_settle(res2["expiry"] + 1)

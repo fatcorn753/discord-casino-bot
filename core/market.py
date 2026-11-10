@@ -12,8 +12,8 @@ from typing import Optional
 MIN_PRICE = 20
 MAX_PRICE = 50_000
 EVENT_PROB = 1 / 720  # 1日に2回ほど、有事（全銘柄が同じ向きに動く急騰・急落）が起こる
-EVENT_RANGE = (0.03, 0.08)  # 有事の大きさ（CSトークンで±3〜8%。ほかの銘柄は、値動きの大きさ σ の比をかける）
-EVENT_SCALE_MAX = 2.0  # 有事の大きさにかける比の上限（NUMAバイオが、動きすぎないように）
+EVENT_RANGE = (0.015, 0.035)  # 有事の大きさ（CSトークンで±1.5〜3.5%。ほかの銘柄は、値動きの大きさ σ の比をかける）
+EVENT_SCALE_MAX = 1.5  # 有事の大きさにかける比の上限（NUMAバイオが、動きすぎないように）
 UNIT = 1_000  # 1枚 = 1000口。小数で買えるよう、保有は口で数える
 FEE_RATE = 0.0  # 買うときと売るときに、それぞれ取引額にかかる割合（今は無料）
 
@@ -28,15 +28,16 @@ class Symbol:
 
 
 # 銘柄。値動きの大きさ σ と、銘柄どうしの相関 ρ は、ここの数字だけで決まる（調整はここを書き換える）
-CS = Symbol("cs", "CSトークン", "🪙", 1_000.0, 0.004)  # 標準（約±0.4%。1日で±15〜20%ほど）
-TEIO = Symbol("teio", "TEIO重工", "🏭", 1_200.0, 0.0035)  # CSと強い正相関
-NUMA = Symbol("numa", "NUMAバイオ", "🧪", 400.0, 0.012)  # 超高ボラの仕手株。ほかとはほぼ無相関
-GOLD = Symbol("gold", "GOLD地金", "🥇", 3_000.0, 0.002)  # CS・TEIOと逆相関の避難先
+# 1日（1,440分）の標準偏差は σ × √1440 ≒ 38σ。現実の値動きに少しスリルを足した水準にしてある
+CS = Symbol("cs", "CSトークン", "🪙", 1_000.0, 0.0012)  # 標準（1日の標準偏差 約4.6%。主要な暗号資産ほど）
+TEIO = Symbol("teio", "TEIO重工", "🏭", 1_200.0, 0.0007)  # 大型株（1日 約2.7%）。CSとは正相関だが、連れ安しすぎない
+NUMA = Symbol("numa", "NUMAバイオ", "🧪", 400.0, 0.0022)  # 仕手株（1日 約8.3%）。ほかとはほぼ無相関
+GOLD = Symbol("gold", "GOLD地金", "🥇", 3_000.0, 0.0004)  # 避難先（1日 約1.5%）。CS・TEIOと逆相関
 SYMBOLS = (CS, TEIO, NUMA, GOLD)
 BY_KEY = {s.key: s for s in SYMBOLS}
 DEFAULT = CS.key
 CORRELATION = {
-    ("cs", "teio"): 0.85,
+    ("cs", "teio"): 0.60,
     ("cs", "numa"): 0.05,
     ("teio", "numa"): 0.05,
     ("cs", "gold"): -0.6,
@@ -48,6 +49,18 @@ CORRELATION = {
 NAME = CS.name
 START_PRICE = CS.start
 SIGMA = CS.sigma
+
+
+DAILY_LIMIT = 0.30  # 値幅制限。24時間前の価格から、上下にこの割合まで（ストップ高・ストップ安）
+
+
+def limit_to_day(prices: dict, reference: dict, limit: float = DAILY_LIMIT) -> dict:
+    """価格を、24時間前の価格（reference）の ±limit の範囲に収める。基準のない銘柄は、そのまま。"""
+    out = {}
+    for key, price in prices.items():
+        ref = reference.get(key)
+        out[key] = price if not ref else min(ref * (1 + limit), max(ref * (1 - limit), price))
+    return out
 
 
 def correlation(a: str, b: str) -> float:

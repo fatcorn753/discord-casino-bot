@@ -168,6 +168,15 @@ class MarketCog(commands.Cog):
     def _prices(self) -> dict:
         return {s.key: self._price(s.key) for s in market.SYMBOLS}
 
+    def _day_reference(self, now: float) -> dict:
+        """値幅制限の基準になる、約24時間前の価格 {銘柄: 価格}。履歴がまだ無い銘柄は含めない。"""
+        out = {}
+        for sym in market.SYMBOLS:
+            hist = self.eco.market_history(now - 86400, sym.key)
+            if hist:
+                out[sym.key] = hist[0][1]
+        return out
+
     def step_prices(self) -> tuple:
         """全銘柄の価格を1つ進めて、(新しい価格 {銘柄: 価格}, 有事の出来事) を返す。"""
         prices = self._prices()
@@ -179,6 +188,7 @@ class MarketCog(commands.Cog):
                 f"ボラティリティ予告: {announced['symbol']} {market_events.LEAD_MIN}分後から{market_events.DURATION_MIN}分"
             )
         new, event = market.next_prices(prices, RNG, self.eco.vol_multipliers(now))
+        new = {k: round(v, 2) for k, v in market.limit_to_day(new, self._day_reference(now)).items()}  # 値幅制限
         ts = max(time.time(), last_ts + 0.001)  # 時計が戻っても、記録の順序を崩さない
         for key, price in new.items():
             self.eco.market_set(ts, price, event, key)
