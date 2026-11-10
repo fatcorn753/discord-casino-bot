@@ -408,3 +408,32 @@ def test_a_horse_in_a_special_race_can_enter_a_regular_race_but_two_regular_race
     other_regular = eco._conn.execute("SELECT MAX(id) FROM horse_races").fetchone()[0]
     ok, why = eco.race_register(U, hid, other_regular, NOW + 5)
     assert not ok and "ほかのレースに出走予定" in why  # 定時どうしは、これまでどおり、重ねて出せない
+
+
+def test_npc_silks_never_overlap_other_horses_but_player_silks_may(tmp_path):
+    eco = Economy(str(tmp_path / "s.db"))
+    for seed in range(30):
+        rid = eco.race_create_special(1_700_000_000.0 + seed, 1, 1)
+        eco.race_close_entries(rid, random.Random(seed))
+        rows = eco.race_entries(rid)
+        silks = [e["silks"] for e in rows]
+        assert len(rows) == h.FIELD_SIZE and len(set(silks)) == len(silks)  # 全員 NPC なら、全員ちがう色
+
+
+def test_npc_silks_avoid_the_colors_players_already_use(tmp_path):
+    eco = Economy(str(tmp_path / "p.db"))
+    for uid, silks in ((11, "🟥"), (12, "🟥"), (13, "🟦")):  # プレイヤー同士の色被りは、そのまま
+        eco.credit(uid, 100_000, "テスト")
+        eco._conn.execute(
+            "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, 1)",
+            (eco._g(), uid, shop.HORSE_VOUCHER),
+        )
+        ok, hid = eco.horse_create(uid, f"馬{uid}", "栗毛", silks)
+        assert ok
+    rid = eco.race_create_special(1_700_000_000.0, 1, 1)
+    for hid in [x["id"] for u in (11, 12, 13) for x in eco.horse_list(u)]:
+        assert eco.race_register(next(x["owner_id"] for x in [eco.horse_get(hid)]), hid, rid, 1_700_000_001.0)[0]
+    eco.race_close_entries(rid, random.Random(3))
+    rows = eco.race_entries(rid)
+    npc = [e["silks"] for e in rows if e["owner_id"] == 0]
+    assert len(npc) == 5 and len(set(npc)) == 5 and not ({"🟥", "🟦"} & set(npc))

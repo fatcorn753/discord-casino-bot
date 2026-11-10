@@ -7,6 +7,7 @@
 import datetime
 import random
 import time
+from collections import Counter
 from typing import Optional
 
 from core import horse as horse_mod
@@ -260,15 +261,21 @@ class HorseMixin:
             taken = {r[2] for r in rows}
             pool = [n for n in horse_mod.NPC_NAMES if n not in taken]
             rng.shuffle(pool)
+            # 帝愛の馬の勝負服は、ほかの馬と被らない色にする（プレイヤーの馬どうしが被るのは、そのまま）。
+            # 色が足りないときだけ、いちばん使われていない色を重ねる
+            used = Counter(r[4] for r in rows)
             while len(rows) < horse_mod.FIELD_SIZE:
                 s = horse_mod.random_stats(rng)
+                least = min(used[c] for c in horse_mod.SILKS)
+                silks = rng.choice([c for c in horse_mod.SILKS if used[c] == least])
+                used[silks] += 1
                 rows.append(
                     (
                         0,
                         0,
                         pool.pop() if pool else f"帝愛{len(rows)}号",
                         rng.choice(horse_mod.COATS),
-                        rng.choice(horse_mod.SILKS),
+                        silks,
                     )
                     + tuple(s[k] for k in horse_mod.STAT_KEYS)
                 )
