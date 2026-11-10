@@ -275,10 +275,12 @@ class DebtMixin:
         """払えなかった shortfall を、強制執行したうえで、残りを帝愛の借金にする。借金に加えた額を返す。"""
         if shortfall <= 0:
             return 0
-        shortfall -= self._cds_cover_self(user_id, shortfall)  # 自分への CDS があれば、まず帝愛が肩代わりする
-        if shortfall <= 0:
+        need = shortfall - self._seize_assets(
+            user_id, shortfall, f"強制執行:{reason}"
+        )  # 先に、自分の資産で払う（ファーストロス）
+        if need <= 0:
             return 0
-        need = shortfall - self._seize_assets(user_id, shortfall, f"強制執行:{reason}")
+        need -= self._cds_cover_self(user_id, need)  # それでも足りない分だけ、自分への CDS が帝愛の肩代わりで受ける
         if need <= 0:
             return 0
         self._conn.execute(
@@ -418,7 +420,8 @@ class DebtMixin:
         貸付の残りは免責（貸し倒れ）。帝愛の借金は、BANKRUPT_FLOOR まで圧縮される。破産者の身分になり、完済して
         BLACKLIST_DAYS 日たつまで、貸付を借りられない。
 
-        forced=True は、破産猶予の時間切れによる強制破産。この場合だけ、他人からの CDS に配当が出る（自分から破産しても出ない）。
+        他人からの CDS に配当が出るのは、強制破産（forced=True・破産猶予の時間切れ）と、破産猶予に入ってからの自己破産・海外逃亡のとき。
+        猶予に入る前の自己破産では、出ない（結託して、わざと破産して配当を抜くのを防ぐ）。猶予に入った人には、新しく CDS を掛けられない。
         escape=True は、海外逃亡の成功。同じ差し押さえをして、帝愛の借金は圧縮ではなく、全額ゼロになる（種銭も貸さない）。
         """
         with self._lock, self._conn:
@@ -435,6 +438,7 @@ class DebtMixin:
             if self._debt(user_id) <= 0 and not loans:
                 return False, "借金も貸付の借り入れもないので、破産できません。"
             debt_before = self._debt(user_id)
+            in_grace = self.grace_until(user_id) is not None  # 猶予に入ってからの破産は、客観的なクレジットイベント
             pool = self._liquidate_everything(user_id)
             shop_value = self._seize_shop(user_id)
             pool += shop_value
@@ -471,8 +475,9 @@ class DebtMixin:
             self._after_debt_change(user_id)
             seed = self._seed_if_empty(user_id)
             self._conn.execute("UPDATE users SET grace_until=NULL WHERE guild_id=? AND user_id=?", (self._g(), user_id))
-            cds_paid = self._cds_settle_default(user_id, debt_before, now) if forced else 0
-            if not forced:
+            payable = forced or in_grace
+            cds_paid = self._cds_settle_default(user_id, debt_before, now) if payable else 0
+            if not payable:
                 self._cds_void(user_id)
             return True, {
                 "forced": forced,

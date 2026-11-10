@@ -55,6 +55,7 @@ RUN_DANGER_RATIO = 0.05
 CDS_MIN_STAKE = 100
 CDS_MIN_ODDS, CDS_MAX_ODDS = 1.2, 15.0
 CDS_TERM_DAYS = 14  # この間に、対象が強制破産しなければ、掛け金は戻らず失効
+CDS_SELF_CAP = 50_000  # 自分への CDS の、配当の見込み（掛け金 × オッズ）の合計の上限（保証を無制限に積めない）
 CDS_PAYOUT_CAP_RATE = 0.50  # 他人への CDS の配当の合計は、対象の破産時の借金のこの割合まで（結託しても損にする）
 
 KATAGI, UNDERGROUND, BANKRUPT = "katagi", "underground", "bankrupt"

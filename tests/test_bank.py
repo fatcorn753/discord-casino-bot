@@ -170,15 +170,32 @@ def test_cds_on_someone_else_pays_only_on_forced_bankruptcy_and_capped_by_their_
     )  # 払い切れず、預金者の預金が減る（AIG ショック）
 
 
-def test_cds_pays_nothing_if_the_target_declares_bankruptcy_himself(eco):
+def test_cds_pays_nothing_if_the_target_declares_bankruptcy_before_the_grace(eco):
     eco.credit(B, 5_000, "テスト")
     eco.balance(T)
     eco.cds_buy(B, T, 1_000, NOW)
-    go_into_debt(eco, T, 20_000)
+    go_into_debt(eco, T, 6_000)  # 借金はあるが、猶予（借金が GRACE_DEBT 以上）には入っていない
+    assert eco.grace_until(T) is None and eco.debt(T) > 0
     before = eco.balance(B)
-    ok, result = eco.bankrupt(T)  # 自分から破産 → 配当なし（結託対策）
+    ok, result = eco.bankrupt(T)  # 猶予に入る前の自己破産 → 配当なし（結託対策）
     assert ok and result["cds_paid"] == 0 and eco.balance(B) == before
     assert eco.cds_list(B)["bought"] == []  # 無効になっている
+
+
+def test_cds_pays_even_if_the_target_declares_bankruptcy_himself_during_the_grace(eco):
+    eco.credit(A, 20_000, "テスト")  # 預金者
+    eco.bank_deposit(A, 10_000, NOW)
+    eco.credit(B, 5_000, "テスト")
+    eco.balance(T)
+    assert eco.cds_buy(B, T, 1_000, NOW)[0]
+    go_into_debt(eco, T, 20_000)
+    assert eco.grace_until(T) is not None
+    debt = eco.debt(T)
+    before = eco.balance(B)
+    ok, result = eco.bankrupt(T)  # 猶予に入ってから、時間切れの直前に自分で破産しても、配当は出る
+    assert ok and result["forced"] is False
+    assert result["cds_paid"] == min(int(1_000 * 15.0), int(teiai.CDS_PAYOUT_CAP_RATE * debt))
+    assert eco.balance(B) == before + result["cds_paid"]
 
 
 def test_cds_expires_if_nothing_happens(eco):
@@ -190,30 +207,35 @@ def test_cds_expires_if_nothing_happens(eco):
     assert eco.cds_list(B)["bought"] == []
 
 
-def test_self_cds_covers_debt_without_giving_cash(eco):
+def test_self_cds_covers_only_what_assets_cannot_and_gives_no_cash(eco):
     eco.credit(A, 20_000, "テスト")
     eco.bank_deposit(A, 10_000, NOW)
     eco.credit(B, 5_000, "テスト")
     assert eco.cds_buy(B, B, 1_000, NOW)[0]  # 自分に掛ける（15倍・見込み 15,000）
-    cash_before = eco.balance(B)
     with eco._lock, eco._conn:
-        eco._owe(B, 12_000, "テスト")  # 現金の外の負け 12,000 を、帝愛が肩代わり
+        cash = eco._balance(B)
+        eco._owe(B, cash + 3_000, "テスト")  # 手元の現金 + 3,000 の負け
     assert eco.debt(B) == 0 and eco.status(B) == teiai.KATAGI  # 借金にも地下落ちにもならない
-    assert eco.balance(B) == cash_before  # 現金は渡らない・差し押さえられない
+    assert eco.balance(B) == 0  # 先に、自分の資産（現金）が差し押さえられている（CDS は、その先の 3,000 だけ）
     assert eco.cds_list(B)["bought"] == []  # 使い切り
 
 
-def test_self_cds_cannot_be_used_to_profit_from_a_deliberate_loss(eco):
-    eco.credit(A, 20_000, "テスト")
-    eco.bank_deposit(A, 10_000, NOW)
+def test_self_cds_does_not_protect_assets_first_loss_is_borne_by_the_player(eco):
     eco.credit(B, 5_000, "テスト")
     eco.cds_buy(B, B, 1_000, NOW)
     total_before = eco.balance(B) + eco.deposit_of(B)
     with eco._lock, eco._conn:
         eco._owe(B, 12_000, "テスト")
-    assert (
-        eco.balance(B) + eco.deposit_of(B) <= total_before
-    )  # 掛け金を払った分、必ず減っている（保険金詐欺にならない）
+    # 掛け金を払い、さらに自分の資産で払える分は失う。CDS は、残りだけ
+    assert eco.balance(B) + eco.deposit_of(B) < total_before - 1_000
+
+
+def test_self_cds_total_payout_is_capped(eco):
+    eco.credit(B, 100_000, "テスト")
+    assert eco.cds_buy(B, B, 3_000, NOW)[0]  # 15倍・見込み 45,000
+    ok, why = eco.cds_buy(B, B, 1_000, NOW)  # 合計 60,000 > 50,000
+    assert not ok and "5" in why and "まで" in why
+    assert eco.cds_buy(B, B, 300, NOW)[0]  # 合計 49,500 までなら買える
 
 
 # ----------------------------- 種銭・信用ダブル・預金の差し押さえ ----------------------------- #

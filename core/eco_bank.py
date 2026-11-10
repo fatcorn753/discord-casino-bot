@@ -9,7 +9,9 @@
   これが預金総額に対して少ないほど、取り付け騒ぎの危険水域。0 以下なら、引き出せない（預金封鎖）
 - 破産猶予: 借金が GRACE_DEBT 以上になると、GRACE_HOURS のカウントダウンに入る。戻せば回避、時間切れで強制破産
 - CDS: 掛け金を払うと、対象が「強制破産」したときに配当（掛け金 × オッズ）。自分への CDS は、借金を肩代わりする保険。
-  他人への CDS は、本人が自分から破産しても配当は出ず、配当の合計も、対象の借金の CDS_PAYOUT_CAP_RATE までに抑える（結託の対策）
+  自分の資産を差し押さえても、なお足りない分にだけ効く（先に自分の資産を失う）。配当の見込みの合計は CDS_SELF_CAP まで。
+  他人への CDS は、猶予の時間切れの強制破産のほか、猶予に入ってからの自己破産でも配当が出る（猶予に入る前の自己破産では出ない）。
+  配当の合計は、対象の借金の CDS_PAYOUT_CAP_RATE までに抑える（結託の対策）
 """
 
 import time
@@ -346,6 +348,19 @@ class BankMixin:
             if self.status(target_id, now) == teiai.BANKRUPT:
                 return False, "その人は、破産者なので、掛けられません。"
             odds = self.cds_quote(target_id, now)["odds"]
+            if buyer_id == target_id:  # 自分への保証は、積める額に上限がある
+                have = self._conn.execute(
+                    "SELECT COALESCE(SUM(stake * odds), 0) FROM cds WHERE guild_id=? AND buyer_id=? AND target_id=? "
+                    "AND status='active' AND expires>?",
+                    (self._g(), buyer_id, buyer_id, now),
+                ).fetchone()[0]
+                if have + stake * odds > teiai.CDS_SELF_CAP:
+                    room = max(0, int((teiai.CDS_SELF_CAP - have) / odds))
+                    return (
+                        False,
+                        f"自分への CDS は、配当の見込みの合計が {teiai.CDS_SELF_CAP:,}ペリカ までです"
+                        f"（いま {int(have):,}ペリカ分。あと掛けられるのは {room:,}ペリカ）。",
+                    )
             self._apply(buyer_id, -stake, f"CDS の掛け金（対象 {target_id}・{odds}倍）")
             self._bank_income(stake, teiai.PREMIUM_YIELD_SHARE, now)
             self._conn.execute(
