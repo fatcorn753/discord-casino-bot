@@ -228,6 +228,7 @@ class ShopView(discord.ui.View):
             tab,
             1,
         )
+        self.picked = None  # 選んだ景品 (種類, 値)。「🛒 購入」を押すまで、買わない。種類は shop / auction / horse
         self._build()
 
     # ---- 見た目 ---- #
@@ -282,6 +283,7 @@ class ShopView(discord.ui.View):
                         label=("✅ " if i.unique and inv.get(i.id, 0) > 0 else "")
                         + (shop.label(i) if mixed else i.name)[:90],
                         value=i.id,
+                        default=self.picked == ("shop", i.id),
                         description=f"{i.price:,}ペリカ"
                         + (f"　在庫 {stocks[i.id]['stock']}/{stocks[i.id]['max']}" if stocks.get(i.id) else "")
                         + (f"　{i.desc}" if i.desc else "")[:60],
@@ -292,6 +294,7 @@ class ShopView(discord.ui.View):
             )
             buy.callback = self._on_buy
             self.add_item(buy)
+            self._add_buy_button()
         if self.tab in ("item", "horse"):
             qty = discord.ui.Select(
                 placeholder=f"個数（いま {self.qty} 個）",
@@ -304,9 +307,31 @@ class ShopView(discord.ui.View):
             qty.callback = self._on_qty
             self.add_item(qty)
 
+    def _add_buy_button(self) -> None:
+        """選んだ景品を買うボタン。何も選んでいないうちは押せない。"""
+        btn = discord.ui.Button(
+            label="🛒 購入" if self.picked is None else f"🛒 購入（{self._picked_name()}）"[:80],
+            style=discord.ButtonStyle.success,
+            disabled=self.picked is None,
+            row=4,
+        )
+        btn.callback = self._on_purchase
+        self.add_item(btn)
+
+    def _picked_name(self) -> str:
+        kind, value = self.picked
+        if kind == "horse":
+            horse = next(
+                (h for h in self.cog.bot.economy.for_guild(self.guild_id).auction_horses() if str(h["id"]) == value),
+                None,
+            )
+            return horse["name"] if horse else "競走馬"
+        item = shop.BY_ID.get(value)
+        return item.name if item else "景品"
+
     def _make_tab(self, tab: str):
         async def callback(interaction: discord.Interaction):
-            self.tab, self.qty = tab, 1
+            self.tab, self.qty, self.picked = tab, 1, None
             await self._redraw(interaction)
 
         return callback
@@ -322,6 +347,7 @@ class ShopView(discord.ui.View):
                     discord.SelectOption(
                         label=shop.label(shop.BY_ID[e["item_id"]])[:100],
                         value=e["item_id"],
+                        default=self.picked == ("auction", e["item_id"]),
                         description=f"{e['price']:,}ペリカ（定価の{e['rate']:.0%}）　残り{e['qty']}",
                     )
                     for e in listed[:25]
@@ -349,6 +375,7 @@ class ShopView(discord.ui.View):
                     discord.SelectOption(
                         label=f"{h['name']}（{h['coat']}）"[:100],
                         value=str(h["id"]),
+                        default=self.picked == ("horse", str(h["id"])),
                         emoji=h["silks"],
                         description=f"{h['price']:,}ペリカ（定価の{h['rate']:.0%}）　速{h['speed']} ス{h['stamina']} パ{h['power']} 根{h['guts']}"[
                             :100
@@ -359,6 +386,8 @@ class ShopView(discord.ui.View):
             )
             pick.callback = self._on_buy_horse
             self.add_item(pick)
+        if listed or horses:
+            self._add_buy_button()
         back = discord.ui.Button(label="🛍️ ショップ", style=discord.ButtonStyle.primary, row=3)
         back.callback = self._to_shop
         self.add_item(back)
@@ -413,27 +442,43 @@ class ShopView(discord.ui.View):
         self.qty = int(interaction.data["values"][0])
         await self._redraw(interaction)
 
+    # 選ぶだけでは買わない。選んだものを覚えて、「🛒 購入」ボタンで買う
     async def _on_buy(self, interaction: discord.Interaction):
-        await self.cog.buy_item(
-            interaction, interaction.data["values"][0], self.qty if self.tab in ("item", "horse") else 1
-        )
+        self.picked = ("shop", interaction.data["values"][0])
+        await self._redraw(interaction)
 
     async def _on_buy_horse(self, interaction: discord.Interaction):
-        await self.cog.buy_auction_horse(interaction, int(interaction.data["values"][0]))
+        self.picked = ("horse", interaction.data["values"][0])
+        await self._redraw(interaction)
 
     async def _on_buy_auction(self, interaction: discord.Interaction):
-        await self.cog.buy_auction(interaction, interaction.data["values"][0], self.qty)
+        self.picked = ("auction", interaction.data["values"][0])
+        await self._redraw(interaction)
+
+    async def _on_purchase(self, interaction: discord.Interaction):
+        if self.picked is None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("景品を選んでください", "買う景品を選んでから、「🛒 購入」を押してください。"),
+                ephemeral=True,
+            )
+        kind, value = self.picked
+        if kind == "horse":
+            await self.cog.buy_auction_horse(interaction, int(value))
+        elif kind == "auction":
+            await self.cog.buy_auction(interaction, value, self.qty)
+        else:
+            await self.cog.buy_item(interaction, value, self.qty if self.tab in ("item", "horse") else 1)
 
     async def _to_auction(self, interaction: discord.Interaction):
-        self.screen, self.qty = "auction", 1
+        self.screen, self.qty, self.picked = "auction", 1, None
         await self._redraw(interaction)
 
     async def _to_inventory(self, interaction: discord.Interaction):
-        self.screen = "inv"
+        self.screen, self.picked = "inv", None
         await self._redraw(interaction)
 
     async def _to_shop(self, interaction: discord.Interaction):
-        self.screen = "shop"
+        self.screen, self.picked = "shop", None
         await self._redraw(interaction)
 
     async def _on_use(self, interaction: discord.Interaction):

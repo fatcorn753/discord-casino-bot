@@ -146,8 +146,11 @@ def test_consumables_get_a_quantity_select_and_buying_uses_it(cog, eco):
     run(view._on_qty(It(values=["3"])))
     assert view.qty == 3 and select(view, 3).placeholder == "個数（いま 3 個）"
     eco.credit(1, 20_000, "テスト")
-    buy_it = It(values=[shop.INSURANCE])
-    run(view._on_buy(buy_it))
+    pick_it = It(values=[shop.INSURANCE])
+    run(view._on_buy(pick_it))
+    assert eco.inventory(1).get(shop.INSURANCE, 0) == 0  # 選んだだけでは、買わない
+    buy_it = It()
+    run(view._on_purchase(buy_it))
     assert (
         eco.inventory(1)[shop.INSURANCE] == 3 and "購入しました" in buy_it.sent[-1]["embed"].title
     )  # 個数が反映される
@@ -158,8 +161,10 @@ def test_consumables_get_a_quantity_select_and_buying_uses_it(cog, eco):
 def test_buying_a_title_then_equipping_and_unequipping_from_the_inventory_screen(cog, eco):
     view = ShopView(cog, 1, 0)
     run(view._make_tab("title")(It()))
-    it = It(values=["title_rookie"])
-    run(view._on_buy(it))
+    run(view._on_buy(It(values=["title_rookie"])))
+    assert "title_rookie" not in eco.inventory(1)  # 選んだだけでは、買わない
+    it = It()
+    run(view._on_purchase(it))
     assert "title_rookie" in eco.inventory(1) and it.sent[-1]["ephemeral"] and eco.balance(1) < INITIAL_BALANCE
     inv_it = It()
     run(view._to_inventory(inv_it))
@@ -220,3 +225,15 @@ def test_only_the_owner_can_use_the_panel(cog):
 def test_unused_catalog_text_no_longer_points_to_removed_commands(cog):
     text = cog._catalog_embed(0, 1).description + cog._inventory_embed(0, 1).description
     assert "/ショップ " not in text
+
+
+def test_purchase_button_is_disabled_until_something_is_picked_and_resets_on_screen_change(cog, eco):
+    view = ShopView(cog, 1, 0)
+    run(view._make_tab("item")(It()))
+    btn = next(c for c in view.children if getattr(c, "label", "").startswith("🛒"))
+    assert btn.disabled and btn.row == 4
+    run(view._on_buy(It(values=[shop.INSURANCE])))
+    btn = next(c for c in view.children if getattr(c, "label", "").startswith("🛒"))
+    assert not btn.disabled and view.picked == ("shop", shop.INSURANCE)
+    run(view._make_tab("title")(It()))
+    assert view.picked is None
