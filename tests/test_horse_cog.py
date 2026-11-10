@@ -8,7 +8,7 @@ import pytest
 
 from cogs import _horse_views as views
 from cogs import horse_cog
-from cogs.horse_cog import HorseCog, comment, lane_text, pick_frames
+from cogs.horse_cog import HorseCog, anim_frames, comment, lane_text, laps_for, pick_frames
 from core import horse as h
 from core import shop
 from core.economy import Economy
@@ -338,3 +338,18 @@ def test_entry_card_in_the_channel_is_redrawn_when_registrations_change(setup):
     asyncio.run(views.refresh_entry_card(interaction, eco, rid))
     assert "ライブホース" not in chan.retired[-1][1]["embed"].description
 
+
+def test_longer_races_get_more_animation_frames():
+    counts = [anim_frames(d) for d in h.DISTANCES]
+    assert counts == sorted(counts) and counts[0] >= 13 and counts[-1] >= 40
+    assert anim_frames(1800) == horse_cog.ANIM_FRAMES
+
+
+def test_long_races_run_several_laps_and_show_the_lap():
+    assert [laps_for(d) for d in h.DISTANCES] == [1, 1, 1, 1, 2, 2, 3]
+    entries = [{"lane": 1, "silks": "🟥", "name": "アルファ"}, {"lane": 2, "silks": "🟦", "name": "ベータ"}]
+    text = lane_text(entries, [0.5, 0.2], laps=2)
+    assert "先頭は 2周目 / 全2周" in text and "2周目" in text and "1周目" in text
+    assert "周目" not in lane_text(entries, [0.5, 0.2])  # 1周のレースは、これまでどおり
+    done = lane_text(entries, [1.0, 0.9], laps=2)
+    assert "全2周" in done

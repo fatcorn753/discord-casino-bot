@@ -21,7 +21,7 @@ from core import horse as horse_mod
 
 TRACK_W = 22  # アニメーションのコースの長さ（文字数）
 STEP = 1.4  # メッセージの書き換えの間隔（秒。レート制限に収まる）
-ANIM_FRAMES = 13  # アニメーションのコマ数（約18秒）
+ANIM_FRAMES = 24  # 1800m のアニメーションのコマ数（約34秒）。距離に比例して増減する
 NONE = discord.AllowedMentions.none()
 
 
@@ -49,6 +49,11 @@ def display_frames(frames: list, winner: int, finish: list = None) -> list:
     return out
 
 
+def anim_frames(distance: int) -> int:
+    """距離に応じたコマ数（長いレースほど、長く見せる）。1000m で13コマ・3000m で40コマ。"""
+    return max(8, round(ANIM_FRAMES * distance / 1800))
+
+
 def pick_frames(frames: list, count: int = ANIM_FRAMES) -> list:
     """全ティックの進みから、アニメーションに使うコマを等間隔に選ぶ（最初と最後を含む）。"""
     last = len(frames) - 1
@@ -56,12 +61,25 @@ def pick_frames(frames: list, count: int = ANIM_FRAMES) -> list:
     return [frames[i] for i in idx]
 
 
-def lane_text(entries: list, positions: list) -> str:
+def laps_for(distance: int) -> int:
+    """コースを何周する見せ方にするか（長いレースは、同じコースを回る）。2000m で2周・3000m で3周。"""
+    return max(1, distance // 1000)
+
+
+def lane_text(entries: list, positions: list, laps: int = 1) -> str:
+    """各馬の位置。laps>1 のときは、コースの1周が全体の 1/laps で、何周目かを頭に書く（馬ごとに、いまの周の位置を出す）。"""
     rows = []
     for e, p in zip(entries, positions):
-        k = min(TRACK_W, int(p * TRACK_W))
-        rows.append(f"{e['lane']} {e['silks']}{'─' * k}🐎{'·' * (TRACK_W - k)}🏁 {e['name'][:5]}")
-    return "```\n" + "\n".join(rows) + "\n```"
+        lap = min(laps - 1, int(p * laps))
+        frac = 1.0 if p >= 1.0 else p * laps - lap
+        k = min(TRACK_W, int(frac * TRACK_W))
+        mark = f" {lap + 1}周目" if laps > 1 and p < 1.0 else ""
+        rows.append(f"{e['lane']} {e['silks']}{'─' * k}🐎{'·' * (TRACK_W - k)}🏁 {e['name'][:5]}{mark}")
+    head = ""
+    if laps > 1:
+        lead = min(laps, int(max(positions) * laps) + 1) if max(positions) < 1.0 else laps
+        head = f"🔁 先頭は {lead}周目 / 全{laps}周\n"
+    return "```\n" + head + "\n".join(rows) + "\n```"
 
 
 def comment(entries: list, positions: list, previous_leader, final: bool, winner=None):
@@ -229,18 +247,22 @@ class HorseCog(commands.Cog):
         await self._retire(guild, eco, race)  # 発売中の投稿（race は、まだ betting のときの値）
         entries = result["entries"]
         winner = result["order"][0]
-        frames = pick_frames(display_frames(result["frames"], winner, result["finish"]))
+        frames = pick_frames(
+            display_frames(result["frames"], winner, result["finish"]), anim_frames(result["track"].distance)
+        )
         channel = await self._channel(guild, eco, race)
         if channel is None:
             return
         title = f"{race_title(eco, race)}　発走！　{result['track'].label}"
+
+        laps = laps_for(result["track"].distance)
 
         def frame_embed(i: int, leader):
             positions = frames[i]
             final = i == len(frames) - 1
             text, new_leader = comment(entries, positions, leader, final, winner)
             return ui.embed(
-                title, f"{text}\n{lane_text(entries, positions)}", ui.GOLD if final else ui.INFO
+                title, f"{text}\n{lane_text(entries, positions, laps)}", ui.GOLD if final else ui.INFO
             ), new_leader
 
         embed, leader = frame_embed(0, None)
