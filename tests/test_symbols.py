@@ -377,3 +377,44 @@ def test_board_without_symbol_shows_summary_with_switcher_and_with_symbol_posts_
     it = It()
     asyncio.run(MarketCog.board.callback(cog, it, choice("numa"), None))
     assert "NUMAバイオ" in it.sent[-1]["embed"].title and "view" not in it.sent[-1]
+
+
+def test_settle_by_percent_sells_that_share_of_a_spot_position(eco):
+    from tests.test_market import It
+
+    cog = make_cog(eco)
+    a = eco.for_guild(G)
+    assert a.crypto_buy(U, 2_000, cog._price("cs"), "cs").ok
+    have = a.crypto_holding(U, "cs")[0]
+    assert have > 0
+    asyncio.run(MarketCog.settle.callback(cog, It(), "spot:cs", None, 25))
+    assert a.crypto_holding(U, "cs")[0] == have - have * 25 // 100
+    left = a.crypto_holding(U, "cs")[0]
+    asyncio.run(MarketCog.settle.callback(cog, It(), "spot:cs", None, 100))  # 100%は、全部
+    assert a.crypto_holding(U, "cs")[0] == 0 and left > 0
+
+
+def test_percent_units_are_at_least_one_unit_and_both_options_are_refused(eco):
+    assert MarketCog._units_from(1_000, None, choice(1)) == 10
+    assert MarketCog._units_from(50, None, choice(1)) == 1  # 端数でも、最低1口
+    assert MarketCog._units_from(1_000, None, choice("half")) == 500
+    assert MarketCog._units_from(1_000, None, choice(100)) is None
+    assert MarketCog._units_from(1_000, None, None) is None
+    from tests.test_market import It
+
+    cog = make_cog(eco)
+    it = It()
+    asyncio.run(MarketCog.settle.callback(cog, it, "spot:cs", choice("half"), 20))
+    assert "どちらか1つ" in it.sent[-1]["embed"].title
+
+
+def test_percent_closes_that_share_of_a_margin_position(eco):
+    from tests.test_market import It
+
+    cog = make_cog(eco)
+    a = eco.for_guild(G)
+    a.credit(U, 20_000, "テスト")
+    assert a.short_open(U, 10_000, cog._price("cs"), 1, "cs").ok
+    have = a.short_position(U, "cs")[0]
+    asyncio.run(MarketCog.settle.callback(cog, It(), "short:cs", None, 30))
+    assert a.short_position(U, "cs")[0] == have - have * 30 // 100

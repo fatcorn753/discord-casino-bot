@@ -3,6 +3,7 @@
 import math
 import random
 import time
+from types import SimpleNamespace
 from typing import Optional
 
 import discord
@@ -443,11 +444,15 @@ class MarketCog(commands.Cog):
 
     @staticmethod
     def _units_from(have: int, lots, ratio) -> Optional[int]:
-        """売る・買い戻す口数。枚数の指定ならその口数、「半分」ならその半分、どちらも省略（または全部）なら None（全部）。"""
+        """売る・買い戻す口数。枚数の指定ならその口数、割合（1〜100の数値。「半分」は50）ならその割合、どちらも省略（または100%）なら None（全部）。"""
         if lots is not None:
             return int(round(lots * market.UNIT))
-        if ratio is not None and ratio.value == "half":
-            return max(1, have // 2)
+        if ratio is not None:
+            value = ratio.value
+            if value == "half":
+                value = 50
+            if isinstance(value, int) and 0 < value < 100:
+                return max(1, have * value // 100)
         return None
 
     @staticmethod
@@ -1179,17 +1184,32 @@ class MarketCog(commands.Cog):
         ]
         return found[:25]
 
-    @group.command(name="決済", description="持っている現物・空売り・債券を、半分か全部、手放す")
-    @app_commands.rename(position="ポジション", ratio="数量")
-    @app_commands.describe(position="決済する持ち物（候補から選ぶ）", ratio="半分か全部（省略で全部。債券は全部だけ）")
+    @group.command(name="決済", description="持っている現物・空売り・債券を、割合（%）を決めて手放す")
+    @app_commands.rename(position="ポジション", ratio="数量", percent="割合")
+    @app_commands.describe(
+        position="決済する持ち物（候補から選ぶ）",
+        ratio="半分か全部（省略で全部。債券は全部だけ）",
+        percent="手放す割合（1〜100%の数字。省略で全部。債券は全部だけ）",
+    )
     @app_commands.choices(
         ratio=[app_commands.Choice(name="半分", value="half"), app_commands.Choice(name="全部", value="all")]
     )
     @app_commands.autocomplete(position=_position_autocomplete)
     async def settle(
-        self, interaction: discord.Interaction, position: str, ratio: Optional[app_commands.Choice[str]] = None
+        self,
+        interaction: discord.Interaction,
+        position: str,
+        ratio: Optional[app_commands.Choice[str]] = None,
+        percent: Optional[app_commands.Range[int, 1, 100]] = None,
     ):
-        await self.settle_position(interaction, position, ratio)
+        if ratio is not None and percent is not None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed(
+                    "どちらか1つにしてください", "「数量」と「割合」は、どちらか一方だけ指定できます。"
+                ),
+                ephemeral=True,
+            )
+        await self.settle_position(interaction, position, ratio if percent is None else SimpleNamespace(value=percent))
 
     # ------------------------------ 債券 ------------------------------ #
     async def _bond_buy(self, interaction: discord.Interaction, kind_key: str, amount: int) -> None:
