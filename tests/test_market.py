@@ -682,3 +682,65 @@ def test_a_step_without_any_shock_moves_the_price_by_exactly_the_drift(monkeypat
     without, _ = market.next_prices(prices, Calm)
     for sym in market.SYMBOLS:
         assert with_drift[sym.key] / without[sym.key] == pytest.approx(math.exp(sym.drift / 1440), rel=1e-4)
+
+
+# ----------------------------- 利益への税（キャピタルゲイン税） ----------------------------- #
+def test_capital_gains_tax_is_progressive_and_zero_for_small_profits():
+    tax = market.capital_gains_tax
+    assert tax(0) == tax(-500) == tax(10_000) == 0  # 損失と、1万までは非課税
+    assert tax(20_000) == 300  # 1万超の 10,000 に 3%
+    assert tax(100_000) == int(90_000 * 0.03)  # 2,700
+    assert tax(200_000) == 2_700 + int(100_000 * 0.07)  # 7,000のぶん
+    assert tax(1_000_000) == 2_700 + int(900_000 * 0.07)
+    assert tax(3_000_000) == 2_700 + 63_000 + int(2_000_000 * 0.12)  # 最高税率12%
+    assert tax(50_000) < tax(60_000) < tax(500_000)  # 利益が増えれば、税も増える
+
+
+def test_a_big_spot_gain_is_taxed_and_the_tax_goes_to_depositors(eco):
+    a = eco.for_guild(G)
+    a.credit(U, 500_000, "テスト")
+    a.credit(2, 20_000, "テスト")
+    a.bank_deposit(2, 20_000, 1.0)  # 預金者
+    r = a.crypto_buy(U, 200_000, 1000)
+    before_deposit = a.deposit_of(2)
+    s = a.crypto_sell(U, None, 1300)  # 約 +30%
+    assert s.ok and s.profit > 50_000
+    assert s.tax == market.capital_gains_tax(s.profit) > 0
+    assert a.balance(U) == INITIAL_BALANCE + 500_000 - r.money + s.money  # 受け取りは、税を引いた額
+    assert a.deposit_of(2) == before_deposit + s.tax  # 預金者がひとりなので、税が全額、預金に入る
+    assert any(
+        "キャピタルゲイン税" in x["reason"]
+        for x in eco._conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))
+    )
+
+
+def test_small_gains_and_losses_are_not_taxed_on_spot_and_margin(eco):
+    a = eco.for_guild(G)
+    a.credit(U, 100_000, "テスト")
+    a.crypto_buy(U, 10_000, 1000)
+    win = a.crypto_sell(U, None, 1100)  # 利益 約1,000
+    assert win.ok and 0 < win.profit <= 10_000 and win.tax == 0  # 1万ペリカまでの利益は、非課税
+    a.crypto_buy(U, 10_000, 1000)
+    lose = a.crypto_sell(U, None, 900)
+    assert lose.profit < 0 and lose.tax == 0
+
+
+def test_a_big_margin_gain_is_taxed_when_closed_by_the_player(eco):
+    a = eco.for_guild(G)
+    a.credit(U, 600_000, "テスト")
+    assert a.long_open(U, 400_000, 1000, 5, "cs").ok  # 40万ペリカぶんの信用買い（担保8万）
+    margin = a.margin_position(U, "cs", "long")[2]
+    before = a.balance(U)
+    res = a.long_close(U, None, 1300, "cs")  # 価格 +30%: 利益 約12万
+    assert res.ok and res.profit > 100_000
+    assert res.tax == market.capital_gains_tax(res.profit) > 0
+    assert a.balance(U) == before + margin + res.profit - res.tax  # 担保 + 利益 - 税
+
+
+def test_forced_sales_do_not_pay_the_gains_tax(eco):
+    a = eco.for_guild(G)
+    a.credit(U, 500_000, "テスト")
+    a.crypto_buy(U, 200_000, 1000)
+    with eco._lock, eco._conn:  # 強制執行などが使う売却（taxable を付けない）
+        forced = a._crypto_sell_locked(U, None, 1300, "cs")
+    assert forced.ok and forced.profit > 50_000 and forced.tax == 0

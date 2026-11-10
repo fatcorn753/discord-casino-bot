@@ -79,6 +79,25 @@ def limit_to_day(prices: dict, reference: dict, limit: float = DAILY_LIMIT) -> d
     return out
 
 
+# 利益への帝愛の税（キャピタルゲイン税）。現物の売却と信用建玉の決済で、利益が出たときだけ、その利益から天引きする。超過累進（段ごとに税率がかわる）
+GAINS_TAX_BRACKETS = ((10_000, 0.0), (100_000, 0.03), (1_000_000, 0.07), (None, 0.12))  # (段の上限, 税率)
+
+
+def capital_gains_tax(profit: int) -> int:
+    """1回の決済の利益 profit にかかる税。小口（1万ペリカまで）は非課税。段ごとに、その段にかかる分だけ、段の税率をかける（超過累進）。"""
+    if profit <= 0:
+        return 0
+    tax, low = 0.0, 0
+    for limit, rate in GAINS_TAX_BRACKETS:
+        top = profit if limit is None else min(profit, limit)
+        if top > low:
+            tax += (top - low) * rate
+        if limit is None or profit <= limit:
+            break
+        low = limit
+    return int(tax)
+
+
 def correlation(a: str, b: str) -> float:
     """銘柄 a と b の相関。同じ銘柄は 1。"""
     if a == b:

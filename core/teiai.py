@@ -46,6 +46,7 @@ LOAN_RECOVERY_PER_HOUR = 0.02  # 地下融資が、1時間あたりこの割合�
 LOCK_DEBT_RATE = 0.05  # 地下労働者の借金の、この割合を、貸し倒れに備えて現金からロックする
 LOSS_SHARE = 0.03  # カジノでプレイヤーが負けた額の、この割合を、預金者の利回りへ回す
 PREMIUM_YIELD_SHARE = 0.5  # CDS の掛け金のうち、預金者の利回りへ回す割合（残りは帝愛の手元現金に残る）
+TAX_YIELD_SHARE = 1.0  # 株の利益への税（キャピタルゲイン税）のうち、預金者の利回りへ回す割合（残りは銀行の手元）
 SKIM_YIELD_SHARE = 0.5  # デイリーのピンハネのうち、預金者の利回りへ回す割合
 RUN_WARN_RATIO = 0.15  # 利用可能現金 ÷ 預金総額 がこれ未満なら 🟡、RUN_DANGER_RATIO 未満なら 🔴
 RUN_DANGER_RATIO = 0.05

@@ -142,6 +142,13 @@ class MarketView(discord.ui.View):
         return True
 
 
+def tax_line(res) -> str:
+    """利益にかかった税（キャピタルゲイン税）の一行。税がなければ空。"""
+    if not getattr(res, "tax", 0):
+        return ""
+    return f"🕴️ 帝愛の税（利益の累進課税）: **−{res.tax:,}ペリカ**（預金者の利回りになります）\n"
+
+
 class MarketCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -553,7 +560,7 @@ class MarketCog(commands.Cog):
                 embed=ui.embed(
                     f"{sym.name}を{verb}ました（{label}の決済）",
                     f"**{market.lots(res.units)}**（価格 {market.pel(price)}）\n"
-                    f"戻ってきた額: {ui.pelica(res.money)}（担保 + 損益）\n損益: **{res.profit:+,}ペリカ**\n残高: **{ui.pelica(res.balance)}**{owed}{rest}",
+                    f"戻ってきた額: {ui.pelica(res.money)}（担保 + 損益）\n損益: **{res.profit:+,}ペリカ**\n{tax_line(res)}残高: **{ui.pelica(res.balance)}**{owed}{rest}",
                     ui.OK if res.profit >= 0 else ui.ERROR,
                 )
             )
@@ -633,7 +640,7 @@ class MarketCog(commands.Cog):
                     f"**{market.lots(res.units)}**（価格 {market.pel(price)}）\n"
                     f"取得 {market.fmt(market.avg_price(have, cost))} → 売値 {market.fmt(price)}　{'🔺' if pct >= 0 else '🔻'}**{pct:+.1f}%**\n"
                     f"受け取り: {ui.pelica(res.money)}\n"
-                    f"買った額との差: **{res.profit:+,}ペリカ**\n残高: **{ui.pelica(res.balance)}**{rest}",
+                    f"買った額との差: **{res.profit:+,}ペリカ**\n{tax_line(res)}残高: **{ui.pelica(res.balance)}**{rest}",
                     ui.OK if res.profit >= 0 else ui.ERROR,
                 )
             )

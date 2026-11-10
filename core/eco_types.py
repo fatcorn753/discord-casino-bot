@@ -37,7 +37,8 @@ class CryptoResult:
     money: int = 0  # 買い: 支払った総額 / 売り: 受け取った額（どちらも手数料込み）
     fee: int = 0
     balance: int = 0
-    profit: int = 0  # 売り: 買った額に対する損益
+    profit: int = 0  # 売り: 買った額に対する損益（税の前）
+    tax: int = 0  # 売り・決済で利益が出たときに、帝愛が源泉徴収した税（money からは、引いてある）
 
 
 @dataclass(frozen=True)

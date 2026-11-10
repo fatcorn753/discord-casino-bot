@@ -7,6 +7,7 @@ import math
 from typing import Optional
 
 from core import market as market_mod
+from core import teiai
 from core.eco_types import CryptoResult
 from core.market import DEFAULT
 
@@ -124,7 +125,7 @@ class CryptoMixin:
             reason = self._collateral_drop_reason(user_id, symbol, units, price)
             if reason:
                 return CryptoResult(False, reason)
-            return self._crypto_sell_locked(user_id, units, price, symbol)
+            return self._crypto_sell_locked(user_id, units, price, symbol, taxable=True)
 
     def _collateral_drop_reason(self, user_id: int, symbol: str, units: Optional[int], price: float) -> str:
         """現物を売ると、担保が減って維持率が OPEN_RATIO を下回るなら、その理由（問題なければ空文字）。信用取引がなければ常に問題なし。"""
@@ -141,10 +142,20 @@ class CryptoMixin:
             )
         return ""
 
+    def _gains_tax(self, user_id: int, profit: int, taxable: bool, what: str) -> int:
+        """利益 profit にかかる税を、帝愛の銀行（預金者の利回り）へ納める。納めた額を返す。強制執行・ロスカットでは取らない（taxable=False）。"""
+        tax = market_mod.capital_gains_tax(profit) if taxable else 0
+        if tax > 0:
+            self._ledger(
+                user_id, 0, self._balance(user_id), f"帝愛のキャピタルゲイン税（{what} 利益{profit:,} → 税{tax:,}）"
+            )
+            self._bank_income(tax, teiai.TAX_YIELD_SHARE)  # 預金者に分配する（預金者がいなければ、銀行の手元に入る）
+        return tax
+
     def _crypto_sell_locked(
-        self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT
+        self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT, taxable: bool = False
     ) -> "CryptoResult":
-        """crypto_sell の本体（呼び出し側が、ロックとトランザクションの中で使う）。"""
+        """crypto_sell の本体（呼び出し側が、ロックとトランザクションの中で使う）。taxable=True なら、利益に税がかかる。"""
         name = market_mod.BY_KEY[symbol].name
         have, cost = self.crypto_holding(user_id, symbol)
         if have <= 0:
@@ -159,7 +170,8 @@ class CryptoMixin:
             cost if units == have else round(cost * units / have)
         )  # 端数の按分は四捨五入（切り捨てだと取得額が少しずつ残る）
         self._ensure(user_id)
-        self._apply(user_id, proceeds, f"{name}売却:{market_mod.lots(units)}@{market_mod.fmt(price)}")
+        tax = self._gains_tax(user_id, proceeds - removed, taxable, f"{name}売却")
+        self._apply(user_id, proceeds - tax, f"{name}売却:{market_mod.lots(units)}@{market_mod.fmt(price)}")
         if units == have:
             self._conn.execute(
                 "DELETE FROM crypto WHERE guild_id=? AND user_id=? AND symbol=?", (self._g(), user_id, symbol)
@@ -170,7 +182,13 @@ class CryptoMixin:
                 (units, removed, self._g(), user_id, symbol),
             )
         return CryptoResult(
-            True, units=units, money=proceeds, fee=fee, balance=self._balance(user_id), profit=proceeds - removed
+            True,
+            units=units,
+            money=proceeds - tax,
+            fee=fee,
+            balance=self._balance(user_id),
+            profit=proceeds - removed,
+            tax=tax,
         )
 
     # ------------------------------------------------------------------ #
@@ -383,8 +401,12 @@ class CryptoMixin:
         label: str,
         symbol: str = DEFAULT,
         owe: bool = False,
+        taxable: bool = False,
     ) -> "CryptoResult":
-        """建玉を units 口、決済する（None なら全部）。担保 + 損益が戻る。owe=True なら、損失が担保を超えた分は、強制執行と借金で払わせる。"""
+        """建玉を units 口、決済する（None なら全部）。担保 + 損益が戻る。owe=True なら、損失が担保を超えた分は、強制執行と借金で払わせる。
+
+        taxable=True なら、利益（pnl > 0）に税がかかる（戻る額から引く）。
+        """
         have, entry_value, margin = self.margin_position(user_id, symbol, side)
         if have <= 0:
             return CryptoResult(False, f"{self.SIDE_NAME[side]}を建てていません。")
@@ -396,6 +418,8 @@ class CryptoMixin:
         part_entry = entry_value if whole else entry_value * units / have
         pnl = self.margin_pnl(side, units, part_entry, price)
         payout = max(0, part_margin + pnl)
+        tax = self._gains_tax(user_id, pnl, taxable, self.SIDE_NAME[side] + "決済")
+        payout -= tax
         table = self._MARGIN_TABLE[side]
         if payout:
             self._apply(user_id, payout, f"{label}:{market_mod.lots(units)}@{market_mod.fmt(price)}")
@@ -417,7 +441,8 @@ class CryptoMixin:
             units=units,
             money=payout,
             balance=self._balance(user_id),
-            profit=pnl if owe else payout - part_margin,
+            profit=pnl if owe else payout + tax - part_margin,
+            tax=tax,
         )
 
     def _short_close_locked(
@@ -432,7 +457,7 @@ class CryptoMixin:
         with self._lock, self._conn:
             self._ensure(user_id)
             return self._margin_close_locked(
-                user_id, side, units, price, f"{self.SIDE_NAME[side]}決済", symbol, owe=True
+                user_id, side, units, price, f"{self.SIDE_NAME[side]}決済", symbol, owe=True, taxable=True
             )
 
     def short_close(self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT) -> "CryptoResult":
