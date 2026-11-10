@@ -44,17 +44,18 @@ class LoanMixin:
         帝愛への返済のあとの、天引きの残りで呼ばれる（core/eco_debt.py の _withhold）。
         """
         total = 0
+        now = time.time()
         rows = self._conn.execute(
             "SELECT * FROM loans WHERE guild_id=? AND borrower_id=? AND status='overdue' ORDER BY id",
             (self._g(), user_id),
         ).fetchall()
         for row in rows:
             loan = dict(row)
-            take = min(self._balance(user_id), self.loan_remaining(loan, loan["due"]), budget - total)
+            take = min(self._balance(user_id), self.loan_remaining(loan, now), budget - total)
             if take > 0:
                 self._loan_pay(loan, take)
                 total += take
-            if self.loan_remaining(loan, loan["due"]) <= 0:
+            if self.loan_remaining(loan, now) <= 0:
                 self._conn.execute("UPDATE loans SET status='repaid' WHERE id=?", (loan["id"],))
         return total
 
@@ -310,9 +311,7 @@ class LoanMixin:
                 return False, "返す貸付が見つかりません。"
             if loan["borrower_id"] != user_id:
                 return False, "返せるのは、借りた本人だけです。"
-            at = (
-                loan["due"] if loan["status"] == "overdue" else now
-            )  # 延滞中は、期限の時点の金額（延滞の利息は付かない）
+            at = now  # 延滞中は、いまの時刻まで遅延損害金が付く
             remaining = self.loan_remaining(loan, at)
             self._ensure(user_id)
             pay = min(remaining, self._balance(user_id)) if amount is None else amount

@@ -474,7 +474,8 @@ def test_bond_maturity_without_debt_pays_out_whole(eco):
     assert eco.balance(U) == before + 1_200 and eco.debt(U) == 0
 
 
-def test_bond_principal_pays_the_overdue_loan_when_there_is_no_senior_debt(eco):
+def test_bond_principal_pays_the_overdue_loan_when_there_is_no_senior_debt(eco, monkeypatch):
+    monkeypatch.setattr("core.eco_loans.time.time", lambda: 1000 + 86400)  # 期限ちょうど（遅延損害金は、まだ付かない）
     eco.balance(U)
     assert eco.bond_buy(U, "junk", 1_000, 1.0)[0]
     eco.balance(A)

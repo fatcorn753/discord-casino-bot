@@ -300,7 +300,7 @@ class LoanCog(commands.Cog):
         if not ok:
             return await interaction.response.send_message(embed=ui.error_embed("返せません", result), ephemeral=True)
         loan = self.g(interaction).loan_get(loan_id)
-        left = self.g(interaction).loan_remaining(loan, loan["due"] if loan["status"] == "overdue" else time.time())
+        left = self.g(interaction).loan_remaining(loan, time.time())
         note = (
             "返済が終わりました。"
             if loan["status"] == "repaid"
@@ -323,7 +323,7 @@ class LoanCog(commands.Cog):
         for loan in eco.loan_list(interaction.user.id)["borrowed"]:
             if loan["status"] in ("offer", "request"):
                 continue
-            left = eco.loan_remaining(loan, loan["due"] if loan["status"] == "overdue" else now)
+            left = eco.loan_remaining(loan, now)
             label = f"#{loan['id']} 残り{left:,}（{'延滞中' if loan['status'] == 'overdue' else '期限 ' + format_minutes(max(1, int((loan['due'] - now) // 60))) + '後'}）"
             if not current or current in label:
                 out.append(app_commands.Choice(name=label[:100], value=loan["id"]))
@@ -344,8 +344,13 @@ class LoanCog(commands.Cog):
                 return f"`#{loan['id']}` {ui.pelica(loan['principal'])}　日利{loans.rate_text(loan['rate_tenths'])}・{loan['term_days']}日　**貸し手を募集中**"
             if loan["status"] == "offer":
                 return f"`#{loan['id']}` {other}　{ui.pelica(loan['principal'])}　日利{loans.rate_text(loan['rate_tenths'])}・{loan['term_days']}日　**承諾待ち**"
-            left = eco.loan_remaining(loan, loan["due"] if loan["status"] == "overdue" else now)
-            state = "⚠️延滞" if loan["status"] == "overdue" else f"期限 <t:{int(loan['due'])}:R>"
+            left = eco.loan_remaining(loan, now)
+            late = loans.late_interest(
+                loan["principal"], loan["rate_tenths"], loan["term_days"], loan["accepted_at"], now
+            )
+            state = (
+                f"⚠️延滞（うち遅延損害金 {late:,}）" if loan["status"] == "overdue" else f"期限 <t:{int(loan['due'])}:R>"
+            )
             return f"`#{loan['id']}` {other}　元本{loan['principal']:,}　日利{loans.rate_text(loan['rate_tenths'])}　残り **{left:,}**　{state}"
 
         e = ui.embed(f"🤝 {interaction.user.display_name} の貸し借り", "", ui.INFO)

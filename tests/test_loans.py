@@ -41,7 +41,7 @@ def test_interest_is_simple_per_day_with_rounding_up_and_a_term_cap():
         and loans.elapsed_days(0, DAY, 10) == 1
         and loans.elapsed_days(0, DAY + 1, 10) == 2
     )
-    assert loans.elapsed_days(0, 99 * DAY, 10) == 10  # 期間が上限（延滞の利息は付かない）
+    assert loans.elapsed_days(0, 99 * DAY, 10) == 10  # 約定の利息は、期間が上限（延滞は、遅延損害金で別に数える）
     assert loans.total_owed(1000, 20, 10, 0, 3 * DAY - 5) == 1000 + 3 * 20
     assert loans.full_term_total(1000, 20, 10) == 1200 and loans.rate_text(25) == "2.5%" and loans.rate_text(0) == "0%"
 
@@ -171,7 +171,10 @@ def earn(eco, user_id, amount):
     eco._apply(user_id, amount, "収入", income=amount)
 
 
-def test_shortfall_becomes_overdue_then_is_collected_from_income(eco):
+def test_shortfall_becomes_overdue_then_is_collected_from_income(eco, monkeypatch):
+    monkeypatch.setattr(
+        "core.eco_loans.time.time", lambda: NOW + 1 + 10 * DAY
+    )  # 期限ちょうど（遅延損害金は、まだ付かない）
     lid = active(eco)  # 借りた1000を使い切った想定
     eco._conn.execute("UPDATE users SET balance=300 WHERE user_id=?", (B,))
     out = eco.loan_collect_due(NOW + 1 + 10 * DAY)
@@ -179,10 +182,10 @@ def test_shortfall_becomes_overdue_then_is_collected_from_income(eco):
     assert eco.balance(B) == 0 and eco.loan_get(lid)["status"] == "overdue"
     assert eco.status(B) == teiai.UNDERGROUND  # 延滞で、地下労働者に落ちる
     earn(eco, B, 500)  # 収入の3割（150）が、天引きで回収される。残りは手元に残る
-    assert eco.balance(B) == 350 and eco.loan_remaining(eco.loan_get(lid), NOW + 99 * DAY) == 750
+    assert eco.balance(B) == 350 and eco.loan_remaining(eco.loan_get(lid), NOW + 1 + 10 * DAY) == 750
     assert eco.balance(A) == INITIAL_BALANCE - 1000 + 300 + 150
     eco.credit(B, 1000, "付与")  # 収入ではない入金からは、天引きしない
-    assert eco.loan_remaining(eco.loan_get(lid), NOW + 99 * DAY) == 750
+    assert eco.loan_remaining(eco.loan_get(lid), NOW + 1 + 10 * DAY) == 750
     earn(eco, B, 10_000)  # 天引き3,000で、残り750を回収して完済
     assert eco.loan_get(lid)["status"] == "repaid" and eco.balance(A) == INITIAL_BALANCE + 200
     assert eco.status(B) == teiai.KATAGI  # 延滞がなくなれば、カタギに戻る
@@ -467,3 +470,32 @@ def test_credit_info_counts_history_and_hides_assets(eco):
     assert c["status"] == teiai.KATAGI and "balance" not in c
     eco._conn.execute("UPDATE loans SET status='discharged' WHERE borrower_id=? AND status='active'", (B,))
     assert eco.loan_credit(B)["discharged"] == 1
+
+
+# ----------------------------- 遅延損害金 ----------------------------- #
+def test_late_interest_starts_after_the_due_date_and_is_capped():
+    p, r, term = 1000, 20, 10  # 日利2.0%・10日
+    assert loans.late_rate_tenths(20) == 30 and loans.late_rate_tenths(1) == loans.LATE_MIN_RATE_TENTHS  # 1.5倍と、下限
+    due = term * DAY
+    assert loans.late_interest(p, r, term, 0, due) == 0  # 期限ちょうどまでは、付かない
+    assert loans.late_interest(p, r, term, 0, due + 1) == 30  # 1日目（切り上げ）: 3.0% × 1
+    assert loans.late_interest(p, r, term, 0, due + 3 * DAY) == 90
+    assert loans.total_owed(p, r, term, 0, due + 3 * DAY) == 1000 + 200 + 90
+    assert loans.late_interest(p, r, term, 0, due + 999 * DAY) == p * loans.LATE_CAP  # 元本の LATE_CAP 倍が上限
+
+
+def test_overdue_loan_keeps_growing_so_waiting_is_never_cheaper(eco, monkeypatch):
+    lid = active(eco)
+    due = eco.loan_get(lid)["due"]
+    eco._conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (B,))
+    eco.loan_collect_due(due)
+    loan = eco.loan_get(lid)
+    assert loan["status"] == "overdue"
+    at_due = eco.loan_remaining(loan, due)
+    assert at_due == 1200
+    assert eco.loan_remaining(loan, due + 2 * DAY) == 1200 + 60  # 遅延日利 3.0% × 2日
+    assert eco.loan_remaining(loan, due + 5 * DAY) > eco.loan_remaining(loan, due + 2 * DAY)
+    eco.credit(B, 5_000, "テスト")
+    monkeypatch.setattr("core.eco_loans.time.time", lambda: due + 2 * DAY)
+    ok, paid = eco.loan_repay(lid, B, None, due + 2 * DAY)  # 返済は、遅延損害金を含めた額
+    assert ok and paid == 1260 and eco.loan_get(lid)["status"] == "repaid"

@@ -399,7 +399,7 @@ class DebtMixin:
             junior_paid, forgiven = 0, 0
             now = time.time()
             for loan in loans:  # 第2順位: 貸付（古い順）。残りは免責
-                at = loan["due"] if loan["status"] == "overdue" else now
+                at = now  # 延滞中の遅延損害金も、いまの時刻まで数える
                 pay = min(pool, self.loan_remaining(loan, at))
                 if pay > 0:
                     self._ensure(loan["lender_id"])
