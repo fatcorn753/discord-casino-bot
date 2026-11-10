@@ -219,6 +219,7 @@ class Economy(
         ).fetchone()["balance"]
 
     def _debt(self, user_id: int) -> int:
+        self._accrue_debt_interest(user_id)  # 帝愛の利息（トイチ）。経過した日数ぶんがあれば、借金に加える
         return self._conn.execute(
             "SELECT debt FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
         ).fetchone()["debt"]
@@ -240,7 +241,8 @@ class Economy(
 
     def debt(self, user_id: int) -> int:
         """借金の残り。口座が無ければ 0（口座は作らない）。"""
-        with self._lock:
+        with self._lock, self._conn:
+            self._accrue_debt_interest(user_id)  # 帝愛の利息（トイチ）が溜まっていれば、先に加える
             row = self._conn.execute(
                 "SELECT debt FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
             ).fetchone()
@@ -586,6 +588,7 @@ class Economy(
     def stats(self, user_id: int) -> dict:
         with self._lock, self._conn:
             self._ensure(user_id)
+            self._accrue_debt_interest(user_id)  # 画面に出す借金に、帝愛の利息（トイチ）を含める
             return dict(
                 self._conn.execute(
                     "SELECT * FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)

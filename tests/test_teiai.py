@@ -602,3 +602,62 @@ def test_escape_is_not_available_to_bankrupts(eco):
 
 
 NOW_E = 1_000_000.0
+
+
+# ----------------------------- 帝愛の利息（トイチ） ----------------------------- #
+def _interest_clock(monkeypatch, now):
+    monkeypatch.setattr("core.eco_debt.time.time", lambda: now[0])
+
+
+def test_debt_grows_by_daily_interest_only_after_each_full_day(eco, monkeypatch):
+    now = [1_800_000_000.0]
+    _interest_clock(monkeypatch, now)
+    indebt(eco, U, debt=5_000)
+    assert eco.debt(U) == 5_000  # 借金ができた時点から数える
+    now[0] += DAY - 60
+    assert eco.debt(U) == 5_000  # 1日に満たない
+    now[0] += 120
+    assert eco.debt(U) == 5_000 + 50  # 1日ぶん: 日利1%
+    now[0] += 3 * DAY
+    assert eco.debt(U) == 5_050 + int(5_050 * 0.01 * 3)  # 3日ぶん。端数の時刻は、失われない
+    assert any(
+        "帝愛の利息" in r["reason"] for r in eco._conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))
+    )
+
+
+def test_interest_per_settlement_is_capped_so_a_long_absence_does_not_explode(eco, monkeypatch):
+    now = [1_800_000_000.0]
+    _interest_clock(monkeypatch, now)
+    indebt(eco, U, debt=2_000)
+    eco.debt(U)
+    now[0] += 90 * DAY  # 3か月来なかった
+    assert eco.debt(U) == 2_000 + int(2_000 * 0.01 * teiai.DEBT_INTEREST_MAX_DAYS)  # 数えるのは10日分まで
+    now[0] += 60  # 超えた日は捨てられていて、すぐ追加で付かない
+    assert eco.debt(U) == 2_200
+
+
+def test_interest_stops_just_before_the_bankruptcy_grace_line(eco, monkeypatch):
+    now = [1_800_000_000.0]
+    _interest_clock(monkeypatch, now)
+    indebt(eco, U, debt=14_900)
+    eco.debt(U)
+    now[0] += 10 * DAY
+    assert eco.debt(U) == teiai.DEBT_INTEREST_CEILING  # 猶予（GRACE_DEBT）の直前で止まる
+    assert eco.grace_until(U) is None  # 利息のせいで、猶予のカウントダウンは始まらない
+    now[0] += 10 * DAY
+    assert eco.debt(U) == teiai.DEBT_INTEREST_CEILING
+
+
+def test_a_paid_off_debt_forgets_the_interest_clock(eco, monkeypatch):
+    now = [1_800_000_000.0]
+    _interest_clock(monkeypatch, now)
+    indebt(eco, U, debt=1_000, balance=5_000)
+    eco.debt(U)
+    now[0] += 2 * DAY
+    assert eco.repay_debt(U, None)[0]  # 利息ぶんも含めて、完済
+    assert eco.debt(U) == 0
+    now[0] += 30 * DAY  # 長い間、借金なし
+    eco._conn.execute("UPDATE users SET debt=500 WHERE user_id=?", (U,))  # 新しい借金
+    assert eco.debt(U) == 500  # 昔の時刻から数えず、いまから
+    now[0] += DAY + 1
+    assert eco.debt(U) == 505

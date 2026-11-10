@@ -57,6 +57,54 @@ class DebtMixin:
                 return teiai.UNDERGROUND
             return teiai.KATAGI
 
+    def _accrue_debt_interest(self, user_id: int, now: Optional[float] = None) -> int:
+        """帝愛の利息（トイチ）を、借金に加える。加えた額を返す。呼び出し側のトランザクションの中で使う。
+
+        経過した**日数（切り上げずに、満了した日だけ）**ぶんの単利で、1回に数えるのは DEBT_INTEREST_MAX_DAYS 日まで
+        （しばらく来なかった人の分は、超えた日を数えない）。借金が DEBT_INTEREST_CEILING に届くと、それ以上は付けない。
+        借金がなくなると、数え始めの時刻を忘れる（次に借金ができたときは、その時点から数える）。
+        """
+        now = time.time() if now is None else now
+        row = self._conn.execute(
+            "SELECT debt, debt_interest_at FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
+        ).fetchone()
+        if row is None:
+            return 0
+        debt, since = row["debt"], row["debt_interest_at"]
+        if debt <= 0:
+            if since:
+                self._conn.execute(
+                    "UPDATE users SET debt_interest_at=0 WHERE guild_id=? AND user_id=?", (self._g(), user_id)
+                )
+            return 0
+        if not since:  # 借金ができて、はじめて数える。この時点から
+            self._conn.execute(
+                "UPDATE users SET debt_interest_at=? WHERE guild_id=? AND user_id=?", (now, self._g(), user_id)
+            )
+            return 0
+        days = int(max(0.0, now - since) // 86400)
+        if days <= 0:
+            return 0
+        counted = min(days, teiai.DEBT_INTEREST_MAX_DAYS)
+        add = max(0, min(int(debt * teiai.DEBT_RATE_PER_DAY * counted), teiai.DEBT_INTEREST_CEILING - debt))
+        new_since = now if days > counted else since + days * 86400.0  # 数えきれなかった日は、捨てる
+        self._conn.execute(
+            "UPDATE users SET debt=debt+?, debt_interest_at=? WHERE guild_id=? AND user_id=?",
+            (add, new_since, self._g(), user_id),
+        )
+        if add > 0:
+            balance = self._conn.execute(
+                "SELECT balance FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
+            ).fetchone()["balance"]
+            self._ledger(
+                user_id,
+                0,
+                balance,
+                f"帝愛の利息（トイチ・日利{teiai.DEBT_RATE_PER_DAY:.0%}・{counted}日分）+{add:,}",
+            )
+            self._note(user_id, f"🕴️ 帝愛の利息が付きました（+{add:,}ペリカ。日利{teiai.DEBT_RATE_PER_DAY:.0%}）。")
+        return add
+
     def _after_debt_change(self, user_id: int) -> None:
         """借金が増減したあとの後始末。破産猶予の出入りを直し、破産者が完済したら、そこから BLACKLIST_DAYS 日が始まる。"""
         self._grace_update(user_id)

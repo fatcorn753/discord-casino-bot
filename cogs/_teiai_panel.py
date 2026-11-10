@@ -62,7 +62,9 @@ def panel_embed(eco, uid: int) -> discord.Embed:
     status, debt = eco.status(uid, now), eco.debt(uid)
     me = [f"身分: {teiai.STATUS_LABEL[status]}　預金: **{ui.pelica(eco.deposit_of(uid))}**"]
     if debt:
-        me.append(f"帝愛への借金: **{ui.pelica(debt)}**")
+        me.append(
+            f"帝愛への借金: **{ui.pelica(debt)}**（利息: 1日 {teiai.DEBT_RATE_PER_DAY:.0%}・{teiai.DEBT_INTEREST_CEILING:,}ペリカまで）"
+        )
     until = eco.grace_until(uid)
     if until is not None:
         me.append(

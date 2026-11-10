@@ -123,7 +123,8 @@ class EconomyCog(commands.Cog):
         if s.get("debt"):
             e.add_field(
                 name="帝愛への借金",
-                value=f"{ui.pelica(s['debt'])}（収入の{int(teiai.REPAY_RATE * 100)}%が天引きで返済されます。`/ペリカ 返済` で自分から返せます）",
+                value=f"{ui.pelica(s['debt'])}（収入の{int(teiai.REPAY_RATE * 100)}%が天引きで返済されます。`/ペリカ 返済` で自分から返せます）\n"
+                f"⏳ 帝愛の利息（トイチ）: 1日ごとに借金の{teiai.DEBT_RATE_PER_DAY:.0%}が加わります（{teiai.DEBT_INTEREST_CEILING:,}ペリカまで）",
                 inline=False,
             )
         if rank:
