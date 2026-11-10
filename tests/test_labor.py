@@ -405,7 +405,15 @@ def worker(i, kind, expires):
 
 def test_settle_plan_no_renewals_needed():
     plan = lab.settle_plan([worker(1, "apprentice", T0 + W)], "normal", True, T0, T0 + 2 * H, 0, 0)
-    assert plan == {"gain": 2, "ores": {}, "pot_spent": 0, "balance_spent": 0, "renewed": [], "removed": [], "quit": []}
+    assert plan == {
+        "gain": 2,
+        "ores": {},
+        "pot_spent": 0,
+        "balance_spent": 0,
+        "renewed": [],
+        "removed": [],
+        "quit": [],
+    }
 
 
 def test_settle_plan_renews_from_pot_then_balance():
@@ -684,3 +692,31 @@ def test_cheap_coal_shows_up_often_for_every_worker_and_ignores_power_and_luck()
 def test_ore_text_lists_the_most_valuable_first():
     text = labor_cog.ore_text({"coal": 5, "diamond": 1, "copper": 2})
     assert text.index("ダイヤ") < text.index("銅") < text.index("石炭")
+
+
+def test_uncollected_shows_how_much_of_it_the_workers_earned(eco, monkeypatch):
+    from cogs.labor_cog import hire_embed, panel_embed
+
+    monkeypatch.setattr(lab, "roll_ores", lambda kind, h, luck, rng: {"copper": 2} if kind == "miner" and h > 0 else {})
+    eco.credit(U, 10_000, "テスト")
+    eco.labor_hire(U, "miner", T0, DAY)
+    eco.labor_click(U, T0 + 2 * H, DAY)  # 触れると決算される（クリックの稼ぎも、未受け取りに入る）
+    state = eco.labor_state(U, T0 + 2 * H, DAY)
+    assert 0 < state["pot_workers_total"] < state["pot_total"]  # 作業員の分は、全体の一部
+    worker_part = state["pot_workers_total"]
+    for embed in (panel_embed(state), hire_embed(state)):
+        field = next(f for f in embed.fields if f.name == "🎒 未受け取り")
+        assert f"うち作業員 {worker_part:,}ペリカ" in field.value
+    eco.labor_collect(U, T0 + 2 * H, DAY)
+    after = eco.labor_state(U, T0 + 2 * H, DAY)
+    assert after["pot_workers_total"] == 0  # 受け取ると、0 に戻る
+
+
+def test_uncollected_hides_the_worker_part_when_there_are_no_workers(eco):
+    from cogs.labor_cog import panel_embed
+
+    state = eco.labor_state(U, T0, DAY)
+    field = next(f for f in panel_embed(state).fields if f.name == "🎒 未受け取り")
+    assert "作業員" not in field.value
+
+

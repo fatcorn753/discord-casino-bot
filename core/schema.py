@@ -178,6 +178,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             fatigue      REAL NOT NULL DEFAULT 0,
             fatigue_at   REAL NOT NULL DEFAULT 0,
             pot          INTEGER NOT NULL DEFAULT 0,   -- 受け取る前の稼ぎ
+            pot_workers  INTEGER NOT NULL DEFAULT 0,   -- そのうち、作業員が稼いだ分（基本給と鉱石の売値。受け取ると 0 に戻る）
             day          TEXT NOT NULL DEFAULT '',
             day_earned   INTEGER NOT NULL DEFAULT 0,   -- 今日の稼ぎ（上限の判定）
             last_click   REAL NOT NULL DEFAULT 0,
@@ -573,6 +574,8 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         if col not in ls:
             conn.execute(f"ALTER TABLE labor ADD COLUMN {col} {ddl}")
     _migrate_labor_counts(conn)
+    if "pot_workers" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
+        conn.execute("ALTER TABLE labor ADD COLUMN pot_workers INTEGER NOT NULL DEFAULT 0")
     if "legacy" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor_workers)")}:
         conn.execute("ALTER TABLE labor_workers ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0")
         conn.execute("UPDATE labor_workers SET legacy=1")  # この列を足す前に雇われていた人は、すべて旧ルールの契約

@@ -80,6 +80,7 @@ class LaborMixin:
             for wid in plan["removed"] + plan["quit"]:
                 self._conn.execute("DELETE FROM labor_workers WHERE id=?", (wid,))
             row["pot"] += plan["gain"] - plan["pot_spent"]
+            row["pot_workers"] = min(row["pot"], max(0, row["pot_workers"] + plan["gain"] - plan["pot_spent"]))
             if plan["ores"]:
                 found = self._ores_of(row)
                 for k, n in plan["ores"].items():
@@ -94,7 +95,8 @@ class LaborMixin:
     def _labor_save(self, user_id: int, row: dict) -> None:
         self._conn.execute(
             "UPDATE labor SET pick=?, glove=?, fatigue=?, fatigue_at=?, pot=?, day=?, day_earned=?, "
-            "last_click=?, clicks=?, earned_total=?, dorm=?, wage=?, idle_at=?, renew=?, ores=? WHERE guild_id=? AND user_id=?",
+            "last_click=?, clicks=?, earned_total=?, dorm=?, wage=?, idle_at=?, renew=?, ores=?, pot_workers=? "
+            "WHERE guild_id=? AND user_id=?",
             (
                 row["pick"],
                 row["glove"],
@@ -111,6 +113,7 @@ class LaborMixin:
                 row["idle_at"],
                 row["renew"],
                 row.get("ores", ""),
+                row["pot_workers"],
                 self._g(),
                 user_id,
             ),
@@ -131,6 +134,7 @@ class LaborMixin:
             self._house_income(skimmed)  # 帝愛の胴元の口座に入る
         self._apply(user_id, net, "地下作業:稼ぎ", income=net)
         row["pot"] = 0
+        row["pot_workers"] = 0
         row["ores"] = ""
         row["skimmed"] = skimmed
         return net
@@ -151,7 +155,20 @@ class LaborMixin:
             row = (
                 dict(r)
                 if r
-                else {k: 0 for k in ("pick", "glove", "pot", "day_earned", "clicks", "earned_total", "dorm", "idle_at")}
+                else {
+                    k: 0
+                    for k in (
+                        "pick",
+                        "glove",
+                        "pot",
+                        "pot_workers",
+                        "day_earned",
+                        "clicks",
+                        "earned_total",
+                        "dorm",
+                        "idle_at",
+                    )
+                }
                 | {
                     "fatigue": 0.0,
                     "fatigue_at": now,
@@ -190,6 +207,9 @@ class LaborMixin:
             row["ores"] = self._ores_of(row)  # 決算ずみの鉱石（見込みの分は、掘るまで分からない）
             row["idle_pending"] = plan["gain"]  # まだ数えていない、作業員の稼ぎ（見込み）
             row["pot_total"] = row["pot"] + plan["gain"] - plan["pot_spent"]
+            row["pot_workers_total"] = min(
+                row["pot_total"], max(0, row["pot_workers"] + plan["gain"] - plan["pot_spent"])
+            )  # 未受け取りのうち、作業員の分（まだ数えていない見込みも含む）
             row["renew_fee"] = plan["pot_spent"] + plan["balance_spent"]  # 切れていた契約の更新に、いま払う額
             # 種類ごとの、いちばん早く切れる契約の期限（画面用）
             row["expires"] = {}

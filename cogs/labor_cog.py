@@ -32,12 +32,20 @@ def ore_text(found: dict) -> str:
     return "　".join(f"{lab.ORE_MARK[k]}{lab.ORE_NAME[k]}×{found[k]}" for k in order if found.get(k))
 
 
+def pot_text(state: dict) -> str:
+    """未受け取りの額。作業員がいるときは、そのうち作業員が稼いだ分（鉱石の売値を含む）も見せる。"""
+    text = f"**{ui.pelica(state['pot_total'])}**"
+    if state["workers"] or state["pot_workers_total"]:
+        text += f"\n（うち作業員 {ui.pelica(state['pot_workers_total'])}）"
+    return text
+
+
 def panel_embed(state: dict, note: str = "") -> discord.Embed:
     """作業の画面。上に、直前の結果。つぎに、お金と疲労。"""
     fat = state["fatigue"]
     e = ui.embed("⛏ 地下作業", note or "「働く」を押すと、ペリカが貯まります。", ui.DARK)
     e.add_field(name="💴 手元", value=ui.pelica(state["balance"]), inline=True)
-    e.add_field(name="🎒 未受け取り", value=f"**{ui.pelica(state['pot_total'])}**", inline=True)
+    e.add_field(name="🎒 未受け取り", value=pot_text(state), inline=True)
     e.add_field(name="📅 今日の稼ぎ", value=ui.pelica(state["day_earned"]), inline=True)
     e.add_field(name="⛏ 1回の稼ぎ", value=f"**{ui.pelica(lab.click_pay(state['pick'], fat))}**", inline=True)
     e.add_field(
@@ -75,7 +83,7 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
         ui.DARK,
     )
     e.add_field(name="💴 手元", value=ui.pelica(state["balance"]), inline=True)
-    e.add_field(name="🎒 未受け取り", value=f"**{ui.pelica(state['pot_total'])}**", inline=True)
+    e.add_field(name="🎒 未受け取り", value=pot_text(state), inline=True)
     e.add_field(name="📈 基本給", value=f"**{state['rate']:,.1f}/時**", inline=True)
     e.add_field(
         name="🏠 人数",
