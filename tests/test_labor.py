@@ -8,6 +8,7 @@ import pytest
 
 from cogs import labor_cog
 from core import labor as lab
+from core import teiai
 from core.economy import Economy
 
 U = 1
@@ -27,6 +28,7 @@ _REAL_ROLL = lab.roll_ores
 def no_ores(monkeypatch):
     """ふつうのテストは、鉱石を掘らない（稼ぎを一定にする）。鉱石のテストは、_REAL_ROLL を戻して使う。"""
     monkeypatch.setattr(lab, "roll_ores", lambda *a, **k: {})
+    monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.0)  # 帝愛のピンハネは、専用のテストで確かめる
 
 
 @pytest.fixture
@@ -592,3 +594,44 @@ def test_old_contracts_are_refunded_and_cancelled_once_when_the_legacy_column_is
     assert again.labor_hire(U, "miner", T0, DAY)[0]  # 雇い直せる
     third = Economy(path)  # 次の起動では、新しい契約は返金されない
     assert third.labor_state(U, T0, DAY)["miner"] == 1 and third.balance(U) == 10_000 - 1_200
+
+
+# ------------------------------ 帝愛のピンハネ ------------------------------ #
+def test_teiai_skims_the_labor_earnings_when_collected(eco, monkeypatch):
+    monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.10)
+    eco.set_balance(U, 0, "テスト")
+    click(eco, 10)
+    pot = eco.labor_state(U, T0 + 100, DAY)["pot_total"]
+    assert pot > 0
+    got = eco.labor_collect(U, T0 + 100, DAY, detail=True)
+    skim = int(pot * 0.10)
+    assert got["skimmed"] == skim and got["amount"] == pot - skim
+    assert eco.balance(U) == pot - skim  # 手元に入るのは、ピンハネの残り
+    assert any(
+        "帝愛のピンハネ（地下作業" in r["reason"]
+        for r in eco._conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))
+    )
+
+
+def test_labor_skim_goes_to_the_teiai_house_account(eco, monkeypatch):
+    monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.10)
+    assert eco.house_account() == {"balance": 0, "skimmed": 0}
+    click(eco, 20)
+    got = eco.labor_collect(U, T0 + 100, DAY, detail=True)
+    assert got["skimmed"] > 0
+    assert eco.house_account() == {"balance": got["skimmed"], "skimmed": got["skimmed"]}  # 全額が、胴元の口座に入る
+    click(eco, 20, start=T0 + 200)
+    again = eco.labor_collect(U, T0 + 400, DAY, detail=True)
+    assert eco.house_account()["balance"] == got["skimmed"] + again["skimmed"]
+
+
+def test_the_skim_applies_to_everyone_and_the_debt_withholding_takes_its_share_of_the_rest(eco, monkeypatch):
+    monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.10)
+    eco._conn.execute("UPDATE users SET balance=0, debt=1000 WHERE user_id=?", (U,))
+    click(eco, 20)
+    pot = eco.labor_state(U, T0 + 100, DAY)["pot_total"]
+    debt_before = eco.debt(U)
+    got = eco.labor_collect(U, T0 + 100, DAY, detail=True)
+    net = pot - int(pot * 0.10)
+    assert got["amount"] == net
+    assert eco.debt(U) == debt_before - int(net * teiai.REPAY_RATE)  # 借金の天引きは、ピンハネの残りにかかる

@@ -661,3 +661,13 @@ def test_a_paid_off_debt_forgets_the_interest_clock(eco, monkeypatch):
     assert eco.debt(U) == 500  # 昔の時刻から数えず、いまから
     now[0] += DAY + 1
     assert eco.debt(U) == 505
+
+
+@pytest.mark.real_scope
+def test_daily_skim_goes_to_the_house_account_and_other_servers_have_their_own(eco):
+    indebt(eco, U, debt=5_000, balance=4_000)
+    res = eco.claim_daily(U, datetime.date(2026, 11, 1))
+    assert res.skimmed == 200
+    assert eco.house_account() == {"balance": res.skimmed, "skimmed": res.skimmed}
+    other = eco.for_guild(99)
+    assert other.house_account() == {"balance": 0, "skimmed": 0}  # サーバーごとに別々

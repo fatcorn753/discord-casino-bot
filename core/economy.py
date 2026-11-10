@@ -491,7 +491,7 @@ class Economy(
             skimmed = teiai.skim(amount) if debt_before > 0 else 0  # 借金中は、帝愛がピンハネ（借金の元本は減らない）
             if skimmed:
                 self._ledger(user_id, 0, self._balance(user_id), f"帝愛のピンハネ（デイリー {skimmed:,}ペリカ）")
-                self._bank_income(skimmed, teiai.SKIM_YIELD_SHARE, needs_depositors=True)  # 預金者の利回りになる
+                self._house_income(skimmed)  # 帝愛の胴元の口座に入る
             credit = amount - skimmed
             self._apply(
                 user_id,

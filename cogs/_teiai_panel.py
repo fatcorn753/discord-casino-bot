@@ -47,6 +47,12 @@ def panel_embed(eco, uid: int) -> discord.Embed:
     bank = eco.bank_status(now)
     color = {"safe": ui.OK, "warn": ui.GOLD, "danger": ui.ERROR, "frozen": ui.ERROR}[bank["level"]]
     e = ui.embed("🏦 帝愛銀行", bank_lines(bank), color)
+    house = eco.house_account()
+    e.add_field(
+        name="🕴️ 帝愛の胴元の口座",
+        value=f"**{ui.pelica(house['balance'])}**　（ピンハネの合計 {ui.pelica(house['skimmed'])}。デイリーと地下作業から入る）",
+        inline=False,
+    )
     graced = eco.grace_list()
     if graced:
         e.add_field(

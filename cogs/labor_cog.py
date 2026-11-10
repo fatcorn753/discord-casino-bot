@@ -12,7 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core import labor as lab
-from core import ui
+from core import teiai, ui
 
 VIEW_TIMEOUT = 900  # 画面が反応する時間（秒）。過ぎたら、`/地下 作業` で開き直す
 
@@ -57,7 +57,9 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     )
     if state.get("ores"):
         e.add_field(name="💎 作業員の掘り出し", value=ore_text(state["ores"]), inline=False)
-    e.set_footer(text="疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します。")
+    e.set_footer(
+        text=f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します（帝愛が{teiai.LABOR_SKIM_RATE:.0%}ピンハネ）。"
+    )
     return e
 
 
@@ -270,6 +272,8 @@ class LaborView(discord.ui.View):
         got = self.eco().labor_collect(self.user_id, time.time(), today(self.bot), detail=True)
         amount, found = got["amount"], got["ores"]
         note = f"💰 **{amount:,}** ペリカを、まとめて手元に移しました。" if amount else ""
+        if got["skimmed"]:
+            note += f"\n🕴️ 帝愛にピンハネされた: **{got['skimmed']:,}**（稼ぎの{teiai.LABOR_SKIM_RATE:.0%}）"
         if found:
             note += f"\n💎 掘り出し: {ore_text(found)}"
         await self._show(interaction, note)

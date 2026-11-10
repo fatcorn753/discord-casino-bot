@@ -286,6 +286,11 @@ def create_tables(conn: sqlite3.Connection) -> None:
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id  INTEGER NOT NULL,
             buyer_id  INTEGER NOT NULL,
+        CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛の胴元の口座（サーバーごとに1行）。ピンハネが入る。銀行の手元（預金の準備）とは別
+            guild_id INTEGER PRIMARY KEY,
+            balance  INTEGER NOT NULL DEFAULT 0,       -- いまの残高
+            skimmed  INTEGER NOT NULL DEFAULT 0        -- これまでに、ピンハネで入った額の合計
+        );
             target_id INTEGER NOT NULL,
             stake     INTEGER NOT NULL,               -- 掛け金
             odds      REAL    NOT NULL,               -- 買ったときのオッズ（配当の見込み = 掛け金 × オッズ）

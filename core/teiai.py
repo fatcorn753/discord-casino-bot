@@ -13,6 +13,9 @@
 from typing import Optional
 
 SEED = 3_000  # 帝愛が貸し付ける種銭の枠（手元がこの額になるまで補充する）
+LABOR_SKIM_RATE = (
+    0.10  # 地下作業の稼ぎを受け取るときに、帝愛がピンハネする割合（借金の有無に関わらず、全員。残りが手元に入る）
+)
 SKIM_RATE = 0.20  # 借金中のデイリーから、帝愛が没収する割合
 REPAY_RATE = 0.30  # 収入から、借金の返済へ天引きする割合
 BANKRUPT_FLOOR = 10_000  # 自己破産のあとに残る、帝愛の借金の上限（これより多い分は圧縮）
@@ -68,6 +71,11 @@ def withhold(income: int) -> int:
 def skim(amount: int) -> int:
     """デイリーから没収する額。"""
     return int(amount * SKIM_RATE)
+
+
+def labor_skim(amount: int) -> int:
+    """地下作業の稼ぎから、帝愛がピンハネする額。"""
+    return int(amount * LABOR_SKIM_RATE)
 
 
 def cds_odds(status: str, debt: int, margin_ratio: Optional[float] = None) -> float:

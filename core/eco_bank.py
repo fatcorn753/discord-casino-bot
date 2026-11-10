@@ -109,6 +109,24 @@ class BankMixin:
                 "level": level,
             }
 
+    def _house_income(self, amount: int) -> None:
+        """帝愛の胴元の口座に、ピンハネの amount を入れる（呼び出し側のトランザクションの中で使う）。"""
+        if amount <= 0:
+            return
+        self._conn.execute(
+            "INSERT INTO teiai_house (guild_id, balance, skimmed) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id) DO UPDATE SET balance=balance+excluded.balance, skimmed=skimmed+excluded.skimmed",
+            (self._g(), amount, amount),
+        )
+
+    def house_account(self) -> dict:
+        """帝愛の胴元の口座 {balance: いまの残高, skimmed: これまでのピンハネの合計}。読み取りだけ（なければ 0）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT balance, skimmed FROM teiai_house WHERE guild_id=?", (self._g(),)
+            ).fetchone()
+        return {"balance": row["balance"], "skimmed": row["skimmed"]} if row else {"balance": 0, "skimmed": 0}
+
     def _bank_income(
         self, amount: int, share: float, now: Optional[float] = None, needs_depositors: bool = False
     ) -> None:

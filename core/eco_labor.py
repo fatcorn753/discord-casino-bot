@@ -10,6 +10,7 @@ from typing import Optional
 
 from core import labor as labor_mod
 from core import shop as shop_mod
+from core import teiai
 
 
 class LaborMixin:
@@ -121,10 +122,16 @@ class LaborMixin:
         if amount <= 0:
             return 0
         self._ensure(user_id)
-        self._apply(user_id, amount, "地下作業:稼ぎ", income=amount)
+        skimmed = teiai.labor_skim(amount)  # 地下労働なので、帝愛がピンハネする（借金の有無に関わらず）
+        net = amount - skimmed
+        if skimmed:
+            self._ledger(user_id, 0, self._balance(user_id), f"帝愛のピンハネ（地下作業 {skimmed:,}ペリカ）")
+            self._house_income(skimmed)  # 帝愛の胴元の口座に入る
+        self._apply(user_id, net, "地下作業:稼ぎ", income=net)
         row["pot"] = 0
         row["ores"] = ""
-        return amount
+        row["skimmed"] = skimmed
+        return net
 
     def labor_state(self, user_id: int, now: Optional[float] = None, day: str = "") -> dict:
         """いまの状態（画面用）。口座や行は、まだ無ければ作らない（読むだけ）。契約の決算は、したことにして見せる（書き込まない）。"""
@@ -237,14 +244,18 @@ class LaborMixin:
             return {"ok": True, "pay": pay}
 
     def labor_collect(self, user_id: int, now: Optional[float] = None, day: str = "", detail: bool = False):
-        """受け取る前の稼ぎを、残高に移す。移した額（天引きの前）を返す。detail=True なら {amount, ores}（掘った鉱石つき）。"""
+        """受け取る前の稼ぎから、帝愛のピンハネを引いて、残高に移す。移した額（借金の天引きの前）を返す。
+
+        detail=True なら {amount（移した額）, skimmed（帝愛のピンハネ）, ores（掘った鉱石）}。
+        """
         now = time.time() if now is None else now
         with self._lock, self._conn:
             row = self._labor_row(user_id, now, day)
             ores = self._ores_of(row)
+            row["skimmed"] = 0
             amount = self._labor_flush(user_id, row)
             self._labor_save(user_id, row)
-            return {"amount": amount, "ores": ores} if detail else amount
+            return {"amount": amount, "skimmed": row["skimmed"], "ores": ores} if detail else amount
 
     def labor_drink(self, user_id: int, now: Optional[float] = None, day: str = "") -> tuple:
         """栄養ドリンコを1本飲んで、疲労を DRINK_RECOVER 回復する。(ok, 理由) を返す。疲れていなければ、減らさない。"""
