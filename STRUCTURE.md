@@ -1,7 +1,7 @@
 # ファイル・フォルダの案内
 
 このリポジトリの、どのファイル・フォルダが、何のためのものかをまとめた一覧です。
-遊び方・コマンド・ゲームのルールは [README.md](README.md) にあります。このファイルは、**コードの置き場所の地図**だけを書きます。
+遊び方・コマンド・導入手順は [README.md](README.md)、各ゲーム・機能のくわしい仕様は [docs/](docs/) にあります。このファイルは、**コードの置き場所の地図**だけを書きます。
 
 > ファイルを足す・名前を変えるときは、この一覧も直してください。
 
@@ -26,7 +26,8 @@
 | `config.json` | 実際の設定（Bot のトークンなど）。**秘匿情報なので Git に入れない**（`.gitignore` 済み） |
 | `config.json.migrated-to-server` | 古い設定ファイルの控え。`config.json.*` として Git に入れない |
 | `data/` | 実行時のデータ。`casino.db`（SQLite 本体）と `bot.lock`（二重起動の防止）。**Git に入れない** |
-| `README.md` | 遊び方・コマンド一覧・各ゲームと機能のルール |
+| `README.md` | 概要・コマンド一覧・導入手順・運用・docs への案内 |
+| `docs/` | 機能ごとの、くわしい仕様（`casino.md`・`stocks.md`・`teiai.md`・`horse.md`・`labor.md`・`shop.md`・`admin.md`） |
 | `STRUCTURE.md` | このファイル |
 | `pyproject.toml` / `uv.lock` | Python のプロジェクト設定と、依存の固定（uv） |
 | `requirements.txt` / `requirements-dev.txt` | 実行に必要な依存 / 開発（テスト・lint）に必要な依存 |

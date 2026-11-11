@@ -829,7 +829,7 @@ class ApprovalCog(commands.Cog):
     )
     @app_commands.rename(file="ファイル", announce="告知", guild_id="サーバー", channel_id="チャンネル")
     @app_commands.describe(
-        file="問題を書いた .txt ファイル（書き方は README の「クイズ」）",
+        file="問題を書いた .txt ファイル（書き方は docs/casino.md の「クイズ」）",
         announce="登録した問題を告知する（既定: しない）",
         guild_id="告知するサーバー（候補から選ぶ。空なら許可されている全サーバー）",
         channel_id="告知するチャンネル（サーバーを選んでから、候補から選ぶ。空なら告知チャンネル）",
