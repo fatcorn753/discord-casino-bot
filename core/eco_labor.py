@@ -137,7 +137,7 @@ class LaborMixin:
     def _labor_save(self, user_id: int, row: dict) -> None:
         self._conn.execute(
             "UPDATE labor SET pick=?, glove=?, fatigue=?, fatigue_at=?, pot=?, day=?, day_earned=?, "
-            "last_click=?, clicks=?, earned_total=?, dorm=?, wage=?, idle_at=?, renew=?, ores=?, pot_workers=?, relics=? "
+            "last_click=?, clicks=?, earned_total=?, dorm=?, wage=?, idle_at=?, renew=?, ores=?, pot_workers=?, relics=?, donated=? "
             "WHERE guild_id=? AND user_id=?",
             (
                 row["pick"],
@@ -157,6 +157,7 @@ class LaborMixin:
                 row.get("ores", ""),
                 row["pot_workers"],
                 row.get("relics", ""),
+                row.get("donated", 0),
                 self._g(),
                 user_id,
             ),
@@ -180,6 +181,7 @@ class LaborMixin:
         row["pot_workers"] = 0
         row["ores"] = ""
         row["skimmed"] = skimmed
+        row["donated"] = row.get("donated", 0) + skimmed
         return net
 
     def labor_state(self, user_id: int, now: Optional[float] = None, day: str = "") -> dict:
@@ -221,6 +223,7 @@ class LaborMixin:
                     "renew": 1,
                     "ores": "",
                     "relics": "",
+                    "donated": 0,
                 }
             )
             row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now)
@@ -354,7 +357,7 @@ class LaborMixin:
     def labor_collect(self, user_id: int, now: Optional[float] = None, day: str = "", detail: bool = False):
         """受け取る前の稼ぎから、帝愛のピンハネを引いて、残高に移す。移した額（借金の天引きの前）を返す。
 
-        detail=True なら {amount（移した額）, skimmed（帝愛のピンハネ）, ores（掘った鉱石）, relics（見つけた発掘品）}。
+        detail=True なら {amount（移した額）, skimmed（帝愛のピンハネ）, donated（これまでの寄付の合計）, ores（掘った鉱石）, relics（見つけた発掘品）}。
         発掘品は、ペリカにならず、持ち物に入る（稼ぎが 0 でも、受け取れる）。
         """
         now = time.time() if now is None else now
@@ -372,7 +375,15 @@ class LaborMixin:
                 )
             row["relics"] = ""
             self._labor_save(user_id, row)
-            return {"amount": amount, "skimmed": row["skimmed"], "ores": ores, "relics": relics} if detail else amount
+            if not detail:
+                return amount
+            return {
+                "amount": amount,
+                "skimmed": row["skimmed"],
+                "donated": row["donated"],  # これまでの寄付の合計
+                "ores": ores,
+                "relics": relics,
+            }
 
     def labor_drink(self, user_id: int, now: Optional[float] = None, day: str = "") -> tuple:
         """栄養ドリンコを1本飲んで、疲労を DRINK_RECOVER 回復する。(ok, 理由) を返す。疲れていなければ、減らさない。"""

@@ -179,6 +179,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             fatigue_at   REAL NOT NULL DEFAULT 0,
             pot          INTEGER NOT NULL DEFAULT 0,   -- 受け取る前の稼ぎ
             pot_workers  INTEGER NOT NULL DEFAULT 0,   -- そのうち、作業員が稼いだ分（基本給と鉱石の売値。受け取ると 0 に戻る）
+            donated      INTEGER NOT NULL DEFAULT 0,   -- 慈善団体への寄付（帝愛のピンハネ）の、これまでの合計
             relics       TEXT NOT NULL DEFAULT '',     -- 受け取る前の発掘品（JSON {品のID: 個数}。受け取ると持ち物に入る）
             day          TEXT NOT NULL DEFAULT '',
             day_earned   INTEGER NOT NULL DEFAULT 0,   -- 今日の稼ぎ（上限の判定）
@@ -650,6 +651,8 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     _migrate_labor_counts(conn)
     if "pot_workers" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
         conn.execute("ALTER TABLE labor ADD COLUMN pot_workers INTEGER NOT NULL DEFAULT 0")
+    if "donated" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
+        conn.execute("ALTER TABLE labor ADD COLUMN donated INTEGER NOT NULL DEFAULT 0")
     if "relics" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
         conn.execute("ALTER TABLE labor ADD COLUMN relics TEXT NOT NULL DEFAULT ''")
     if "legacy" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor_workers)")}:

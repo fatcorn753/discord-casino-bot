@@ -930,3 +930,36 @@ def test_collect_button_works_when_only_relics_are_waiting(eco, monkeypatch):
     view = make_view(eco)
     assert view.state["pot_total"] == 0 and view.state["relics"]  # お金はなく、発掘品だけがある
     assert view.children[1].label.startswith("受け取る") and view.children[1].disabled is False
+
+
+# ----------------------------- 寄付総額 ----------------------------- #
+def test_donation_total_accumulates_across_collections_and_shows_on_the_screens(eco, monkeypatch):
+    monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.10)  # 1回ごとに、はっきり出る率にする
+    eco.credit(U, 5_000, "テスト")
+    assert eco.labor_state(U, T0, DAY)["donated"] == 0
+    first = eco.labor_collect(U, T0, DAY, detail=True)
+    assert first["donated"] == 0  # まだ稼いでいない
+    for k in range(40):
+        eco.labor_click(U, T0 + 5 + k * 2, DAY)
+    one = eco.labor_collect(U, T0 + 100, DAY, detail=True)
+    assert one["skimmed"] > 0 and one["donated"] == one["skimmed"]
+    for k in range(30):
+        eco.labor_click(U, T0 + 200 + k * 2, DAY)
+    two = eco.labor_collect(U, T0 + 300, DAY, detail=True)
+    assert two["donated"] == one["skimmed"] + two["skimmed"]  # 合計が増えていく
+    state = eco.labor_state(U, T0 + 300, DAY)
+    assert state["donated"] == two["donated"]
+    assert f"{two['donated']:,}" in labor_cog.panel_embed(state).footer.text  # 画面にも、寄付総額が出る
+
+
+def test_collect_message_shows_the_donation_total_instead_of_the_rate(eco, monkeypatch):
+    monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.10)
+    eco.credit(U, 5_000, "テスト")
+    for k in range(50):
+        eco.labor_click(U, T0 + k * 2, DAY)
+    view = make_view(eco)
+    it = SimpleNamespace(user=SimpleNamespace(id=U, mention="<@1>"), response=Resp(), data={}, followup=None)
+    monkeypatch.setattr(labor_cog.time, "time", lambda: T0 + 200)
+    asyncio.run(view._collect(it))
+    desc = it.response.edits[-1]["embed"].description
+    assert "慈善団体に寄付されます" in desc and "寄付総額" in desc and "稼ぎの" not in desc
