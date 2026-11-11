@@ -98,7 +98,7 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
 
 
 def hire_embed(state: dict, note: str = "") -> discord.Embed:
-    """雇用の画面。作業員の一覧（人数・稼ぎ・次の値段）、寮、賃金。"""
+    """雇用の画面。作業員の一覧（人数・稼ぎ・次の値段）、寮。"""
     full = state["workers"] >= state["slots"]
     head = [x for x in (note, "⚠ 人数がいっぱいです。寮を強化するか、誰かを解雇しよう。" if full else "") if x]
     e = ui.embed(
@@ -114,13 +114,6 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
     e.add_field(
         name="🏠 人数",
         value=f"**{state['workers']} / {state['slots']}人**（寮 Lv{state['dorm']}/{lab.DORM_MAX}）",
-        inline=True,
-    )
-    wage = state["wage"]
-    e.add_field(
-        name="💼 賃金",
-        value=f"**{lab.WAGE_NAME[wage]}**"
-        + (f"\n作業員の稼ぎ ×{lab.WAGE_MULT['low']}・1日に {lab.QUIT_PER_DAY:.0%} で1人ずつ辞める" if wage == "low" else ""),
         inline=True,
     )
     e.add_field(
@@ -195,14 +188,6 @@ class LaborView(discord.ui.View):
             back.callback = self._goto("work")
             self.add_item(back)
             self.add_item(collect)
-            wage = discord.ui.Button(
-                label="賃金を" + lab.WAGE_NAME["normal" if s["wage"] == "low" else "low"] + "にする",
-                emoji="💼",
-                style=discord.ButtonStyle.secondary,
-                row=0,
-            )
-            wage.callback = self._wage
-            self.add_item(wage)
             renew = discord.ui.Button(
                 label="自動更新: " + ("オン" if s["renew"] else "オフ"),
                 emoji="🔁",
@@ -358,11 +343,6 @@ class LaborView(discord.ui.View):
     async def _dorm(self, interaction: discord.Interaction):
         ok, reason = self.eco().labor_dorm(self.user_id, time.time(), today(self.bot))
         await self._show(interaction, "🏠 寮を強化した！　雇える人数が増えた。" if ok else f"⚠ {reason}")
-
-    async def _wage(self, interaction: discord.Interaction):
-        want = "normal" if self.state["wage"] == "low" else "low"
-        ok, reason = self.eco().labor_set_wage(self.user_id, want, time.time(), today(self.bot))
-        await self._show(interaction, f"💴 賃金を **{lab.WAGE_NAME[want]}** にした。" if ok else f"⚠ {reason}")
 
     def _upgrader(self, tool: str):
         async def callback(interaction: discord.Interaction):

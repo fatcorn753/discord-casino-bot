@@ -192,7 +192,6 @@ def create_tables(conn: sqlite3.Connection) -> None:
             craftsman    INTEGER NOT NULL DEFAULT 0,
             foreman      INTEGER NOT NULL DEFAULT 0,
             dorm         INTEGER NOT NULL DEFAULT 0,   -- 寮の段（1段ごとに、雇える人数 +1）
-            wage         TEXT NOT NULL DEFAULT 'normal',
             idle_at      REAL NOT NULL DEFAULT 0,      -- 作業員の稼ぎを、最後に数えた時刻
             renew        INTEGER NOT NULL DEFAULT 1,   -- 作業員の契約の自動更新（1=オン）
             ores         TEXT NOT NULL DEFAULT '',     -- 受け取る前の稼ぎに含まれる鉱石（JSON {鉱石: 個数}）

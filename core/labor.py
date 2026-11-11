@@ -141,10 +141,6 @@ DORM_COST = (2_000, 6_000, 15_000, 40_000, 100_000)  # 寮を1段上げる値段
 DORM_MAX = 5
 
 STOCK_HOURS = 24.0  # 受け取らずに貯められる時間（超えた分は消える）
-WAGES = ("normal", "low")
-WAGE_NAME = {"normal": "標準", "low": "低賃金"}
-WAGE_MULT = {"normal": 1.0, "low": 1.2}  # 低賃金は、稼ぎが増える代わりに、作業員が辞める（鉱石は変わらない）
-QUIT_PER_DAY = 0.05  # 低賃金のとき、作業員1人が1日に辞める確率
 
 
 def contract_fee(kind: str) -> int:
@@ -170,9 +166,9 @@ def foreman_luck(foremen: int) -> float:
     return FOREMAN_LUCK * max(0, foremen)
 
 
-def idle_rate(counts: dict, wage: str) -> float:
+def idle_rate(counts: dict) -> float:
     """作業員たちの、1時間あたりの稼ぎ（ペリカ。鉱石は含まない）。counts は {種類: 人数}。"""
-    return sum(WORKER_RATE[k] * counts.get(k, 0) for k in WORKERS) * WAGE_MULT.get(wage, 1.0)
+    return sum(WORKER_RATE[k] * counts.get(k, 0) for k in WORKERS)
 
 
 def ore_ev(kind: str, luck: float = 0.0) -> float:
@@ -237,7 +233,6 @@ def idle_hours(since: float, now: float) -> float:
 
 def settle_plan(
     workers: list,
-    wage: str,
     renew: bool,
     idle_at: float,
     now: float,
@@ -252,10 +247,9 @@ def settle_plan(
     稼ぎに数える時間は、最後に数えてから（STOCK_HOURS まで）。契約が切れた人は、
     - 自動更新オンで、契約料が払えれば、更新する（貯まった稼ぎから先に払い、足りなければ手元から）。新しい期限は、いまから CONTRACT_DAYS 日後
     - 払えない・オフなら、退職する（切れるまでの分だけ稼ぐ）
-    低賃金なら、残った人から、確率で辞める人も出る。
     作業員は、働いた1時間ごとに鉱石を掘る（監督がいるほど、レア鉱石が出やすい）。売値は、gain に入る。
-    {gain, ores: {鉱石: 個数}, finds: [(時刻, 作業員の種類, 鉱石, 個数)], pot_spent, balance_spent, renewed: [(id, 新しい期限)], removed: [id], quit: [id]} を返す。
-    rng は、random() を持つもの（鉱石・辞める人の抽選。省略なら本物の乱数）。
+    {gain, ores: {鉱石: 個数}, finds: [(時刻, 作業員の種類, 鉱石, 個数)], pot_spent, balance_spent, renewed: [(id, 新しい期限)], removed: [id]} を返す。
+    rng は、random() を持つもの（鉱石・発掘品の抽選。省略なら本物の乱数）。
     """
     rng = rng or random.SystemRandom()
     hours = idle_hours(idle_at, now) if idle_at > 0 else 0.0
@@ -270,7 +264,7 @@ def settle_plan(
         return c
 
     avail_pot = pot + int(
-        idle_rate(counts_of(active), wage) * (1 + wage_bonus) * hours
+        idle_rate(counts_of(active)) * (1 + wage_bonus) * hours
     )  # 契約が続く人の稼ぎが入った、貯まった稼ぎ（鉱石は、決算の前は数えない）
     pot_spent = balance_spent = 0
     renewed, removed = [], []
@@ -287,7 +281,7 @@ def settle_plan(
         removed.append(w["id"])
     renewed_ids = {i for i, _ in renewed}
     staying = active + [w for w in expired if w["id"] in renewed_ids]
-    gain = idle_rate(counts_of(staying), wage) * (1 + wage_bonus) * hours
+    gain = idle_rate(counts_of(staying)) * (1 + wage_bonus) * hours
     luck = foreman_luck(counts_of(staying)["foreman"]) + luck_bonus  # 発掘品（隕石の欠片）の効果が、出やすさに足される
     ores: dict = {}
     relics: dict = {}  # 作業員が見つけた発掘品 {ショップの品のID: 個数}
@@ -312,12 +306,8 @@ def settle_plan(
     for w in expired:  # 退職する人は、切れるまでの分だけ働く
         if w["id"] in removed:
             worked = max(0.0, min(now, w["expires_at"]) - start) / 3600.0
-            gain += WORKER_RATE[w["kind"]] * WAGE_MULT.get(wage, 1.0) * (1 + wage_bonus) * worked
+            gain += WORKER_RATE[w["kind"]] * (1 + wage_bonus) * worked
             dig(w["kind"], worked, start)
-    quit_ids = []
-    if wage == "low" and hours > 0:
-        p = QUIT_PER_DAY * hours / 24.0
-        quit_ids = [w["id"] for w in staying if rng.random() < p]
     return {
         "gain": int(gain) + ore_gain(ores),
         "ores": ores,
@@ -327,7 +317,6 @@ def settle_plan(
         "balance_spent": balance_spent,
         "renewed": renewed,
         "removed": removed,
-        "quit": quit_ids,
     }
 
 

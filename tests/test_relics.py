@@ -68,8 +68,8 @@ def test_fossil_raises_click_pay_by_one_percent_on_average(eco):
 
 def test_bone_raises_worker_wage_and_meteor_raises_ore_luck():
     worker = [{"id": 1, "kind": "miner", "expires_at": 9e9}]
-    base = lab.settle_plan(worker, "normal", True, 0.0, 10 * H, 0, 0, random.Random(1))
-    wage = lab.settle_plan(worker, "normal", True, 0.0, 10 * H, 0, 0, random.Random(1), wage_bonus=0.01)
+    base = lab.settle_plan(worker, True, 0.0, 10 * H, 0, 0, random.Random(1))
+    wage = lab.settle_plan(worker, True, 0.0, 10 * H, 0, 0, random.Random(1), wage_bonus=0.01)
     assert base["gain"] <= wage["gain"] <= base["gain"] + 2  # 作業員の稼ぎが +1%（10時間で 100.5 → 101.5）
     rng = random.Random(7)
     a = sum(lab.roll_ores("craftsman", 1, 0.0, rng).get("gold", 0) for _ in range(400000))

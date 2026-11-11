@@ -106,7 +106,7 @@ class LaborMixin:
             row[k] = sum(1 for w in workers if w["kind"] == k)
 
     def _idle_settle(self, user_id: int, row: dict, now: float, rng=None) -> None:
-        """作業員の稼ぎを pot に足し、切れた契約を決算する（更新なら契約料を払い、払えなければ退職）。低賃金なら、辞める人も出る。"""
+        """作業員の稼ぎを pot に足し、切れた契約を決算する（更新なら契約料を払い、払えなければ退職）。"""
         workers = self._workers_of(user_id)
         if workers:
             bal = self._conn.execute(
@@ -114,7 +114,6 @@ class LaborMixin:
             ).fetchone()
             plan = labor_mod.settle_plan(
                 workers,
-                row["wage"],
                 bool(row["renew"]),
                 row["idle_at"],
                 now,
@@ -128,7 +127,7 @@ class LaborMixin:
                 self._apply(user_id, -plan["balance_spent"], "地下作業:契約の更新")
             for wid, expires in plan["renewed"]:
                 self._conn.execute("UPDATE labor_workers SET expires_at=? WHERE id=?", (expires, wid))
-            for wid in plan["removed"] + plan["quit"]:
+            for wid in plan["removed"]:
                 self._conn.execute("DELETE FROM labor_workers WHERE id=?", (wid,))
             row["pot"] += plan["gain"] - plan["pot_spent"]
             row["pot_workers"] = min(row["pot"], max(0, row["pot_workers"] + plan["gain"] - plan["pot_spent"]))
@@ -152,7 +151,7 @@ class LaborMixin:
     def _labor_save(self, user_id: int, row: dict) -> None:
         self._conn.execute(
             "UPDATE labor SET pick=?, glove=?, fatigue=?, fatigue_at=?, pot=?, day=?, day_earned=?, "
-            "last_click=?, clicks=?, earned_total=?, dorm=?, wage=?, idle_at=?, renew=?, ores=?, pot_workers=?, relics=?, donated=? "
+            "last_click=?, clicks=?, earned_total=?, dorm=?, idle_at=?, renew=?, ores=?, pot_workers=?, relics=?, donated=? "
             "WHERE guild_id=? AND user_id=?",
             (
                 row["pick"],
@@ -166,7 +165,6 @@ class LaborMixin:
                 row["clicks"],
                 row["earned_total"],
                 row["dorm"],
-                row["wage"],
                 row["idle_at"],
                 row["renew"],
                 row.get("ores", ""),
@@ -203,7 +201,7 @@ class LaborMixin:
         """いまの状態（画面用）。口座や行は、まだ無ければ作らない（読むだけ）。契約の決算は、したことにして見せる（書き込まない）。"""
         now = time.time() if now is None else now
 
-        class _NoQuit:  # 見込みの表示では、辞める人は数えない
+        class _NoRoll:  # 見込みの表示では、鉱石の抽選をしない（random() が 1.0 なら、何も出ない）
             @staticmethod
             def random():
                 return 1.0
@@ -234,7 +232,6 @@ class LaborMixin:
                     "fatigue_at": now,
                     "last_click": 0.0,
                     "day": day,
-                    "wage": "normal",
                     "renew": 1,
                     "ores": "",
                     "relics": "",
@@ -252,13 +249,12 @@ class LaborMixin:
             workers = self._workers_of(user_id)
             plan = labor_mod.settle_plan(
                 workers,
-                row["wage"],
                 bool(row["renew"]),
                 row["idle_at"],
                 now,
                 row["pot"],
                 row["balance"],
-                _NoQuit,
+                _NoRoll,
                 wage_bonus=buffs.get("wage", 0.0),
                 luck_bonus=buffs.get("luck", 0.0),
             )
@@ -268,7 +264,7 @@ class LaborMixin:
             self._set_counts(row, stay)
             row["workers"] = len(stay)
             row["slots"] = labor_mod.slots(row["dorm"])
-            row["rate"] = labor_mod.idle_rate(self._counts(row), row["wage"])
+            row["rate"] = labor_mod.idle_rate(self._counts(row))
             row["relics"] = self._relics_of(row)  # 決算ずみの発掘品
             row["ores"] = self._ores_of(row)  # 決算ずみの鉱石（見込みの分は、掘るまで分からない）
             row["idle_pending"] = plan["gain"]  # まだ数えていない、作業員の稼ぎ（見込み）
@@ -491,18 +487,6 @@ class LaborMixin:
                 return False, f"ペリカが足りません（{cost:,} 必要）。"
             self._apply(user_id, -cost, "地下作業:寮の強化")
             row["dorm"] += 1
-            self._labor_save(user_id, row)
-            return True, ""
-
-    def labor_set_wage(self, user_id: int, wage: str, now: Optional[float] = None, day: str = "") -> tuple:
-        """賃金の設定を変える（変える前の稼ぎは、前の設定で数える）。(ok, 理由) を返す。"""
-        if wage not in labor_mod.WAGES:
-            return False, "そんな賃金はありません。"
-        now = time.time() if now is None else now
-        with self._lock, self._conn:
-            self._ensure(user_id)
-            row = self._labor_row(user_id, now, day)
-            row["wage"] = wage
             self._labor_save(user_id, row)
             return True, ""
 
