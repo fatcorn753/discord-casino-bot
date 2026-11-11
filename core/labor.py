@@ -76,25 +76,23 @@ def click_outcome(pick: int, glove: int, fatigue: float) -> dict:
 # ---------------------------------------------------------------- #
 # 雇用（作業員）。放置でも稼げる。数字はここだけを直せばよい
 # ---------------------------------------------------------------- #
-WORKERS = ("apprentice", "miner", "craftsman", "archaeologist", "foreman")
+WORKERS = ("apprentice", "miner", "craftsman", "foreman")
 WORKER_NAME = {
     "apprentice": "見習い",
     "miner": "坑夫",
     "craftsman": "職人",
-    "archaeologist": "発掘員",
     "foreman": "監督",
 }
-WORKER_MARK = {"apprentice": "🧒", "miner": "👷", "craftsman": "🧑‍🔧", "archaeologist": "🧑‍🔬", "foreman": "🕴️"}
+WORKER_MARK = {"apprentice": "🧒", "miner": "👷", "craftsman": "🧑‍🔧", "foreman": "🕴️"}
 WORKER_RATE = {
     "apprentice": 1.8,
     "miner": 10.05,
     "craftsman": 23.55,
-    "archaeologist": 0,
     "foreman": 0,
 }  # 基本給（1時間）。毎日受け取る人の、契約料の約3割（監督は掘らない）
 CONTRACT_DAYS = 1  # 契約の期間（日）。切れたら、自動更新（オンの場合）か、退職。1日で、勝ち負けが分かる
 # 契約料（雇うときと、更新のときに払う）。毎日受け取る人が、契約の1日（24時間）に稼ぐ、基本給（約3割）と鉱石の期待値（約5割）の合計を上回る
-CONTRACT_FEE = {"apprentice": 150, "miner": 520, "craftsman": 1_160, "archaeologist": 2_400, "foreman": 640}
+CONTRACT_FEE = {"apprentice": 150, "miner": 520, "craftsman": 1_160, "foreman": 640}
 FOREMAN_LUCK = 0.25  # 監督1人ごとに、レア鉱石の出やすさが増える割合（基本給は増えない）
 
 COAL_P = 0.40  # 石炭が出る確率（働いた1時間ごと。見習いでも、半分近い時間で何か掘れる）
@@ -120,22 +118,23 @@ ORE_MARK = {o[0]: o[2] for o in ORES}
 ORE_VALUE = {o[0]: o[4] for o in ORES}
 ORE_BIG = ("diamond", "legend")  # 公開で知らせる当たり
 # 作業員の種類ごとの、鉱石の出やすさ（確率にかける。契約料に比例して、期待値は契約料の約3.5割）
-ORE_POWER = {"apprentice": 0.12, "miner": 0.415, "craftsman": 0.95, "archaeologist": 0.0, "foreman": 0.0}
+ORE_POWER = {"apprentice": 0.12, "miner": 0.415, "craftsman": 0.95, "foreman": 0.0}
 
-# 発掘品（コレクション用の宝石・化石・遺物）。発掘員だけが、働いた1時間ごとに1回、探す（基本給も鉱石もない。ペリカにはならず、持ち物になる）。
+# 発掘品（コレクション用の宝石・化石・遺物）。ふつうの作業員が、鉱石を掘るときに、まれに見つける（ペリカにはならず、持ち物になる）。
 # 売値は決まっていない。`/取引` で、プレイヤーどうしが売り買いする。value は、取引の値段の幅の目安（定価の0.1〜5倍。同じ2人の取引の上限は10万）
-# (id, 名前, 印, 出る確率（1時間ごと）, 目安の価値)。ふつうの鉱石と別の作業員が掘る。ペリカを新しく作らない（買い手が払う）
+# (id, 名前, 印, 出る確率（働いた1時間ごと。RELIC_POWER=1 の作業員のもの）, 目安の価値)。ペリカを新しく作らない（買い手が払う）
 RELICS = (
-    ("fossil", "三葉虫の化石", "🐚", 0.020, 1_500),
-    ("bone", "恐竜の骨", "🦴", 0.010, 4_000),
-    ("meteor", "隕石の欠片", "☄️", 0.004, 10_000),
-    ("vase", "古代文明の壺", "🏺", 0.0016, 25_000),
-    ("crown", "王家の黄金冠", "👑", 0.0004, 60_000),
-    ("tear", "竜の涙", "🔮", 0.0001, 100_000),
+    ("fossil", "三葉虫の化石", "🐚", 0.0033, 1_500),
+    ("bone", "恐竜の骨", "🦴", 0.0017, 4_000),
+    ("meteor", "隕石の欠片", "☄️", 0.00067, 10_000),
+    ("vase", "古代文明の壺", "🏺", 0.00027, 25_000),
+    ("crown", "王家の黄金冠", "👑", 0.000067, 60_000),
+    ("tear", "竜の涙", "🔮", 0.000017, 100_000),
 )
 RELIC_ID = {r[0]: f"relic_{r[0]}" for r in RELICS}  # ショップの品のID（core/shop.py）
 RELIC_BIG = ("crown", "tear")  # 公開で知らせる当たり
-RELIC_POWER = {"apprentice": 0.0, "miner": 0.0, "craftsman": 0.0, "archaeologist": 1.0, "foreman": 0.0}
+# 作業員の種類ごとの、発掘品の出やすさ（確率にかける。上位の作業員ほど出やすい。監督の運も効く。監督は掘らない）
+RELIC_POWER = {"apprentice": 0.5, "miner": 0.8, "craftsman": 1.0, "foreman": 0.0}
 
 SLOTS_BASE = 5  # 雇える人数（監督も数える）
 DORM_COST = (2_000, 6_000, 15_000, 40_000, 100_000)  # 寮を1段上げる値段。1段ごとに +1人
@@ -203,7 +202,7 @@ def roll_ores(kind: str, hours: float, luck: float, rng) -> dict:
 
 
 def roll_relics(kind: str, hours: float, luck: float, rng) -> dict:
-    """作業員1人が hours 時間ぶん働いて掘り当てた発掘品 {id: 個数}（発掘員だけ）。端数の時間は、確率で1回にする。監督の運が効く。"""
+    """作業員1人が hours 時間ぶん働いて見つけた発掘品 {id: 個数}。端数の時間は、確率で1回にする。監督の運が効く（監督は探さない）。"""
     power = RELIC_POWER.get(kind, 0.0)
     found: dict = {}
     if power <= 0:
@@ -222,9 +221,9 @@ def roll_relics(kind: str, hours: float, luck: float, rng) -> dict:
     return found
 
 
-def relic_ev(luck: float = 0.0) -> float:
-    """発掘員1人の、1時間あたりの発掘品の価値の期待値（目安の価値で数える）。"""
-    return sum(p * v * RELIC_POWER["archaeologist"] * (1 + luck) for _, _, _, p, v in RELICS)
+def relic_ev(kind: str, luck: float = 0.0) -> float:
+    """作業員1人の、1時間あたりの発掘品の価値の期待値（目安の価値で数える）。"""
+    return sum(p * v * RELIC_POWER.get(kind, 0.0) * (1 + luck) for _, _, _, p, v in RELICS)
 
 
 def ore_gain(found: dict) -> int:
@@ -282,7 +281,7 @@ def settle_plan(
     gain = idle_rate(counts_of(staying), wage) * hours
     luck = foreman_luck(counts_of(staying)["foreman"])
     ores: dict = {}
-    relics: dict = {}  # 発掘員が見つけた発掘品 {ショップの品のID: 個数}
+    relics: dict = {}  # 作業員が見つけた発掘品 {ショップの品のID: 個数}
     finds: list = []  # 掘り出しの履歴 [(時刻, 作業員の種類, 鉱石か発掘品のID, 個数)]。抽選は1時間ごとなので、時刻は、その時間枠の終わりにそろえる
 
     def dig(kind, h, begin):

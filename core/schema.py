@@ -655,6 +655,7 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE labor ADD COLUMN donated INTEGER NOT NULL DEFAULT 0")
     if "relics" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
         conn.execute("ALTER TABLE labor ADD COLUMN relics TEXT NOT NULL DEFAULT ''")
+    _refund_archaeologists(conn)  # 専用の「発掘員」は、なくなった（ふつうの作業員が、発掘品を見つける）
     if "legacy" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor_workers)")}:
         conn.execute("ALTER TABLE labor_workers ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0")
         conn.execute("UPDATE labor_workers SET legacy=1")  # この列を足す前に雇われていた人は、すべて旧ルールの契約
@@ -744,6 +745,30 @@ def _migrate_labor_counts(conn: sqlite3.Connection, now: float = None) -> None:
             "UPDATE labor SET apprentice=0, miner=0, craftsman=0, foreman=0 WHERE guild_id=? AND user_id=?",
             (r["guild_id"], r["user_id"]),
         )
+
+
+ARCHAEOLOGIST_FEE = 2_400  # なくなった「発掘員」の、契約料（返金の額）
+
+
+def _refund_archaeologists(conn: sqlite3.Connection, now: float = None) -> None:
+    """専用の「発掘員」を雇っていた人の契約料を返して、契約を解約する（何度動かしても安全。いなければ何もしない）。"""
+    import time
+
+    now = time.time() if now is None else now
+    refunds: dict = {}
+    for r in conn.execute("SELECT guild_id, user_id FROM labor_workers WHERE kind='archaeologist'").fetchall():
+        key = (r["guild_id"], r["user_id"])
+        refunds[key] = refunds.get(key, 0) + ARCHAEOLOGIST_FEE
+    for (guild_id, user_id), amount in refunds.items():
+        row = conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id)).fetchone()
+        if row is not None:
+            after = row["balance"] + amount
+            conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, guild_id, user_id))
+            conn.execute(
+                "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
+                (guild_id, user_id, amount, after, "地下作業:契約料の返金（発掘員の廃止）", now),
+            )
+    conn.execute("DELETE FROM labor_workers WHERE kind='archaeologist'")
 
 
 def _refund_legacy_contracts(conn: sqlite3.Connection, now: float = None) -> None:

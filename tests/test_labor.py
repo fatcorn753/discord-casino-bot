@@ -837,15 +837,17 @@ def test_contract_is_one_day_and_the_ore_numbers_scale_to_one_day(monkeypatch):
         assert 0.8 * lab.CONTRACT_FEE[kind] < mean < lab.CONTRACT_FEE[kind], kind
 
 
-def test_only_the_archaeologist_digs_relics_and_gets_no_wage_or_ores():
+def test_ordinary_workers_find_relics_by_chance_and_the_foreman_does_not_dig():
     rng = random.Random(4)
-    assert lab.WORKER_RATE["archaeologist"] == 0 and lab.ORE_POWER["archaeologist"] == 0
-    assert _REAL_ROLL("archaeologist", 200, 0.0, rng) == {}  # 鉱石は掘らない
-    for kind in ("apprentice", "miner", "craftsman", "foreman"):
-        assert lab.roll_relics(kind, 500, 0.0, rng) == {}  # ほかの作業員は、発掘品を見つけない
-    found = lab.roll_relics("archaeologist", 2000, 0.0, rng)
-    assert found and all(i in lab.RELIC_ID.values() or i in {r[0] for r in lab.RELICS} for i in found)
-    assert sum(found.values()) > 0.02 * 2000 * 0.7  # 1時間あたりの合計確率は、約 3.6%
+    assert "archaeologist" not in lab.WORKERS  # 専用の作業員は、いない
+    assert lab.roll_relics("foreman", 5000, 0.0, rng) == {}  # 監督は、探さない
+    for kind in ("apprentice", "miner", "craftsman"):
+        found = lab.roll_relics(kind, 20000, 0.0, rng)
+        assert found and all(i in {r[0] for r in lab.RELICS} for i in found), kind
+    total = {k: sum(lab.roll_relics(k, 60000, 0.0, rng).values()) for k in ("apprentice", "miner", "craftsman")}
+    assert total["apprentice"] < total["miner"] < total["craftsman"]  # 上位の作業員ほど、見つけやすい
+    per_hour = sum(r[3] for r in lab.RELICS) * lab.RELIC_POWER["craftsman"]
+    assert 0.004 < per_hour < 0.01  # 職人1人で、1週間に1つほど
 
 
 def test_relic_table_is_ordered_by_rarity_and_values_fit_the_pair_cap():
@@ -859,20 +861,19 @@ def test_relic_table_is_ordered_by_rarity_and_values_fit_the_pair_cap():
 
 def test_foreman_luck_raises_relic_chances_too():
     rng = random.Random(8)
-    plain = sum(sum(lab.roll_relics("archaeologist", 1, 0.0, rng).values()) for _ in range(30000))
-    lucky = sum(sum(lab.roll_relics("archaeologist", 1, 1.0, rng).values()) for _ in range(30000))
-    assert lucky > plain * 1.6
+    plain = sum(sum(lab.roll_relics("craftsman", 1, 0.0, rng).values()) for _ in range(200000))
+    lucky = sum(sum(lab.roll_relics("craftsman", 1, 1.0, rng).values()) for _ in range(200000))
+    assert lucky > plain * 1.5
 
 
-def test_archaeologist_relics_pile_up_and_are_collected_into_the_inventory_even_with_no_pelica(eco, monkeypatch):
+def test_relics_pile_up_and_are_collected_into_the_inventory_even_with_no_pelica(eco, monkeypatch):
     monkeypatch.setattr(
         lab,
         "roll_relics",
-        lambda kind, h, luck, rng: {"fossil": 2, "crown": 1} if kind == "archaeologist" and h > 0 else {},
+        lambda kind, h, luck, rng: {"fossil": 2, "crown": 1} if kind == "miner" and h > 0 else {},
     )
     eco.credit(U, 5_000, "テスト")
-    assert eco.labor_hire(U, "archaeologist", T0, DAY)[0]
-    assert eco.balance(U) == 5_000 - lab.CONTRACT_FEE["archaeologist"]
+    assert eco.labor_hire(U, "miner", T0, DAY)[0]
     seen = eco.labor_state(U, T0 + 3 * H, DAY)
     assert seen["relics"] == {}  # 見込みでは、見つけない
     eco.labor_click(U, T0 + 3 * H, DAY)  # 触れると決算される
@@ -889,15 +890,15 @@ def test_relics_show_on_the_screens_and_a_big_relic_is_announced_publicly(eco, m
     monkeypatch.setattr(
         lab,
         "roll_relics",
-        lambda kind, h, luck, rng: {"tear": 1, "fossil": 1} if kind == "archaeologist" and h > 0 else {},
+        lambda kind, h, luck, rng: {"tear": 1, "fossil": 1} if kind == "craftsman" and h > 0 else {},
     )
     eco.credit(U, 5_000, "テスト")
-    eco.labor_hire(U, "archaeologist", T0, DAY)
+    eco.labor_hire(U, "craftsman", T0, DAY)
     eco.labor_click(U, T0 + H, DAY)
     state = eco.labor_state(U, T0 + H, DAY)
     assert "発掘品" in text(labor_cog.panel_embed(state)) and "竜の涙" in text(labor_cog.panel_embed(state))
-    assert "発掘員" in text(labor_cog.hire_embed(state)) and "発掘品" in text(labor_cog.hire_embed(state))
-    assert "竜の涙" in text(labor_cog.panel_embed(state)) and "目安" in labor_cog.finds_text(state["finds"])
+    assert "発掘品" in text(labor_cog.hire_embed(state))  # 雇用の画面に、「まれに発掘品」と出る
+    assert "目安" in labor_cog.finds_text(state["finds"])
     view = make_view(eco)
     sent = []
 
@@ -915,21 +916,37 @@ def test_relics_show_on_the_screens_and_a_big_relic_is_announced_publicly(eco, m
 
 def test_collect_button_works_when_only_relics_are_waiting(eco, monkeypatch):
     monkeypatch.setattr(
-        lab, "roll_relics", lambda kind, h, luck, rng: {"fossil": 1} if kind == "archaeologist" and h > 0 else {}
+        lab, "roll_relics", lambda kind, h, luck, rng: {"fossil": 1} if kind == "craftsman" and h > 0 else {}
     )
     eco.credit(U, 5_000, "テスト")
-    eco.labor_hire(U, "archaeologist", T0, DAY)
+    eco.labor_hire(U, "craftsman", T0, DAY)
     eco.labor_click(U, T0 + H, DAY)
     eco.labor_collect(U, T0 + H, DAY)  # クリックの稼ぎと、最初の発掘品を、先に受け取る
-    eco.labor_click(U, T0 + 2 * H, DAY)  # 触れると、2時間目の分が決算される（発掘品が1つ）
-    eco.labor_collect(U, T0 + 2 * H, DAY)
     monkeypatch.setattr(labor_cog.time, "time", lambda: T0 + 3 * H)
-    eco._conn.execute("UPDATE labor SET pot=0, pot_workers=0 WHERE guild_id=? AND user_id=?", (eco._g(), U))
-    eco.labor_click(U, T0 + 3 * H, DAY)
+    eco.labor_click(U, T0 + 3 * H, DAY)  # 触れると、次の分が決算される（発掘品が入る）
     eco._conn.execute("UPDATE labor SET pot=0, pot_workers=0 WHERE guild_id=? AND user_id=?", (eco._g(), U))
     view = make_view(eco)
     assert view.state["pot_total"] == 0 and view.state["relics"]  # お金はなく、発掘品だけがある
     assert view.children[1].label.startswith("受け取る") and view.children[1].disabled is False
+
+
+def test_old_archaeologist_contracts_are_refunded_and_removed_once(eco):
+    from core import schema
+
+    eco.credit(U, 1_000, "テスト")
+    before = eco.balance(U)
+    with eco._lock, eco._conn:
+        eco._conn.execute(
+            "INSERT INTO labor_workers (guild_id, user_id, kind, expires_at) VALUES (?, ?, 'archaeologist', ?)",
+            (eco._g(), U, T0 + 86400),
+        )
+        schema._refund_archaeologists(eco._conn, T0)
+        schema._refund_archaeologists(eco._conn, T0)  # 二度動かしても、増えない
+    assert eco.balance(U) == before + schema.ARCHAEOLOGIST_FEE
+    assert eco.labor_state(U, T0, DAY)["workers"] == 0  # 状態を読んでも、落ちない
+    assert any(
+        "発掘員の廃止" in r["reason"] for r in eco._conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))
+    )
 
 
 # ----------------------------- 寄付総額 ----------------------------- #

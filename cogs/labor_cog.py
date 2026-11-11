@@ -131,12 +131,8 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
     for k in lab.WORKERS:
         if k == "foreman":
             gain = f"レア鉱石・発掘品が出やすい +{lab.FOREMAN_LUCK:.0%}"
-        elif k == "archaeologist":
-            gain = (
-                "基本給・鉱石はなし。1時間に1回、**発掘品**（化石・遺物）を探す（ペリカにはならず、`/取引` で売れる）"
-            )
         else:
-            gain = f"基本給 {lab.WORKER_RATE[k]:g}/時 ＋ 鉱石"
+            gain = f"基本給 {lab.WORKER_RATE[k]:g}/時 ＋ 鉱石 ＋ まれに発掘品"
         until = f"\n契約が切れる: <t:{int(state['expires'][k])}:R>" if state["expires"].get(k) else ""
         e.add_field(
             name=f"{lab.WORKER_MARK[k]} {lab.WORKER_NAME[k]} ×{state[k]}",
@@ -319,7 +315,7 @@ class LaborView(discord.ui.View):
         big_relics = {i: n for i, n in relics.items() if i.removeprefix("relic_") in lab.RELIC_BIG}
         if big_relics:  # 大当たりの発掘品も、みんなに知らせる
             await interaction.followup.send(
-                f"🎉 {interaction.user.mention} の発掘員が、**{relic_text(big_relics)}** を掘り当てた！"
+                f"🎉 {interaction.user.mention} の作業員が、**{relic_text(big_relics)}** を掘り当てた！"
             )
         big = {k: n for k, n in found.items() if k in lab.ORE_BIG}
         if big:  # 大当たりは、みんなに知らせる
