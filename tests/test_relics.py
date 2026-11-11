@@ -70,7 +70,7 @@ def test_bone_raises_worker_wage_and_meteor_raises_ore_luck():
     worker = [{"id": 1, "kind": "miner", "expires_at": 9e9}]
     base = lab.settle_plan(worker, "normal", True, 0.0, 10 * H, 0, 0, random.Random(1))
     wage = lab.settle_plan(worker, "normal", True, 0.0, 10 * H, 0, 0, random.Random(1), wage_bonus=0.01)
-    assert base["gain"] <= wage["gain"] <= base["gain"] + 2  # 基本給が +1%（10時間で 100.5 → 101.5）
+    assert base["gain"] <= wage["gain"] <= base["gain"] + 2  # 作業員の稼ぎが +1%（10時間で 100.5 → 101.5）
     rng = random.Random(7)
     a = sum(lab.roll_ores("craftsman", 1, 0.0, rng).get("gold", 0) for _ in range(400000))
     b = sum(lab.roll_ores("craftsman", 1, 0.01, rng).get("gold", 0) for _ in range(400000))
@@ -83,7 +83,7 @@ def test_bone_and_meteor_flow_into_the_settlement(eco):
     plain = eco.labor_state(U, T0 + 10 * H, DAY)["pot_total"]
     give(eco, "relic_bone")
     buffed = eco.labor_state(U, T0 + 10 * H, DAY)["pot_total"]
-    assert buffed >= plain and buffed - plain <= 4  # 基本給が +1%（10時間で 235 → 237）
+    assert buffed >= plain and buffed - plain <= 4  # 作業員の稼ぎが +1%（10時間で 235 → 237）
 
 
 def test_vase_speeds_up_fatigue_recovery(eco):

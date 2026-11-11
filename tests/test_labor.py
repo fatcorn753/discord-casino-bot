@@ -31,7 +31,7 @@ def no_ores(monkeypatch):
     for kind, rate in (("apprentice", 1.0), ("miner", 3.75), ("craftsman", 8.25)):
         monkeypatch.setitem(
             lab.WORKER_RATE, kind, rate
-        )  # 基本給の数字を固定して、計算の仕組みだけを確かめる（本物の数字は、専用のテストで）
+        )  # 作業員の稼ぎの数字を固定して、計算の仕組みだけを確かめる（本物の数字は、専用のテストで）
     monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.0)  # 帝愛のピンハネは、専用のテストで確かめる
 
 
@@ -213,7 +213,7 @@ def test_worker_numbers():
     counts = {"apprentice": 2, "craftsman": 1}
     assert lab.idle_rate(counts, "normal") == 2 * 1.0 + 8.25
     assert lab.idle_rate(counts, "low") == pytest.approx(10.25 * lab.WAGE_MULT["low"])
-    assert lab.idle_rate({**counts, "foreman": 1}, "normal") == 10.25  # 監督は、基本給を増やさない
+    assert lab.idle_rate({**counts, "foreman": 1}, "normal") == 10.25  # 監督は、作業員の稼ぎを増やさない
     assert lab.foreman_luck(8) == pytest.approx(2.0) and lab.foreman_luck(0) == 0  # 上限はない
     assert lab.idle_hours(0, 100 * H) == lab.STOCK_HOURS and lab.idle_hours(100, 50) == 0
 
@@ -234,7 +234,7 @@ def test_hire_costs_the_contract_fee_and_sets_a_one_day_term(eco):
 def test_workers_earn_while_idle_up_to_the_stock_limit(eco):
     eco.credit(U, 5_000, "テスト")
     eco.labor_hire(U, "apprentice", T0, DAY)
-    eco.labor_hire(U, "apprentice", T0, DAY)  # 1時間 2ペリカ（基本給）
+    eco.labor_hire(U, "apprentice", T0, DAY)  # 1時間 2ペリカ（作業員の稼ぎ）
     s = eco.labor_state(U, T0 + 2 * H, DAY)
     assert s["rate"] == 2 and s["idle_pending"] == 4 and s["pot_total"] == 4
     assert eco.labor_collect(U, T0 + 2 * H, DAY) == 4
@@ -337,7 +337,7 @@ def test_hire_embed_shows_prices_slots_and_pending(eco):
         "1 / 5人" in d
         and "見習い" in d
         and str(lab.CONTRACT_FEE["apprentice"]) in d
-        and "基本給 1/時" in d
+        and "稼ぎ 1/時" in d
         and "自動更新" in d
     )
     assert state["pot_total"] == 3 and "3" in text(labor_cog.panel_embed(state))
@@ -540,7 +540,7 @@ class Fixed(random.Random):
 
 
 def test_ore_numbers_are_a_losing_bet_on_average(monkeypatch):
-    monkeypatch.undo()  # 本物の基本給・鉱石の数字で確かめる
+    monkeypatch.undo()  # 本物の作業員の稼ぎ・鉱石の数字で確かめる
     for kind in ("apprentice", "miner", "craftsman"):
         week_hours = lab.STOCK_HOURS * lab.CONTRACT_DAYS  # 毎日1回受け取る人の、契約の期間の働き
         mean = (lab.WORKER_RATE[kind] + lab.ore_ev(kind)) * week_hours
@@ -548,7 +548,7 @@ def test_ore_numbers_are_a_losing_bet_on_average(monkeypatch):
         assert 0.8 * lab.CONTRACT_FEE[kind] < mean < lab.CONTRACT_FEE[kind]  # 平均は赤字（ただし、遠くはない）
         assert mean_low < lab.CONTRACT_FEE[kind]  # 低賃金でも、平均は赤字
         base_only = lab.WORKER_RATE[kind] * lab.WAGE_MULT["low"] * week_hours
-        assert base_only < 0.7 * lab.CONTRACT_FEE[kind]  # 基本給だけでは、はっきり赤字
+        assert base_only < 0.7 * lab.CONTRACT_FEE[kind]  # 作業員の稼ぎだけでは、はっきり赤字
 
 
 def test_roll_ores_follows_the_table_and_foreman_luck():
@@ -830,7 +830,7 @@ def test_click_log_keeps_working_across_hours(eco):
 
 # ----------------------------- 発掘員と発掘品（#24） ----------------------------- #
 def test_contract_is_one_day_and_the_ore_numbers_scale_to_one_day(monkeypatch):
-    monkeypatch.undo()  # 本物の基本給・鉱石の数字で確かめる
+    monkeypatch.undo()  # 本物の作業員の稼ぎ・鉱石の数字で確かめる
     assert lab.CONTRACT_DAYS == 1 and lab.STOCK_HOURS == 24.0
     for kind in ("apprentice", "miner", "craftsman"):  # 1日の平均は、契約料の8割台（運の勝負）
         mean = (lab.WORKER_RATE[kind] + lab.ore_ev(kind)) * 24

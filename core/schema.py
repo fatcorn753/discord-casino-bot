@@ -178,7 +178,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             fatigue      REAL NOT NULL DEFAULT 0,
             fatigue_at   REAL NOT NULL DEFAULT 0,
             pot          INTEGER NOT NULL DEFAULT 0,   -- 受け取る前の稼ぎ
-            pot_workers  INTEGER NOT NULL DEFAULT 0,   -- そのうち、作業員が稼いだ分（基本給と鉱石の売値。受け取ると 0 に戻る）
+            pot_workers  INTEGER NOT NULL DEFAULT 0,   -- そのうち、作業員が稼いだ分（作業員の稼ぎと鉱石の売値。受け取ると 0 に戻る）
             donated      INTEGER NOT NULL DEFAULT 0,   -- 慈善団体への寄付（帝愛のピンハネ）の、これまでの合計
             relics       TEXT NOT NULL DEFAULT '',     -- 受け取る前の発掘品（JSON {品のID: 個数}。受け取ると持ち物に入る）
             day          TEXT NOT NULL DEFAULT '',

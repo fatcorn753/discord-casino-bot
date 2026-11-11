@@ -110,7 +110,7 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
     )
     e.add_field(name="💴 手元", value=ui.pelica(state["balance"]), inline=True)
     e.add_field(name="🎒 未受け取り", value=pot_text(state), inline=True)
-    e.add_field(name="📈 基本給", value=f"**{state['rate']:,.1f}/時**", inline=True)
+    e.add_field(name="📈 作業員の稼ぎ", value=f"**{state['rate']:,.1f}/時**", inline=True)
     e.add_field(
         name="🏠 人数",
         value=f"**{state['workers']} / {state['slots']}人**（寮 Lv{state['dorm']}/{lab.DORM_MAX}）",
@@ -120,7 +120,7 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
     e.add_field(
         name="💼 賃金",
         value=f"**{lab.WAGE_NAME[wage]}**"
-        + (f"\n基本給 ×{lab.WAGE_MULT['low']}・1日に {lab.QUIT_PER_DAY:.0%} で1人ずつ辞める" if wage == "low" else ""),
+        + (f"\n作業員の稼ぎ ×{lab.WAGE_MULT['low']}・1日に {lab.QUIT_PER_DAY:.0%} で1人ずつ辞める" if wage == "low" else ""),
         inline=True,
     )
     e.add_field(
@@ -132,7 +132,7 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
         if k == "foreman":
             gain = f"レア鉱石・発掘品が出やすい +{lab.FOREMAN_LUCK:.0%}"
         else:
-            gain = f"基本給 {lab.WORKER_RATE[k]:g}/時 ＋ 鉱石 ＋ まれに発掘品"
+            gain = f"稼ぎ {lab.WORKER_RATE[k]:g}/時 ＋ 鉱石 ＋ まれに発掘品"
         until = f"\n契約が切れる: <t:{int(state['expires'][k])}:R>" if state["expires"].get(k) else ""
         e.add_field(
             name=f"{lab.WORKER_MARK[k]} {lab.WORKER_NAME[k]} ×{state[k]}",
@@ -140,7 +140,7 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
             inline=True,
         )
     e.set_footer(
-        text=f"契約は{lab.CONTRACT_DAYS}日ごと。基本給だけでは赤字で、平均でも契約料に届きません。当たり次第です。貯まるのは最大{lab.STOCK_HOURS:.0f}時間分。"
+        text=f"契約は{lab.CONTRACT_DAYS}日ごと。作業員の稼ぎだけでは赤字で、平均でも契約料に届きません。当たり次第です。貯まるのは最大{lab.STOCK_HOURS:.0f}時間分。"
     )
     return e
 

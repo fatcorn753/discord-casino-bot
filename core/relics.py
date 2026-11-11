@@ -9,7 +9,7 @@ BUFF_RATE = 0.01  # 1種類ごとの効果の大きさ
 # 品のID → (効果の名前, 効果の説明)。効果の名前は、処理側が見分ける
 BUFFS = {
     "relic_fossil": ("click", "地下作業の「働く」1回の稼ぎ"),
-    "relic_bone": ("wage", "作業員の基本給"),
+    "relic_bone": ("wage", "作業員の稼ぎ"),
     "relic_meteor": ("luck", "作業員の鉱石・発掘品の出やすさ"),
     "relic_vase": ("recovery", "地下作業の疲労の回復"),
     "relic_crown": ("daily", "デイリーボーナスの額"),
