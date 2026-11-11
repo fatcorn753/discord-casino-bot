@@ -9,7 +9,7 @@ from core import labor, relics
 TITLE, CARD_COLOR, CARD_ICON, CONSUMABLE, COLOR_ROLE = "title", "card_color", "card_icon", "consumable", "color_role"
 RACING = "racing"  # 競馬の品（購入券・にんじん）。買うと持ち物に増え、`/競馬 厩舎` で使う（枚数が増える品なので、消耗品と同じ扱い）
 SKIN_DICE, SKIN_TABLE, COLLECTION = "skin_dice", "skin_table", "collection"
-RELIC = "relic"  # 発掘品（作業員が、鉱石を掘るときに、まれに見つける）。買えない。持っているだけで飾りになり、`/取引` で売り買いする
+RELIC = "relic"  # 発掘品（作業員が、鉱石を掘るときに、まれに見つける）。買えない。持っているだけで飾りになり、競売の画面で売り買いする
 MARKET = "market"  # 帝愛市の品（裏情報メモなど）。持ち物には増えず、買うと、その場で効果が出る
 
 KIND_LABEL = {
@@ -253,7 +253,7 @@ CATALOG += [
         RELIC,
         0,
         mark,
-        desc="作業員が、まれに見つける、コレクション用の発掘品。`/取引` で売り買いできる。"
+        desc="作業員が、まれに見つける、コレクション用の発掘品。競売の画面（「🕴️ 帝愛の競売」）で売り買いできる。"
         + relics.buff_text(labor.RELIC_ID[rid]),
         limited=True,
         mark=mark,

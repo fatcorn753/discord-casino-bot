@@ -1,13 +1,13 @@
-"""/取引 — プレイヤー間の市場。競走馬と、消耗品・見た目の品を、定価で売ったり、競りに出したりする。
+"""プレイヤー間の市場と競り。ショップの「🕴️ 帝愛の競売」の画面（cogs/shop_cog.py）に出て、そこから使う。
 
-- 出品: `/取引 出品`（品・馬を選び、値段・方式を決める）。出した品・馬は、出品の間、預かる。
-- 買う・入札: `/取引 一覧` から、出品を選んで、「買う」「入札する」。入札のお金は、残高から預かる（抜かれたら返る）。
+- 出品: 競売の画面の「📤 出品する」。品・馬を選び、値段・方式を決める。出した品・馬は、出品の間、預かる。
+- 買う・入札: 競売の画面の「🤝 プレイヤーの出品」から、出品を選んで、「買う」「入札する」。入札のお金は、残高から預かる（抜かれたら返る）。
 - 売れると、売り手の受け取りから 5% を引く（帝愛銀行の収入）。同じ2人の取引は、24時間で合計 10万ペリカまで。
 - 締切は、Bot が定期的に確認して精算する（競りの落札は、告知チャンネルに知らせる）。
+- コマンドはない（競売の画面に一本化した）。このファイルは、画面の部品・買う／入札の処理・締切の精算を持つ。
 """
 
 import discord
-from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs._horse_views import stat_lines
@@ -109,55 +109,161 @@ class DetailView(discord.ui.View):
         await interaction.response.send_modal(BidModal(self, p2p.min_next_bid(row["price"], row["bid"])))
 
 
-class ListView(discord.ui.View):
-    """出品の一覧。選ぶと、詳細が出る。"""
+class SellModal(discord.ui.Modal):
+    """出品の値段などを入れる。方式（定価 / 競り）は、押したボタンで決まっている。"""
 
-    def __init__(self, cog: "P2PCog", user_id: int, guild_id: int, kind=None):
-        super().__init__(timeout=300)
-        self.cog, self.user_id, self.guild_id, self.kind = cog, user_id, guild_id, kind
-        self.rows = cog.bot.economy.for_guild(guild_id).p2p_active(kind, limit=SHOWN)
-        eco = cog.bot.economy.for_guild(guild_id)
-        if self.rows:
-            select = discord.ui.Select(
-                placeholder="見る出品を選ぶ",
-                options=[
-                    discord.SelectOption(
-                        label=eco.p2p_label(r)[:80],
-                        value=str(r["id"]),
-                        description=(
-                            f"定価 {r['price']:,}" if r["mode"] == "fixed" else f"競り {(r['bid'] or r['price']):,}"
-                        )
-                        + "ペリカ",
-                    )
-                    for r in self.rows
-                ],
+    def __init__(self, view: "SellView", mode: str):
+        super().__init__(title="定価で出す" if mode == "fixed" else "競りに出す")
+        self.view, self.mode = view, mode
+        kind, _, ref = view.target.partition(":")
+        lo, hi = p2p.price_range("horse") if kind == "horse" else p2p.price_range("item", ref, 1)
+        self.price = discord.ui.TextInput(
+            label=("定価" if mode == "fixed" else "開始価格")
+            + f"（ペリカ。1個あたりでなく、まとめて。{lo:,}〜{hi:,}）",
+            max_length=9,
+        )
+        self.add_item(self.price)
+        self.qty = None
+        if kind == "item" and not shop_mod.BY_ID[ref].unique:  # 消耗品・発掘品だけ、個数を選べる
+            self.qty = discord.ui.TextInput(label="個数（省略で1）", required=False, max_length=3, default="1")
+            self.add_item(self.qty)
+        self.hours = None
+        if mode == "auction":
+            self.hours = discord.ui.TextInput(
+                label=f"競りの長さ（時間。{'・'.join(map(str, p2p.AUCTION_HOURS))} のどれか）",
+                max_length=3,
+                default="24",
             )
+            self.add_item(self.hours)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        def num(field, default=None):
+            text = (field.value or "").replace(",", "").strip() if field is not None else ""
+            return int(text) if text else default
+
+        try:
+            price, qty, hours = num(self.price), num(self.qty, 1), num(self.hours)
+        except ValueError:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("出品できません", "数字で入れてください。"), ephemeral=True
+            )
+        kind, _, ref = self.view.target.partition(":")
+        eco = self.view.cog.eco_of(interaction)
+        ok, result = eco.p2p_list(interaction.user.id, kind, ref, qty or 1, self.mode, price, hours)
+        if not ok:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("出品できません", result), ephemeral=True
+            )
+        row = eco.p2p_get(result)
+        self.view.stop()
+        await interaction.response.send_message(
+            embed=ui.ok_embed(
+                "出品しました",
+                f"{line_of(eco, row)}\n売れる（落札される）と、{p2p.FEE_RATE:.0%} の手数料を引いた額が入ります。"
+                "取り消しは、競売の画面の「📋 自分の取引」から。",
+            ),
+            ephemeral=True,
+        )
+
+
+class SellView(discord.ui.View):
+    """出品の画面。出す品・馬を選んで、「定価で出す」か「競りに出す」を押す。"""
+
+    def __init__(self, cog: "P2PCog", user_id: int, guild_id: int):
+        super().__init__(timeout=300)
+        self.cog, self.user_id, self.target = cog, user_id, None
+        eco = cog.bot.economy.for_guild(guild_id)
+        self.options = []
+        for item_id, qty in eco.inventory(user_id).items():
+            if p2p.tradable(item_id):
+                label = f"{shop_mod.label(shop_mod.BY_ID[item_id])}（持っている {qty}）"
+                self.options.append(discord.SelectOption(label=label[:100], value=f"item:{item_id}"))
+        for horse in eco.horse_list(user_id):
+            self.options.append(
+                discord.SelectOption(
+                    label=f"{horse['name']}（馬）"[:100], value=f"horse:{horse['id']}", emoji=horse["silks"]
+                )
+            )
+        self.options = self.options[:25]
+        if self.options:
+            select = discord.ui.Select(placeholder="出す品・馬を選ぶ", options=self.options)
             select.callback = self._on_pick
             self.add_item(select)
+            for label, mode in (("💴 定価で出す", "fixed"), ("🔨 競りに出す", "auction")):
+                button = discord.ui.Button(label=label, style=discord.ButtonStyle.success, row=1)
+                button.callback = self._make_go(mode)
+                self.add_item(button)
 
     def embed(self) -> discord.Embed:
-        eco = self.cog.bot.economy.for_guild(self.guild_id)
-        title = "🤝 取引の一覧" + {"horse": "（競走馬）", "item": "（品物）"}.get(self.kind, "")
-        body = (
-            "\n".join(line_of(eco, r) for r in self.rows)
-            or "いま、出ているものはありません。`/取引 出品` で、自分の品や馬を出せます。"
+        return ui.embed(
+            "📤 出品する",
+            "出す品・馬を選んで、「定価で出す」（すぐ買える）か「競りに出す」（入札で上がる）を押します。\n"
+            f"出した間は、品・馬を預かります（1人 {p2p.MAX_ACTIVE} 件まで）。売れると {p2p.FEE_RATE:.0%} の手数料を引きます。",
+            ui.INFO,
         )
-        return ui.embed(title, body, ui.INFO)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return interaction.user.id == self.user_id
 
     async def _on_pick(self, interaction: discord.Interaction):
-        eco = self.cog.eco_of(interaction)
-        row = eco.p2p_get(int(interaction.data["values"][0]))
-        if row is None or row["status"] != "active":
-            return await interaction.response.send_message(
-                embed=ui.error_embed("もうありません", "その出品は、終わりました。"), ephemeral=True
+        self.target = interaction.data["values"][0]
+        for option in self.options:  # 選んだものを、選択肢に残して見せる
+            option.default = option.value == self.target
+        await interaction.response.edit_message(view=self)
+
+    def _make_go(self, mode: str):
+        async def callback(interaction: discord.Interaction):
+            if self.target is None:
+                return await interaction.response.send_message(
+                    embed=ui.error_embed("先に選んでください", "出す品・馬を、選択肢から選んでください。"),
+                    ephemeral=True,
+                )
+            await interaction.response.send_modal(SellModal(self, mode))
+
+        return callback
+
+
+class MineView(discord.ui.View):
+    """自分の取引。出している品（取り消せる）と、入札中の競り。"""
+
+    def __init__(self, cog: "P2PCog", user_id: int, guild_id: int):
+        super().__init__(timeout=300)
+        self.cog, self.user_id, self.guild_id = cog, user_id, guild_id
+        eco = cog.bot.economy.for_guild(guild_id)
+        self.data = eco.p2p_mine(user_id)
+        cancellable = [r for r in self.data["selling"] if not r["bidder_id"]]  # 入札が入った競りは、取り消せない
+        if cancellable:
+            select = discord.ui.Select(
+                placeholder="取り消す出品を選ぶ",
+                options=[
+                    discord.SelectOption(label=f"#{r['id']} {eco.p2p_label(r)}"[:100], value=str(r["id"]))
+                    for r in cancellable[:25]
+                ],
             )
-        view = DetailView(self.cog, self.user_id, row["id"], row["mode"])
-        if row["seller_id"] == self.user_id:
-            view.clear_items()  # 自分の出品は、買えない
-        await interaction.response.send_message(embed=detail_embed(eco, row), view=view, ephemeral=True)
+            select.callback = self._on_cancel
+            self.add_item(select)
+
+    def embed(self) -> discord.Embed:
+        eco = self.cog.bot.economy.for_guild(self.guild_id)
+        sell = "\n".join(line_of(eco, r) for r in self.data["selling"]) or "出していません。"
+        bid = "\n".join(line_of(eco, r) for r in self.data["bidding"]) or "入札中のものは、ありません。"
+        e = ui.embed("📋 自分の取引", "", ui.INFO)
+        e.add_field(name="出している（入札が入った競りは、取り消せません）", value=sell[:1024], inline=False)
+        e.add_field(name="入札中（あなたが最高入札者）", value=bid[:1024], inline=False)
+        return e
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    async def _on_cancel(self, interaction: discord.Interaction):
+        eco = self.cog.bot.economy.for_guild(self.guild_id)
+        ok, why = eco.p2p_cancel(self.user_id, int(interaction.data["values"][0]))
+        if not ok:
+            return await interaction.response.send_message(embed=ui.error_embed("取り消せません", why), ephemeral=True)
+        self.stop()
+        await interaction.response.send_message(
+            embed=ui.ok_embed("取り消しました", "出品を取り消して、品・馬を戻しました。"), ephemeral=True
+        )
 
 
 class P2PCog(commands.Cog):
@@ -172,10 +278,6 @@ class P2PCog(commands.Cog):
 
     def eco_of(self, interaction: discord.Interaction):
         return self.bot.economy.for_guild(interaction.guild_id)
-
-    group = app_commands.Group(
-        name="取引", description="🤝 プレイヤー間の市場（競走馬・品物を、定価で売る／競りに出す）", guild_only=True
-    )
 
     # ------------------------------ 買う・入札 ------------------------------ #
     async def do_buy(self, interaction: discord.Interaction, listing_id: int) -> None:
@@ -254,117 +356,37 @@ class P2PCog(commands.Cog):
         finally:
             self.bot.sessions.end(uid)
 
-    # ------------------------------ コマンド ------------------------------ #
-    @group.command(name="一覧", description="出ている品・馬を見る（選ぶと、買う・入札できる）")
-    @app_commands.rename(kind="種類")
-    @app_commands.choices(
-        kind=[app_commands.Choice(name="競走馬", value="horse"), app_commands.Choice(name="品物", value="item")]
-    )
-    async def listing(self, interaction: discord.Interaction, kind: app_commands.Choice[str] = None):
-        view = ListView(self, interaction.user.id, interaction.guild_id, kind.value if kind else None)
-        kwargs = {"view": view} if view.rows else {}  # 出品がなければ、選ぶ部品は出さない（view=None は渡さない）
+    # ------------------------------ 画面（競売の画面から開く） ------------------------------ #
+    async def open_detail(self, interaction: discord.Interaction, listing_id: int) -> None:
+        """出品の詳細（「買う」「入札する」）を、本人にだけ見せる。"""
+        eco = self.eco_of(interaction)
+        row = eco.p2p_get(listing_id)
+        if row is None or row["status"] != "active":
+            return await interaction.response.send_message(
+                embed=ui.error_embed("もうありません", "その出品は、終わりました。"), ephemeral=True
+            )
+        view = DetailView(self, interaction.user.id, row["id"], row["mode"])
+        if row["seller_id"] == interaction.user.id:
+            view.clear_items()  # 自分の出品は、買えない
+        await interaction.response.send_message(embed=detail_embed(eco, row), view=view, ephemeral=True)
+
+    async def open_sell(self, interaction: discord.Interaction) -> None:
+        """出品の画面（品・馬を選んで、定価か競りで出す）。"""
+        view = SellView(self, interaction.user.id, interaction.guild_id)
+        if not view.options:
+            return await interaction.response.send_message(
+                embed=ui.error_embed(
+                    "出せるものがありません", "売れる品（消耗品・カードの色など・発掘品）か、馬を、持っていません。"
+                ),
+                ephemeral=True,
+            )
+        await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+
+    async def open_mine(self, interaction: discord.Interaction) -> None:
+        """自分の出品と入札中のものを見せる（出品は、ここから取り消せる）。"""
+        view = MineView(self, interaction.user.id, interaction.guild_id)
+        kwargs = {"view": view} if view.children else {}
         await interaction.response.send_message(embed=view.embed(), ephemeral=True, **kwargs)
-
-    async def _sell_autocomplete(self, interaction: discord.Interaction, current: str):
-        eco = self.eco_of(interaction)
-        uid = interaction.user.id
-        out = []
-        for item_id, qty in eco.inventory(uid).items():
-            if p2p.tradable(item_id):
-                name = f"{shop_mod.label(shop_mod.BY_ID[item_id])}（持っている {qty}）"
-                out.append(app_commands.Choice(name=name[:100], value=f"item:{item_id}"))
-        for horse in eco.horse_list(uid):
-            out.append(app_commands.Choice(name=f"🐴 {horse['name']}（馬）"[:100], value=f"horse:{horse['id']}"))
-        return [c for c in out if current in c.name][:25]
-
-    @group.command(name="出品", description="自分の品・馬を、定価で売る／競りに出す（出した間は、預かります）")
-    @app_commands.rename(target="品", mode="方式", price="値段", qty="個数", hours="競りの長さ")
-    @app_commands.describe(
-        target="出す品・馬（候補から選ぶ）",
-        mode="定価（すぐ買える）か、競り（入札で上がる）",
-        price="定価、または競りの開始価格（まとめて1つの値段）",
-        qty="消耗品の個数（省略で1）",
-        hours="競りの長さ（競りのとき。省略で24時間）",
-    )
-    @app_commands.choices(
-        mode=[
-            app_commands.Choice(name="定価（すぐ買える）", value="fixed"),
-            app_commands.Choice(name="競り（入札で上がる）", value="auction"),
-        ],
-        hours=[app_commands.Choice(name=f"{h}時間", value=h) for h in p2p.AUCTION_HOURS],
-    )
-    async def sell(
-        self,
-        interaction: discord.Interaction,
-        target: str,
-        mode: app_commands.Choice[str],
-        price: app_commands.Range[int, 1, 10_000_000],
-        qty: app_commands.Range[int, 1, 99] = 1,
-        hours: app_commands.Choice[int] = None,
-    ):
-        kind, _, ref = target.partition(":")
-        if kind not in ("item", "horse") or not ref:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("出品できません", "「品」は、候補から選んでください。"), ephemeral=True
-            )
-        eco = self.eco_of(interaction)
-        ok, result = eco.p2p_list(
-            interaction.user.id,
-            kind,
-            ref,
-            qty,
-            mode.value,
-            price,
-            hours.value if hours else 24 if mode.value == "auction" else None,
-        )
-        if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("出品できません", result), ephemeral=True
-            )
-        row = eco.p2p_get(result)
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "出品しました",
-                f"{line_of(eco, row)}\n売れる（落札される）と、{p2p.FEE_RATE:.0%} の手数料を引いた額が入ります。取り消しは `/取引 取消`。",
-            ),
-            ephemeral=True,
-        )
-
-    sell.autocomplete("target")(_sell_autocomplete)
-
-    @group.command(name="自分", description="自分の出品と、入札中の競りを見る")
-    async def mine(self, interaction: discord.Interaction):
-        eco = self.eco_of(interaction)
-        data = eco.p2p_mine(interaction.user.id)
-        sell = "\n".join(line_of(eco, r) for r in data["selling"]) or "出していません。"
-        bid = "\n".join(line_of(eco, r) for r in data["bidding"]) or "入札中のものは、ありません。"
-        e = ui.embed("🤝 自分の取引", "", ui.INFO)
-        e.add_field(name="出している", value=sell[:1024], inline=False)
-        e.add_field(name="入札中（あなたが最高入札者）", value=bid[:1024], inline=False)
-        await interaction.response.send_message(embed=e, ephemeral=True)
-
-    async def _cancel_autocomplete(self, interaction: discord.Interaction, current: str):
-        eco = self.eco_of(interaction)
-        rows = eco.p2p_mine(interaction.user.id)["selling"]
-        return [
-            app_commands.Choice(name=f"#{r['id']} {eco.p2p_label(r)}"[:100], value=r["id"])
-            for r in rows
-            if current in f"#{r['id']} {eco.p2p_label(r)}"
-        ][:25]
-
-    @group.command(
-        name="取消", description="自分の出品を取り消して、品・馬を戻す（入札が入った競りは、取り消せません）"
-    )
-    @app_commands.rename(listing_id="出品")
-    async def cancel(self, interaction: discord.Interaction, listing_id: int):
-        ok, why = self.eco_of(interaction).p2p_cancel(interaction.user.id, listing_id)
-        if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("取り消せません", why), ephemeral=True)
-        await interaction.response.send_message(
-            embed=ui.ok_embed("取り消しました", "出品を取り消して、品・馬を戻しました。"), ephemeral=True
-        )
-
-    cancel.autocomplete("listing_id")(_cancel_autocomplete)
 
     # ------------------------------ 締切の精算 ------------------------------ #
     @tasks.loop(seconds=30)

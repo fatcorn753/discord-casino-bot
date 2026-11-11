@@ -309,6 +309,20 @@ class ShopView(discord.ui.View):
             qty.callback = self._on_qty
             self.add_item(qty)
 
+    def _p2p(self):
+        """プレイヤー間の取引の部品（cogs/p2p_cog.py）。読み込まれていなければ None（画面に出さない）。"""
+        get = getattr(self.cog.bot, "get_cog", None)
+        return get("P2PCog") if get else None
+
+    async def _on_player(self, interaction: discord.Interaction):
+        await self._p2p().open_detail(interaction, int(interaction.data["values"][0]))
+
+    async def _on_sell(self, interaction: discord.Interaction):
+        await self._p2p().open_sell(interaction)
+
+    async def _on_mine(self, interaction: discord.Interaction):
+        await self._p2p().open_mine(interaction)
+
     def _add_buy_button(self) -> None:
         """選んだ景品を買うボタン。何も選んでいないうちは押せない。"""
         btn = discord.ui.Button(
@@ -388,11 +402,40 @@ class ShopView(discord.ui.View):
             )
             pick.callback = self._on_buy_horse
             self.add_item(pick)
+        p2p_cog = self._p2p()
+        if p2p_cog is not None:  # プレイヤーの出品（定価・競り）も、この画面に出る
+            players = eco.p2p_active(None, limit=25)
+            if players:
+                pick = discord.ui.Select(
+                    placeholder="🤝 プレイヤーの出品を見る（選ぶと、買う・入札できる）",
+                    row=3,
+                    options=[
+                        discord.SelectOption(
+                            label=eco.p2p_label(r)[:100],
+                            value=str(r["id"]),
+                            description=(
+                                f"定価 {r['price']:,}ペリカ"
+                                if r["mode"] == "fixed"
+                                else f"競り {(r['bid'] or r['price']):,}ペリカ"
+                            ),
+                        )
+                        for r in players
+                    ],
+                )
+                pick.callback = self._on_player
+                self.add_item(pick)
         if listed or horses:
             self._add_buy_button()
-        back = discord.ui.Button(label="🛍️ ショップ", style=discord.ButtonStyle.primary, row=3)
+        back = discord.ui.Button(label="🛍️ ショップ", style=discord.ButtonStyle.primary, row=4)
         back.callback = self._to_shop
         self.add_item(back)
+        if p2p_cog is not None:
+            sell = discord.ui.Button(label="📤 出品する", style=discord.ButtonStyle.secondary, row=4)
+            sell.callback = self._on_sell
+            self.add_item(sell)
+            mine = discord.ui.Button(label="📋 自分の取引", style=discord.ButtonStyle.secondary, row=4)
+            mine.callback = self._on_mine
+            self.add_item(mine)
 
     def _build_inventory(self) -> None:
         eco = self.cog.bot.economy.for_guild(self.guild_id)
@@ -702,15 +745,18 @@ class ShopCog(commands.Cog):
         """帝愛の競売の棚（破産で差し押さえた品。値段は日ごとに下がる）。"""
         eco = self.bot.economy.for_guild(guild_id)
         listed = eco.auction_list()
+        players = eco.p2p_active(None, limit=10)
         e = ui.embed(
             "🕴️ 帝愛の競売",
             "破産で差し押さえた品を、帝愛が売りに出します。**買えるのはカタギだけ**。"
             f"値段は定価の{teiai.AUCTION_START:.0%}から、1日ごとに{teiai.AUCTION_STEP:.0%}ずつ下がり、{teiai.AUCTION_FLOOR:.0%}で止まります。\n"
-            "売上は、帝愛銀行の収入（預金者の利回り）になります。",
+            "売上は、帝愛銀行の収入（預金者の利回り）になります。\n"
+            "**プレイヤーも、ここに品・馬を出せます**（「📤 出品する」。定価か競り。売れると5%の手数料）。",
             ui.GOLD,
         )
         if not listed and not eco.auction_horses():
-            e.add_field(name="棚", value="いまは、売りに出ている品はありません。", inline=False)
+            if not players:
+                e.add_field(name="棚", value="いまは、売りに出ている品はありません。", inline=False)
         else:
             e.add_field(
                 name="棚",
@@ -730,6 +776,14 @@ class ShopCog(commands.Cog):
                     f"　速{h['speed']} ス{h['stamina']} パ{h['power']} 根{h['guts']}　{h['races']}戦{h['wins']}勝"
                     for h in horses
                 )[:1024],
+                inline=False,
+            )
+        if players:
+            from cogs.p2p_cog import line_of
+
+            e.add_field(
+                name="🤝 プレイヤーの出品（下の選択肢で、見る・買う・入札する）",
+                value="\n".join(line_of(eco, r) for r in players)[:1024],
                 inline=False,
             )
         me = eco.peek_stats(user_id)
@@ -1025,7 +1079,7 @@ class ShopCog(commands.Cog):
                 embed=ui.ok_embed(
                     "発掘品です",
                     f"**{it.name}** は、使う品ではありません。{relics.buff_text(it.id)}（出品している間は、効きません）。\n"
-                    "`/取引 出品` で、売れます。",
+                    "競売の画面の「📤 出品する」で、売れます。",
                 ),
                 ephemeral=True,
             )

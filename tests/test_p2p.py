@@ -310,38 +310,141 @@ def cog(eco):
     return p2p_cog.P2PCog(bot)
 
 
-def test_command_sells_and_the_list_view_shows_and_buys(cog, eco, monkeypatch):
+def _auction_view(cog_shop, uid):
+    from cogs import shop_cog
+
+    return shop_cog.ShopView(cog_shop, uid, G, screen="auction")
+
+
+@pytest.fixture
+def shop_cog_obj(eco, cog):
+    from cogs import shop_cog
+
+    bot = SimpleNamespace(
+        economy=SimpleNamespace(for_guild=lambda gid: eco),
+        sessions=cog.bot.sessions,
+        config={},
+        guilds=[],
+        get_cog=lambda name: cog if name == "P2PCog" else None,
+    )
+    return shop_cog.ShopCog(bot)
+
+
+def test_sell_view_lists_tradable_items_and_horses_and_the_modal_lists_it(cog, eco):
     give(eco, S, CARROT, 2)
+    give(eco, S, "title_regular")  # 称号は、候補に出ない
+    hid = horse(eco, S)
+    view = p2p_cog.SellView(cog, S, G)
+    values = [o.value for o in view.options]
+    assert f"item:{CARROT}" in values and f"horse:{hid}" in values and "item:title_regular" not in values
+    go = view.children[1]
+    no_pick = It(S)
+    asyncio.run(go.callback(no_pick))
+    assert "先に選んでください" in no_pick.sent[-1]["embed"].title  # 選ぶ前に押すと、案内
+    asyncio.run(view._on_pick(_PickIt(S, f"item:{CARROT}")))
+    opened = It(S)
+    asyncio.run(go.callback(opened))
+    modal = opened.sent[-1]["modal"]
+    assert (
+        isinstance(modal, p2p_cog.SellModal) and modal.qty is not None and modal.hours is None
+    )  # 定価・消耗品: 個数あり
+    asyncio.run(view._on_pick(_PickIt(S, f"horse:{hid}")))
+    horse_modal = It(S)
+    asyncio.run(view.children[2].callback(horse_modal))
+    m2 = horse_modal.sent[-1]["modal"]
+    assert m2.qty is None and m2.hours is not None  # 競り・馬: 個数なし・長さあり
+
+
+class _PickIt(It):
+    def __init__(self, uid, value):
+        super().__init__(uid, values=[value])
+        self.response = SimpleNamespace(send_message=self._send, send_modal=self._modal, edit_message=self._edit)
+
+    async def _edit(self, **kw):
+        self.sent.append(kw)
+
+
+def test_sell_modal_lists_the_item_and_validates_numbers(cog, eco):
+    give(eco, S, CARROT, 3)
+    view = p2p_cog.SellView(cog, S, G)
+    view.target = f"item:{CARROT}"
+    modal = p2p_cog.SellModal(view, "fixed")
+    modal.price._value = "abc"
+    bad = It(S)
+    asyncio.run(modal.on_submit(bad))
+    assert "数字で入れて" in bad.sent[-1]["embed"].description and eco.inventory(S)[CARROT] == 3
+    modal.price._value = "1,500"
+    modal.qty._value = "2"
+    done = It(S)
+    asyncio.run(modal.on_submit(done))
+    assert "出品しました" in done.sent[-1]["embed"].title and eco.inventory(S)[CARROT] == 1
+    listing = eco.p2p_active(None)[0]
+    assert listing["price"] == 1_500 and listing["qty"] == 2 and listing["mode"] == "fixed"
+    view.target = f"item:{CARROT}"
+    auction = p2p_cog.SellModal(view, "auction")
+    auction.price._value = "1000"
+    auction.qty._value = "1"
+    auction.hours._value = "6"
+    asyncio.run(auction.on_submit(It(S)))
+    assert any(r["mode"] == "auction" and r["end_at"] > 0 for r in eco.p2p_active(None))
+
+
+def test_auction_screen_shows_player_listings_with_sell_and_mine_buttons(shop_cog_obj, eco):
+    give(eco, S, CARROT, 2)
+    _, lid = eco.p2p_list(S, "item", CARROT, 1, "fixed", 1_500, None, time_now())
+    view = _auction_view(shop_cog_obj, B)
+    labels = [getattr(c, "label", "") for c in view.children]
+    assert "📤 出品する" in labels and "📋 自分の取引" in labels and "🛍️ ショップ" in labels
+    assert any(isinstance(c, p2p_cog.discord.ui.Select) and c.placeholder.startswith("🤝") for c in view.children)
+    text = "\n".join(f.value for f in view.embed().fields)
+    assert "にんじん" in text and f"#{lid}" in text  # 競売の画面に、プレイヤーの出品が並ぶ
+    assert all(c.row <= 4 for c in view.children)  # 画面の段に収まっている
+
+
+def test_picking_a_player_listing_opens_the_detail_and_the_button_buys(shop_cog_obj, cog, eco, monkeypatch):
+    give(eco, S, CARROT, 2)
+    _, lid = eco.p2p_list(S, "item", CARROT, 2, "fixed", 1_500, None, time_now())
 
     async def yes(*a, **k):
         return True
 
     monkeypatch.setattr(p2p_cog, "confirm_action", yes)
-    it = It(S)
-    asyncio.run(p2p_cog.P2PCog.sell.callback(cog, it, f"item:{CARROT}", SimpleNamespace(value="fixed"), 1_500, 2, None))
-    assert "出品しました" in it.sent[-1]["embed"].title and eco.inventory(S).get(CARROT, 0) == 0
-    lid = eco.p2p_active(None)[0]["id"]
-    view = p2p_cog.ListView(cog, B, G)
-    assert "にんじん" in view.embed().description and str(lid) in view.embed().description
+    view = _auction_view(shop_cog_obj, B)
     pick = It(B, values=[str(lid)])
-    asyncio.run(view._on_pick(pick))
-    assert "にんじん" in pick.sent[-1]["embed"].title and pick.sent[-1]["view"].children  # 買うボタンがある
-    asyncio.run(pick.sent[-1]["view"]._on_go(It(B)))
+    asyncio.run(view._on_player(pick))
+    sent = pick.sent[-1]
+    assert "にんじん" in sent["embed"].title and sent["view"].children and sent["ephemeral"] is True
+    asyncio.run(sent["view"]._on_go(It(B)))
     assert eco.inventory(B)[CARROT] == 2
-    mine = It(S)
-    asyncio.run(p2p_cog.P2PCog.mine.callback(cog, mine))
-    assert mine.sent[-1]["ephemeral"] is True
+    seller_pick = It(S, values=[str(eco.p2p_active(None)[0]["id"])]) if eco.p2p_active(None) else None
+    assert seller_pick is None  # 売れたので、もう出ていない
 
 
-def test_seller_sees_no_buy_button_on_own_listing_and_empty_list_has_no_select(cog, eco):
-    empty = p2p_cog.ListView(cog, B, G)
-    assert not empty.children and "出ているものはありません" in empty.embed().description
+def test_own_listing_has_no_buy_button_and_mine_view_cancels(cog, eco):
     give(eco, S, CARROT)
-    _, lid = eco.p2p_list(S, "item", CARROT, 1, "fixed", 1_000, None, NOW)
-    view = p2p_cog.ListView(cog, S, G)
-    it = It(S, values=[str(lid)])
-    asyncio.run(view._on_pick(it))
-    assert not it.sent[-1]["view"].children
+    _, lid = eco.p2p_list(S, "item", CARROT, 1, "fixed", 1_000, None, time_now())
+    own = It(S)
+    asyncio.run(cog.open_detail(own, lid))
+    assert not own.sent[-1]["view"].children  # 自分の出品は、買えない
+    mine = p2p_cog.MineView(cog, S, G)
+    assert f"#{lid}" in mine.embed().fields[0].value and mine.children
+    gone = It(S, values=[str(lid)])
+    asyncio.run(mine._on_cancel(gone))
+    assert "取り消しました" in gone.sent[-1]["embed"].title and eco.inventory(S)[CARROT] == 1
+    empty = p2p_cog.MineView(cog, S, G)
+    assert not empty.children and "出していません" in empty.embed().fields[0].value
+
+
+def test_sell_screen_without_anything_to_sell_says_so(cog, eco):
+    nothing = It(C)
+    asyncio.run(cog.open_sell(nothing))
+    assert "出せるものがありません" in nothing.sent[-1]["embed"].title
+
+
+def time_now():
+    import time
+
+    return time.time()
 
 
 def test_bid_through_the_modal_and_settlement_announces_the_winner(cog, eco, monkeypatch):
