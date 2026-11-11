@@ -42,9 +42,9 @@ def fatigue_gain(glove: int) -> float:
     return FATIGUE_GAIN - GAIN_CUT_PER_LEVEL * clamp_level(glove)
 
 
-def fatigue_now(fatigue: float, since: float, now: float) -> float:
-    """最後に疲労を更新してから時間がたった、いまの疲労。"""
-    return max(0.0, min(FATIGUE_MAX, fatigue - max(0.0, now - since) * RECOVER_PER_SEC))
+def fatigue_now(fatigue: float, since: float, now: float, recovery: float = 0.0) -> float:
+    """最後に疲労を更新してから時間がたった、いまの疲労。recovery は、回復の速さの上がり幅（発掘品の効果。0.01 で +1%）。"""
+    return max(0.0, min(FATIGUE_MAX, fatigue - max(0.0, now - since) * RECOVER_PER_SEC * (1 + recovery)))
 
 
 def pay_rate(fatigue: float) -> float:
@@ -236,7 +236,16 @@ def idle_hours(since: float, now: float) -> float:
 
 
 def settle_plan(
-    workers: list, wage: str, renew: bool, idle_at: float, now: float, pot: int, balance: int, rng=None
+    workers: list,
+    wage: str,
+    renew: bool,
+    idle_at: float,
+    now: float,
+    pot: int,
+    balance: int,
+    rng=None,
+    wage_bonus: float = 0.0,
+    luck_bonus: float = 0.0,
 ) -> dict:
     """作業員の稼ぎと契約の決算（DB に触らない）。workers は [{id, kind, expires_at}]。
 
@@ -261,7 +270,7 @@ def settle_plan(
         return c
 
     avail_pot = pot + int(
-        idle_rate(counts_of(active), wage) * hours
+        idle_rate(counts_of(active), wage) * (1 + wage_bonus) * hours
     )  # 契約が続く人の基本給が入った、貯まった稼ぎ（鉱石は、決算の前は数えない）
     pot_spent = balance_spent = 0
     renewed, removed = [], []
@@ -278,8 +287,8 @@ def settle_plan(
         removed.append(w["id"])
     renewed_ids = {i for i, _ in renewed}
     staying = active + [w for w in expired if w["id"] in renewed_ids]
-    gain = idle_rate(counts_of(staying), wage) * hours
-    luck = foreman_luck(counts_of(staying)["foreman"])
+    gain = idle_rate(counts_of(staying), wage) * (1 + wage_bonus) * hours
+    luck = foreman_luck(counts_of(staying)["foreman"]) + luck_bonus  # 発掘品（隕石の欠片）の効果が、出やすさに足される
     ores: dict = {}
     relics: dict = {}  # 作業員が見つけた発掘品 {ショップの品のID: 個数}
     finds: list = []  # 掘り出しの履歴 [(時刻, 作業員の種類, 鉱石か発掘品のID, 個数)]。抽選は1時間ごとなので、時刻は、その時間枠の終わりにそろえる
@@ -303,7 +312,7 @@ def settle_plan(
     for w in expired:  # 退職する人は、切れるまでの分だけ働く
         if w["id"] in removed:
             worked = max(0.0, min(now, w["expires_at"]) - start) / 3600.0
-            gain += WORKER_RATE[w["kind"]] * WAGE_MULT.get(wage, 1.0) * worked
+            gain += WORKER_RATE[w["kind"]] * WAGE_MULT.get(wage, 1.0) * (1 + wage_bonus) * worked
             dig(w["kind"], worked, start)
     quit_ids = []
     if wage == "low" and hours > 0:

@@ -492,6 +492,7 @@ class Economy(
                     "UPDATE profile SET daily_boost = daily_boost - 1 WHERE guild_id=? AND user_id=?",
                     (self._g(), user_id),
                 )
+            amount = round(amount * (1 + self._relic_buffs(user_id).get("daily", 0.0)))  # 発掘品（王家の黄金冠）の効果
             debt_before = self._debt(user_id)
             skimmed = teiai.skim(amount) if debt_before > 0 else 0  # 借金中は、帝愛がピンハネ（借金の元本は減らない）
             if skimmed:

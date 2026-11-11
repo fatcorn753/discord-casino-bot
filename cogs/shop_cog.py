@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from core import approval, logthrottle, nick, shop, teiai, ui
+from core import approval, logthrottle, nick, relics, shop, teiai, ui
 from core.confirm import confirm_action
 
 CONFIRM_FROM = 10_000  # この金額以上の購入は、確認ボタンを挟む
@@ -1024,7 +1024,8 @@ class ShopCog(commands.Cog):
             return await interaction.response.send_message(
                 embed=ui.ok_embed(
                     "発掘品です",
-                    f"**{it.name}** は、持っているだけで飾りになります（使う品ではありません）。`/取引 出品` で、売れます。",
+                    f"**{it.name}** は、使う品ではありません。{relics.buff_text(it.id)}（出品している間は、効きません）。\n"
+                    "`/取引 出品` で、売れます。",
                 ),
                 ephemeral=True,
             )

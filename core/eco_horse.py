@@ -534,6 +534,9 @@ class HorseMixin:
                 prize = horse_mod.PRIZES[place - 1] if place <= len(horse_mod.PRIZES) else 0
                 if e["owner_id"]:
                     if prize:
+                        prize = round(
+                            prize * (1 + self._relic_buffs(e["owner_id"]).get("prize", 0.0))
+                        )  # 発掘品（竜の涙）の効果
                         self._apply(e["owner_id"], prize, f"競馬賞金:{e['name']}（{place}着）", income=prize)
                         prizes[e["owner_id"]] = prizes.get(e["owner_id"], 0) + prize
                     self._conn.execute(

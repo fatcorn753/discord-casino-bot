@@ -9,6 +9,7 @@ import time
 from typing import Optional
 
 from core import labor as labor_mod
+from core import relics as relics_mod
 from core import shop as shop_mod
 from core import teiai
 
@@ -23,12 +24,24 @@ class LaborMixin:
         row = dict(
             self._conn.execute("SELECT * FROM labor WHERE guild_id=? AND user_id=?", (self._g(), user_id)).fetchone()
         )
-        row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now)
+        buffs = self._relic_buffs(user_id)
+        row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now, buffs.get("recovery", 0.0))
         row["fatigue_at"] = now
         if row["day"] != day:
             row["day"], row["day_earned"] = day, 0
         self._idle_settle(user_id, row, now, rng)
         return row
+
+    def _relic_buffs(self, user_id: int) -> dict:
+        """持っている発掘品の効果 {効果の名前: 上がり幅}（出品中の品は持ち物にないので、効かない）。"""
+        held = [
+            r["item_id"]
+            for r in self._conn.execute(
+                "SELECT item_id FROM inventory WHERE guild_id=? AND user_id=? AND qty>0 AND item_id LIKE 'relic_%'",
+                (self._g(), user_id),
+            )
+        ]
+        return relics_mod.buffs_of(held)
 
     @staticmethod
     def _counts(row: dict) -> dict:
@@ -108,6 +121,8 @@ class LaborMixin:
                 row["pot"],
                 bal["balance"] if bal else 0,
                 rng,
+                wage_bonus=self._relic_buffs(user_id).get("wage", 0.0),
+                luck_bonus=self._relic_buffs(user_id).get("luck", 0.0),
             )
             if plan["balance_spent"] > 0:
                 self._apply(user_id, -plan["balance_spent"], "地下作業:契約の更新")
@@ -226,7 +241,8 @@ class LaborMixin:
                     "donated": 0,
                 }
             )
-            row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now)
+            buffs = self._relic_buffs(user_id)
+            row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now, buffs.get("recovery", 0.0))
             if row["day"] != day:
                 row["day_earned"] = 0
             bal = self._conn.execute(
@@ -243,6 +259,8 @@ class LaborMixin:
                 row["pot"],
                 row["balance"],
                 _NoQuit,
+                wage_bonus=buffs.get("wage", 0.0),
+                luck_bonus=buffs.get("luck", 0.0),
             )
             gone = set(plan["removed"])
             renewed = dict(plan["renewed"])
@@ -302,7 +320,7 @@ class LaborMixin:
             if now - row["last_click"] < labor_mod.CLICK_INTERVAL:
                 return {"ok": False, "reason": "押すのが早すぎます。", "quiet": True}
             out = labor_mod.click_outcome(row["pick"], row["glove"], row["fatigue"])
-            pay = out["pay"]
+            pay = max(1, relics_mod.chance_round(out["pay"] * (1 + self._relic_buffs(user_id).get("click", 0.0))))
             row["last_click_before"] = row["last_click"]
             row.update(
                 fatigue=out["fatigue"],

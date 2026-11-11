@@ -4,7 +4,7 @@ import dataclasses
 from dataclasses import dataclass
 from typing import Optional
 
-from core import labor
+from core import labor, relics
 
 TITLE, CARD_COLOR, CARD_ICON, CONSUMABLE, COLOR_ROLE = "title", "card_color", "card_icon", "consumable", "color_role"
 RACING = "racing"  # 競馬の品（購入券・にんじん）。買うと持ち物に増え、`/競馬 厩舎` で使う（枚数が増える品なので、消耗品と同じ扱い）
@@ -253,7 +253,8 @@ CATALOG += [
         RELIC,
         0,
         mark,
-        desc="作業員が、まれに見つける、コレクション用の発掘品。持っているだけで飾りになり、`/取引` で売り買いできる",
+        desc="作業員が、まれに見つける、コレクション用の発掘品。`/取引` で売り買いできる。"
+        + relics.buff_text(labor.RELIC_ID[rid]),
         limited=True,
         mark=mark,
     )
