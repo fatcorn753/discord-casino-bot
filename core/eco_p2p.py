@@ -197,6 +197,14 @@ class P2PMixin:
             ).fetchone()
             return dict(r) if r else None
 
+    def p2p_set_post(self, listing_id: int, channel_id: int, message_id: int) -> None:
+        """告知を投稿したチャンネルとメッセージを覚える（入札・売れたときに、書き換えるため）。"""
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE market_listings SET channel_id=?, message_id=? WHERE id=? AND guild_id=?",
+                (channel_id, message_id, listing_id, self._g()),
+            )
+
     def p2p_buy(self, buyer_id: int, listing_id: int, now: Optional[float] = None) -> tuple:
         """定価の出品を買う。(成功か, 理由か支払った額)。"""
         now = time.time() if now is None else now
@@ -311,8 +319,22 @@ class P2PMixin:
     # ---------------------------------------------------------------- #
     # 一覧                                                              #
     # ---------------------------------------------------------------- #
-    def p2p_active(self, kind: Optional[str] = None, now: Optional[float] = None, limit: int = 25) -> list:
-        """出ている出品（締切の近い順）。"""
+    P2P_ORDERS = {
+        "end": "end_at, id",  # 締切が近い順
+        "price_asc": "CASE WHEN bid>0 THEN bid ELSE price END, id",  # 安い順（競りは、いまの最高入札）
+        "price_desc": "CASE WHEN bid>0 THEN bid ELSE price END DESC, id",  # 高い順
+        "new": "id DESC",  # 新しい順
+    }
+
+    def p2p_active(
+        self,
+        kind: Optional[str] = None,
+        now: Optional[float] = None,
+        limit: int = 25,
+        mode: Optional[str] = None,
+        order: str = "end",
+    ) -> list:
+        """出ている出品。kind は horse / item、mode は fixed / auction で絞れる。order は P2P_ORDERS のどれか（既定は締切の近い順）。"""
         now = time.time() if now is None else now
         with self._lock:
             sql = "SELECT * FROM market_listings WHERE guild_id=? AND status='active' AND end_at>?"
@@ -320,7 +342,20 @@ class P2PMixin:
             if kind:
                 sql += " AND kind=?"
                 args.append(kind)
-            return [dict(r) for r in self._conn.execute(sql + " ORDER BY end_at, id LIMIT ?", (*args, limit))]
+            if mode:
+                sql += " AND mode=?"
+                args.append(mode)
+            ordering = self.P2P_ORDERS.get(order, self.P2P_ORDERS["end"])
+            return [dict(r) for r in self._conn.execute(sql + f" ORDER BY {ordering} LIMIT ?", (*args, limit))]
+
+    def p2p_count(self, now: Optional[float] = None) -> int:
+        """出ている出品の数（画面のタブに出す）。"""
+        now = time.time() if now is None else now
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND status='active' AND end_at>?",
+                (self._g(), now),
+            ).fetchone()[0]
 
     def p2p_mine(self, user_id: int, now: Optional[float] = None) -> dict:
         """自分の出品（出している）と、自分が最高入札者の競り。"""

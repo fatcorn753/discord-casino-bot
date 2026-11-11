@@ -395,7 +395,8 @@ def test_auction_screen_shows_player_listings_with_sell_and_mine_buttons(shop_co
     view = _auction_view(shop_cog_obj, B)
     labels = [getattr(c, "label", "") for c in view.children]
     assert "📤 出品する" in labels and "📋 自分の取引" in labels and "🛍️ ショップ" in labels
-    assert any(isinstance(c, p2p_cog.discord.ui.Select) and c.placeholder.startswith("🤝") for c in view.children)
+    assert view.auction_tab == "players"  # 出品があるので、最初に、プレイヤーの出品のタブが開く
+    assert any(isinstance(c, p2p_cog.discord.ui.Select) and "見る出品を選ぶ" in c.placeholder for c in view.children)
     text = "\n".join(f.value for f in view.embed().fields)
     assert "にんじん" in text and f"#{lid}" in text  # 競売の画面に、プレイヤーの出品が並ぶ
     assert all(c.row <= 4 for c in view.children)  # 画面の段に収まっている
@@ -481,3 +482,162 @@ def test_the_most_valuable_relic_still_fits_under_the_pair_cap(eco):
     top = max(shop.RELIC_VALUE, key=shop.RELIC_VALUE.get)
     lo, hi = p2p.price_range("item", top, 1)
     assert hi <= p2p.PAIR_DAILY_LIMIT and lo < shop.RELIC_VALUE[top] <= hi
+
+
+# ----------------------------- 競売の画面（タブ・絞り込み・並び順） ----------------------------- #
+def test_auction_screen_opens_on_the_shelf_when_no_player_listings_and_tabs_switch(shop_cog_obj, eco):
+    view = _auction_view(shop_cog_obj, B)
+    assert view.auction_tab == "teiai"  # 出品がなければ、帝愛の棚
+    labels = [getattr(c, "label", "") for c in view.children]
+    assert any(label.startswith("🤝 プレイヤーの出品（0）") for label in labels)
+    give(eco, S, CARROT)
+    eco.p2p_list(S, "item", CARROT, 1, "fixed", 1_000, None, time_now())
+    again = _auction_view(shop_cog_obj, B)
+    assert again.auction_tab == "players"
+    labels = [getattr(c, "label", "") for c in again.children]
+    assert any(label.startswith("🤝 プレイヤーの出品（1）") for label in labels)
+    tab_it = _PickIt(B, "")
+    asyncio.run(again._make_auction_tab("teiai")(tab_it))
+    assert again.auction_tab == "teiai" and "帝愛の棚" in again.embed().title
+    assert all(c.row <= 4 for c in again.children)
+
+
+def test_player_tab_filters_sorts_and_shows_two_line_entries(shop_cog_obj, eco):
+    import time
+
+    now = time.time()
+    give(eco, S, CARROT, 2)
+    give(eco, S, shop.INSURANCE)
+    hid = horse(eco, S)
+    _, cheap = eco.p2p_list(S, "item", CARROT, 1, "fixed", 1_000, None, now)
+    _, pricey = eco.p2p_list(S, "item", shop.INSURANCE, 1, "auction", 3_000, 6, now + 1)
+    _, mount = eco.p2p_list(S, "horse", str(hid), 1, "fixed", 40_000, None, now + 2)
+    view = _auction_view(shop_cog_obj, B)
+    text = view.embed().fields[0].value
+    assert (
+        f"#{cheap}" in text and f"#{pricey}" in text and f"#{mount}" in text and "出品 <@1>" in text and "締切" in text
+    )
+    assert text.index(f"#{pricey}") < text.index(f"#{cheap}")  # 締切が近い順（競りの6時間が、定価の7日より先）
+    horse_only = _PickIt(B, "")
+    asyncio.run(view._make_p2p_filter("horse")(horse_only))
+    assert f"#{mount}" in view.embed().fields[0].value and f"#{cheap}" not in view.embed().fields[0].value
+    asyncio.run(view._make_p2p_filter("auction")(_PickIt(B, "")))
+    only_auction = view.embed().fields[0].value
+    assert f"#{pricey}" in only_auction and f"#{cheap}" not in only_auction
+    asyncio.run(view._make_p2p_filter("all")(_PickIt(B, "")))
+    asyncio.run(view._on_p2p_order(_PickIt(B, "price_desc")))
+    ordered = view.embed().fields[0].value
+    assert ordered.index(f"#{mount}") < ordered.index(f"#{pricey}") < ordered.index(f"#{cheap}")  # 高い順
+    asyncio.run(view._on_p2p_order(_PickIt(B, "new")))
+    newest = view.embed().fields[0].value
+    assert newest.index(f"#{mount}") < newest.index(f"#{pricey}") < newest.index(f"#{cheap}")
+
+
+def test_empty_player_tab_invites_the_first_seller(shop_cog_obj, eco):
+    view = _auction_view(shop_cog_obj, B)
+    asyncio.run(view._make_auction_tab("players")(_PickIt(B, "")))
+    assert "最初の出品者" in view.embed().fields[0].value
+    assert not any(isinstance(c, p2p_cog.discord.ui.Select) and "見る出品" in c.placeholder for c in view.children)
+
+
+# ----------------------------- 出品の告知（チャンネルへの投稿） ----------------------------- #
+class PostChan:
+    id = 77
+
+    def __init__(self):
+        self.sent, self.edits = [], []
+
+    async def send(self, **kw):
+        self.sent.append(kw)
+        return SimpleNamespace(id=500 + len(self.sent))
+
+    def get_partial_message(self, mid):
+        chan = self
+
+        class Partial:
+            async def edit(self, **kw):
+                chan.edits.append((mid, kw))
+
+        return Partial()
+
+
+def _guild(chan):
+    return SimpleNamespace(id=G, get_channel=lambda cid: chan if cid == chan.id else None, me=object())
+
+
+def test_listing_is_announced_in_the_channel_and_the_post_follows_bids_and_the_sale(cog, eco, monkeypatch):
+    chan = PostChan()
+    monkeypatch.setattr(p2p_cog, "announce_channel", lambda g, e: chan)
+    guild = _guild(chan)
+    give(eco, S, CARROT, 2)
+    _, lid = eco.p2p_list(S, "item", CARROT, 2, "auction", 1_000, 6, NOW)
+    assert asyncio.run(cog.announce(guild, lid)) is True
+    post = chan.sent[0]
+    assert "出品" in post["embed"].title and "にんじん" in post["embed"].title
+    assert post["view"].children[0].custom_id == f"p2p:open:{lid}"  # 「見る・買う・入札」のボタン
+    row = eco.p2p_get(lid)
+    assert row["channel_id"] == chan.id and row["message_id"] == 501
+    eco.p2p_bid(B, lid, 1_200, NOW + 10)
+    asyncio.run(cog.refresh_post(guild, lid))
+    mid, kw = chan.edits[-1]
+    assert (
+        mid == 501
+        and "入札あり" not in kw["embed"].title
+        and "1,200" in kw["embed"].description + kw["embed"].title + "".join(f.value for f in kw["embed"].fields)
+    )
+    assert "view" not in kw  # 出ている間は、ボタンを残す
+    eco.p2p_settle(NOW + 7 * 3600)
+    asyncio.run(cog.refresh_post(guild, lid))
+    mid, kw = chan.edits[-1]
+    assert "売れました" in kw["embed"].title and kw["view"] is None  # 売れたら、結果に書き換わり、ボタンが外れる
+
+
+def test_cancelled_and_expired_posts_are_rewritten_and_missing_channels_are_ignored(cog, eco, monkeypatch):
+    chan = PostChan()
+    monkeypatch.setattr(p2p_cog, "announce_channel", lambda g, e: chan)
+    guild = _guild(chan)
+    give(eco, S, CARROT, 2)
+    _, a = eco.p2p_list(S, "item", CARROT, 1, "fixed", 1_000, None, NOW)
+    asyncio.run(cog.announce(guild, a))
+    eco.p2p_cancel(S, a, NOW + 1)
+    asyncio.run(cog.refresh_post(guild, a))
+    assert "取り消されました" in chan.edits[-1][1]["embed"].title
+    _, b = eco.p2p_list(S, "item", CARROT, 1, "auction", 1_000, 1, NOW)
+    asyncio.run(cog.announce(guild, b))
+    eco.p2p_settle(NOW + 3_601)
+    asyncio.run(cog.refresh_post(guild, b))
+    assert "売れ残り" in chan.edits[-1][1]["embed"].title
+    assert asyncio.run(cog.announce(None, b)) is False  # サーバーがなければ、何もしない
+    monkeypatch.setattr(p2p_cog, "announce_channel", lambda g, e: None)
+    assert asyncio.run(cog.announce(guild, b)) is False  # 告知チャンネルがなければ、投稿しない（出品は、そのまま）
+    asyncio.run(cog.refresh_post(None, b))  # 投稿を覚えていなくても、落ちない
+
+
+def test_selling_through_the_modal_posts_the_announcement(cog, eco, monkeypatch):
+    chan = PostChan()
+    monkeypatch.setattr(p2p_cog, "announce_channel", lambda g, e: chan)
+    give(eco, S, CARROT, 2)
+    view = p2p_cog.SellView(cog, S, G)
+    view.target = f"item:{CARROT}"
+    modal = p2p_cog.SellModal(view, "fixed")
+    modal.price._value = "1500"
+    modal.qty._value = "1"
+    done = It(S)
+    done.guild = _guild(chan)
+    asyncio.run(modal.on_submit(done))
+    assert chan.sent and "告知チャンネルに" in done.sent[-1]["embed"].description
+    assert eco.p2p_active(None)[0]["message_id"] == 501
+
+
+def test_the_announce_button_opens_the_detail_for_anyone(cog, eco):
+    give(eco, S, CARROT)
+    _, lid = eco.p2p_list(S, "item", CARROT, 1, "fixed", 1_000, None, time_now())
+    button = p2p_cog.ListingButton(lid)
+    it = It(B)
+    it.client = SimpleNamespace(get_cog=lambda name: cog)
+    asyncio.run(button.callback(it))
+    assert "にんじん" in it.sent[-1]["embed"].title and it.sent[-1]["view"].children
+    gone = It(B)
+    gone.client = SimpleNamespace(get_cog=lambda name: None)
+    asyncio.run(button.callback(gone))
+    assert "いまは使えません" in gone.sent[-1]["embed"].title

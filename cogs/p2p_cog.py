@@ -7,6 +7,8 @@
 - コマンドはない（競売の画面に一本化した）。このファイルは、画面の部品・買う／入札の処理・締切の精算を持つ。
 """
 
+import re
+
 import discord
 from discord.ext import commands, tasks
 
@@ -34,6 +36,18 @@ def price_text(r: dict) -> str:
 
 def line_of(eco, r: dict) -> str:
     return f"`#{r['id']}` {eco.p2p_label(r)}　{price_text(r)}　{'締切' if r['mode'] == 'auction' else '期限'} {when(r['end_at'])}"
+
+
+def entry_text(eco, r: dict) -> str:
+    """一覧の1件（2行）。何を・いくらで・どの方式で・誰が・いつまでか。競りは、入札の有無も。"""
+    if r["mode"] == "fixed":
+        how = f"💴 定価 **{ui.pelica(r['price'])}**"
+    elif r["bid"]:
+        how = f"🔨 競り 現在 **{ui.pelica(r['bid'])}**（入札あり）"
+    else:
+        how = f"🔨 競り 開始 **{ui.pelica(r['price'])}**（入札なし）"
+    left = "締切" if r["mode"] == "auction" else "期限"
+    return f"`#{r['id']}` **{eco.p2p_label(r)}**　{how}\n　└ 出品 <@{r['seller_id']}>　{left} {when(r['end_at'])}"
 
 
 def detail_embed(eco, r: dict) -> discord.Embed:
@@ -64,6 +78,59 @@ def detail_embed(eco, r: dict) -> discord.Embed:
             lines += ["", item.desc]
     lines.append(f"\n売れると、売り手の受け取りから {p2p.FEE_RATE:.0%} を引きます。")
     return ui.embed(f"🤝 {eco.p2p_label(r)}", "\n".join(lines), ui.INFO)
+
+
+ENDED_TEXT = {
+    "sold": ("✅ 売れました", "{label} は、<@{buyer}> が **{price}** で買いました。"),
+    "expired": ("⌛ 終了（売れ残り）", "{label} は、買い手がつかず、終了しました。"),
+    "cancelled": ("🚫 取り消されました", "{label} の出品は、取り消されました。"),
+}
+
+
+def post_embed(eco, r: dict) -> discord.Embed:
+    """告知の投稿。出ている間は、値段・締切・最高入札。終わったら、結果（売れた値段など）に書き換わる。"""
+    label = eco.p2p_label(r)
+    if r["status"] != "active":
+        title, text = ENDED_TEXT.get(r["status"], ENDED_TEXT["expired"])
+        sold = r["status"] == "sold"
+        body = text.format(label=label, buyer=r["buyer_id"], price=ui.pelica(r["sold_price"]))
+        return ui.embed(f"{title}: {label}", body, ui.OK if sold else ui.INFO)
+    e = detail_embed(eco, r)
+    e.title = f"📣 出品: {label}"
+    e.description = (
+        e.description or ""
+    ) + "\n\n下の「🔍 見る・買う・入札」で、買えます（`/ショップ` → 「🕴️ 帝愛の競売」からも）。"
+    return e
+
+
+class ListingButton(discord.ui.DynamicItem[discord.ui.Button], template=r"p2p:open:(?P<id>\d+)"):
+    """告知の投稿の「見る・買う・入札」。再起動しても動くよう、出品の番号を custom_id に入れる。"""
+
+    def __init__(self, listing_id: int):
+        super().__init__(
+            discord.ui.Button(
+                label="🔍 見る・買う・入札", style=discord.ButtonStyle.success, custom_id=f"p2p:open:{listing_id}"
+            )
+        )
+        self.listing_id = listing_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match):
+        return cls(int(match["id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("P2PCog")
+        if cog is None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("いまは使えません", "しばらくしてから、もう一度試してください。"), ephemeral=True
+            )
+        await cog.open_detail(interaction, self.listing_id)
+
+
+def listing_view(listing_id: int) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(ListingButton(listing_id))
+    return view
 
 
 class BidModal(discord.ui.Modal):
@@ -156,11 +223,13 @@ class SellModal(discord.ui.Modal):
             )
         row = eco.p2p_get(result)
         self.view.stop()
+        posted = await self.view.cog.announce(getattr(interaction, "guild", None), result)  # 告知チャンネルに投稿する
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "出品しました",
                 f"{line_of(eco, row)}\n売れる（落札される）と、{p2p.FEE_RATE:.0%} の手数料を引いた額が入ります。"
-                "取り消しは、競売の画面の「📋 自分の取引」から。",
+                "取り消しは、競売の画面の「📋 自分の取引」から。"
+                + ("\n📣 告知チャンネルに、出品を投稿しました。" if posted else ""),
             ),
             ephemeral=True,
         )
@@ -261,6 +330,7 @@ class MineView(discord.ui.View):
         if not ok:
             return await interaction.response.send_message(embed=ui.error_embed("取り消せません", why), ephemeral=True)
         self.stop()
+        await self.cog.refresh_post(getattr(interaction, "guild", None), int(interaction.data["values"][0]))
         await interaction.response.send_message(
             embed=ui.ok_embed("取り消しました", "出品を取り消して、品・馬を戻しました。"), ephemeral=True
         )
@@ -271,6 +341,7 @@ class P2PCog(commands.Cog):
         self.bot = bot
 
     async def cog_load(self):
+        self.bot.add_dynamic_items(ListingButton)
         self.tick.start()
 
     def cog_unload(self):
@@ -278,6 +349,43 @@ class P2PCog(commands.Cog):
 
     def eco_of(self, interaction: discord.Interaction):
         return self.bot.economy.for_guild(interaction.guild_id)
+
+    # ------------------------------ 出品の告知（チャンネルへの投稿） ------------------------------ #
+    async def announce(self, guild, listing_id: int) -> bool:
+        """出品を、告知チャンネルに投稿する（投稿を覚えて、入札・売れたときに書き換える）。投稿できたら True。失敗しても、出品には影響しない。"""
+        if guild is None:
+            return False
+        eco = self.bot.economy.for_guild(guild.id)
+        row = eco.p2p_get(listing_id)
+        channel = announce_channel(guild, eco) if row else None
+        if channel is None:
+            return False
+        try:
+            msg = await channel.send(embed=post_embed(eco, row), view=listing_view(listing_id), allowed_mentions=NONE)
+        except discord.HTTPException as exc:
+            logthrottle.warn(("p2p-announce", guild.id), f"出品の告知に失敗: guild={guild.id}: {exc!r}")
+            return False
+        eco.p2p_set_post(listing_id, channel.id, msg.id)
+        return True
+
+    async def refresh_post(self, guild, listing_id: int) -> None:
+        """告知の投稿を、いまの状態（最高入札・売れた・取り消し・終了）に書き換える。終わったら、ボタンを外す。"""
+        if guild is None:
+            return
+        eco = self.bot.economy.for_guild(guild.id)
+        row = eco.p2p_get(listing_id)
+        if row is None or not row["message_id"]:
+            return
+        channel = guild.get_channel(row["channel_id"])
+        if channel is None:
+            return
+        try:
+            kwargs = {"embed": post_embed(eco, row)}
+            if row["status"] != "active":
+                kwargs["view"] = None
+            await channel.get_partial_message(row["message_id"]).edit(**kwargs)
+        except discord.HTTPException as exc:  # 消されていても、取引には関係ない
+            logthrottle.warn(("p2p-refresh", guild.id), f"出品の告知を書き換えられません: guild={guild.id}: {exc!r}")
 
     # ------------------------------ 買う・入札 ------------------------------ #
     async def do_buy(self, interaction: discord.Interaction, listing_id: int) -> None:
@@ -315,6 +423,7 @@ class P2PCog(commands.Cog):
                 ),
                 ephemeral=True,
             )
+            await self.refresh_post(getattr(interaction, "guild", None), listing_id)  # 告知を「売れました」に
         finally:
             self.bot.sessions.end(uid)
 
@@ -353,6 +462,7 @@ class P2PCog(commands.Cog):
                 ),
                 ephemeral=True,
             )
+            await self.refresh_post(getattr(interaction, "guild", None), listing_id)  # 告知の最高入札・締切を更新
         finally:
             self.bot.sessions.end(uid)
 
@@ -406,6 +516,8 @@ class P2PCog(commands.Cog):
     async def _settle_guild(self, guild: discord.Guild) -> None:
         eco = self.bot.economy.for_guild(guild.id)
         results = eco.p2p_settle()
+        for row, _res in results:
+            await self.refresh_post(guild, row["id"])  # 告知を、売れた・終了に書き換える
         channel = (
             announce_channel(guild, eco)
             if any(res == "sold" and r["mode"] == "auction" for r, res in results)

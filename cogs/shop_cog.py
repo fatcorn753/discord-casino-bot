@@ -10,11 +10,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from core import approval, logthrottle, nick, relics, shop, teiai, ui
+from core import approval, logthrottle, nick, p2p, relics, shop, teiai, ui
 from core.confirm import confirm_action
 
 CONFIRM_FROM = 10_000  # この金額以上の購入は、確認ボタンを挟む
 MAX_QTY = 10
+SHOWN = 25  # 競売の画面で、選択肢に出すプレイヤーの出品の数（Discord の選択肢の上限）
 STATUS_NICK_MINUTES = 2  # 身分のニックネームを付け外しする確認の間隔
 STATUS_NICK_PER_GUILD = 200  # 1回の確認で、1サーバーあたり扱う人数の上限（API を使いすぎない）
 
@@ -231,6 +232,8 @@ class ShopView(discord.ui.View):
             1,
         )
         self.picked = None  # 選んだ景品 (種類, 値)。「🛒 購入」を押すまで、買わない。種類は shop / auction / horse
+        self.auction_tab = None  # 競売の画面のタブ（players / teiai）。None は、開いたときに決める
+        self.p2p_filter, self.p2p_order = "all", "end"  # プレイヤーの出品の、絞り込みと並び順
         self._build()
 
     # ---- 見た目 ---- #
@@ -238,7 +241,13 @@ class ShopView(discord.ui.View):
         if self.screen == "inv":
             return self.cog._inventory_embed(self.guild_id, self.user_id)
         if self.screen == "auction":
-            return self.cog._auction_embed(self.guild_id, self.user_id)
+            return self.cog._auction_embed(
+                self.guild_id,
+                self.user_id,
+                tab=self.auction_tab or self._default_auction_tab(),
+                p2p_filter=self.p2p_filter,
+                p2p_order=self.p2p_order,
+            )
         return self.cog._catalog_embed(self.guild_id, self.user_id, self.tab)
 
     def _build(self) -> None:
@@ -352,13 +361,124 @@ class ShopView(discord.ui.View):
 
         return callback
 
-    def _build_auction(self) -> None:
+    # ---- 帝愛の競売の画面（タブ: プレイヤーの出品 / 帝愛の棚） ---- #
+    P2P_FILTERS = {  # 絞り込み: 名前 → (種類, 方式)
+        "all": ("すべて", None, None),
+        "horse": ("🐴 馬", "horse", None),
+        "item": ("📦 品物", "item", None),
+        "auction": ("🔨 競りだけ", None, "auction"),
+    }
+    P2P_ORDERS = {"end": "締切が近い順", "price_asc": "安い順", "price_desc": "高い順", "new": "新しい順"}
+
+    def _default_auction_tab(self) -> str:
+        """競売の画面を開いたときのタブ。プレイヤーの出品があれば、そちら。なければ、帝愛の棚。"""
         eco = self.cog.bot.economy.for_guild(self.guild_id)
+        return "players" if self._p2p() is not None and eco.p2p_count() else "teiai"
+
+    def _build_auction(self) -> None:
+        if self.auction_tab is None:
+            self.auction_tab = self._default_auction_tab()
+        eco = self.cog.bot.economy.for_guild(self.guild_id)
+        p2p_cog = self._p2p()
+        # 上の段: タブ（いまのタブは青）と、出品・自分の取引・ショップへもどる
+        if p2p_cog is not None:
+            for tab, label in (
+                ("players", f"🤝 プレイヤーの出品（{eco.p2p_count()}）"),
+                ("teiai", f"🕴️ 帝愛の棚（{len(eco.auction_list()) + len(eco.auction_horses())}）"),
+            ):
+                btn = discord.ui.Button(
+                    label=label,
+                    style=discord.ButtonStyle.primary if tab == self.auction_tab else discord.ButtonStyle.secondary,
+                    row=0,
+                )
+                btn.callback = self._make_auction_tab(tab)
+                self.add_item(btn)
+            sell = discord.ui.Button(label="📤 出品する", style=discord.ButtonStyle.success, row=0)
+            sell.callback = self._on_sell
+            self.add_item(sell)
+            mine = discord.ui.Button(label="📋 自分の取引", style=discord.ButtonStyle.secondary, row=0)
+            mine.callback = self._on_mine
+            self.add_item(mine)
+        else:
+            self.auction_tab = "teiai"
+        back = discord.ui.Button(label="🛍️ ショップ", style=discord.ButtonStyle.secondary, row=0)
+        back.callback = self._to_shop
+        self.add_item(back)
+        if self.auction_tab == "players":
+            self._build_auction_players(eco)
+        else:
+            self._build_auction_teiai(eco)
+
+    def _make_auction_tab(self, tab: str):
+        async def callback(interaction: discord.Interaction):
+            self.auction_tab, self.picked = tab, None
+            await self._redraw(interaction)
+
+        return callback
+
+    def _p2p_rows(self, eco) -> list:
+        _label, kind, mode = self.P2P_FILTERS[self.p2p_filter]
+        return eco.p2p_active(kind, limit=SHOWN, mode=mode, order=self.p2p_order)
+
+    def _build_auction_players(self, eco) -> None:
+        """プレイヤーの出品のタブ: 絞り込み・並べ替え・出品の選択肢。"""
+        for key, (label, _kind, _mode) in self.P2P_FILTERS.items():
+            btn = discord.ui.Button(
+                label=label,
+                style=discord.ButtonStyle.primary if key == self.p2p_filter else discord.ButtonStyle.secondary,
+                row=1,
+            )
+            btn.callback = self._make_p2p_filter(key)
+            self.add_item(btn)
+        order = discord.ui.Select(
+            placeholder=f"並び順: {self.P2P_ORDERS[self.p2p_order]}",
+            row=2,
+            options=[
+                discord.SelectOption(label=name, value=key, default=key == self.p2p_order)
+                for key, name in self.P2P_ORDERS.items()
+            ],
+        )
+        order.callback = self._on_p2p_order
+        self.add_item(order)
+        rows = self._p2p_rows(eco)
+        if rows:
+            pick = discord.ui.Select(
+                placeholder="見る出品を選ぶ（選ぶと、買う・入札できる）",
+                row=3,
+                options=[
+                    discord.SelectOption(
+                        label=eco.p2p_label(r)[:100],
+                        value=str(r["id"]),
+                        description=(
+                            f"定価 {r['price']:,}ペリカ"
+                            if r["mode"] == "fixed"
+                            else f"競り {(r['bid'] or r['price']):,}ペリカ" + ("（入札あり）" if r["bid"] else "")
+                        ),
+                    )
+                    for r in rows
+                ],
+            )
+            pick.callback = self._on_player
+            self.add_item(pick)
+
+    def _make_p2p_filter(self, key: str):
+        async def callback(interaction: discord.Interaction):
+            self.p2p_filter = key
+            await self._redraw(interaction)
+
+        return callback
+
+    async def _on_p2p_order(self, interaction: discord.Interaction):
+        self.p2p_order = interaction.data["values"][0]
+        await self._redraw(interaction)
+
+    def _build_auction_teiai(self, eco) -> None:
+        """帝愛の棚のタブ（破産で差し押さえた品・馬。値段は日ごとに下がる）。"""
         listed = eco.auction_list()
         if listed:
             buy = discord.ui.Select(
                 placeholder="買う品を選ぶ",
-                row=0,
+                row=1,
                 options=[
                     discord.SelectOption(
                         label=shop.label(shop.BY_ID[e["item_id"]])[:100],
@@ -374,7 +494,7 @@ class ShopView(discord.ui.View):
             if any(not shop.BY_ID[e["item_id"]].unique for e in listed):
                 qty = discord.ui.Select(
                     placeholder=f"消耗品の個数（いま {self.qty} 個）",
-                    row=1,
+                    row=2,
                     options=[
                         discord.SelectOption(label=f"{n}個", value=str(n), default=n == self.qty)
                         for n in range(1, MAX_QTY + 1)
@@ -386,7 +506,7 @@ class ShopView(discord.ui.View):
         if horses:
             pick = discord.ui.Select(
                 placeholder="競走馬を買う",
-                row=2,
+                row=3,
                 options=[
                     discord.SelectOption(
                         label=f"{h['name']}（{h['coat']}）"[:100],
@@ -402,40 +522,8 @@ class ShopView(discord.ui.View):
             )
             pick.callback = self._on_buy_horse
             self.add_item(pick)
-        p2p_cog = self._p2p()
-        if p2p_cog is not None:  # プレイヤーの出品（定価・競り）も、この画面に出る
-            players = eco.p2p_active(None, limit=25)
-            if players:
-                pick = discord.ui.Select(
-                    placeholder="🤝 プレイヤーの出品を見る（選ぶと、買う・入札できる）",
-                    row=3,
-                    options=[
-                        discord.SelectOption(
-                            label=eco.p2p_label(r)[:100],
-                            value=str(r["id"]),
-                            description=(
-                                f"定価 {r['price']:,}ペリカ"
-                                if r["mode"] == "fixed"
-                                else f"競り {(r['bid'] or r['price']):,}ペリカ"
-                            ),
-                        )
-                        for r in players
-                    ],
-                )
-                pick.callback = self._on_player
-                self.add_item(pick)
         if listed or horses:
             self._add_buy_button()
-        back = discord.ui.Button(label="🛍️ ショップ", style=discord.ButtonStyle.primary, row=4)
-        back.callback = self._to_shop
-        self.add_item(back)
-        if p2p_cog is not None:
-            sell = discord.ui.Button(label="📤 出品する", style=discord.ButtonStyle.secondary, row=4)
-            sell.callback = self._on_sell
-            self.add_item(sell)
-            mine = discord.ui.Button(label="📋 自分の取引", style=discord.ButtonStyle.secondary, row=4)
-            mine.callback = self._on_mine
-            self.add_item(mine)
 
     def _build_inventory(self) -> None:
         eco = self.cog.bot.economy.for_guild(self.guild_id)
@@ -519,7 +607,7 @@ class ShopView(discord.ui.View):
             await self.cog.buy_item(interaction, value, self.qty if self.tab in ("item", "horse") else 1)
 
     async def _to_auction(self, interaction: discord.Interaction):
-        self.screen, self.qty, self.picked = "auction", 1, None
+        self.screen, self.qty, self.picked, self.auction_tab = "auction", 1, None, None  # タブは、開くたびに決め直す
         await self._redraw(interaction)
 
     async def _to_inventory(self, interaction: discord.Interaction):
@@ -741,53 +829,73 @@ class ShopCog(commands.Cog):
         e.set_footer(text=f"あなたの残高: {ui.pelica(balance)}")
         return e
 
-    def _auction_embed(self, guild_id: int, user_id: int) -> discord.Embed:
-        """帝愛の競売の棚（破産で差し押さえた品。値段は日ごとに下がる）。"""
+    def _auction_embed(
+        self, guild_id: int, user_id: int, tab: str = "teiai", p2p_filter: str = "all", p2p_order: str = "end"
+    ) -> discord.Embed:
+        """帝愛の競売の画面。tab は、プレイヤーの出品（players）か、帝愛の棚（teiai。破産で差し押さえた品。値段は日ごとに下がる）。"""
         eco = self.bot.economy.for_guild(guild_id)
+        me = eco.peek_stats(user_id)
+        footer = f"あなたの残高: {ui.pelica(me['balance'] if me else 0)}"
+        if tab == "players":
+            from cogs.p2p_cog import entry_text
+
+            label, kind, mode = ShopView.P2P_FILTERS[p2p_filter]
+            rows = eco.p2p_active(kind, limit=SHOWN, mode=mode, order=p2p_order)
+            e = ui.embed(
+                "🤝 帝愛の競売 — プレイヤーの出品",
+                "プレイヤーが出した品・馬です。下の選択肢で出品を選ぶと、**買う**（定価）・**入札する**（競り）ができます。"
+                f"自分の品・馬は「📤 出品する」で出せます（売れると{p2p.FEE_RATE:.0%}の手数料）。\n"
+                f"絞り込み: **{label}**　並び順: **{ShopView.P2P_ORDERS[p2p_order]}**　（{len(rows)}件）",
+                ui.GOLD,
+            )
+            if rows:
+                shown = rows[:8]
+                e.add_field(
+                    name="出品（上から8件。残りは、下の選択肢に出ます）" if len(rows) > 8 else "出品",
+                    value="\n".join(entry_text(eco, r) for r in shown)[:1024],
+                    inline=False,
+                )
+            else:
+                e.add_field(
+                    name="出品",
+                    value="いまは、出ている品・馬はありません。「📤 出品する」で、最初の出品者になれます。",
+                    inline=False,
+                )
+            e.set_footer(text=footer)
+            return e
         listed = eco.auction_list()
-        players = eco.p2p_active(None, limit=10)
         e = ui.embed(
-            "🕴️ 帝愛の競売",
+            "🕴️ 帝愛の競売 — 帝愛の棚",
             "破産で差し押さえた品を、帝愛が売りに出します。**買えるのはカタギだけ**。"
             f"値段は定価の{teiai.AUCTION_START:.0%}から、1日ごとに{teiai.AUCTION_STEP:.0%}ずつ下がり、{teiai.AUCTION_FLOOR:.0%}で止まります。\n"
-            "売上は、帝愛銀行の収入（預金者の利回り）になります。\n"
-            "**プレイヤーも、ここに品・馬を出せます**（「📤 出品する」。定価か競り。売れると5%の手数料）。",
+            "売上は、帝愛銀行の収入（預金者の利回り）になります。",
             ui.GOLD,
         )
-        if not listed and not eco.auction_horses():
-            if not players:
-                e.add_field(name="棚", value="いまは、売りに出ている品はありません。", inline=False)
-        else:
-            e.add_field(
-                name="棚",
-                value="\n".join(
-                    f"{shop.label(shop.BY_ID[x['item_id']])} — **{ui.pelica(x['price'])}**（定価の{x['rate']:.0%}）"
-                    + (f" ×{x['qty']}" if not shop.BY_ID[x["item_id"]].unique else "")
-                    for x in listed
-                )[:1024],
-                inline=False,
-            )
         horses = eco.auction_horses()
-        if horses:
-            e.add_field(
-                name="🐴 競走馬（名前とステータスは、そのまま引き継ぎます）",
-                value="\n".join(
-                    f"{h['silks']} **{h['name']}**（{h['coat']}）— **{ui.pelica(h['price'])}**（定価の{h['rate']:.0%}）"
-                    f"　速{h['speed']} ス{h['stamina']} パ{h['power']} 根{h['guts']}　{h['races']}戦{h['wins']}勝"
-                    for h in horses
-                )[:1024],
-                inline=False,
-            )
-        if players:
-            from cogs.p2p_cog import line_of
-
-            e.add_field(
-                name="🤝 プレイヤーの出品（下の選択肢で、見る・買う・入札する）",
-                value="\n".join(line_of(eco, r) for r in players)[:1024],
-                inline=False,
-            )
-        me = eco.peek_stats(user_id)
-        e.set_footer(text=f"あなたの残高: {ui.pelica(me['balance'] if me else 0)}")
+        if not listed and not horses:
+            e.add_field(name="棚", value="いまは、売りに出ている品はありません。", inline=False)
+        else:
+            if listed:
+                e.add_field(
+                    name="棚",
+                    value="\n".join(
+                        f"{shop.label(shop.BY_ID[x['item_id']])} — **{ui.pelica(x['price'])}**（定価の{x['rate']:.0%}）"
+                        + (f" ×{x['qty']}" if not shop.BY_ID[x["item_id"]].unique else "")
+                        for x in listed
+                    )[:1024],
+                    inline=False,
+                )
+            if horses:
+                e.add_field(
+                    name="🐴 競走馬（名前とステータスは、そのまま引き継ぎます）",
+                    value="\n".join(
+                        f"{h['silks']} **{h['name']}**（{h['coat']}）— **{ui.pelica(h['price'])}**（定価の{h['rate']:.0%}）"
+                        f"　速{h['speed']} ス{h['stamina']} パ{h['power']} 根{h['guts']}　{h['races']}戦{h['wins']}勝"
+                        for h in horses
+                    )[:1024],
+                    inline=False,
+                )
+        e.set_footer(text=footer)
         return e
 
     async def buy_auction_horse(self, interaction: discord.Interaction, horse_id: int):
