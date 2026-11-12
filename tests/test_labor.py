@@ -22,12 +22,16 @@ def text(embed) -> str:
 
 
 _REAL_ROLL = lab.roll_ores
+_REAL_RELICS = lab.roll_relics
 
 
 @pytest.fixture(autouse=True)
 def no_ores(monkeypatch):
     """ふつうのテストは、鉱石を掘らない（稼ぎを一定にする）。鉱石のテストは、_REAL_ROLL を戻して使う。"""
     monkeypatch.setattr(lab, "roll_ores", lambda *a, **k: {})
+    monkeypatch.setattr(
+        lab, "roll_relics", lambda *a, **k: {}
+    )  # 発掘品も、掘らない（まれに出て、テストがぶれるのを防ぐ）
     for kind, rate in (("apprentice", 1.0), ("miner", 3.75), ("craftsman", 8.25)):
         monkeypatch.setitem(
             lab.WORKER_RATE, kind, rate
@@ -807,11 +811,11 @@ def test_contract_is_one_day_and_the_ore_numbers_scale_to_one_day(monkeypatch):
 def test_ordinary_workers_find_relics_by_chance_and_the_foreman_does_not_dig():
     rng = random.Random(4)
     assert "archaeologist" not in lab.WORKERS  # 専用の作業員は、いない
-    assert lab.roll_relics("foreman", 5000, 0.0, rng) == {}  # 監督は、探さない
+    assert _REAL_RELICS("foreman", 5000, 0.0, rng) == {}  # 監督は、探さない
     for kind in ("apprentice", "miner", "craftsman"):
-        found = lab.roll_relics(kind, 20000, 0.0, rng)
+        found = _REAL_RELICS(kind, 20000, 0.0, rng)
         assert found and all(i in {r[0] for r in lab.RELICS} for i in found), kind
-    total = {k: sum(lab.roll_relics(k, 60000, 0.0, rng).values()) for k in ("apprentice", "miner", "craftsman")}
+    total = {k: sum(_REAL_RELICS(k, 60000, 0.0, rng).values()) for k in ("apprentice", "miner", "craftsman")}
     assert total["apprentice"] < total["miner"] < total["craftsman"]  # 上位の作業員ほど、見つけやすい
     per_hour = sum(r[3] for r in lab.RELICS) * lab.RELIC_POWER["craftsman"]
     assert 0.004 < per_hour < 0.01  # 職人1人で、1週間に1つほど
@@ -828,8 +832,8 @@ def test_relic_table_is_ordered_by_rarity_and_values_fit_the_pair_cap():
 
 def test_foreman_luck_raises_relic_chances_too():
     rng = random.Random(8)
-    plain = sum(sum(lab.roll_relics("craftsman", 1, 0.0, rng).values()) for _ in range(200000))
-    lucky = sum(sum(lab.roll_relics("craftsman", 1, 1.0, rng).values()) for _ in range(200000))
+    plain = sum(sum(_REAL_RELICS("craftsman", 1, 0.0, rng).values()) for _ in range(200000))
+    lucky = sum(sum(_REAL_RELICS("craftsman", 1, 1.0, rng).values()) for _ in range(200000))
     assert lucky > plain * 1.5
 
 
