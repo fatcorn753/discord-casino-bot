@@ -376,16 +376,22 @@ class P2PCog(commands.Cog):
         row = eco.p2p_get(listing_id)
         if row is None or not row["message_id"]:
             return
+        ended = row["status"] != "active"
         channel = guild.get_channel(row["channel_id"])
-        if channel is None:
-            return
-        try:
-            kwargs = {"embed": post_embed(eco, row)}
-            if row["status"] != "active":
-                kwargs["view"] = None
-            await channel.get_partial_message(row["message_id"]).edit(**kwargs)
-        except discord.HTTPException as exc:  # 消されていても、取引には関係ない
-            logthrottle.warn(("p2p-refresh", guild.id), f"出品の告知を書き換えられません: guild={guild.id}: {exc!r}")
+        if channel is not None:
+            try:
+                kwargs = {"embed": post_embed(eco, row)}
+                if ended:
+                    kwargs["view"] = None
+                await channel.get_partial_message(row["message_id"]).edit(**kwargs)
+            except discord.HTTPException as exc:  # 消されていても、取引には関係ない
+                logthrottle.warn(
+                    ("p2p-refresh", guild.id), f"出品の告知を書き換えられません: guild={guild.id}: {exc!r}"
+                )
+        if ended:
+            eco.p2p_mark_post_done(
+                listing_id
+            )  # 終わった出品は、書き換えを1回で済ませる（チャンネルや投稿がなくても、くり返さない）
 
     # ------------------------------ 買う・入札 ------------------------------ #
     async def do_buy(self, interaction: discord.Interaction, listing_id: int) -> None:
@@ -518,6 +524,8 @@ class P2PCog(commands.Cog):
         results = eco.p2p_settle()
         for row, _res in results:
             await self.refresh_post(guild, row["id"])  # 告知を、売れた・終了に書き換える
+        for row in eco.p2p_unsynced_posts():  # 取引停止（破産猶予・破産）などで、取り下げられた出品の告知も、書き換える
+            await self.refresh_post(guild, row["id"])
         channel = (
             announce_channel(guild, eco)
             if any(res == "sold" and r["mode"] == "auction" for r, res in results)

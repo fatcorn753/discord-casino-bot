@@ -11,6 +11,10 @@ from core import horse as horse_mod
 from core import p2p, teiai
 from core import shop as shop_mod
 
+GRACE_LOCK_TEXT = (
+    "破産猶予中は、取引（出品・買う・入札）ができません（破産の前に、資産を移して、借金を踏み倒すのを防ぐためです）。"
+)
+
 
 class P2PMixin:
     # ---------------------------------------------------------------- #
@@ -92,6 +96,8 @@ class P2PMixin:
             return False, f"競りの長さは、{'・'.join(map(str, p2p.AUCTION_HOURS))} 時間から選んでください。"
         with self._lock, self._conn:
             self._ensure(user_id)
+            if self.grace_until(user_id) is not None:
+                return False, GRACE_LOCK_TEXT
             active = self._conn.execute(
                 "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active'",
                 (self._g(), user_id),
@@ -210,6 +216,8 @@ class P2PMixin:
         now = time.time() if now is None else now
         with self._lock, self._conn:
             self._ensure(buyer_id)
+            if self.grace_until(buyer_id) is not None:
+                return False, GRACE_LOCK_TEXT
             row = self.p2p_get(listing_id)
             if row is None or row["status"] != "active" or row["end_at"] <= now:
                 return False, "その出品は、もうありません。"
@@ -226,6 +234,8 @@ class P2PMixin:
         now = time.time() if now is None else now
         with self._lock, self._conn:
             self._ensure(bidder_id)
+            if self.grace_until(bidder_id) is not None:
+                return False, GRACE_LOCK_TEXT
             row = self.p2p_get(listing_id)
             if row is None or row["status"] != "active" or row["end_at"] <= now:
                 return False, "その出品は、もうありません。"
@@ -266,6 +276,65 @@ class P2PMixin:
             self._p2p_give(user_id, row)
             self._p2p_close(listing_id, "cancelled", now)
             return True, ""
+
+    # ---------------------------------------------------------------- #
+    # 破産猶予・破産のとき: 出品の取り下げと、入札の取り消し                  #
+    # ---------------------------------------------------------------- #
+    def p2p_pull_back(self, user_id: int, now: Optional[float] = None) -> dict:
+        """その人の出品を、すべて取り下げて品・馬を持ち物へ戻し、最高入札者になっている競りの入札は、お金を返して取り消す。
+
+        破産猶予に入った人・破産する人が、預け先（出品・入札の預かり）に資産を隠して、借金を踏み倒すのを防ぐ。
+        入札が入っている自分の出品も、強制的に取り下げる（入札者には、お金が返る）。呼び出し側のトランザクションの中で使う。
+        {取り下げた出品の数, 取り消した入札の数} を返す。
+        """
+        now = time.time() if now is None else now
+        pulled = {"listings": 0, "bids": 0}
+        for row in [
+            dict(r)
+            for r in self._conn.execute(
+                "SELECT * FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active'",
+                (self._g(), user_id),
+            )
+        ]:
+            label = self.p2p_label(row)
+            if row["bidder_id"]:  # 最高入札者に、預かっていたお金を返す
+                self._ensure(row["bidder_id"])
+                self._apply(row["bidder_id"], row["bid"], f"取引:入札の返金（{label}・出品者の取引停止）")
+                self._note(
+                    row["bidder_id"],
+                    f"⚠️ **{label}** の出品者が取引できなくなったため、競りは中止され、入札 {row['bid']:,}ペリカ は返りました。",
+                )
+            self._p2p_give(user_id, row)
+            self._p2p_close(row["id"], "cancelled", now)
+            pulled["listings"] += 1
+        for row in [
+            dict(r)
+            for r in self._conn.execute(
+                "SELECT * FROM market_listings WHERE guild_id=? AND bidder_id=? AND status='active'",
+                (self._g(), user_id),
+            )
+        ]:
+            self._apply(user_id, row["bid"], f"取引:入札の返金（{self.p2p_label(row)}・取引停止）")
+            self._conn.execute("UPDATE market_listings SET bid=0, bidder_id=0 WHERE id=?", (row["id"],))
+            pulled["bids"] += 1
+        return pulled
+
+    def p2p_unsynced_posts(self) -> list:
+        """終わった（売れた・取り消し・終了）のに、告知の投稿を、まだ書き換えていない出品。"""
+        with self._lock:
+            return [
+                dict(r)
+                for r in self._conn.execute(
+                    "SELECT * FROM market_listings WHERE guild_id=? AND status!='active' AND message_id>0 AND post_done=0",
+                    (self._g(),),
+                )
+            ]
+
+    def p2p_mark_post_done(self, listing_id: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE market_listings SET post_done=1 WHERE id=? AND guild_id=?", (listing_id, self._g())
+            )
 
     # ---------------------------------------------------------------- #
     # 締切の精算                                                        #

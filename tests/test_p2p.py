@@ -7,7 +7,7 @@ import pytest
 
 from cogs import p2p_cog
 from core import horse as horse_mod
-from core import p2p, shop
+from core import p2p, shop, teiai
 from core.economy import Economy
 from core.session import Sessions
 
@@ -641,3 +641,95 @@ def test_the_announce_button_opens_the_detail_for_anyone(cog, eco):
     gone.client = SimpleNamespace(get_cog=lambda name: None)
     asyncio.run(button.callback(gone))
     assert "いまは使えません" in gone.sent[-1]["embed"].title
+
+
+# ----------------------------- 破産猶予・破産中の取引の遮断（#25） ----------------------------- #
+def _into_grace(eco, uid):
+    """uid を、破産猶予に入る借金の額にする。"""
+    eco.balance(uid)
+    with eco._lock, eco._conn:
+        eco._conn.execute("UPDATE users SET balance=0 WHERE guild_id=? AND user_id=?", (eco._g(), uid))
+        eco._owe(uid, teiai.GRACE_DEBT + 5_000, "テスト")
+    assert eco.grace_until(uid) is not None
+
+
+def test_a_user_in_grace_cannot_list_buy_or_bid(eco):
+    from core import eco_p2p
+
+    give(eco, S, CARROT, 2)
+    _, fixed = eco.p2p_list(S, "item", CARROT, 1, "fixed", 1_000, None, NOW)
+    _, auction = eco.p2p_list(S, "item", CARROT, 1, "auction", 1_000, 6, NOW)
+    _into_grace(eco, B)
+    give(eco, B, CARROT)
+    ok, why = eco.p2p_list(B, "item", CARROT, 1, "fixed", 1_000, None, NOW)
+    assert not ok and why == eco_p2p.GRACE_LOCK_TEXT and eco.inventory(B)[CARROT] == 1  # 出品できない（品は、動かない）
+    ok, why = eco.p2p_buy(B, fixed, NOW + 1)
+    assert not ok and why == eco_p2p.GRACE_LOCK_TEXT
+    ok, why = eco.p2p_bid(B, auction, 1_000, NOW + 1)
+    assert not ok and why == eco_p2p.GRACE_LOCK_TEXT and eco.p2p_get(auction)["bid"] == 0
+
+
+def test_entering_grace_pulls_back_the_listings_and_refunds_the_top_bidder(eco):
+    give(eco, B, CARROT, 2)
+    horse_id = horse(eco, B)
+    _, fixed = eco.p2p_list(B, "item", CARROT, 1, "fixed", 1_000, None, NOW)
+    _, auction = eco.p2p_list(B, "item", CARROT, 1, "auction", 1_000, 6, NOW)
+    _, mount = eco.p2p_list(B, "horse", str(horse_id), 1, "fixed", 40_000, None, NOW)
+    assert eco.inventory(B).get(CARROT, 0) == 0 and eco.horse_list(B) == []  # 預かり中
+    c0 = eco.balance(C)
+    assert eco.p2p_bid(C, auction, 1_200, NOW + 5)[0] and eco.balance(C) == c0 - 1_200
+    _into_grace(eco, B)
+    assert eco.inventory(B)[CARROT] == 2 and [h["id"] for h in eco.horse_list(B)] == [horse_id]  # 持ち物へ戻った
+    assert all(eco.p2p_get(i)["status"] == "cancelled" for i in (fixed, auction, mount))
+    assert eco.balance(C) == c0  # 入札のお金は、返る
+    assert any("中止" in n for n in eco.take_notices(C))
+    assert not eco.p2p_cancel(B, fixed, NOW + 10)[0]  # もう取り消せるものはない
+
+
+def test_entering_grace_cancels_the_bids_the_user_holds_and_returns_the_escrowed_cash(eco):
+    give(eco, S, CARROT)
+    _, auction = eco.p2p_list(S, "item", CARROT, 1, "auction", 1_000, 6, NOW)
+    b0 = eco.balance(B)
+    assert eco.p2p_bid(B, auction, 3_000, NOW + 5)[0] and eco.balance(B) == b0 - 3_000
+    _into_grace(eco, B)
+    listing = eco.p2p_get(auction)
+    assert (
+        listing["status"] == "active" and listing["bid"] == 0 and listing["bidder_id"] == 0
+    )  # 入札だけが、取り消された
+    # 預けていたお金が現金に戻っているので、差し押さえの対象になる（隠せない）
+    assert eco.balance(B) >= 0 and eco.debt(B) > 0
+
+
+def test_bankruptcy_pulls_back_listings_so_they_are_seized_not_hidden(eco):
+    give(eco, B, CARROT, 3)
+    eco.p2p_list(B, "item", CARROT, 3, "fixed", 1_500, None, NOW)
+    with eco._lock, eco._conn:
+        eco._conn.execute(
+            "UPDATE users SET debt=2000 WHERE guild_id=? AND user_id=?", (eco._g(), B)
+        )  # 猶予の手前の借金
+    assert eco.grace_until(B) is None and eco.inventory(B).get(CARROT, 0) == 0
+    ok, result = eco.bankrupt(B)
+    assert ok
+    assert not eco.p2p_active(None, NOW + 1)  # 出品は、なくなった
+    assert any(r["status"] == "cancelled" for r in eco._conn.execute("SELECT status FROM market_listings"))
+    assert eco.inventory(B).get(CARROT, 0) == 0  # 持ち物に戻ったあと、差し押さえられた
+    assert result["shop_value"] == int(
+        3 * shop.BY_ID[CARROT].price * teiai.SEIZE_RATE
+    )  # 隠していた3個ぶんも、差し押さえの額に入っている
+
+
+def test_ended_posts_are_synced_once_even_when_the_listing_was_pulled_back_elsewhere(cog, eco, monkeypatch):
+    chan = PostChan()
+    monkeypatch.setattr(p2p_cog, "announce_channel", lambda g, e: chan)
+    guild = _guild(chan)
+    give(eco, B, CARROT)
+    _, lid = eco.p2p_list(B, "item", CARROT, 1, "fixed", 1_000, None, NOW)
+    asyncio.run(cog.announce(guild, lid))
+    _into_grace(eco, B)  # 取り下げられる（告知の書き換えは、まだ）
+    assert [r["id"] for r in eco.p2p_unsynced_posts()] == [lid]
+    asyncio.run(cog._settle_guild(guild))  # 定期の確認で、告知が「取り消されました」に書き換わる
+    assert "取り消されました" in chan.edits[-1][1]["embed"].title and chan.edits[-1][1]["view"] is None
+    assert eco.p2p_unsynced_posts() == []
+    n = len(chan.edits)
+    asyncio.run(cog._settle_guild(guild))
+    assert len(chan.edits) == n  # 二度目は、書き換えない

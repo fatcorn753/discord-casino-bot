@@ -262,6 +262,7 @@ class BankMixin:
             self._conn.execute(
                 "UPDATE users SET grace_until=? WHERE guild_id=? AND user_id=?", (until, self._g(), user_id)
             )
+            self.p2p_pull_back(user_id, now)  # 取引の出品・入札は、取り下げる（資産隠しの防止）
             self._note(
                 user_id,
                 f"⚠️ 借金が {teiai.GRACE_DEBT:,}ペリカ に達し、**破産猶予**に入りました。<t:{int(until)}:R> までに借金を {teiai.GRACE_DEBT:,}ペリカ 未満へ戻せなければ、強制破産です。",

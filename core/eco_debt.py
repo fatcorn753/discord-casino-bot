@@ -438,6 +438,7 @@ class DebtMixin:
             if self._debt(user_id) <= 0 and not loans:
                 return False, "借金も貸付の借り入れもないので、破産できません。"
             debt_before = self._debt(user_id)
+            self.p2p_pull_back(user_id)  # 取引の出品・入札を取り下げて、品・馬・入札のお金を、差し押さえの対象に戻す
             in_grace = self.grace_until(user_id) is not None  # 猶予に入ってからの破産は、客観的なクレジットイベント
             pool = self._liquidate_everything(user_id)
             shop_value = self._seize_shop(user_id)

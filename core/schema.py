@@ -246,7 +246,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
             sold_price INTEGER NOT NULL DEFAULT 0,
             closed_at  REAL,
             channel_id INTEGER NOT NULL DEFAULT 0,     -- 告知を投稿したチャンネル（0 は、投稿していない）
-            message_id INTEGER NOT NULL DEFAULT 0      -- 告知の投稿（入札・売れたときに書き換える）
+            message_id INTEGER NOT NULL DEFAULT 0,     -- 告知の投稿（入札・売れたときに書き換える）
+            post_done  INTEGER NOT NULL DEFAULT 0      -- 終わった出品の、告知の書き換えが済んでいるか（1 = 済み）
         );
         CREATE INDEX IF NOT EXISTS market_listings_active ON market_listings (guild_id, status, end_at);
         CREATE TABLE IF NOT EXISTS seized_items (
@@ -657,7 +658,7 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     if "relics" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
         conn.execute("ALTER TABLE labor ADD COLUMN relics TEXT NOT NULL DEFAULT ''")
     ml = {r["name"] for r in conn.execute("PRAGMA table_info(market_listings)")}
-    for col in ("channel_id", "message_id"):
+    for col in ("channel_id", "message_id", "post_done"):
         if col not in ml:
             conn.execute(f"ALTER TABLE market_listings ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
     _refund_archaeologists(conn)  # 専用の「発掘員」は、なくなった（ふつうの作業員が、発掘品を見つける）
