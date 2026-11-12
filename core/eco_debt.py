@@ -395,8 +395,16 @@ class DebtMixin:
         )
         return int(value * teiai.SEIZE_RATE)
 
+    def escape_left(self, user_id: int) -> int:
+        """海外逃亡を、あと何回試せるか。読み取り専用。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT escape_tries FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
+            ).fetchone()
+        return max(0, teiai.ESCAPE_MAX_TRIES - (row["escape_tries"] if row else 0))
+
     def escape_attempt(self, user_id: int, now: Optional[float] = None, rng=None) -> tuple:
-        """海外逃亡。成功すると、全財産を置いて、帝愛の借金が全額ゼロ（破産の扱い）。失敗すると、罰金が借金に加わり、クールダウン。
+        """海外逃亡。成功すると、全財産を置いて、帝愛の借金が全額ゼロ（破産の扱い）。失敗すると、罰金が借金に加わり、クールダウン。通算 ESCAPE_MAX_TRIES 回まで。
 
         (成功か, 理由か結果の辞書) を返す。結果は {"escaped": 成功か, "fine": 罰金, "debt": いまの借金, "bankrupt": 成功時の破産の結果}。
         """
@@ -410,12 +418,17 @@ class DebtMixin:
             if debt < teiai.ESCAPE_MIN_DEBT:
                 return False, f"逃亡を試せるのは、帝愛の借金が {teiai.ESCAPE_MIN_DEBT:,}ペリカ 以上のときだけです。"
             row = self._conn.execute(
-                "SELECT escape_at FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
+                "SELECT escape_at, escape_tries FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
             ).fetchone()
+            if row["escape_tries"] >= teiai.ESCAPE_MAX_TRIES:
+                return False, f"逃亡のチャンスは、通算 {teiai.ESCAPE_MAX_TRIES} 回までです。もう使い切りました。"
             ready = (row["escape_at"] or 0) + teiai.ESCAPE_COOLDOWN_HOURS * 3600
             if now < ready:
                 return False, f"警戒が厳しく、次に試せるのは <t:{int(ready)}:R> です。"
-            self._conn.execute("UPDATE users SET escape_at=? WHERE guild_id=? AND user_id=?", (now, self._g(), user_id))
+            self._conn.execute(
+                "UPDATE users SET escape_at=?, escape_tries=escape_tries+1 WHERE guild_id=? AND user_id=?",
+                (now, self._g(), user_id),
+            )
             if rng.random() < teiai.ESCAPE_CHANCE:
                 ok, result = self.bankrupt(user_id, escape=True)
                 if not ok:

@@ -702,6 +702,8 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     for col in ("bankrupt_at", "blacklist_until", "escape_at"):
         if col not in users_cols:
             conn.execute(f"ALTER TABLE users ADD COLUMN {col} REAL")
+    if "escape_tries" not in users_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN escape_tries INTEGER NOT NULL DEFAULT 0")
     for table, col, ddl in (
         ("horse_bets", "picks", "TEXT NOT NULL DEFAULT ''"),
         ("horses", "listed_at", "REAL"),

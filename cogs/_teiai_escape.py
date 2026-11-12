@@ -68,7 +68,8 @@ async def run_escape(interaction: discord.Interaction, eco, after_success) -> No
     ok = await confirm_action(
         interaction,
         "海外逃亡を試しますか？",
-        f"成功率は **{teiai.ESCAPE_CHANCE:.0%}**。\n"
+        f"成功率は **{teiai.ESCAPE_CHANCE:.0%}**。チャンスは通算 **{teiai.ESCAPE_MAX_TRIES}回** までで、失敗も1回に数えます"
+        f"（あと **{eco.escape_left(uid)}回**）。\n"
         "・**成功**: 全財産とショップの全品を**置いていき**、帝愛の借金が**全額ゼロ**になります"
         f"（貸付は免責・貸付は{teiai.BLACKLIST_DAYS}日のブラックリスト）。\n"
         f"・**失敗**: 罰金（借金の**{teiai.ESCAPE_FINE_RATE:.0%}**・最低{teiai.ESCAPE_FINE_MIN:,}ペリカ）が借金に加わり、"

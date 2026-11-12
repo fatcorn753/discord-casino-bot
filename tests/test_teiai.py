@@ -629,12 +629,16 @@ def test_escape_has_a_minimum_fine_and_a_minimum_debt(eco):
     assert not ok and "以上" in reason
 
 
-def test_escape_success_rate_is_about_seven_percent(eco):
-    import random
-
-    rng = random.Random(1)
-    wins = sum(rng.random() < teiai.ESCAPE_CHANCE for _ in range(20_000))
-    assert 0.06 < wins / 20_000 < 0.08 and teiai.ESCAPE_CHANCE == 0.07
+def test_escape_is_one_percent_and_only_two_tries_in_total(eco):
+    assert teiai.ESCAPE_CHANCE == 0.01 and teiai.ESCAPE_MAX_TRIES == 2
+    _in_debt(eco)
+    day = teiai.ESCAPE_COOLDOWN_HOURS * 3600 + 1
+    assert eco.escape_left(U) == 2
+    assert eco.escape_attempt(U, now=NOW_E, rng=_Roll(0.99))[1]["escaped"] is False
+    assert eco.escape_attempt(U, now=NOW_E + day, rng=_Roll(0.99))[1]["escaped"] is False
+    assert eco.escape_left(U) == 0
+    ok, reason = eco.escape_attempt(U, now=NOW_E + 3 * day, rng=_Roll(0.0))
+    assert not ok and "2" in reason  # 3回目は、当たりの目でも試せない
 
 
 def test_escape_is_not_available_to_bankrupts(eco):
