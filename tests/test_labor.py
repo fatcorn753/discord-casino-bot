@@ -937,7 +937,7 @@ def test_donation_total_accumulates_across_collections_and_shows_on_the_screens(
     assert two["donated"] == one["skimmed"] + two["skimmed"]  # 合計が増えていく
     state = eco.labor_state(U, T0 + 300, DAY)
     assert state["donated"] == two["donated"]
-    assert f"{two['donated']:,}" in labor_cog.panel_embed(state).footer.text  # 画面にも、寄付総額が出る
+    assert f"{two['donated_all']:,}" in labor_cog.panel_embed(state).footer.text  # 画面にも、寄付総額が出る
 
 
 def test_collect_message_shows_the_donation_total_instead_of_the_rate(eco, monkeypatch):
@@ -1029,3 +1029,16 @@ def test_tools_go_up_to_level_ten_with_doubling_costs():
     assert lab.fatigue_gain(5) == 1.0 and lab.fatigue_gain(10) == 0.5  # 手袋は Lv6 から緩やかに（0 以下にならない）
     assert all(lab.fatigue_gain(a) > lab.fatigue_gain(a + 1) > 0 for a in range(10) if a + 1 <= 10)
     assert lab.upgrade_cost(5) == 7_000 and lab.upgrade_cost(9) == 112_000 and lab.upgrade_cost(10) is None
+
+
+def test_donation_total_is_the_sum_of_everyone_in_the_server(eco, monkeypatch):
+    monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.10)
+    eco.credit(2, 5_000, "テスト")
+    for uid in (U, 2):
+        for k in range(50):
+            eco.labor_click(uid, T0 + k * 2, DAY)
+    a = eco.labor_collect(U, T0 + 200, DAY, detail=True)
+    b = eco.labor_collect(2, T0 + 201, DAY, detail=True)
+    assert a["donated"] > 0 and b["donated"] > 0
+    assert b["donated_all"] == a["donated"] + b["donated"] == eco.labor_donated_total()
+    assert eco.labor_state(U, T0 + 202, DAY)["donated_all"] == a["donated"] + b["donated"]

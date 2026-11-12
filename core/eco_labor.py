@@ -43,6 +43,13 @@ class LaborMixin:
         }
         return relics_mod.buffs_of(held)
 
+    def labor_donated_total(self) -> int:
+        """このサーバーの全員の、慈善団体への寄付（帝愛のピンハネ）の合計。"""
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COALESCE(SUM(donated), 0) FROM labor WHERE guild_id=?", (self._g(),)
+            ).fetchone()[0]
+
     def relic_stock(self, user_id: int) -> dict:
         """持ち物にある発掘品 {品のID: 個数}（★つきも含む）。"""
         with self._lock:
@@ -318,6 +325,7 @@ class LaborMixin:
             row["drinks"] = inv["qty"] if inv else 0
             row["finds"] = self.labor_finds(user_id)
             row["held_relics"] = self.relic_stock(user_id)
+            row["donated_all"] = self.labor_donated_total()  # このサーバーの全員の寄付の合計
             return row
 
     def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> dict:
@@ -429,7 +437,8 @@ class LaborMixin:
             return {
                 "amount": amount,
                 "skimmed": row["skimmed"],
-                "donated": row["donated"],  # これまでの寄付の合計
+                "donated": row["donated"],  # この人のこれまでの寄付の合計
+                "donated_all": self.labor_donated_total(),  # このサーバーの全員の寄付の合計
                 "ores": ores,
                 "relics": relics,
             }

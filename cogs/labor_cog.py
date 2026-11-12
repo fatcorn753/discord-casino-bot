@@ -99,7 +99,7 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     if state.get("finds"):
         e.add_field(name="📜 最近の掘り出し", value=finds_text(state["finds"]), inline=False)
     e.set_footer(
-        text=f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します（稼ぎの{teiai.LABOR_SKIM_RATE:.0%}は、慈善団体に寄付されます。これまでの寄付総額 {state.get('donated', 0):,}ペリカ）。"
+        text=f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します（稼ぎの{teiai.LABOR_SKIM_RATE:.0%}は、慈善団体に寄付されます）。\n寄付総額：{state.get('donated_all', 0):,}ペリカ　あなた：{state.get('donated', 0):,}ペリカ"
     )
     return e
 
@@ -318,7 +318,7 @@ class LaborView(discord.ui.View):
         amount, found, relics = got["amount"], got["ores"], got["relics"]
         note = f"💰 **{amount:,}** ペリカを、まとめて手元に移しました。" if amount else ""
         if got["skimmed"]:
-            note += f"\n🎗️ ピンハネされた **{got['skimmed']:,}** ペリカは、慈善団体に寄付されます（寄付総額 **{got['donated']:,}** ペリカ）"
+            note += f"\n🎗️ ピンハネされた **{got['skimmed']:,}** ペリカは、慈善団体に寄付されます\n　寄付総額：**{got['donated_all']:,}** ペリカ　あなた：**{got['donated']:,}** ペリカ"
         if found:
             note += f"\n💎 掘り出し: {ore_text(found)}"
         if relics:
