@@ -105,16 +105,14 @@ class GuildMixin:
 
     def status_nick_targets(self) -> list:
         """身分のニックネームを、付ける・外す必要があるかもしれない人（このサーバー）。借金・延滞・破産者の人と、身分だけで付けている人。"""
-        now = time.time()
         with self._lock:
             return [
                 r[0]
                 for r in self._conn.execute(
-                    "SELECT user_id FROM users WHERE guild_id=? AND (debt > 0 OR (bankrupt_at IS NOT NULL AND "
-                    "(blacklist_until IS NULL OR blacklist_until > ?)) OR EXISTS (SELECT 1 FROM loans l WHERE "
+                    "SELECT user_id FROM users WHERE guild_id=? AND (debt > 0 OR EXISTS (SELECT 1 FROM loans l WHERE "
                     "l.guild_id=users.guild_id AND l.borrower_id=users.user_id AND l.status='overdue')) "
                     "UNION SELECT user_id FROM nick_prefs WHERE guild_id=? AND enabled=0",
-                    (self._g(), now, self._g()),
+                    (self._g(), self._g()),
                 )
             ]
 

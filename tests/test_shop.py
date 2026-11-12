@@ -544,6 +544,7 @@ def test_auction_buy_moves_item_pays_bank_and_blocks_non_katagi(eco):
     assert not any(e["item_id"] == shop.STREAK_GUARD for e in eco.auction_list())
     assert eco.bank_status()["cash"] > cash_before  # 売上は帝愛の収入
     # 破産者（カタギでない）は、買えない。持っているものは買えない
+    eco._conn.execute("UPDATE users SET debt=100 WHERE user_id=1")  # 借金のある人（カタギでない）は、買えない
     assert not eco.auction_buy(1, CARD).ok
     assert eco.auction_buy(2, CARD).ok and not eco.auction_buy(2, CARD).ok
 

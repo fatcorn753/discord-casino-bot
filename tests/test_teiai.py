@@ -212,7 +212,8 @@ def test_bankruptcy_seizes_everything_and_pays_the_senior_then_the_junior_credit
     assert eco.balance(A) == INITIAL_BALANCE + 5_000
     assert eco.inventory(U) == {} and eco.get_profile(U, raw=True)["title"] is None  # ショップは全部没収
     assert eco._conn.execute("SELECT status FROM loans WHERE borrower_id=?", (U,)).fetchone()[0] == "repaid"
-    assert eco.status(U) == teiai.BANKRUPT and eco.debt(U) == 0
+    assert eco.status(U) == teiai.KATAGI and eco.debt(U) == 0  # 借金がなければ、身分は破産者でない
+    assert eco.loan_blacklisted(U)  # 貸付のブラックリストは、完済から7日続く
     assert eco.balance(U) == pool - 45_000  # 借金をすべて払って、あまった分は手元に残る
     assert (
         eco._conn.execute("SELECT blacklist_until FROM users WHERE user_id=?", (U,)).fetchone()[0] is not None
@@ -244,21 +245,32 @@ def test_bankruptcy_keeps_the_senior_debt_up_to_the_floor_and_blocks_new_loans(e
         "VALUES (0, ?, ?, 100, 0, 5, 'offer', 0, ?)",
         (A, U, time.time() + DAY),
     )
-    assert "破産者" in eco.loan_accept(1, U, time.time())[1]  # ブラックリストの間は、借りられない
+    assert "ブラックリスト" in eco.loan_accept(1, U, time.time())[1]  # ブラックリストの間は、借りられない
     assert eco.bankrupt(U) == (False, "すでに破産者です。")
 
 
-def test_a_bankrupt_person_returns_to_katagi_seven_days_after_paying_off(eco):
+def test_a_bankrupt_person_returns_to_katagi_when_the_debt_is_paid_but_the_loan_blacklist_lasts_seven_days(eco):
     eco.balance(U)
     eco._conn.execute("UPDATE users SET balance=0, debt=20_000 WHERE user_id=?", (U,))
     eco.bankrupt(U)
+    assert eco.status(U) == teiai.BANKRUPT  # 借金が残っている間は、破産者
     eco.credit(U, 100_000, "付与")
     assert eco.repay_debt(U)[0] and eco.debt(U) == 0
     row = eco._conn.execute("SELECT blacklist_until FROM users WHERE user_id=?", (U,)).fetchone()
     assert row[0] is not None  # 完済から7日が始まる
-    assert eco.status(U) == teiai.BANKRUPT
-    assert eco.status(U, now=time.time() + 6 * DAY) == teiai.BANKRUPT
-    assert eco.status(U, now=time.time() + 8 * DAY) == teiai.KATAGI
+    assert eco.status(U) == teiai.KATAGI  # 身分は、完済ですぐ、カタギに戻る
+    assert eco.loan_blacklisted(U) and eco.loan_blacklisted(
+        U, now=time.time() + 6 * DAY
+    )  # 貸付は、7日たつまで借りられない
+    assert not eco.loan_blacklisted(U, now=time.time() + 8 * DAY)
+
+
+def test_a_bankrupt_person_with_debt_left_is_still_blacklisted_for_loans_however_long_it_takes(eco):
+    eco.balance(U)
+    eco._conn.execute("UPDATE users SET balance=0, debt=500_000 WHERE user_id=?", (U,))
+    eco.bankrupt(U)
+    assert eco.debt(U) > 0 and eco.status(U) == teiai.BANKRUPT
+    assert eco.loan_blacklisted(U, now=time.time() + 365 * DAY)  # 借金が残っている間は、期間なしで続く
 
 
 def test_no_bankruptcy_without_any_debt(eco):
@@ -561,7 +573,9 @@ def test_escape_success_wipes_the_whole_debt_but_takes_everything(eco):
     _in_debt(eco)
     ok, r = eco.escape_attempt(U, now=NOW_E, rng=_Roll(0.0))
     assert ok and r["escaped"] and eco.debt(U) == 0 and eco.balance(U) == 0  # 種銭も貸さない
-    assert eco.status(U) == teiai.BANKRUPT  # 破産者のブラックリスト
+    assert eco.status(U) == teiai.KATAGI and eco.loan_blacklisted(
+        U
+    )  # 借金がゼロなので、身分はカタギ。貸付だけ、ブラックリスト
     assert r["bankrupt"]["compressed"] > teiai.BANKRUPT_FLOOR - 1  # 圧縮ではなく全額ゼロ
 
 
@@ -598,7 +612,7 @@ def test_escape_is_not_available_to_bankrupts(eco):
     _in_debt(eco)
     assert eco.escape_attempt(U, now=NOW_E, rng=_Roll(0.0))[0]
     ok, reason = eco.escape_attempt(U, now=NOW_E + 10 * 86400, rng=_Roll(0.0))
-    assert not ok and "破産者" in reason
+    assert not ok  # 借金がゼロなので、逃亡は試せない（完済していなければ、破産者は逃亡できない）
 
 
 NOW_E = 1_000_000.0

@@ -42,7 +42,10 @@ class DebtMixin:
         )
 
     def status(self, user_id: int, now: Optional[float] = None) -> str:
-        """身分。読み取り専用で、口座は作らない。破産者は、完済して BLACKLIST_DAYS 日たつと、カタギに戻る。"""
+        """身分。読み取り専用で、口座は作らない。破産者は、借金が残っている間だけ（完済すれば、カタギ・地下労働者に戻る）。
+
+        貸付を借りられない期間（ブラックリスト）は、身分とは別で、完済から BLACKLIST_DAYS 日続く（loan_blacklisted）。
+        """
         now = time.time() if now is None else now
         with self._lock:
             row = self._conn.execute(
@@ -51,11 +54,23 @@ class DebtMixin:
             ).fetchone()
             if row is None:
                 return teiai.KATAGI
-            if row["bankrupt_at"] is not None and (row["blacklist_until"] is None or now < row["blacklist_until"]):
+            if row["bankrupt_at"] is not None and row["debt"] > 0:
                 return teiai.BANKRUPT
             if row["debt"] > 0 or self._has_overdue(user_id):
                 return teiai.UNDERGROUND
             return teiai.KATAGI
+
+    def loan_blacklisted(self, user_id: int, now: Optional[float] = None) -> bool:
+        """破産のブラックリストの間か（貸付を借りられない）。破産してから、完済して BLACKLIST_DAYS 日たつまで。身分（破産者）より長い。"""
+        now = time.time() if now is None else now
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT debt, bankrupt_at, blacklist_until FROM users WHERE guild_id=? AND user_id=?",
+                (self._g(), user_id),
+            ).fetchone()
+        if row is None or row["bankrupt_at"] is None:
+            return False
+        return row["debt"] > 0 or row["blacklist_until"] is None or now < row["blacklist_until"]
 
     def _accrue_debt_interest(self, user_id: int, now: Optional[float] = None) -> int:
         """帝愛の利息（トイチ）を、借金に加える。加えた額を返す。呼び出し側のトランザクションの中で使う。
@@ -228,7 +243,7 @@ class DebtMixin:
         with self._lock, self._conn:
             self._ensure(user_id)
             if self.status(user_id) == teiai.BANKRUPT:
-                return False, "破産者は、完済して7日たつまで、帝愛から借りられません。"
+                return False, "破産者は、完済するまで、帝愛から借りられません。"
             if self.grace_until(user_id) is not None:
                 return False, "破産猶予の間は、新しく借りられません。"
             short = teiai.SEED - self._balance(user_id)

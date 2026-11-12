@@ -86,7 +86,7 @@ def test_accept_guards(eco):
     assert eco.loan_accept(lid, B, NOW + loans.OFFER_HOURS * 3600) == (False, "承諾の期限が過ぎました。")
     eco.balance(B)
     eco._conn.execute("UPDATE users SET bankrupt_at=?, blacklist_until=NULL WHERE user_id=?", (NOW, B))
-    assert "破産者" in eco.loan_accept(lid, B, NOW + 1)[1]  # 破産者のブラックリスト中は、借りられない
+    assert "ブラックリスト" in eco.loan_accept(lid, B, NOW + 1)[1]  # 破産者のブラックリスト中は、借りられない
     eco._conn.execute("UPDATE users SET bankrupt_at=NULL WHERE user_id=?", (B,))
     eco._conn.execute("UPDATE users SET balance=10 WHERE user_id=?", (A,))  # 貸す側の残高が減った
     assert "貸す側の残高" in eco.loan_accept(lid, B, NOW + 1)[1]

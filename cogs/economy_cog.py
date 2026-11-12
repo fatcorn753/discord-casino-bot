@@ -244,7 +244,11 @@ class EconomyCog(commands.Cog):
         uid = interaction.user.id
         if eco.status(uid) == teiai.BANKRUPT:
             return await interaction.response.send_message(
-                embed=ui.error_embed("すでに破産者です", "完済して7日たつと、カタギに戻ります。"), ephemeral=True
+                embed=ui.error_embed(
+                    "すでに破産者です",
+                    "借金を完済すると、カタギに戻ります（貸付だけは、完済から7日、借りられません）。",
+                ),
+                ephemeral=True,
             )
         if eco.debt(uid) <= 0 and not eco.loan_list(uid)["borrowed"]:
             return await interaction.response.send_message(

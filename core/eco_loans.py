@@ -10,7 +10,6 @@ import time
 from typing import Optional
 
 from core import loans as loans_mod
-from core import teiai
 
 
 class LoanMixin:
@@ -94,8 +93,8 @@ class LoanMixin:
     # ---- 募集（借りたい人が出す。最初に貸すと言った人が貸し手になる） ---- #
     def _loan_borrow_block(self, user_id: int) -> Optional[str]:
         """いま、この人が貸付を借りられない理由（借りられるなら None）。承諾・募集・貸すときに、同じ条件で確かめる。"""
-        if self.status(user_id) == teiai.BANKRUPT:
-            return "破産者のブラックリストの間は、借りられません（完済して7日たつと解除されます）。"
+        if self.loan_blacklisted(user_id):
+            return "破産のブラックリストの間は、貸付を借りられません（完済して7日たつと解除されます）。"
         late = self._conn.execute(
             "SELECT COUNT(*) FROM loans WHERE guild_id=? AND borrower_id=? AND status='overdue'", (self._g(), user_id)
         ).fetchone()[0]
