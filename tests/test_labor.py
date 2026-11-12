@@ -54,11 +54,11 @@ def click(eco, n, start=T0, step=1.5):
 
 
 def test_pure_numbers():
-    assert lab.pay_per_click(0) == 10 and lab.pay_per_click(5) == 30 and lab.pay_per_click(99) == 30
+    assert lab.pay_per_click(0) == 10 and lab.pay_per_click(5) == 30 and lab.pay_per_click(99) == 50
     assert lab.pay_rate(0) == 1.0 and abs(lab.pay_rate(100) - lab.MIN_PAY_RATE) < 1e-9
     assert lab.fatigue_gain(5) == 1.0
     assert lab.fatigue_now(50, 0, 100) == 40 and lab.fatigue_now(10, 0, 1000) == 0
-    assert lab.upgrade_cost(0) == 150 and lab.upgrade_cost(5) is None
+    assert lab.upgrade_cost(0) == 150 and lab.upgrade_cost(10) is None
     assert lab.click_pay(0, 100) == 2 and lab.click_pay(0, 0) == 10
 
 
@@ -1022,3 +1022,10 @@ def test_merge_select_appears_only_with_ten_and_merges(eco):
     assert eco.relic_stock(U) == {"relic_fossil_s1": 1}
     assert "合体した" in it.response.edits[-1]["embed"].description
 
+
+def test_tools_go_up_to_level_ten_with_doubling_costs():
+    assert lab.MAX_LEVEL == 10 and len(lab.UPGRADE_COST) == 10
+    assert lab.pay_per_click(10) == 50 and lab.pay_per_click(5) == 30  # 伸びは今までと同じ
+    assert lab.fatigue_gain(5) == 1.0 and lab.fatigue_gain(10) == 0.5  # 手袋は Lv6 から緩やかに（0 以下にならない）
+    assert all(lab.fatigue_gain(a) > lab.fatigue_gain(a + 1) > 0 for a in range(10) if a + 1 <= 10)
+    assert lab.upgrade_cost(5) == 7_000 and lab.upgrade_cost(9) == 112_000 and lab.upgrade_cost(10) is None
