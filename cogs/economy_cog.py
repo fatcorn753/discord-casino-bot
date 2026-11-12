@@ -1,6 +1,7 @@
 """/ペリカ — 残高・デイリー・ランキング・送金・履歴。"""
 
 import datetime
+import logging
 import math
 import time
 from typing import Optional
@@ -111,13 +112,24 @@ class RankingView(discord.ui.View):
             return False
         return True
 
-    @discord.ui.button(label="総資産", emoji="🏆", style=discord.ButtonStyle.secondary)
-    async def normal(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await interaction.response.edit_message(embed=self.embed("normal"), view=self)
+    async def _switch(self, interaction: discord.Interaction, mode: str) -> None:
+        # 全員分の資産の計算に時間がかかっても、3秒の期限で「失敗」にならないよう、先に応答してから書き換える
+        await interaction.response.defer()
+        self.normal.style = discord.ButtonStyle.primary if mode == "normal" else discord.ButtonStyle.secondary
+        self.final.style = discord.ButtonStyle.primary if mode == "final" else discord.ButtonStyle.secondary
+        embed = self.embed(mode)
+        await interaction.edit_original_response(embed=embed, view=self)
 
-    @discord.ui.button(label="ファイナル総資産", emoji="💎", style=discord.ButtonStyle.primary)
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item) -> None:
+        logging.getLogger(__name__).exception("ランキングの切り替えに失敗しました: %r", error)
+
+    @discord.ui.button(label="総資産", emoji="🏆", style=discord.ButtonStyle.primary)
+    async def normal(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self._switch(interaction, "normal")
+
+    @discord.ui.button(label="ファイナル総資産", emoji="💎", style=discord.ButtonStyle.secondary)
     async def final(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await interaction.response.edit_message(embed=self.embed("final"), view=self)
+        await self._switch(interaction, "final")
 
     @discord.ui.button(label="自分の内訳", emoji="🧾", style=discord.ButtonStyle.secondary)
     async def mine(self, interaction: discord.Interaction, _button: discord.ui.Button):

@@ -86,3 +86,32 @@ def test_final_ranking_and_breakdown_embeds(eco):
     assert text.index(f"<@{B}>") < text.index(f"<@{A}>")
     d = ranking.build_breakdown_embed(eco, B, "b").description
     assert "発掘品" in d and "ファイナル総資産" in d
+
+
+def test_ranking_view_can_switch_back_and_forth(eco):
+    import asyncio
+    from types import SimpleNamespace
+
+    from cogs.economy_cog import RankingView
+
+    seen = []
+
+    class Resp:
+        async def defer(self):
+            pass
+
+    async def edit(**kw):
+        seen.append(kw["embed"].title)
+
+    it = SimpleNamespace(user=SimpleNamespace(id=A), response=Resp(), edit_original_response=edit)
+    view = RankingView(eco, A)
+
+    async def go():
+        await view.final.callback(it)
+        await view.normal.callback(it)
+
+    asyncio.run(go())
+    import discord
+
+    assert view.normal.style == discord.ButtonStyle.primary and view.final.style == discord.ButtonStyle.secondary
+    assert "ファイナル" in seen[0] and "ファイナル" not in seen[1]
