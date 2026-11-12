@@ -303,7 +303,7 @@ def test_full_race_flow_pays_bettors_and_owners_and_is_settled_once(eco):
 
 def test_bet_rules(eco):
     rid = open_race(eco)
-    eco.credit(V, 100_000, "テスト")
+    eco.credit(V, 300_000, "テスト")
     assert "まだ" in eco.race_bet(V, rid, "win", 1, 100, NOW + 1)[1]  # 締切前（発売前）は買えない
     field_ = eco.race_close_entries(rid, random.Random(2))
     eco.race_set_odds(rid, h.make_odds(field_["runners"]))

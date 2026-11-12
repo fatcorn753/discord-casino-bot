@@ -41,8 +41,8 @@ FORM_MULT = {1: 1.015, 0: 1.0, -1: 0.985}
 TAKEOUT = 0.15  # 控除率（オッズは、公正な倍率の 1 - TAKEOUT 倍）
 ODDS_SIMS = 8000  # estimate（本当の確率を調べる検証用）の、シミュレーション回数
 MAX_ODDS = 99.9
-MIN_STAKE, MAX_STAKE = 100, 10_000  # 1回の賭け金
-MAX_RACE_STAKE = 30_000  # 1人が1レースに賭けられる合計
+MIN_STAKE, MAX_STAKE = 100, 50_000  # 1回の賭け金
+MAX_RACE_STAKE = 150_000  # 1人が1レースに賭けられる合計
 
 ENTRY_FEE = 1_000  # 出走料
 PRIZES = (12_000, 5_000, 2_000)  # 1着・2着・3着の賞金（馬主へ）
