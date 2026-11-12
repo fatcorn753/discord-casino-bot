@@ -360,13 +360,27 @@ class LaborView(discord.ui.View):
 class LaborCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # (サーバー, 人) → 最後に開いた作業場の (チャンネルID, メッセージID)。新しく開いたら、前のを消す（チャンネルが作業場で埋まらないように）
+        self._panels: dict = {}
 
     group = app_commands.Group(name="地下", description="⛏ ペリカが尽きたときの、地下の仕事", guild_only=True)
 
     @group.command(name="作業", description="ボタンを押して稼ぐ（元手は0）。稼いだら、作業員を雇って放置でも稼ぐ")
     async def work(self, interaction: discord.Interaction):
         view = LaborView(self.bot, interaction.user.id, interaction.guild_id)
+        key = (interaction.guild_id, interaction.user.id)
+        old = self._panels.pop(key, None)
         await interaction.response.send_message(embed=panel_embed(view.state), view=view)
+        if old:
+            try:
+                await self.bot.get_partial_messageable(old[0]).get_partial_message(old[1]).delete()
+            except discord.HTTPException:
+                pass  # すでに消えている・消せない: そのまま
+        try:
+            msg = await interaction.original_response()
+            self._panels[key] = (msg.channel.id, msg.id)
+        except discord.HTTPException:
+            pass
 
     @group.command(name="ランキング", description="⛏ 採掘ランキング（稼いだペリカの多い順）")
     @app_commands.rename(period="期間")

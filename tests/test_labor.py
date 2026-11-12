@@ -963,3 +963,38 @@ def test_the_wage_setting_is_gone_and_workers_do_not_quit(eco):
     plan = lab.settle_plan([worker(1, "miner", T0 + W)], True, T0, T0 + 10 * H, 0, 0, random.Random(1))
     assert "quit" not in plan
     assert eco.labor_state(U, T0 + 10 * H, DAY)["workers"] == 3  # 契約の間は、必ず残る
+
+
+def test_opening_the_workplace_again_deletes_the_previous_panel(eco):
+    deleted, n = [], iter(range(100, 200))
+
+    class Partial:
+        def __init__(self, cid):
+            self.cid = cid
+
+        def get_partial_message(self, mid):
+            return SimpleNamespace(delete=lambda: self._del(mid))
+
+        async def _del(self, mid):
+            deleted.append((self.cid, mid))
+
+    class It:
+        guild_id, user = 0, SimpleNamespace(id=U)
+
+        def __init__(self):
+            self.response = SimpleNamespace(send_message=self._send)
+            self.mid = next(n)
+
+        async def _send(self, **kw):
+            pass
+
+        async def original_response(self):
+            return SimpleNamespace(channel=SimpleNamespace(id=7), id=self.mid)
+
+    bot = SimpleNamespace(economy=SimpleNamespace(for_guild=lambda g: eco), config={}, get_partial_messageable=Partial)
+    cog = labor_cog.LaborCog(bot)
+    first, second = It(), It()
+    asyncio.run(cog.work.callback(cog, first))
+    assert deleted == []
+    asyncio.run(cog.work.callback(cog, second))
+    assert deleted == [(7, first.mid)]  # 前に開いた作業場だけが消える
