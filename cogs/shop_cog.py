@@ -654,12 +654,15 @@ class ShopCog(commands.Cog):
         return item.name if item else None
 
     def _nick_tag(self, guild_id: int, user_id: int):
-        """ニックネームの末尾に付ける名前。カタギでなければ身分（装備は差し押さえ中）、カタギで称号の表示を選んでいれば装備中の称号。"""
+        """ニックネームの末尾に付ける名前。カタギでなければ身分（装備は差し押さえ中）、カタギで称号の表示を選んでいれば装備中の称号、
+        それ以外の富豪（総資産100万以上）は【富豪】。"""
         eco = self.bot.economy.for_guild(guild_id)
         status = eco.status(user_id)
         if status != teiai.KATAGI:
             return teiai.STATUS_NAME[status]
-        return self._equipped_title(guild_id, user_id) if eco.nick_pref(guild_id, user_id) else None
+        if eco.nick_pref(guild_id, user_id):
+            return self._equipped_title(guild_id, user_id)  # 自分で選んだ称号の表示を、富豪より優先する
+        return teiai.STATUS_NAME[teiai.WEALTHY] if eco.display_status(user_id) == teiai.WEALTHY else None
 
     async def sync_status_nick(self, guild: discord.Guild, member: discord.Member) -> None:
         """身分に合わせて、ニックネームの末尾の【地下労働者】などを付ける・外す（称号の表示を選んだ人は、その称号に戻す）。

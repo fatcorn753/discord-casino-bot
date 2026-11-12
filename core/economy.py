@@ -568,6 +568,22 @@ class Economy(
         ]
         return sorted(total, key=lambda t: (-t[1], t[0]))
 
+    def wealthy_ids(self) -> set:
+        """富豪（総資産が WEALTHY_ASSETS 以上で、カタギ）のユーザーID。表示だけの身分で、ゲームの条件には使わない。"""
+        return {
+            uid
+            for uid, total in self._ranked(None)
+            if total >= teiai.WEALTHY_ASSETS and self.status(uid) == teiai.KATAGI
+        }
+
+    def display_status(self, user_id: int, wealthy: Optional[set] = None) -> str:
+        """表示用の身分。status() と同じで、カタギで総資産が WEALTHY_ASSETS 以上なら WEALTHY。wealthy を渡すと再計算しない。"""
+        status = self.status(user_id)
+        if status != teiai.KATAGI:
+            return status
+        ids = self.wealthy_ids() if wealthy is None else wealthy
+        return teiai.WEALTHY if user_id in ids else teiai.KATAGI
+
     def top(self, limit: int = 10, user_ids: Optional[set] = None) -> list:
         """[(順位, ユーザーID, 総資産), ...]。このサーバーの口座だけで並べる。user_ids を渡すと、さらにその人たちに絞る。
 

@@ -59,8 +59,17 @@ CDS_SELF_CAP = 50_000  # 自分への CDS の、配当の見込み（掛け金 �
 CDS_PAYOUT_CAP_RATE = 0.50  # 他人への CDS の配当の合計は、対象の破産時の借金のこの割合まで（結託しても損にする）
 
 KATAGI, UNDERGROUND, BANKRUPT = "katagi", "underground", "bankrupt"
-STATUS_LABEL = {KATAGI: "🟢 カタギ", UNDERGROUND: "🟡 地下労働者", BANKRUPT: "🔴 破産者"}
-STATUS_NAME = {UNDERGROUND: "地下労働者", BANKRUPT: "破産者"}  # ニックネームの末尾に【…】で付ける名前
+# 富豪は表示だけの身分。eco.status() は返さない（競売・取引などの「カタギだけ」の判定を変えないため）。eco.display_status() が返す
+WEALTHY = "wealthy"
+WEALTHY_ASSETS = 1_000_000  # 総資産（現金・預金・株・債券など、借金を引いたあと）がこれ以上のカタギが富豪
+STATUS_LABEL = {
+    KATAGI: "🟢 カタギ",
+    UNDERGROUND: "🟤 地下労働者",
+    BANKRUPT: "🔴 破産者",
+    WEALTHY: "🟡 富豪",
+}
+STATUS_MARK = {UNDERGROUND: "🟤", BANKRUPT: "🔴", WEALTHY: "🟡"}  # ランキングの名前の横の印
+STATUS_NAME = {UNDERGROUND: "地下労働者", BANKRUPT: "破産者", WEALTHY: "富豪"}  # ニックネームの末尾に【…】で付ける名前
 
 
 def withhold(income: int) -> int:

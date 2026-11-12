@@ -120,7 +120,7 @@ class EconomyCog(commands.Cog):
             color_item.value if color_item else ui.GOLD,
         )
         e.set_thumbnail(url=member.display_avatar.url)
-        e.add_field(name="身分", value=teiai.STATUS_LABEL[prof["status"]], inline=True)
+        e.add_field(name="身分", value=teiai.STATUS_LABEL[self.g(interaction).display_status(member.id)], inline=True)
         if s.get("debt"):
             e.add_field(
                 name="帝愛への借金",

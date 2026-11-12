@@ -36,9 +36,9 @@ def build_embed(
                 parts.append(f"債券 {bonds[uid]:,}")
             return f"**{ui.pelica(total)}**" + (f"（うち{'・'.join(parts)}）" if parts else "")
 
-        marks = {teiai.UNDERGROUND: "🟡", teiai.BANKRUPT: "🔴"}  # カタギでない人は、名前の横に身分の印
+        wealthy = eco.wealthy_ids()  # カタギでない人・富豪は、名前の横に身分の印
         lines = [
-            f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>{marks.get(eco.status(uid), '')}　{worth(uid, bal)}"
+            f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>{teiai.STATUS_MARK.get(eco.display_status(uid, wealthy), '')}　{worth(uid, bal)}"
             for r, uid, bal in top
         ]
         me = eco.rank_of(viewer_id, guild_ids) if viewer_id else None

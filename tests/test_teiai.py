@@ -433,7 +433,36 @@ def test_ranking_marks_people_who_are_not_katagi(eco):
     eco.balance(A)
     indebt(eco, user_id=A, debt=100, balance=900)
     text = ranking.build_embed(eco, None, "t").description
-    assert f"<@{A}>🟡" in text and f"<@{U}>🟡" not in text
+    assert f"<@{A}>🟤" in text and f"<@{U}>🟤" not in text
+
+
+def _set_balance(eco, user_id, balance):
+    eco.balance(user_id)
+    eco._conn.execute("UPDATE users SET balance=? WHERE user_id=?", (balance, user_id))
+    eco._conn.commit()
+
+
+def test_wealthy_is_display_only_and_needs_katagi_with_enough_assets(eco):
+    _set_balance(eco, U, teiai.WEALTHY_ASSETS)
+    _set_balance(eco, A, teiai.WEALTHY_ASSETS - 1)
+    assert eco.display_status(U) == teiai.WEALTHY
+    assert eco.status(U) == teiai.KATAGI  # ゲームの条件に使う status() は変わらない
+    assert eco.display_status(A) == teiai.KATAGI
+    assert eco.wealthy_ids() == {U}
+    assert U in eco.status_nick_targets()
+
+
+def test_wealthy_with_debt_is_not_wealthy(eco):
+    indebt(eco, user_id=U, debt=10, balance=teiai.WEALTHY_ASSETS * 2)
+    assert eco.display_status(U) == teiai.UNDERGROUND
+    assert U not in eco.wealthy_ids()
+
+
+def test_ranking_marks_the_wealthy(eco):
+    from core import ranking
+
+    _set_balance(eco, U, teiai.WEALTHY_ASSETS)
+    assert f"<@{U}>🟡" in ranking.build_embed(eco, None, "t").description
 
 
 @pytest.mark.real_scope

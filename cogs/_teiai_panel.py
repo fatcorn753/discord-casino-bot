@@ -66,7 +66,9 @@ def panel_embed(eco, uid: int) -> discord.Embed:
     if claims:
         e.add_field(name="💀 掛けられている CDS（配当見込みの合計）", value=ui.pelica(claims), inline=False)
     status, debt = eco.status(uid, now), eco.debt(uid)
-    me = [f"身分: {teiai.STATUS_LABEL[status]}　預金: **{ui.pelica(eco.deposit_of(uid))}**"]
+    me = [
+        f"身分: {teiai.STATUS_LABEL[eco.display_status(uid) if status == teiai.KATAGI else status]}　預金: **{ui.pelica(eco.deposit_of(uid))}**"
+    ]
     if debt:
         me.append(
             f"帝愛への借金: **{ui.pelica(debt)}**（利息: 1日 {teiai.DEBT_RATE_PER_DAY:.0%}・{teiai.DEBT_INTEREST_CEILING:,}ペリカまで）"
