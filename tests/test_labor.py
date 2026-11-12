@@ -998,3 +998,27 @@ def test_opening_the_workplace_again_deletes_the_previous_panel(eco):
     assert deleted == []
     asyncio.run(cog.work.callback(cog, second))
     assert deleted == [(7, first.mid)]  # 前に開いた作業場だけが消える
+
+
+def test_merge_select_appears_only_with_ten_and_merges(eco):
+    def give_relic(n):
+        eco._conn.execute(
+            "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, 'relic_fossil', ?) "
+            "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = ?",
+            (eco._g(), U, n, n),
+        )
+        eco._conn.commit()
+
+    import discord
+
+    give_relic(9)
+    assert not any(isinstance(c, discord.ui.Select) for c in make_view(eco).children)
+    give_relic(10)
+    view = make_view(eco)
+    select = next(c for c in view.children if isinstance(c, discord.ui.Select))
+    assert "★" in select.options[0].label
+    it = SimpleNamespace(user=SimpleNamespace(id=U), response=Resp(), data={"values": ["relic_fossil"]})
+    asyncio.run(view._merge(it))
+    assert eco.relic_stock(U) == {"relic_fossil_s1": 1}
+    assert "合体した" in it.response.edits[-1]["embed"].description
+

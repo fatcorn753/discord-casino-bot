@@ -260,8 +260,26 @@ CATALOG += [
     )
     for rid, name, mark, _p, _value in labor.RELICS
 ]
+# 発掘品を合体してできる★つき（★1〜）。★が1つ増えるごとに、目安の価値が10倍
+CATALOG += [
+    Item(
+        relics.star_id(labor.RELIC_ID[rid], star),
+        name + relics.stars(star),
+        RELIC,
+        0,
+        mark,
+        desc=f"{name}を{relics.MERGE_COUNT**star}個ぶん合体した、★{star}の発掘品。競売の画面で売り買いできる。"
+        + relics.buff_text(relics.star_id(labor.RELIC_ID[rid], star)),
+        limited=True,
+        mark=mark,
+    )
+    for rid, name, mark, _p, _value in labor.RELICS
+    for star in range(1, relics.STAR_MAX + 1)
+]
 RELIC_VALUE = {
-    labor.RELIC_ID[rid]: value for rid, _n, _m, _p, value in labor.RELICS
+    relics.star_id(labor.RELIC_ID[rid], star): value * relics.MERGE_COUNT**star
+    for rid, _n, _m, _p, value in labor.RELICS
+    for star in range(relics.STAR_MAX + 1)
 }  # 目安の価値（取引の値段の幅の元）
 BY_ID = {i.id: i for i in CATALOG}
 BY_NAME = {}

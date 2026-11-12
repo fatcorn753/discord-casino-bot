@@ -12,7 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core import labor as lab
-from core import shop, teiai, ui
+from core import relics, shop, teiai, ui
 
 VIEW_TIMEOUT = 900  # 画面が反応する時間（秒）。過ぎたら、`/地下 作業` で開き直す
 
@@ -89,6 +89,13 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
         e.add_field(name="💎 作業員の掘り出し", value=ore_text(state["ores"]), inline=False)
     if state.get("relics"):
         e.add_field(name="🏺 発掘品（受け取ると持ち物に入る）", value=relic_text(state["relics"]), inline=False)
+    if state.get("held_relics"):
+        e.add_field(
+            name="🎒 持っている発掘品",
+            value=relic_text(state["held_relics"])
+            + f"\n（同じ品を{relics.MERGE_COUNT}個集めると、★が1つ増えた1個に合体できます）",
+            inline=False,
+        )
     if state.get("finds"):
         e.add_field(name="📜 最近の掘り出し", value=finds_text(state["finds"]), inline=False)
     e.set_footer(
@@ -259,6 +266,26 @@ class LaborView(discord.ui.View):
             )
             b.callback = self._upgrader(tool)
             self.add_item(b)
+        mergeable = [
+            i
+            for i, n in sorted(s["held_relics"].items(), key=lambda kv: -shop.RELIC_VALUE.get(kv[0], 0))
+            if n >= relics.MERGE_COUNT and relics.split_id(i)[1] < relics.STAR_MAX
+        ]
+        if mergeable:
+            merge = discord.ui.Select(
+                placeholder=f"🧬 発掘品を合体（{relics.MERGE_COUNT}個 → ★が1つ増えた1個）",
+                row=2,
+                options=[
+                    discord.SelectOption(
+                        label=f"{shop.BY_ID[i].name} {relics.MERGE_COUNT}個 → {shop.BY_ID[relics.star_id(relics.split_id(i)[0], relics.split_id(i)[1] + 1)].name}（いま {s['held_relics'][i]}個）",
+                        value=i,
+                        emoji=shop.BY_ID[i].mark,
+                    )
+                    for i in mergeable[:25]
+                ],
+            )
+            merge.callback = self._merge
+            self.add_item(merge)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
@@ -343,6 +370,13 @@ class LaborView(discord.ui.View):
     async def _dorm(self, interaction: discord.Interaction):
         ok, reason = self.eco().labor_dorm(self.user_id, time.time(), today(self.bot))
         await self._show(interaction, "🏠 寮を強化した！　雇える人数が増えた。" if ok else f"⚠ {reason}")
+
+    async def _merge(self, interaction: discord.Interaction):
+        ok, result = self.eco().relic_merge(self.user_id, interaction.data["values"][0])
+        if not ok:
+            return await self._show(interaction, f"⚠ {result}")
+        item = shop.BY_ID[result]
+        await self._show(interaction, f"🧬 合体した！　**{item.mark}{item.name}** ができた。{relics.buff_text(result)}")
 
     def _upgrader(self, tool: str):
         async def callback(interaction: discord.Interaction):

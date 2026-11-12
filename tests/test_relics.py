@@ -1,4 +1,4 @@
-"""発掘品の効果（持っている間、種類ごとに +1%）。"""
+"""発掘品の効果（持っている間、1個ごとに +1%）。"""
 
 import random
 
@@ -34,16 +34,19 @@ def give(eco, item, qty=1, uid=U):
 
 # ----------------------------- 純粋なロジック ----------------------------- #
 def test_every_relic_has_one_percent_buff_and_a_description():
-    assert set(relics.BUFFS) == set(shop.RELIC_VALUE)  # 全部の発掘品に、効果がある
+    assert set(relics.BUFFS) == {
+        i for i in shop.RELIC_VALUE if relics.split_id(i)[1] == 0
+    }  # 全部の発掘品に、効果がある
     assert len({name for name, _ in relics.BUFFS.values()}) == len(relics.BUFFS)  # 効果は、種類ごとに別
     assert relics.BUFF_RATE == 0.01
     for item_id in relics.BUFFS:
         assert "+1%" in relics.buff_text(item_id) and "+1%" in shop.BY_ID[item_id].desc
 
 
-def test_buffs_do_not_stack_per_kind_and_unknown_items_are_ignored():
+def test_buffs_stack_per_item_and_unknown_items_are_ignored():
     got = relics.buffs_of(["relic_fossil", "relic_fossil", "relic_crown", "carrot"])
-    assert got == {"click": 0.01, "daily": 0.01}
+    assert got == {"click": 0.02, "daily": 0.01}
+    assert relics.buffs_of({"relic_bone": 3, "relic_tear": 0, "carrot": 5}) == {"wage": 0.03}
     assert relics.buffs_of([]) == {}
 
 
@@ -136,7 +139,38 @@ def test_listed_relics_do_not_give_their_buff_and_the_buff_returns_after_cancell
     assert p2p.tradable("relic_bone")
 
 
-def test_all_six_buffs_can_be_held_together_and_each_counts_once(eco):
+def test_all_six_buffs_can_be_held_together_and_stack_by_count(eco):
     for item_id in relics.BUFFS:
         give(eco, item_id, 3)
-    assert eco._relic_buffs(U) == {name: 0.01 for name, _ in relics.BUFFS.values()}
+    assert eco._relic_buffs(U) == {name: 0.03 for name, _ in relics.BUFFS.values()}
+
+
+def test_star_ids_buffs_and_values():
+    assert relics.split_id("relic_fossil_s2") == ("relic_fossil", 2) and relics.split_id("relic_fossil") == (
+        "relic_fossil",
+        0,
+    )
+    assert relics.buffs_of({"relic_fossil_s1": 1, "relic_fossil": 3, "relic_bone_s2": 1}) == {
+        "click": 0.13,
+        "wage": 1.0,
+    }
+    assert shop.BY_ID["relic_fossil_s2"].name == "三葉虫の化石★★" and shop.RELIC_VALUE["relic_fossil_s2"] == 150_000
+    assert "+10%" in relics.buff_text("relic_fossil_s1")
+
+
+def test_merge_ten_into_one_star_and_stack_further(eco):
+    give(eco, "relic_fossil", 25)
+    ok, new = eco.relic_merge(U, "relic_fossil")
+    assert ok and new == "relic_fossil_s1"
+    assert eco.relic_stock(U) == {"relic_fossil": 15, "relic_fossil_s1": 1}
+    assert eco.relic_merge(U, "relic_fossil")[0] and eco.relic_merge(U, "relic_fossil")[0] is False  # 5個では足りない
+    assert abs(eco._relic_buffs(U)["click"] - 0.25) < 1e-9  # 残り5個 ×1% + ★1 が2個 ×10%
+    give(eco, "relic_fossil_s1", 8)  # ★1 が10個になる
+    assert eco.relic_merge(U, "relic_fossil_s1") == (True, "relic_fossil_s2")
+
+
+def test_max_star_and_non_relics_cannot_merge(eco):
+    give(eco, "relic_tear_s3", 10)
+    ok, reason = eco.relic_merge(U, "relic_tear_s3")
+    assert not ok and "最上位" in reason
+    assert not eco.relic_merge(U, "carrot")[0]

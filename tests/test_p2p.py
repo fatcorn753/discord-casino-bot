@@ -481,7 +481,10 @@ def test_relics_can_be_traded_within_their_reference_value_range(eco):
 def test_the_most_valuable_relic_still_fits_under_the_pair_cap(eco):
     top = max(shop.RELIC_VALUE, key=shop.RELIC_VALUE.get)
     lo, hi = p2p.price_range("item", top, 1)
-    assert hi <= p2p.PAIR_DAILY_LIMIT and lo < shop.RELIC_VALUE[top] <= hi
+    assert hi <= p2p.PAIR_DAILY_LIMIT and lo <= hi  # ★つきの高価な品も、売れない値段の幅にならない
+    plain = "relic_fossil"
+    lo, hi = p2p.price_range("item", plain, 1)
+    assert hi <= p2p.PAIR_DAILY_LIMIT and lo < shop.RELIC_VALUE[plain] <= hi
 
 
 # ----------------------------- 競売の画面（タブ・絞り込み・並び順） ----------------------------- #

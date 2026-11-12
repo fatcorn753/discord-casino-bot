@@ -55,9 +55,10 @@ def price_range(kind: str, item_id: str = "", qty: int = 1) -> tuple:
         return HORSE_PRICE_RANGE
     base = shop.RELIC_VALUE.get(item_id, shop.BY_ID[item_id].price) * max(1, qty)  # 発掘品は、目安の価値
     lo, hi = ITEM_PRICE_RANGE
-    return max(MIN_PRICE, math.ceil(base * lo)), min(
-        PAIR_DAILY_LIMIT, math.floor(base * hi)
-    )  # 上限は、同じ相手との1日の上限まで
+    high = min(PAIR_DAILY_LIMIT, math.floor(base * hi))  # 上限は、同じ相手との1日の上限まで
+    return min(
+        max(MIN_PRICE, math.ceil(base * lo)), high
+    ), high  # 高価な★つきは、下限も上限に合わせる（売れなくならないように）
 
 
 def fee_of(price: int) -> int:

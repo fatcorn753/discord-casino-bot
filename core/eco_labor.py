@@ -33,15 +33,49 @@ class LaborMixin:
         return row
 
     def _relic_buffs(self, user_id: int) -> dict:
-        """持っている発掘品の効果 {効果の名前: 上がり幅}（出品中の品は持ち物にないので、効かない）。"""
-        held = [
-            r["item_id"]
+        """持っている発掘品の効果 {効果の名前: 上がり幅}（個数ぶん重なる。出品中の品は持ち物にないので、効かない）。"""
+        held = {
+            r["item_id"]: r["qty"]
             for r in self._conn.execute(
-                "SELECT item_id FROM inventory WHERE guild_id=? AND user_id=? AND qty>0 AND item_id LIKE 'relic_%'",
+                "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0 AND item_id LIKE 'relic_%'",
                 (self._g(), user_id),
             )
-        ]
+        }
         return relics_mod.buffs_of(held)
+
+    def relic_stock(self, user_id: int) -> dict:
+        """持ち物にある発掘品 {品のID: 個数}（★つきも含む）。"""
+        with self._lock:
+            return {
+                r["item_id"]: r["qty"]
+                for r in self._conn.execute(
+                    "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0 AND item_id LIKE 'relic_%'",
+                    (self._g(), user_id),
+                )
+            }
+
+    def relic_merge(self, user_id: int, item_id: str) -> tuple:
+        """同じ発掘品を MERGE_COUNT 個つかって、★が1つ増えた1個に合体する。(成功か, 理由か合体後の品のID)。"""
+        base, star = relics_mod.split_id(item_id)
+        if base not in relics_mod.BUFFS:
+            return False, "発掘品ではありません。"
+        if star >= relics_mod.STAR_MAX:
+            return False, f"★{relics_mod.STAR_MAX} は最上位で、これ以上は合体できません。"
+        new_id = relics_mod.star_id(base, star + 1)
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            cur = self._conn.execute(
+                "UPDATE inventory SET qty = qty - ? WHERE guild_id=? AND user_id=? AND item_id=? AND qty >= ?",
+                (relics_mod.MERGE_COUNT, self._g(), user_id, item_id, relics_mod.MERGE_COUNT),
+            )
+            if cur.rowcount == 0:
+                return False, f"合体には、同じ発掘品が {relics_mod.MERGE_COUNT}個 要ります（出品中の品は数えません）。"
+            self._conn.execute(
+                "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, 1) "
+                "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + 1",
+                (self._g(), user_id, new_id),
+            )
+        return True, new_id
 
     @staticmethod
     def _counts(row: dict) -> dict:
@@ -283,6 +317,7 @@ class LaborMixin:
             ).fetchone()
             row["drinks"] = inv["qty"] if inv else 0
             row["finds"] = self.labor_finds(user_id)
+            row["held_relics"] = self.relic_stock(user_id)
             return row
 
     def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> dict:
