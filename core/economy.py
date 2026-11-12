@@ -24,6 +24,7 @@ from typing import Optional
 
 from core import market as market_mod
 from core import schema, teiai
+from core.eco_assets import AssetMixin
 from core.eco_auction import AuctionMixin
 from core.eco_bank import BankMixin
 from core.eco_bonds import BondMixin
@@ -57,6 +58,7 @@ from core.shop import STREAK_GUARD
 
 
 class Economy(
+    AssetMixin,
     QuizMixin,
     BondMixin,
     RaffleMixin,

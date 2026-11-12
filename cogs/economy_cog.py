@@ -79,6 +79,52 @@ def manage_guild_or_owner():
     return app_commands.check(predicate)
 
 
+class RankingView(discord.ui.View):
+    """ランキングの切り替え（総資産 / ファイナル総資産）と、自分の資産の内訳。押せるのは、開いた本人だけ。"""
+
+    def __init__(self, eco, user_id: int):
+        super().__init__(timeout=300)
+        self.eco, self.user_id = eco, user_id
+
+    def embed(self, mode: str) -> discord.Embed:
+        if mode == "final":
+            return ranking.build_final_embed(
+                self.eco,
+                None,
+                "🏆 このサーバーのランキング（ファイナル総資産）",
+                self.user_id,
+                footer="ファイナル総資産 = 総資産 + 馬・持ち物・発掘品・預かり中のお金・貸し借りなど、ペリカに換算できるもの全部",
+            )
+        return ranking.build_embed(
+            self.eco,
+            None,
+            "🏆 このサーバーのランキング（総資産）",
+            self.user_id,
+            footer="総資産 = 残高 + CSトークンの評価額 ｜ ペリカはサーバーごとに別々です",
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "これは他の人のランキングです。`/ペリカ ランキング` で自分のを開けます。", ephemeral=True
+            )
+            return False
+        return True
+
+    @discord.ui.button(label="総資産", emoji="🏆", style=discord.ButtonStyle.secondary)
+    async def normal(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(embed=self.embed("normal"), view=self)
+
+    @discord.ui.button(label="ファイナル総資産", emoji="💎", style=discord.ButtonStyle.primary)
+    async def final(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await interaction.response.edit_message(embed=self.embed("final"), view=self)
+
+    @discord.ui.button(label="自分の内訳", emoji="🧾", style=discord.ButtonStyle.secondary)
+    async def mine(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        e = ranking.build_breakdown_embed(self.eco, self.user_id, interaction.user.display_name)
+        await interaction.response.send_message(embed=e, ephemeral=True)
+
+
 class EconomyCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -309,16 +355,23 @@ class EconomyCog(commands.Cog):
             embed=ui.embed("📜 今日のミッション", "\n".join(lines), ui.GOLD), ephemeral=True
         )
 
-    @group.command(name="ランキング", description="このサーバーで、ペリカの多い順に並べる")
-    async def ranking(self, interaction: discord.Interaction):
-        e = ranking.build_embed(
-            self.g(interaction),
-            None,
-            "🏆 このサーバーのランキング（総資産）",
-            interaction.user.id,
-            footer="総資産 = 残高 + CSトークンの評価額 ｜ ペリカはサーバーごとに別々です",
+    @group.command(
+        name="ランキング",
+        description="このサーバーで、ペリカの多い順に並べる（ファイナル総資産・資産の内訳も見られる）",
+    )
+    @app_commands.rename(member="内訳")
+    @app_commands.describe(member="この人の資産の内訳を見る（省略でランキング）")
+    async def ranking(self, interaction: discord.Interaction, member: Optional[discord.Member] = None):
+        eco = self.g(interaction)
+        if member is not None:
+            e = ranking.build_breakdown_embed(eco, member.id, member.display_name)
+            return await interaction.response.send_message(
+                embed=e, ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
+            )
+        view = RankingView(eco, interaction.user.id)
+        await interaction.response.send_message(
+            embed=view.embed("normal"), view=view, allowed_mentions=discord.AllowedMentions.none()
         )
-        await interaction.response.send_message(embed=e, allowed_mentions=discord.AllowedMentions.none())
 
     # ------------------- 自動で更新されるランキング掲示板 ------------------- #
     def _board_embed(self, guild_id: int) -> discord.Embed:

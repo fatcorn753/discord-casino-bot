@@ -48,3 +48,42 @@ def build_embed(
     if footer:
         e.set_footer(text=footer)
     return e
+
+
+def build_final_embed(
+    eco, guild_ids: Optional[set], title: str, viewer_id: Optional[int] = None, footer: Optional[str] = None
+) -> discord.Embed:
+    """ファイナル総資産（馬・持ち物・発掘品なども、ペリカに換算して全部足したもの）の上位 TOP_N 人。"""
+    ranked = eco.final_assets(guild_ids)
+    if not ranked:
+        e = ui.embed(title, "まだ誰も遊んでいません。`/ペリカ デイリー` から始めましょう。", ui.INFO)
+    else:
+        wealthy = eco.wealthy_ids()
+        lines = [
+            f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>{teiai.STATUS_MARK.get(eco.display_status(uid, wealthy), '')}"
+            f"\u3000**{ui.pelica(total)}**"
+            for r, (uid, total, _p) in enumerate(ranked[:TOP_N], 1)
+        ]
+        if viewer_id:
+            for r, (uid, total, _p) in enumerate(ranked, 1):
+                if uid == viewer_id and r > TOP_N:
+                    lines.append(f"…\n`{r:>2}` <@{viewer_id}>\u3000**{ui.pelica(total)}**")
+        e = ui.embed(title, "\n".join(lines), ui.GOLD)
+    if footer:
+        e.set_footer(text=footer)
+    return e
+
+
+def build_breakdown_embed(eco, user_id: int, name: str) -> discord.Embed:
+    """その人のファイナル総資産の、おおまかな内訳。"""
+    from core.eco_assets import PART_LABELS
+
+    found = next(((total, p) for uid, total, p in eco.final_assets() if uid == user_id), None)
+    if found is None:
+        return ui.embed(f"🧾 {name} の資産の内訳", "まだ口座がありません。", ui.INFO)
+    total, parts = found
+    lines = [f"{label}: **{ui.pelica(parts[key])}**" for key, label in PART_LABELS.items() if parts[key]]
+    lines.append(f"\n**ファイナル総資産: {ui.pelica(total)}**")
+    e = ui.embed(f"🧾 {name} の資産の内訳", "\n".join(lines), ui.GOLD)
+    e.set_footer(text="着せ替え・コレクションは買値、馬は購入価格＋引退金の見込み、発掘品は目安の価値で数えます")
+    return e
