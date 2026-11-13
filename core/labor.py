@@ -3,7 +3,7 @@
 ペリカが尽きた人の救済。元手は 0。「働く」ボタンを押すとペリカが貯まる。
 - 疲労: 押すたびに溜まり、溜まるほど1回の稼ぎが減る。時間で自然に回復する（事故も、休憩もない）
 - 工具: ツルハシ（稼ぎ）・手袋（疲労の溜まりにくさ）を、稼いだペリカで強化する
-1日の上限や、手元の制限はない（連打は、手間がかかるので、続かない）。稼ぎの速さは、疲労で自然に頭打ちになる。
+「働く」クリックの稼ぎには、1日の上限がある（CLICK_DAY_CAP）。手元の制限はない。稼ぎの速さは、疲労で自然に頭打ちになる。
 作業員は、1日の契約で雇う（自動更新）。作業員の稼ぎだけでは契約料に届かず（赤字）、働いた1時間ごとに鉱石を掘り、
 レア鉱石を引けば大きく黒字になる。期待値は、契約料の100%未満（運の勝負）。1日で結果が分かる。
 """
@@ -79,6 +79,7 @@ def upgrade_cost(level: int):
     """いまのレベルから次へ上げる値段。最大なら None。"""
     level = clamp_level(level)
     return None if level >= MAX_LEVEL else UPGRADE_COST[level]
+
 
 
 def bar(fatigue: float, width: int = 10) -> str:
@@ -178,6 +179,7 @@ def dorm_cost(level: int):
     """寮を次へ上げる値段。最大なら None。"""
     level = clamp_dorm(level)
     return None if level >= DORM_MAX else DORM_COST[level]
+
 
 
 def foreman_luck(foremen: int) -> float:
@@ -340,6 +342,33 @@ def settle_plan(
 
 # ---- 自動操作の疑いを確かめる（持ち主用の記録の集計。決めつけず、数字を見せるだけ）----
 CLICK_GAP_MAX = 600.0  # 前の押下からこれ以内なら、「続けて押している」間隔として数える（秒）
+
+# 自動操作（BOTなど）の疑いがあるときの、早めの打ち止め。BANではなく、その日はそこで止まるだけ（翌日には戻る）
+# 「機械的に規則正しい」の基準は、運営の「クリック履歴」画面（cogs/_admin_embeds.py）と共通
+MECH_CV_MAX = 0.1  # 間隔のばらつき（標準偏差 ÷ 平均）がこれ未満なら、機械的に規則正しいとみなす
+MECH_MIN_CLICKS = 100  # 1時間にこれ未満しか押していなければ、ばらつきでは判定しない（サンプルが少なすぎる）
+SUSPECT_HOURS = 3  # 直近、これだけ連続した「完了した時間」が、ずっと機械的に規則正しければ、自動操作とみなす
+
+
+def is_mechanical_hour(h: dict) -> bool:
+    """1時間の記録（labor_click_hours() の1行）が、機械的に規則正しいか。"""
+    if h["gaps"] < 2 or h["clicks"] < MECH_MIN_CLICKS:
+        return False
+    mean = h["sum_gap"] / h["gaps"]
+    if not mean:
+        return False
+    var = max(0.0, h["sum_gap2"] / h["gaps"] - mean * mean)
+    return math.sqrt(var) / mean < MECH_CV_MAX
+
+
+def auto_click_suspected(hour_rows: list, current_hour: int) -> bool:
+    """直近 SUSPECT_HOURS 時間（いまの時間は、まだ集計中なので含めない）、ずっと機械的に規則正しければ True。
+
+    hour_rows は、core/eco_labor.py の labor_click_hours() の結果（{hour, clicks, gaps, sum_gap, sum_gap2, ...} の並び）。
+    """
+    by_hour = {r["hour"]: r for r in hour_rows}
+    watch = range(current_hour - SUSPECT_HOURS, current_hour)
+    return all(h in by_hour and is_mechanical_hour(by_hour[h]) for h in watch)
 
 
 def click_report(hours: list) -> dict:

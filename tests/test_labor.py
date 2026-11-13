@@ -937,7 +937,7 @@ def test_donation_total_accumulates_across_collections_and_shows_on_the_screens(
     assert two["donated"] == one["skimmed"] + two["skimmed"]  # 合計が増えていく
     state = eco.labor_state(U, T0 + 300, DAY)
     assert state["donated"] == two["donated"]
-    assert f"{two['donated_all']:,}" in labor_cog.panel_embed(state).footer.text  # 画面にも、寄付総額が出る
+    assert state["donated_all"] >= two["donated"]  # サーバー全員の合計は、記録として残る（画面には出さない）
 
 
 def test_collect_message_shows_the_donation_total_instead_of_the_rate(eco, monkeypatch):
@@ -950,7 +950,7 @@ def test_collect_message_shows_the_donation_total_instead_of_the_rate(eco, monke
     monkeypatch.setattr(labor_cog.time, "time", lambda: T0 + 200)
     asyncio.run(view._collect(it))
     desc = it.response.edits[-1]["embed"].description
-    assert "慈善団体に寄付されます" in desc and "寄付総額" in desc and "稼ぎの" not in desc
+    assert "慈善団体に寄付されます" in desc and "寄付総額" not in desc and "稼ぎの" not in desc
 
 
 def test_the_wage_setting_is_gone_and_workers_do_not_quit(eco):
@@ -1053,3 +1053,39 @@ def test_click_earnings_are_capped_per_day_and_workers_are_not(eco, monkeypatch)
     assert pays[4:] == [lab.OVER_CAP_PAY] * 4  # 上限を超えたら、1ペリカずつ
     assert eco.labor_state(U, T0 + 20, DAY)["day_click"] == 100 + 4 * lab.OVER_CAP_PAY
     assert eco.labor_click(U, T0 + 100_000, "2026-11-20")["pay"] > lab.OVER_CAP_PAY  # 日が変われば、また稼げる
+
+
+# ----------------------------- 自動操作の疑いがあるときの、早めの打ち止め ----------------------------- #
+def test_is_mechanical_hour_needs_enough_clicks_and_low_variation():
+    base = {"gaps": 200, "sum_gap": 200.0, "sum_gap2": 200.0, "clicks": 200}  # 間隔はすべて1.0秒（ばらつき0）
+    assert lab.is_mechanical_hour(base)
+    assert not lab.is_mechanical_hour({**base, "clicks": lab.MECH_MIN_CLICKS - 1})  # 回数が足りない
+    assert not lab.is_mechanical_hour({**base, "gaps": 300, "sum_gap": 300.0, "sum_gap2": 3_000.0})  # ばらつきが大きい
+    assert not lab.is_mechanical_hour(
+        {**base, "gaps": 1, "sum_gap": 1.0, "sum_gap2": 1.0}
+    )  # サンプルが1回では判定しない
+
+
+def test_auto_click_suspected_needs_consecutive_mechanical_hours():
+    mech = {"clicks": 200, "gaps": 200, "sum_gap": 200.0, "sum_gap2": 200.0}
+    rows = [{"hour": h, **mech} for h in (10, 11, 12)]
+    assert lab.auto_click_suspected(rows, 13)  # 直近3時間、ずっと機械的
+    assert not lab.auto_click_suspected(rows[1:], 13)  # 2時間しかない
+    assert not lab.auto_click_suspected(rows, 14)  # 「いまの時間」が13になり、直近3時間に抜けが出る
+    human = {"clicks": 50, "gaps": 50, "sum_gap": 100.0, "sum_gap2": 400.0}  # ばらつきも回数も、人間らしい
+    assert not lab.auto_click_suspected([{"hour": h, **human} for h in (10, 11, 12)], 13)
+
+
+def test_labor_click_stops_early_after_three_mechanical_hours(eco):
+    hour0 = int(T0 // 3600)
+    mech = (200, 200, 200.0, 200.0, 1.0)  # clicks, gaps, sum_gap, sum_gap2, min_gap
+    for h in (hour0 - 3, hour0 - 2, hour0 - 1):
+        eco._conn.execute(
+            "INSERT INTO labor_click_hours (guild_id, user_id, hour, clicks, pay, gaps, sum_gap, sum_gap2, min_gap) "
+            "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)",
+            (eco._g(), U, h, *mech[:1], *mech[1:]),
+        )
+    eco._conn.commit()
+    r = eco.labor_click(U, T0, DAY)
+    assert r["ok"] and r["pay"] == lab.OVER_CAP_PAY  # 上限にはまだ届いていないのに、早めに打ち止め
+    assert eco.labor_state(U, T0 + 1, DAY)["day_click"] < lab.CLICK_DAY_CAP

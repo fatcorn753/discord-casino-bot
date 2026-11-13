@@ -4,6 +4,7 @@ import datetime
 
 import discord
 
+from core import labor as lab
 from core import ui
 from core.duration import format_minutes
 from games import pachinko, rtplevel
@@ -108,11 +109,16 @@ def click_history_embed(name: str, report: dict, tz_hours: float, hours: int) ->
     rows = report["rows"]
     if not rows:
         return ui.embed(f"🕵️ {name} の「働く」の記録", f"過去{hours}時間に、押した記録はありません。", ui.INFO)
-    mech = sum(1 for r in rows if r["cv"] is not None and r["clicks"] >= 100 and r["cv"] < 0.1)
+
+    def is_mech(r: dict) -> bool:
+        return r["clicks"] >= lab.MECH_MIN_CLICKS and r["cv"] is not None and r["cv"] < lab.MECH_CV_MAX
+
+    mech = sum(1 for r in rows if is_mech(r))
     lines = [
         f"押した回数 **{report['clicks']:,}回**　稼ぎ **{report['pay']:,}ペリカ**",
         f"押した時間 **{report['active_hours']}時間**（過去{hours}時間のうち）　休まず押し続けた最長 **{report['longest_run']}時間**",
-        f"押す間隔が機械的に規則正しい時間（100回以上・ばらつき 0.1 未満）: **{mech}時間**",
+        f"押す間隔が機械的に規則正しい時間（{lab.MECH_MIN_CLICKS}回以上・ばらつき {lab.MECH_CV_MAX} 未満）: **{mech}時間**",
+        f"（これが **{lab.SUSPECT_HOURS}時間連続**すると、自動で、その日のクリックの稼ぎが打ち止めになります）",
         "",
         "**1時間ごと**（間隔のばらつき = 標準偏差 ÷ 平均。人間が手で押すと、ふつう 0.3 以上）",
     ]
@@ -121,7 +127,7 @@ def click_history_embed(name: str, report: dict, tz_hours: float, hours: int) ->
         gap = f"平均{r['mean_gap']:.2f}秒" if r["mean_gap"] else "—"
         cv = f"ばらつき{r['cv']:.2f}" if r["cv"] is not None else "—"
         low = f"最短{r['min_gap']:.2f}秒" if r["min_gap"] is not None else ""
-        mark = " ⚠️" if r["cv"] is not None and r["clicks"] >= 100 and r["cv"] < 0.1 else ""
+        mark = " ⚠️" if is_mech(r) else ""
         lines.append(f"`{at:%m/%d %H時}` {r['clicks']:>4}回　{gap}　{cv}　{low}{mark}")
     e = ui.embed(f"🕵️ {name} の「働く」の記録", "\n".join(lines)[:4000], ui.INFO)
     e.set_footer(

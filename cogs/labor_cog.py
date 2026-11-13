@@ -68,17 +68,16 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     e = ui.embed("⛏ 地下作業", note or "「働く」を押すと、ペリカが貯まります。", ui.DARK)
     e.add_field(name="💴 手元", value=ui.pelica(state["balance"]), inline=True)
     e.add_field(name="🎒 未受け取り", value=pot_text(state), inline=True)
-    e.add_field(name="📅 今日の稼ぎ", value=ui.pelica(state["day_earned"]), inline=True)
     capped = state["day_click"] >= lab.CLICK_DAY_CAP
+    e.add_field(
+        name="📅 今日の稼ぎ",
+        value=f"{ui.pelica(state['day_earned'])}\n（クリック {state['day_click']:,}/{lab.CLICK_DAY_CAP:,}ペリカ）",
+        inline=True,
+    )
     e.add_field(
         name="⛏ 1回の稼ぎ",
         value=f"**{ui.pelica(lab.OVER_CAP_PAY if capped else lab.click_pay(state['pick'], fat))}**"
         + (f"\n（上限に達しました。{lab.OVER_CAP_PAY}ペリカずつ）" if capped else ""),
-        inline=True,
-    )
-    e.add_field(
-        name="📊 今日の「働く」の稼ぎ",
-        value=f"{state['day_click']:,} / {lab.CLICK_DAY_CAP:,}ペリカ（作業員の稼ぎは別）",
         inline=True,
     )
     e.add_field(
@@ -110,7 +109,7 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     if state.get("finds"):
         e.add_field(name="📜 最近の掘り出し", value=finds_text(state["finds"]), inline=False)
     e.set_footer(
-        text=f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します（稼ぎの{teiai.LABOR_SKIM_RATE:.0%}は、慈善団体に寄付されます）。\n寄付総額：{state.get('donated_all', 0):,}ペリカ　あなた：{state.get('donated', 0):,}ペリカ"
+        text=f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します（稼ぎの{teiai.LABOR_SKIM_RATE:.0%}は、慈善団体に寄付されます）。"
     )
     return e
 
@@ -329,7 +328,7 @@ class LaborView(discord.ui.View):
         amount, found, relics = got["amount"], got["ores"], got["relics"]
         note = f"💰 **{amount:,}** ペリカを、まとめて手元に移しました。" if amount else ""
         if got["skimmed"]:
-            note += f"\n🎗️ ピンハネされた **{got['skimmed']:,}** ペリカは、慈善団体に寄付されます\n　寄付総額：**{got['donated_all']:,}** ペリカ　あなた：**{got['donated']:,}** ペリカ"
+            note += f"\n🎗️ ピンハネされた **{got['skimmed']:,}** ペリカは、慈善団体に寄付されます"
         if found:
             note += f"\n💎 掘り出し: {ore_text(found)}"
         if relics:

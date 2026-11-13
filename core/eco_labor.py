@@ -364,6 +364,11 @@ class LaborMixin:
             pay = max(1, relics_mod.chance_round(out["pay"] * (1 + self._relic_buffs(user_id).get("click", 0.0))))
             room = labor_mod.CLICK_DAY_CAP - row["day_click"]  # 今日、あと何ペリカ、クリックで稼げるか
             pay = labor_mod.OVER_CAP_PAY if room <= 0 else min(pay, room)
+            hour = int(now // 3600)
+            since = now - labor_mod.SUSPECT_HOURS * 3600
+            suspected = labor_mod.auto_click_suspected(self.labor_click_hours(user_id, since), hour)
+            if suspected:  # 自動操作の疑い: BANではなく、その日はそこで打ち止め（翌日には戻る）
+                pay = labor_mod.OVER_CAP_PAY
             row["last_click_before"] = row["last_click"]
             row.update(
                 fatigue=out["fatigue"],
