@@ -81,6 +81,10 @@ def upgrade_cost(level: int):
     return None if level >= MAX_LEVEL else UPGRADE_COST[level]
 
 
+def upgrade_spent(level: int) -> int:
+    """いまのレベルに上げるまでに、これまで払った額の合計（資産の計算用）。"""
+    return sum(UPGRADE_COST[: clamp_level(level)])
+
 
 def bar(fatigue: float, width: int = 10) -> str:
     n = round(width * max(0.0, min(FATIGUE_MAX, fatigue)) / FATIGUE_MAX)
@@ -180,6 +184,10 @@ def dorm_cost(level: int):
     level = clamp_dorm(level)
     return None if level >= DORM_MAX else DORM_COST[level]
 
+
+def dorm_spent(level: int) -> int:
+    """いまの寮の段に上げるまでに、これまで払った額の合計（資産の計算用）。"""
+    return sum(DORM_COST[: clamp_dorm(level)])
 
 
 def foreman_luck(foremen: int) -> float:

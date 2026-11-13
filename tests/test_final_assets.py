@@ -115,3 +115,15 @@ def test_ranking_view_can_switch_back_and_forth(eco):
 
     assert view.normal.style == discord.ButtonStyle.primary and view.final.style == discord.ButtonStyle.secondary
     assert "総資産" in seen[0] and "純資産" in seen[1]
+
+
+def test_labor_tool_upgrades_count_toward_assets(eco):
+    from core import labor as lab
+
+    eco._conn.execute("INSERT OR IGNORE INTO labor (guild_id, user_id) VALUES (?, ?)", (eco._g(), A))
+    eco._conn.execute("UPDATE labor SET pick=2, glove=1, dorm=1 WHERE guild_id=? AND user_id=?", (eco._g(), A))
+    eco._conn.commit()
+    want = lab.upgrade_spent(2) + lab.upgrade_spent(1) + lab.dorm_spent(1)
+    assert want > 0
+    assert parts(eco, A)["tools"] == want
+    assert parts(eco, B)["tools"] == 0

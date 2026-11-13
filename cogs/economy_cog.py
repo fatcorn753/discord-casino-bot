@@ -94,14 +94,14 @@ class RankingView(discord.ui.View):
                 None,
                 "🏆 このサーバーのランキング（総資産）",
                 self.user_id,
-                footer="総資産 = 純資産 + 馬・持ち物・発掘品・預かり中のお金・貸し借りなど、ペリカに換算できるもの全部",
+                footer="総資産 = 純資産 + 馬・持ち物・発掘品・地下作業の工具・預かり中のお金・貸し借りなど、ペリカに換算できるもの全部",
             )
         return ranking.build_embed(
             self.eco,
             None,
             "🏆 このサーバーのランキング（純資産）",
             self.user_id,
-            footer="純資産 = 残高 + CSトークンの評価額 ｜ ペリカはサーバーごとに別々です",
+            footer="純資産 = 現金 − 借金 + 預金・株・債券・オプションの評価額 ｜ ペリカはサーバーごとに別々です",
         )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:

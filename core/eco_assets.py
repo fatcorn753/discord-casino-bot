@@ -1,6 +1,6 @@
 """ファイナル総資産: ペリカに換算できるものを、すべて合計した資産（ランキングと、人ごとの内訳）。
 
-`/ペリカ ランキング` の総資産（現金・預金・株・債券など）に、馬・持ち物・発掘品・預かり中のお金・貸し借りなどを足したもの。
+`/ペリカ ランキング` の純資産（現金・預金・株・債券など）に、馬・持ち物・発掘品・地下作業の工具・預かり中のお金・貸し借りなどを足したもの。
 売れない着せ替え・コレクションも、買値で数える。評価の元は、次のとおり（売値ではなく、目安の価値）。
 """
 
@@ -9,6 +9,7 @@ import time
 from typing import Optional
 
 from core import horse as horse_mod
+from core import labor as labor_mod
 from core import shop
 
 # 内訳の名前（表示順）。キーは asset_parts() の辞書のキー
@@ -22,6 +23,7 @@ PART_LABELS = {
     "relics": "🏺 発掘品（目安の価値）",
     "horses": "🐎 競走馬（購入価格＋引退金の見込み）",
     "pot": "⛏ 受け取る前の地下作業の稼ぎ",
+    "tools": "🧰 地下作業の工具・寮（これまでの強化費用）",
     "escrow": "🔒 競りへの入札（預かり中）",
     "loans": "🤝 貸し借り（貸した分−借りた分）",
 }
@@ -72,8 +74,17 @@ class AssetMixin:
 
             for r in self._conn.execute("SELECT user_id, item_id, qty FROM inventory WHERE guild_id=? AND qty>0", (g,)):
                 item(r["user_id"], r["item_id"], r["qty"])
-            for r in self._conn.execute("SELECT user_id, relics, pot FROM labor WHERE guild_id=?", (g,)):
+            for r in self._conn.execute(
+                "SELECT user_id, relics, pot, pick, glove, dorm FROM labor WHERE guild_id=?", (g,)
+            ):
                 add(r["user_id"], "pot", r["pot"])
+                add(
+                    r["user_id"],
+                    "tools",
+                    labor_mod.upgrade_spent(r["pick"])
+                    + labor_mod.upgrade_spent(r["glove"])
+                    + labor_mod.dorm_spent(r["dorm"]),
+                )
                 try:
                     waiting = json.loads(r["relics"] or "{}")
                 except ValueError:

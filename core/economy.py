@@ -549,7 +549,7 @@ class Economy(
             return values
 
     def _ranked(self, user_ids: Optional[set]) -> list:
-        """[(ユーザーID, 純資産)] を多い順に。純資産は、残高にCSトークンの評価額を足し、借金を引いたもの。"""
+        """[(ユーザーID, 純資産)] を多い順に。純資産は、残高から借金を引き、CS・預金・債券・オプションの評価額を足したもの。"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT user_id, balance - debt AS balance FROM users WHERE guild_id=?", (self._g(),)
@@ -589,7 +589,7 @@ class Economy(
     def top(self, limit: int = 10, user_ids: Optional[set] = None) -> list:
         """[(順位, ユーザーID, 純資産), ...]。このサーバーの口座だけで並べる。user_ids を渡すと、さらにその人たちに絞る。
 
-        純資産は、残高（現金）にCSトークンの評価額を足したもの。トークンを買っても順位が下がらないようにしている。
+        純資産は、残高（現金）から借金を引き、CS・預金・債券・オプションの評価額を足したもの。トークンを買っても順位が下がらないようにしている。
         """
         return [(i + 1, uid, bal) for i, (uid, bal) in enumerate(self._ranked(user_ids)[:limit])]
 
