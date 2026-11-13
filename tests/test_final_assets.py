@@ -85,7 +85,7 @@ def test_final_ranking_and_breakdown_embeds(eco):
     text = ranking.build_final_embed(eco, None, "t", A).description
     assert text.index(f"<@{B}>") < text.index(f"<@{A}>")
     d = ranking.build_breakdown_embed(eco, B, "b").description
-    assert "発掘品" in d and "ファイナル総資産" in d
+    assert "発掘品" in d and "総資産" in d
 
 
 def test_ranking_view_can_switch_back_and_forth(eco):
@@ -114,4 +114,4 @@ def test_ranking_view_can_switch_back_and_forth(eco):
     import discord
 
     assert view.normal.style == discord.ButtonStyle.primary and view.final.style == discord.ButtonStyle.secondary
-    assert "ファイナル" in seen[0] and "ファイナル" not in seen[1]
+    assert "総資産" in seen[0] and "純資産" in seen[1]

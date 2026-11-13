@@ -62,7 +62,7 @@ CDS_PAYOUT_CAP_RATE = 0.50  # 他人への CDS の配当の合計は、対象の
 KATAGI, UNDERGROUND, BANKRUPT = "katagi", "underground", "bankrupt"
 # 富豪は表示だけの身分。eco.status() は返さない（競売・取引などの「カタギだけ」の判定を変えないため）。eco.display_status() が返す
 WEALTHY = "wealthy"
-WEALTHY_ASSETS = 1_000_000  # 総資産（現金・預金・株・債券など、借金を引いたあと）がこれ以上のカタギが富豪
+WEALTHY_ASSETS = 1_000_000  # 純資産（現金・預金・株・債券など、借金を引いたあと）がこれ以上のカタギが富豪
 STATUS_LABEL = {
     KATAGI: "🟢 カタギ",
     UNDERGROUND: "🟤 地下労働者",

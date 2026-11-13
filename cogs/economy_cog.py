@@ -81,7 +81,7 @@ def manage_guild_or_owner():
 
 
 class RankingView(discord.ui.View):
-    """ランキングの切り替え（総資産 / ファイナル総資産）と、自分の資産の内訳。押せるのは、開いた本人だけ。"""
+    """ランキングの切り替え（純資産 / 総資産）と、自分の資産の内訳。押せるのは、開いた本人だけ。"""
 
     def __init__(self, eco, user_id: int):
         super().__init__(timeout=300)
@@ -92,16 +92,16 @@ class RankingView(discord.ui.View):
             return ranking.build_final_embed(
                 self.eco,
                 None,
-                "🏆 このサーバーのランキング（ファイナル総資産）",
+                "🏆 このサーバーのランキング（総資産）",
                 self.user_id,
-                footer="ファイナル総資産 = 総資産 + 馬・持ち物・発掘品・預かり中のお金・貸し借りなど、ペリカに換算できるもの全部",
+                footer="総資産 = 純資産 + 馬・持ち物・発掘品・預かり中のお金・貸し借りなど、ペリカに換算できるもの全部",
             )
         return ranking.build_embed(
             self.eco,
             None,
-            "🏆 このサーバーのランキング（総資産）",
+            "🏆 このサーバーのランキング（純資産）",
             self.user_id,
-            footer="総資産 = 残高 + CSトークンの評価額 ｜ ペリカはサーバーごとに別々です",
+            footer="純資産 = 残高 + CSトークンの評価額 ｜ ペリカはサーバーごとに別々です",
         )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -123,11 +123,11 @@ class RankingView(discord.ui.View):
     async def on_error(self, interaction: discord.Interaction, error: Exception, item) -> None:
         logging.getLogger(__name__).exception("ランキングの切り替えに失敗しました: %r", error)
 
-    @discord.ui.button(label="総資産", emoji="🏆", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="純資産", emoji="🏆", style=discord.ButtonStyle.primary)
     async def normal(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await self._switch(interaction, "normal")
 
-    @discord.ui.button(label="ファイナル総資産", emoji="💎", style=discord.ButtonStyle.secondary)
+    @discord.ui.button(label="総資産", emoji="💎", style=discord.ButtonStyle.secondary)
     async def final(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await self._switch(interaction, "final")
 
@@ -187,7 +187,7 @@ class EconomyCog(commands.Cog):
                 inline=False,
             )
         if rank:
-            e.add_field(name="このサーバーでの順位（総資産）", value=f"{rank[0]}位 / {rank[2]}人", inline=True)
+            e.add_field(name="このサーバーでの順位（純資産）", value=f"{rank[0]}位 / {rank[2]}人", inline=True)
         owned, collection_total = shop.collection_value(self.g(interaction).inventory(member.id))
         if (
             owned and prof["frozen"]
@@ -369,7 +369,7 @@ class EconomyCog(commands.Cog):
 
     @group.command(
         name="ランキング",
-        description="このサーバーで、ペリカの多い順に並べる（ファイナル総資産・資産の内訳も見られる）",
+        description="このサーバーで、ペリカの多い順に並べる（総資産・資産の内訳も見られる）",
     )
     @app_commands.rename(member="内訳")
     @app_commands.describe(member="この人の資産の内訳を見る（省略でランキング）")
@@ -391,7 +391,7 @@ class EconomyCog(commands.Cog):
         return ranking.build_embed(
             self.bot.economy.for_guild(guild_id),
             None,
-            "🏆 ペリカランキング（総資産）",
+            "🏆 ペリカランキング（純資産）",
             header=f"最終更新: <t:{ts}:R>\n\n",
             footer=f"{BOARD_INTERVAL_MINUTES}分ごとに自動で更新されます",
         )

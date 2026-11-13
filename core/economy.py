@@ -549,7 +549,7 @@ class Economy(
             return values
 
     def _ranked(self, user_ids: Optional[set]) -> list:
-        """[(ユーザーID, 総資産)] を多い順に。総資産は、残高にCSトークンの評価額を足し、借金を引いたもの。"""
+        """[(ユーザーID, 純資産)] を多い順に。純資産は、残高にCSトークンの評価額を足し、借金を引いたもの。"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT user_id, balance - debt AS balance FROM users WHERE guild_id=?", (self._g(),)
@@ -558,11 +558,11 @@ class Economy(
             for uid, eq in self.margin_equity().items():
                 values[uid] = values.get(uid, 0) + eq
             for uid, held in self.bond_values().items():
-                values[uid] = values.get(uid, 0) + held  # 預けている債券の元本も総資産
+                values[uid] = values.get(uid, 0) + held  # 預けている債券の元本も純資産
             for uid, held in self.bank_values().items():
-                values[uid] = values.get(uid, 0) + held  # 帝愛への預金も総資産
+                values[uid] = values.get(uid, 0) + held  # 帝愛への預金も純資産
             for uid, held in self.option_values().items():
-                values[uid] = values.get(uid, 0) + held  # オプションも、いま売ったときの手取りで総資産
+                values[uid] = values.get(uid, 0) + held  # オプションも、いま売ったときの手取りで純資産
         total = [
             (r["user_id"], r["balance"] + values.get(r["user_id"], 0))
             for r in rows
@@ -571,7 +571,7 @@ class Economy(
         return sorted(total, key=lambda t: (-t[1], t[0]))
 
     def wealthy_ids(self) -> set:
-        """富豪（総資産が WEALTHY_ASSETS 以上で、カタギ）のユーザーID。表示だけの身分で、ゲームの条件には使わない。"""
+        """富豪（純資産が WEALTHY_ASSETS 以上で、カタギ）のユーザーID。表示だけの身分で、ゲームの条件には使わない。"""
         return {
             uid
             for uid, total in self._ranked(None)
@@ -579,7 +579,7 @@ class Economy(
         }
 
     def display_status(self, user_id: int, wealthy: Optional[set] = None) -> str:
-        """表示用の身分。status() と同じで、カタギで総資産が WEALTHY_ASSETS 以上なら WEALTHY。wealthy を渡すと再計算しない。"""
+        """表示用の身分。status() と同じで、カタギで純資産が WEALTHY_ASSETS 以上なら WEALTHY。wealthy を渡すと再計算しない。"""
         status = self.status(user_id)
         if status != teiai.KATAGI:
             return status
@@ -587,14 +587,14 @@ class Economy(
         return teiai.WEALTHY if user_id in ids else teiai.KATAGI
 
     def top(self, limit: int = 10, user_ids: Optional[set] = None) -> list:
-        """[(順位, ユーザーID, 総資産), ...]。このサーバーの口座だけで並べる。user_ids を渡すと、さらにその人たちに絞る。
+        """[(順位, ユーザーID, 純資産), ...]。このサーバーの口座だけで並べる。user_ids を渡すと、さらにその人たちに絞る。
 
-        総資産は、残高（現金）にCSトークンの評価額を足したもの。トークンを買っても順位が下がらないようにしている。
+        純資産は、残高（現金）にCSトークンの評価額を足したもの。トークンを買っても順位が下がらないようにしている。
         """
         return [(i + 1, uid, bal) for i, (uid, bal) in enumerate(self._ranked(user_ids)[:limit])]
 
     def rank_of(self, user_id: int, user_ids: Optional[set] = None) -> Optional[tuple]:
-        """(順位, 総資産, 対象人数)。登録がなければ None。"""
+        """(順位, 純資産, 対象人数)。登録がなければ None。"""
         ranked = self._ranked(user_ids)
         for i, (uid, bal) in enumerate(ranked):
             if uid == user_id:
