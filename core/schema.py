@@ -182,7 +182,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
             donated      INTEGER NOT NULL DEFAULT 0,   -- 慈善団体への寄付（帝愛のピンハネ）の、これまでの合計
             relics       TEXT NOT NULL DEFAULT '',     -- 受け取る前の発掘品（JSON {品のID: 個数}。受け取ると持ち物に入る）
             day          TEXT NOT NULL DEFAULT '',
-            day_earned   INTEGER NOT NULL DEFAULT 0,   -- 今日の稼ぎ（上限の判定）
+            day_earned   INTEGER NOT NULL DEFAULT 0,   -- 今日の稼ぎ（画面に出す額）
+            day_click    INTEGER NOT NULL DEFAULT 0,   -- 今日の「働く」クリックの稼ぎ（1日の上限の判定。作業員の分は入らない）
             last_click   REAL NOT NULL DEFAULT 0,
             rest_until   REAL NOT NULL DEFAULT 0,
             clicks       INTEGER NOT NULL DEFAULT 0,
@@ -655,6 +656,8 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE labor ADD COLUMN pot_workers INTEGER NOT NULL DEFAULT 0")
     if "donated" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
         conn.execute("ALTER TABLE labor ADD COLUMN donated INTEGER NOT NULL DEFAULT 0")
+    if "day_click" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
+        conn.execute("ALTER TABLE labor ADD COLUMN day_click INTEGER NOT NULL DEFAULT 0")
     if "relics" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
         conn.execute("ALTER TABLE labor ADD COLUMN relics TEXT NOT NULL DEFAULT ''")
     ml = {r["name"] for r in conn.execute("PRAGMA table_info(market_listings)")}

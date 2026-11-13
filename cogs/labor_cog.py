@@ -69,7 +69,18 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     e.add_field(name="💴 手元", value=ui.pelica(state["balance"]), inline=True)
     e.add_field(name="🎒 未受け取り", value=pot_text(state), inline=True)
     e.add_field(name="📅 今日の稼ぎ", value=ui.pelica(state["day_earned"]), inline=True)
-    e.add_field(name="⛏ 1回の稼ぎ", value=f"**{ui.pelica(lab.click_pay(state['pick'], fat))}**", inline=True)
+    capped = state["day_click"] >= lab.CLICK_DAY_CAP
+    e.add_field(
+        name="⛏ 1回の稼ぎ",
+        value=f"**{ui.pelica(lab.OVER_CAP_PAY if capped else lab.click_pay(state['pick'], fat))}**"
+        + (f"\n（上限に達しました。{lab.OVER_CAP_PAY}ペリカずつ）" if capped else ""),
+        inline=True,
+    )
+    e.add_field(
+        name="📊 今日の「働く」の稼ぎ",
+        value=f"{state['day_click']:,} / {lab.CLICK_DAY_CAP:,}ペリカ（作業員の稼ぎは別）",
+        inline=True,
+    )
     e.add_field(
         name=f"😮\u200d💨 疲労（{fatigue_label(fat)}）",
         value=f"{lab.bar(fat)}\n{fat:.0f}%　稼ぎ {lab.pay_rate(fat):.0%}",

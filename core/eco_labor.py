@@ -1,7 +1,7 @@
 """地下作業（Economy に混ぜ込む部品）。クリッカー。数字と計算は core/labor.py、表は core/schema.py の labor。
 
 稼ぎは、まず「受け取る前の稼ぎ（pot）」に貯まる。受け取りを押すと、まとめて残高に移る（収入なので、借金があれば天引き）。
-上限や、手元の制限はない。day_earned は、画面に出す「今日の稼ぎ」。
+「働く」クリックの稼ぎには、1日の上限がある（CLICK_DAY_CAP。day_click で数える。超えたら1回 OVER_CAP_PAY）。day_earned は、画面に出す「今日の稼ぎ」。
 """
 
 import json
@@ -28,7 +28,7 @@ class LaborMixin:
         row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now, buffs.get("recovery", 0.0))
         row["fatigue_at"] = now
         if row["day"] != day:
-            row["day"], row["day_earned"] = day, 0
+            row["day"], row["day_earned"], row["day_click"] = day, 0, 0
         self._idle_settle(user_id, row, now, rng)
         return row
 
@@ -191,7 +191,7 @@ class LaborMixin:
 
     def _labor_save(self, user_id: int, row: dict) -> None:
         self._conn.execute(
-            "UPDATE labor SET pick=?, glove=?, fatigue=?, fatigue_at=?, pot=?, day=?, day_earned=?, "
+            "UPDATE labor SET pick=?, glove=?, fatigue=?, fatigue_at=?, pot=?, day=?, day_earned=?, day_click=?, "
             "last_click=?, clicks=?, earned_total=?, dorm=?, idle_at=?, renew=?, ores=?, pot_workers=?, relics=?, donated=? "
             "WHERE guild_id=? AND user_id=?",
             (
@@ -202,6 +202,7 @@ class LaborMixin:
                 row["pot"],
                 row["day"],
                 row["day_earned"],
+                row["day_click"],
                 row["last_click"],
                 row["clicks"],
                 row["earned_total"],
@@ -262,6 +263,7 @@ class LaborMixin:
                         "pot",
                         "pot_workers",
                         "day_earned",
+                        "day_click",
                         "clicks",
                         "earned_total",
                         "dorm",
@@ -282,7 +284,7 @@ class LaborMixin:
             buffs = self._relic_buffs(user_id)
             row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now, buffs.get("recovery", 0.0))
             if row["day"] != day:
-                row["day_earned"] = 0
+                row["day_earned"] = row["day_click"] = 0
             bal = self._conn.execute(
                 "SELECT balance FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
             ).fetchone()
@@ -360,6 +362,8 @@ class LaborMixin:
                 return {"ok": False, "reason": "押すのが早すぎます。", "quiet": True}
             out = labor_mod.click_outcome(row["pick"], row["glove"], row["fatigue"])
             pay = max(1, relics_mod.chance_round(out["pay"] * (1 + self._relic_buffs(user_id).get("click", 0.0))))
+            room = labor_mod.CLICK_DAY_CAP - row["day_click"]  # 今日、あと何ペリカ、クリックで稼げるか
+            pay = labor_mod.OVER_CAP_PAY if room <= 0 else min(pay, room)
             row["last_click_before"] = row["last_click"]
             row.update(
                 fatigue=out["fatigue"],
@@ -367,6 +371,7 @@ class LaborMixin:
                 clicks=row["clicks"] + 1,
                 pot=row["pot"] + pay,
                 day_earned=row["day_earned"] + pay,
+                day_click=row["day_click"] + pay,
                 earned_total=row["earned_total"] + pay,
             )
             self._labor_log_click(user_id, now, pay, now - row["last_click_before"])

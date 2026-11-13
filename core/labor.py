@@ -29,12 +29,15 @@ UPGRADE_COST = (
     112_000,
 )  # 次のレベルへ上げる値段（レベル0→1, 1→2, …）。ほぼ倍々
 
+CLICK_DAY_CAP = 20_000  # 「働く」クリックの稼ぎの、1日の上限（作業員の稼ぎ・鉱石は対象外）。超えた分は、1回あたり OVER_CAP_PAY ペリカしか稼げない
+OVER_CAP_PAY = 1
+
 BASE_PAY = 10  # 工具なしの、1回の稼ぎ
 PAY_PER_LEVEL = 4  # ツルハシ1段ごとの加算（Lv10 で最大 50）
 FATIGUE_MAX = 100.0
 FATIGUE_GAIN = 3.0  # 工具なしの、1回で溜まる疲労
 GAIN_CUT_PER_LEVEL = 0.4  # 手袋1段ごとの軽減（Lv5 まで。Lv5 で 1.0）
-LATE_GAIN_CUT_PER_LEVEL = 0.1  # Lv6 以降の軽減（0 や負にならないよう、小さくする。Lv10 で 0.5）
+LATE_GAIN_CUT_PER_LEVEL = 0.1  # Lv6 以降の軽減（0 や負にならないよう、小さくする。Lv10 で 2.0）
 EARLY_LEVELS = 5
 MIN_PAY_RATE = 0.2  # 疲労が満タンのときの、稼ぎの割合（空のときは 1.0）
 RECOVER_PER_SEC = 0.1  # 疲労の自然回復（100 回復するのに約17分）
