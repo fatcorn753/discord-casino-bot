@@ -116,7 +116,7 @@ def test_choosing_a_shelf_shows_only_that_shelf_and_offers_only_buyable_items(co
     embed = it.edits[0]["embed"]
     assert embed.title == "🏷️ 称号" and all(f.name[0] in "🌱🥉🥈🥇" for f in embed.fields)  # 値段の段階ごと
     assert (
-        "🌱 入門" in [f.name for f in embed.fields] and "地下の帝王" in embed.fields[-1].value
+        "🌱 入門" in [f.name for f in embed.fields] and "百億の男" in embed.fields[-1].value
     )  # 最高額は、いちばん最後
     options = select(view, 2).options
     assert 0 < len(options) <= 25 and all("ペリカ" in o.description for o in options)
