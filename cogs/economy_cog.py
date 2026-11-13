@@ -212,7 +212,7 @@ class EconomyCog(commands.Cog):
             )
         held = self.g(interaction).crypto_values().get(member.id, 0)
         if held:
-            e.add_field(name="CSトークン評価額", value=ui.pelica(held), inline=True)
+            e.add_field(name="証券（現物）の評価額", value=ui.pelica(held), inline=True)
         bonds = self.g(interaction).bond_values().get(member.id, 0)
         if bonds:
             e.add_field(name="債券（預けている元本）", value=ui.pelica(bonds), inline=True)
