@@ -85,5 +85,7 @@ def build_breakdown_embed(eco, user_id: int, name: str) -> discord.Embed:
     lines = [f"{label}: **{ui.pelica(parts[key])}**" for key, label in PART_LABELS.items() if parts[key]]
     lines.append(f"\n**総資産: {ui.pelica(total)}**")
     e = ui.embed(f"🧾 {name} の資産の内訳", "\n".join(lines), ui.GOLD)
-    e.set_footer(text="着せ替え・コレクションは買値、馬は購入価格＋引退金の見込み、発掘品は目安の価値、地下作業の工具・寮はこれまでの強化費用で数えます")
+    e.set_footer(
+        text="着せ替え・コレクションは買値、馬は購入価格＋引退金の見込み、発掘品は目安の価値、地下作業の工具・寮はこれまでの強化費用で数えます"
+    )
     return e

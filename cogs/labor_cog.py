@@ -12,7 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core import labor as lab
-from core import relics, shop, teiai, ui
+from core import relics, shop, ui
 
 VIEW_TIMEOUT = 900  # 画面が反応する時間（秒）。過ぎたら、`/地下 作業` で開き直す
 
@@ -109,7 +109,8 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     if state.get("finds"):
         e.add_field(name="📜 最近の掘り出し", value=finds_text(state["finds"]), inline=False)
     e.set_footer(
-        text=f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します（稼ぎの{teiai.LABOR_SKIM_RATE:.0%}は、慈善団体に寄付されます）。"
+        text=f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します。\n"
+        f"総寄付金額：{state.get('donated_all', 0):,}ペリカ"
     )
     return e
 

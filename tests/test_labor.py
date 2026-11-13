@@ -652,7 +652,7 @@ def test_the_default_skim_is_one_percent_and_the_screens_call_it_a_charity_donat
     eco.credit(U, 5_000, "テスト")
     eco.labor_hire(U, "miner", T0, DAY)
     view = make_view(eco)
-    assert "慈善団体" in labor_cog.panel_embed(eco.labor_state(U, T0, DAY)).footer.text
+    assert "総寄付金額" in labor_cog.panel_embed(eco.labor_state(U, T0, DAY)).footer.text
     sent = []
 
     async def send(content, **kw):
