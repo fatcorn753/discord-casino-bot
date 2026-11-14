@@ -128,7 +128,8 @@ casino-bot/
 ├── cogs/                # /ペリカ /カジノ /ショップ /証券 /クイズ /運営(DM) /help ほか。`_` で始まるファイル（_admin_views.py など）は部品で、Bot は読み込まない
 ├── docs/                # 機能ごとの、くわしい仕様（README から、リンクしています）
 ├── tests/
-├── ruff.toml / requirements-dev.txt   # 整形・検査（開発用）: `pip install -r requirements-dev.txt` → `ruff check .` / `ruff format .`
+├── pyproject.toml / uv.lock             # 依存関係・ruff・pyright・pytest 設定（uv）
+├── requirements.txt / requirements-dev.txt  # pip 環境向け依存一覧
 └── data/                # 実行時データ（自動生成・gitignore済）
 ```
 

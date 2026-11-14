@@ -29,9 +29,8 @@
 | `README.md` | 概要・コマンド一覧・導入手順・運用・docs への案内 |
 | `docs/` | 機能ごとの、くわしい仕様（`casino.md`・`stocks.md`・`teiai.md`・`horse.md`・`labor.md`・`shop.md`・`admin.md`） |
 | `STRUCTURE.md` | このファイル |
-| `pyproject.toml` / `uv.lock` | Python のプロジェクト設定と、依存の固定（uv） |
-| `requirements.txt` / `requirements-dev.txt` | 実行に必要な依存 / 開発（テスト・lint）に必要な依存 |
-| `ruff.toml` | ruff（整形・lint）の設定 |
+| `pyproject.toml` / `uv.lock` | Python のプロジェクト設定・ruff・pyright・pytest 設定と、依存の固定（uv） |
+| `requirements.txt` / `requirements-dev.txt` | 実行に必要な依存 / 開発（テスト・lint・型検査）に必要な依存 |
 | `LICENSE` | ライセンス |
 | `.gitignore` | Git に入れないものの一覧（設定・DB・ログ・キャッシュなど） |
 | `tests/` | 自動テスト（下の節） |
