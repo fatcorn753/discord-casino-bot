@@ -1,4 +1,4 @@
-"""帝愛ファイナンス（借金）と身分の数字。調整はここの定数を書き換える。
+"""帝愛ファイナンス（借金）と身分の数字。調整は catalogs/teiai.yaml を書き換える。
 
 借金（users.debt）は、帝愛からの借金（シニア債権）。プレイヤー間の貸付（/貸付）は、そのあとに回収されるジュニア債権。
 
@@ -12,71 +12,63 @@
 
 from typing import Optional
 
-SEED = 3_000  # 帝愛が貸し付ける種銭の枠（手元がこの額になるまで補充する）
-LABOR_SKIM_RATE = 0.03  # 地下作業の稼ぎを受け取るときに、ピンハネされる割合（借金の有無に関わらず、全員。残りが手元に入る）。画面には「慈善団体への寄付」と出す
-HORSE_PRIZE_SKIM_RATE = (
-    0.0  # 競馬の賞金が出たときに、ピンハネされる割合（買った馬は撤廃。レンタル馬は別に下の割合がかかる）
-)
-HORSE_RENTAL_EXTRA_SKIM_RATE = (
-    0.20  # レンタル馬の賞金には、これが上に加わる（買った馬より、わざと不利にする）。率は仮の値（未定）
-)
-SKIM_RATE = 0.20  # 借金中のデイリーから、帝愛が没収する割合
-REPAY_RATE = 0.30  # 収入から、借金の返済へ天引きする割合
-BANKRUPT_FLOOR = 10_000  # 自己破産のあとに残る、帝愛の借金の上限（これより多い分は圧縮）
-BLACKLIST_DAYS = 7  # 破産者の身分が続く、完済後の日数
-ESCAPE_CHANCE = 0.01  # 海外逃亡の成功率。成功すると、全財産を置いていく代わりに、帝愛の借金が全額ゼロになる
-ESCAPE_MIN_DEBT = 5_000  # 逃亡を試せる、帝愛の借金の下限（種銭だけの人が、気軽に押せないように）
-ESCAPE_FINE_RATE = 0.10  # 失敗したときの罰金（借金に加わる。借金に対する割合）
-ESCAPE_FINE_MIN = 1_000  # 罰金の最低額
-ESCAPE_MAX_TRIES = 2  # 海外逃亡を試せる回数（1人につき、このサーバーで通算。失敗も1回に数える）
-ESCAPE_COOLDOWN_HOURS = 24  # 失敗のあと、もう一度試せるまでの時間
-AUCTION_START = 0.90  # 差し押さえた品を競売に出すときの、最初の値段（定価に対して）
-AUCTION_STEP = 0.10  # 1日ごとの値下がり（定価に対して）
-AUCTION_FLOOR = 0.70  # 値下がりの下限。SEIZE_RATE より高くして、買い直して破産し直すと損をするようにする。ここで止まるので、売れ残る品があってもよい
-AUCTION_YIELD_SHARE = 0.5  # 競売の売上のうち、預金者の利回りへ回す割合
-SEIZE_RATE = 0.50  # ショップの品と、解約できない債券を差し押さえるときの換金率（購入額に対して）
+from core import catalogs
+
+_CFG = catalogs.teiai()
+
+SEED = _CFG.seed  # 帝愛が貸し付ける種銭の枠（手元がこの額になるまで補充する）
+LABOR_SKIM_RATE = _CFG.labor_skim_rate  # 地下作業の稼ぎを受け取るときに、ピンハネされる割合
+HORSE_PRIZE_SKIM_RATE = _CFG.horse_prize_skim_rate  # 競馬の賞金が出たときに、ピンハネされる割合（買った馬は撤廃）
+HORSE_RENTAL_EXTRA_SKIM_RATE = _CFG.horse_rental_extra_skim_rate  # レンタル馬の賞金に加わる割合
+SKIM_RATE = _CFG.skim_rate  # 借金中のデイリーから、帝愛が没収する割合
+REPAY_RATE = _CFG.repay_rate  # 収入から、借金の返済へ天引きする割合
+BANKRUPT_FLOOR = _CFG.bankrupt_floor  # 自己破産のあとに残る、帝愛の借金の上限
+BLACKLIST_DAYS = _CFG.blacklist_days  # 破産者の身分が続く、完済後の日数
+ESCAPE_CHANCE = _CFG.escape_chance  # 海外逃亡の成功率
+ESCAPE_MIN_DEBT = _CFG.escape_min_debt  # 逃亡を試せる、帝愛の借金の下限
+ESCAPE_FINE_RATE = _CFG.escape_fine_rate  # 失敗したときの罰金（借金に対する割合）
+ESCAPE_FINE_MIN = _CFG.escape_fine_min  # 罰金の最低額
+ESCAPE_MAX_TRIES = _CFG.escape_max_tries  # 海外逃亡を試せる回数
+ESCAPE_COOLDOWN_HOURS = _CFG.escape_cooldown_hours  # 失敗のあと、もう一度試せるまでの時間
+AUCTION_START = _CFG.auction_start  # 差し押さえた品を競売に出すときの、最初の値段（定価に対して）
+AUCTION_STEP = _CFG.auction_step  # 1日ごとの値下がり（定価に対して）
+AUCTION_FLOOR = _CFG.auction_floor  # 値下がりの下限
+AUCTION_YIELD_SHARE = _CFG.auction_yield_share  # 競売の売上のうち、預金者の利回りへ回す割合
+SEIZE_RATE = _CFG.seize_rate  # ショップの品と、解約できない債券を差し押さえるときの換金率
 
 # ---- 帝愛の利息（トイチ）----
-DEBT_RATE_PER_DAY = 0.01  # 借金にかかる日利（10日で1割＝トイチ）。経過した日数ぶんの単利を、借金に加える
-DEBT_INTEREST_MAX_DAYS = (
-    10  # 1回の決算で数える日数の上限。しばらく来なかった人の借金が、一気に膨らまないようにする（放置死の防止）
-)
+DEBT_RATE_PER_DAY = _CFG.debt_rate_per_day  # 借金にかかる日利（10日で1割＝トイチ）
+DEBT_INTEREST_MAX_DAYS = _CFG.debt_interest_max_days  # 1回の決算で数える日数の上限
 # ---- 破産猶予（取り立てのカウントダウン）----
-GRACE_DEBT = 15_000  # 帝愛への借金がこの額以上になると、破産猶予に入る
+GRACE_DEBT = _CFG.grace_debt  # 帝愛への借金がこの額以上になると、破産猶予に入る
 DEBT_INTEREST_CEILING = GRACE_DEBT - 1  # 利息で借金が増えるのは、ここまで
-GRACE_HOURS = 24  # 猶予の長さ。この間に借金を GRACE_DEBT 未満へ戻せば回避、時間切れで自動の強制破産
+GRACE_HOURS = _CFG.grace_hours  # 猶予の長さ
 
 # ---- 帝愛預金（部分準備銀行）----
-BANK_MIN_DEPOSIT = 100
-RESERVE_RATIO = 0.20  # 預けられた額のうち、すぐ払い出せる現金として手元に置く割合（残りは「地下融資」に回す）
-LOAN_RECOVERY_PER_HOUR = 0.02  # 地下融資が、1時間あたりこの割合ずつ手元の現金に戻ってくる
-LOCK_DEBT_RATE = 0.05  # 地下労働者の借金の、この割合を、貸し倒れに備えて現金からロックする
-LOSS_SHARE = 0.03  # カジノでプレイヤーが負けた額の、この割合を、預金者の利回りへ回す
-PREMIUM_YIELD_SHARE = 0.5  # CDS の掛け金のうち、預金者の利回りへ回す割合（残りは帝愛の手元現金に残る）
-TAX_YIELD_SHARE = 1.0  # 株の利益への税（キャピタルゲイン税）のうち、預金者の利回りへ回す割合（残りは銀行の手元）
-SKIM_YIELD_SHARE = 0.5  # デイリーのピンハネのうち、預金者の利回りへ回す割合
-RUN_WARN_RATIO = 0.15  # 利用可能現金 ÷ 預金総額 がこれ未満なら 🟡、RUN_DANGER_RATIO 未満なら 🔴
-RUN_DANGER_RATIO = 0.05
+BANK_MIN_DEPOSIT = _CFG.bank_min_deposit
+RESERVE_RATIO = _CFG.reserve_ratio
+LOAN_RECOVERY_PER_HOUR = _CFG.loan_recovery_per_hour
+LOCK_DEBT_RATE = _CFG.lock_debt_rate
+LOSS_SHARE = _CFG.loss_share
+PREMIUM_YIELD_SHARE = _CFG.premium_yield_share
+TAX_YIELD_SHARE = _CFG.tax_yield_share
+SKIM_YIELD_SHARE = _CFG.skim_yield_share
+RUN_WARN_RATIO = _CFG.run_warn_ratio
+RUN_DANGER_RATIO = _CFG.run_danger_ratio
 
 # ---- CDS（破綻保証）----
-CDS_MIN_STAKE = 100
-CDS_MIN_ODDS, CDS_MAX_ODDS = 1.2, 15.0
-CDS_TERM_DAYS = 14  # この間に、対象が強制破産しなければ、掛け金は戻らず失効
-CDS_SELF_CAP = 50_000  # 自分への CDS の、配当の見込み（掛け金 × オッズ）の合計の上限（保証を無制限に積めない）
-CDS_PAYOUT_CAP_RATE = 0.50  # 他人への CDS の配当の合計は、対象の破産時の借金のこの割合まで（結託しても損にする）
+CDS_MIN_STAKE = _CFG.cds_min_stake
+CDS_MIN_ODDS, CDS_MAX_ODDS = _CFG.cds_min_odds, _CFG.cds_max_odds
+CDS_TERM_DAYS = _CFG.cds_term_days
+CDS_SELF_CAP = _CFG.cds_self_cap
+CDS_PAYOUT_CAP_RATE = _CFG.cds_payout_cap_rate
 
 KATAGI, UNDERGROUND, BANKRUPT = "katagi", "underground", "bankrupt"
-# 富豪は表示だけの身分。eco.status() は返さない（競売・取引などの「カタギだけ」の判定を変えないため）。eco.display_status() が返す
 WEALTHY = "wealthy"
-WEALTHY_ASSETS = 1_000_000  # 純資産（現金・預金・株・債券など、借金を引いたあと）がこれ以上のカタギが富豪
-STATUS_LABEL = {
-    KATAGI: "🟢 カタギ",
-    UNDERGROUND: "🟤 地下労働者",
-    BANKRUPT: "🔴 破産者",
-    WEALTHY: "🟡 富豪",
-}
-STATUS_MARK = {UNDERGROUND: "🟤", BANKRUPT: "🔴", WEALTHY: "🟡"}  # ランキングの名前の横の印
-STATUS_NAME = {UNDERGROUND: "地下労働者", BANKRUPT: "破産者", WEALTHY: "富豪"}  # ニックネームの末尾に【…】で付ける名前
+WEALTHY_ASSETS = _CFG.wealthy_assets
+STATUS_LABEL = {k: v.label for k, v in _CFG.statuses.items()}
+STATUS_MARK = {k: v.mark for k, v in _CFG.statuses.items() if v.mark is not None}
+STATUS_NAME = {k: v.name for k, v in _CFG.statuses.items() if v.name is not None}
 
 
 def withhold(income: int) -> int:
@@ -95,11 +87,7 @@ def labor_skim(amount: int) -> int:
 
 
 def cds_odds(status: str, debt: int, margin_ratio: Optional[float] = None) -> float:
-    """CDS のオッズ（倍率）。対象の危険度 r に連動し、オッズ = 0.85 ÷ r（MIN〜MAX に収める）。
-
-    r: カタギ 0.04 / 地下労働者 0.25〜0.75（借金が GRACE_DEBT に近いほど高い）。信用取引の維持率が 150% 未満なら +0.1。
-    危なくなるほど安く買えなくなる（買い遅れると、配当が小さい）。
-    """
+    """CDS のオッズ（倍率）。"""
     r = 0.04 if status == KATAGI else 0.25 + 0.5 * min(1.0, debt / GRACE_DEBT)
     if margin_ratio is not None and margin_ratio < 1.5:
         r += 0.1

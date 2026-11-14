@@ -375,7 +375,7 @@ class LaborView(discord.ui.View):
         return callback
 
     async def _dismiss(self, interaction: discord.Interaction):
-        kind = interaction.data["values"][0]
+        kind = ui.selected_values(interaction)[0]
         ok, reason = self.eco().labor_dismiss(self.user_id, kind, time.time(), today(self.bot))
         await self._show(interaction, f"**{lab.WORKER_NAME[kind]}** を解雇した。" if ok else f"⚠ {reason}")
 
@@ -394,7 +394,7 @@ class LaborView(discord.ui.View):
         await self._show(interaction, "🏠 寮を強化した！　雇える人数が増えた。" if ok else f"⚠ {reason}")
 
     async def _merge(self, interaction: discord.Interaction):
-        ok, result = self.eco().relic_merge(self.user_id, interaction.data["values"][0])
+        ok, result = self.eco().relic_merge(self.user_id, ui.selected_values(interaction)[0])
         if not ok:
             return await self._show(interaction, f"⚠ {result}")
         item = shop.BY_ID[result]
@@ -423,8 +423,9 @@ class LaborCog(commands.Cog):
 
     @group.command(name="作業", description="ボタンを押して稼ぐ（元手は0）。稼いだら、作業員を雇って放置でも稼ぐ")
     async def work(self, interaction: discord.Interaction):
-        view = LaborView(self.bot, interaction.user.id, interaction.guild_id)
-        key = (interaction.guild_id, interaction.user.id)
+        gid = ui.guild_id_of(interaction)
+        view = LaborView(self.bot, interaction.user.id, gid)
+        key = (gid, interaction.user.id)
         old = self._panels.pop(key, None)
         await interaction.response.send_message(embed=panel_embed(view.state), view=view)
         if old:

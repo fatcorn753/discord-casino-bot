@@ -9,18 +9,14 @@ from typing import TYPE_CHECKING, cast
 import discord
 
 from cogs._teiai_escape import run_escape
-from core import teiai, ui
+from core import catalogs, teiai, ui
 
 if TYPE_CHECKING:
     from cogs.shop_cog import ShopCog
 
-LEVEL_MARK = {"safe": "🟢", "warn": "🟡", "danger": "🔴", "frozen": "🚨"}
-LEVEL_TEXT = {
-    "safe": "余裕あり",
-    "warn": "取り付け警戒",
-    "danger": "取り付け危険水域！",
-    "frozen": "支払停止（預金封鎖）",
-}
+_TEIAI_CFG = catalogs.teiai()
+LEVEL_MARK = dict(_TEIAI_CFG.panel_level_mark)
+LEVEL_TEXT = dict(_TEIAI_CFG.panel_level_text)
 
 
 def meter(ratio, width: int = 10) -> str:

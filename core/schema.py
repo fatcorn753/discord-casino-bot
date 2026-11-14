@@ -1,11 +1,16 @@
-"""データベースの表の定義（作成）と、古い版の表への列の追加（移行）。
+"""データベースの表の定義（作成）と、古い版の表への列の追加・移行。
 
-Economy が起動するときに、create_tables → add_missing_columns の順で呼ぶ。サーバー別になる前の記録の移行は Economy 側にある。
+Economy が起動するときに、migrate_to_guild_scope → create_tables → add_missing_columns → retire_autoplay の順で呼ぶ。
 """
 
 import json
+import os
 import random
 import sqlite3
+import time
+from typing import Optional
+
+from core.eco_types import INITIAL_BALANCE
 
 USERS_DDL = """
     CREATE TABLE IF NOT EXISTS users (
@@ -108,13 +113,15 @@ def create_tables(conn: sqlite3.Connection) -> None:
             bonus     INTEGER NOT NULL DEFAULT 0,   -- 金にんじんで増えた、ステータス合計の増加分
             created   REAL NOT NULL,
             listed_at REAL,                         -- 破産で差し押さえられて、帝愛の競売に出た時刻（owner_id=-1 のとき）
-            rented_day TEXT                          -- 帝愛からの、その日だけのレンタル馬なら、その日付。買うと NULL に戻る
+            rented_day TEXT,                         -- 帝愛からの、その日だけのレンタル馬なら、その日付。買うと NULL に戻る
+            tactic    TEXT NOT NULL DEFAULT 'pace'   -- 作戦（front / pace / stalk / close）
         );
         CREATE INDEX IF NOT EXISTS horses_owner ON horses (guild_id, owner_id);
         CREATE TABLE IF NOT EXISTS horse_races (     -- レース（定時と臨時）
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id    INTEGER NOT NULL,
             kind        TEXT NOT NULL,              -- regular / special
+            grade       TEXT NOT NULL DEFAULT '',   -- ''（通常）/ 'G1'（重賞）
             start_at    REAL NOT NULL,
             entry_close REAL NOT NULL,
             bet_close   REAL NOT NULL,
@@ -139,6 +146,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             stamina   INTEGER NOT NULL DEFAULT 50,
             power     INTEGER NOT NULL DEFAULT 50,
             guts      INTEGER NOT NULL DEFAULT 50,
+            tactic    TEXT NOT NULL DEFAULT 'pace', -- 作戦のコピー
             form      INTEGER NOT NULL DEFAULT 0,
             races     INTEGER NOT NULL DEFAULT 0,   -- 戦績のコピー（オッズに使う。帝愛の馬は作りもの）
             wins      INTEGER NOT NULL DEFAULT 0,
@@ -620,10 +628,17 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE horses ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0")
     if "rented_day" not in hs:
         conn.execute("ALTER TABLE horses ADD COLUMN rented_day TEXT")
+    if "tactic" not in hs:
+        conn.execute("ALTER TABLE horses ADD COLUMN tactic TEXT NOT NULL DEFAULT 'pace'")
+    hr = {r["name"] for r in conn.execute("PRAGMA table_info(horse_races)")}
+    if "grade" not in hr:
+        conn.execute("ALTER TABLE horse_races ADD COLUMN grade TEXT NOT NULL DEFAULT ''")
     he = {r["name"] for r in conn.execute("PRAGMA table_info(horse_entries)")}
     for col in ("races", "wins", "places"):
         if col not in he:
             conn.execute(f"ALTER TABLE horse_entries ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+    if "tactic" not in he:
+        conn.execute("ALTER TABLE horse_entries ADD COLUMN tactic TEXT NOT NULL DEFAULT 'pace'")
     us = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
     if "last_slot" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN last_slot INTEGER")
@@ -740,10 +755,8 @@ _SYMBOL_TABLES = {
 }
 
 
-def _migrate_labor_counts(conn: sqlite3.Connection, now: float = None) -> None:
+def _migrate_labor_counts(conn: sqlite3.Connection, now: Optional[float] = None) -> None:
     """作業員を「人数の列」で持っていた版から、契約つきの1人1行の表（labor_workers）へ移す。いまの人は、今から7日の契約にする（何度動かしても安全）。"""
-    import time
-
     now = time.time() if now is None else now
     for r in conn.execute(
         "SELECT guild_id, user_id, apprentice, miner, craftsman, foreman FROM labor "
@@ -764,10 +777,8 @@ def _migrate_labor_counts(conn: sqlite3.Connection, now: float = None) -> None:
 ARCHAEOLOGIST_FEE = 2_400  # なくなった「発掘員」の、契約料（返金の額）
 
 
-def _refund_archaeologists(conn: sqlite3.Connection, now: float = None) -> None:
+def _refund_archaeologists(conn: sqlite3.Connection, now: Optional[float] = None) -> None:
     """専用の「発掘員」を雇っていた人の契約料を返して、契約を解約する（何度動かしても安全。いなければ何もしない）。"""
-    import time
-
     now = time.time() if now is None else now
     refunds: dict = {}
     for r in conn.execute("SELECT guild_id, user_id FROM labor_workers WHERE kind='archaeologist'").fetchall():
@@ -785,10 +796,8 @@ def _refund_archaeologists(conn: sqlite3.Connection, now: float = None) -> None:
     conn.execute("DELETE FROM labor_workers WHERE kind='archaeologist'")
 
 
-def _refund_legacy_contracts(conn: sqlite3.Connection, now: float = None) -> None:
+def _refund_legacy_contracts(conn: sqlite3.Connection, now: Optional[float] = None) -> None:
     """鉱石版より前に雇った作業員の契約料を、いまの値段で返して、契約を解約する（ルール変更の補償）。列を足したときに、1回だけ動く。"""
-    import time
-
     from core import labor
 
     now = time.time() if now is None else now
@@ -819,3 +828,91 @@ def _add_symbol_columns(conn: sqlite3.Connection) -> None:
         conn.execute(f"DROP TABLE {table}_old")
     if "symbol" not in {r["name"] for r in conn.execute("PRAGMA table_info(chart_posts)")}:
         conn.execute("ALTER TABLE chart_posts ADD COLUMN symbol TEXT NOT NULL DEFAULT 'cs'")
+
+
+def migrate_to_guild_scope(conn: sqlite3.Connection, db_path: str, legacy_guild_id: Optional[int]) -> None:
+    """サーバー別になる前の記録（users に guild_id が無い）を、指定したサーバーのものとして引き継ぐ。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    if not cols or "guild_id" in cols:
+        return  # 新規、または移行済み
+    if legacy_guild_id is None:
+        raise RuntimeError(
+            "古い形式の記録があります。引き継ぎ先のサーバーIDを、config.json の legacy_guild_id に設定してください。"
+        )
+    gid = int(legacy_guild_id)
+    if gid <= 0:
+        raise ValueError(f"legacy_guild_id が不正です: {legacy_guild_id!r}")
+    backup = db_path + ".before-guild-scope"
+    if not os.path.exists(backup):  # 万一に備えて、移行の前に記録を丸ごと退避する
+        tmp = backup + ".tmp"  # 途中で落ちた不完全なファイルを、退避済みと誤認しないよう最後に改名する
+        dst = sqlite3.connect(tmp)
+        conn.backup(dst)
+        dst.close()
+        os.replace(tmp, backup)
+    have = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("ALTER TABLE users RENAME TO users_old")
+        conn.execute(USERS_DDL)
+        conn.execute(
+            "INSERT INTO users (guild_id, user_id, balance, daily_streak, last_daily, games_played, total_wagered, "
+            "total_won, biggest_win, created_at) SELECT ?, user_id, balance, daily_streak, last_daily, games_played, "
+            "total_wagered, total_won, biggest_win, created_at FROM users_old",
+            (gid,),
+        )
+        conn.execute("DROP TABLE users_old")
+        conn.execute("DROP INDEX IF EXISTS ledger_user")
+        for t in ("ledger", "escrow"):  # 無い表は、あとの create_tables が新しい形で作る
+            if t in have:
+                conn.execute(f"ALTER TABLE {t} ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 0")
+                conn.execute(f"UPDATE {t} SET guild_id=?", (gid,))
+        if "inventory" in have:
+            conn.execute("ALTER TABLE inventory RENAME TO inventory_old")
+            conn.execute(INVENTORY_DDL)
+            conn.execute(
+                "INSERT INTO inventory (guild_id, user_id, item_id, qty) SELECT ?, user_id, item_id, qty FROM inventory_old",
+                (gid,),
+            )
+            conn.execute("DROP TABLE inventory_old")
+        if "profile" in have:
+            conn.execute("ALTER TABLE profile RENAME TO profile_old")
+            conn.execute(PROFILE_DDL)
+            conn.execute(
+                "INSERT INTO profile (guild_id, user_id, title, card_color, card_icon, daily_boost, insurance) "
+                "SELECT ?, user_id, title, card_color, card_icon, daily_boost, insurance FROM profile_old",
+                (gid,),
+            )
+            conn.execute("DROP TABLE profile_old")
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def retire_autoplay(conn: sqlite3.Connection, now: Optional[float] = None) -> None:
+    """廃止した自動プレイの表が残っていたら、預け中の分を残高に戻してから表を消す（預けた額を失わせない）。"""
+    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='autoplay'").fetchone():
+        return
+    ts = time.time() if now is None else now
+    for row in conn.execute("SELECT guild_id, user_id, pot FROM autoplay").fetchall():
+        if row["pot"] > 0:
+            gid, uid, pot = row["guild_id"], row["user_id"], row["pot"]
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO users (guild_id, user_id, balance, created_at) VALUES (?, ?, ?, ?)",
+                (gid, uid, INITIAL_BALANCE, ts),
+            )
+            if cur.rowcount:
+                conn.execute(
+                    "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
+                    (gid, uid, INITIAL_BALANCE, INITIAL_BALANCE, "初期支給", ts),
+                )
+            before = conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (gid, uid)).fetchone()[
+                "balance"
+            ]
+            after = before + pot
+            conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, gid, uid))
+            conn.execute(
+                "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
+                (gid, uid, pot, after, "自動プレイ精算", ts),
+            )
+    conn.execute("DROP TABLE autoplay")

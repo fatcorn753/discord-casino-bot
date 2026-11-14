@@ -7,26 +7,14 @@ import asyncio
 
 import discord
 
-from core import teiai, ui
+from core import catalogs, teiai, ui
 from core.confirm import confirm_action
 
-FRAME_SECONDS = 1.4
-SHIP = [
-    "      |\\",
-    "      | \\",
-    " _____|__\\_____",
-    " \\  o  o  o   /",
-    "  \\___________/",
-]
-WAVES = ["~^~^~^~^~^~^~^~^~^~^~^~^~^~^", "^~^~^~^~^~^~^~^~^~^~^~^~^~^~"]
-PROGRESS = [
-    "🌃 夜の港から、こっそり出航…",
-    "🌊 沖へ…灯りが遠ざかる…",
-    "🌫️ 霧の中を進む…",
-    "💡 …遠くに、光が見える…？",
-    "🌅 公海が近い…！",
-    "⚓ 運命の瞬間…",
-]
+_CFG = catalogs.teiai()
+FRAME_SECONDS = _CFG.escape_frame_seconds
+SHIP = list(_CFG.escape_ship)
+WAVES = list(_CFG.escape_waves)
+PROGRESS = list(_CFG.escape_progress)
 
 
 def ship_frame(step: int) -> str:
@@ -35,26 +23,8 @@ def ship_frame(step: int) -> str:
     return "\n".join(lines + [WAVES[step % 2], WAVES[(step + 1) % 2]])
 
 
-SUCCESS_ART = r"""
-        \  |  /
-      --  ( )  --      * * *
-        /  |  \
-              |\
-     _________| \________
-     \  o  o  o   /  ===> FREE!
-~~~~~~\___________/~~~~~~~~~~~~
-^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^
-"""
-
-FAIL_ART = r"""
-   !!  KEIBI  !!       ___
-  =====[]=====       _|   |_
-   __|_____|__      |  o o |
-  /  KAIJO     \     \_____/
-  \____________/   ~~ CAUGHT! ~~
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^
-"""
+SUCCESS_ART = _CFG.escape_success_art
+FAIL_ART = _CFG.escape_fail_art
 
 
 def block(text: str) -> str:

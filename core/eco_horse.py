@@ -13,11 +13,12 @@ from typing import Optional
 from core import horse as horse_mod
 from core import shop as shop_mod
 from core import teiai
+from core.eco_base import EcoBase
 from core.eco_types import PurchaseResult
 from core.shop import CARROT, GOLD_CARROT, HORSE_VOUCHER
 
 
-class HorseMixin:
+class HorseMixin(EcoBase):
     # ---------------------------------------------------------------- #
     # 馬                                                                #
     # ---------------------------------------------------------------- #
@@ -276,6 +277,7 @@ class HorseMixin:
                 "VALUES (?, 'special', ?, ?, ?, 'entry', ?, ?)",
                 (self._g(), bet_close + horse_mod.BET_LEAD_SEC, entry_close, bet_close, channel_id, now),
             )
+            assert cur.lastrowid is not None
             return cur.lastrowid
 
     def race_set_message(self, race_id: int, channel_id: int, message_id: int) -> None:

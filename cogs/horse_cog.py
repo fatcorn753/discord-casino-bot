@@ -8,6 +8,7 @@
 
 import asyncio
 import time
+from typing import Optional, cast
 
 import discord
 from discord import app_commands
@@ -27,7 +28,7 @@ NONE = discord.AllowedMentions.none()
 GAP_ZOOM = 3.0  # 先頭との差を、見やすく広げる倍率（そのままだと、全馬が団子に見える）
 
 
-def display_frames(frames: list, winner: int, finish: list = None) -> list:
+def display_frames(frames: list, winner: int, finish: Optional[list] = None) -> list:
     """アニメーション用に、先頭がゴールした瞬間までに切り、先頭との差を GAP_ZOOM 倍に広げる（後ろに下がって見えないようにする）。
 
     最後のコマは、1着の馬がゴールに着いた瞬間。ほかの馬は、ゴールの時刻の差（finish）だけ手前にいる
@@ -147,7 +148,7 @@ class HorseCog(commands.Cog):
         self.bot.add_dynamic_items(RaceButton)
         self.tick.start()
 
-    def cog_unload(self):
+    async def cog_unload(self):
         self.tick.cancel()
 
     group = app_commands.Group(
@@ -155,12 +156,12 @@ class HorseCog(commands.Cog):
     )
 
     def g(self, interaction: discord.Interaction):
-        return self.bot.economy.for_guild(interaction.guild_id)
+        return self.bot.economy.for_guild(ui.guild_id_of(interaction))
 
     # ------------------------------ コマンド ------------------------------ #
     @group.command(name="厩舎", description="自分の馬・ステータスの配分・出走の申し込み")
     async def stable(self, interaction: discord.Interaction):
-        view = Stable(self.bot, interaction.user.id, interaction.guild_id)
+        view = Stable(self.bot, interaction.user.id, ui.guild_id_of(interaction))
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
     @group.command(name="出馬表", description="いまのレースの出馬表・オッズ（馬券もここから）")
@@ -190,12 +191,13 @@ class HorseCog(commands.Cog):
 
     # ------------------------------ 開催 ------------------------------ #
     async def start_special(
-        self, guild: discord.Guild, entry_min: int, bet_min: int, channel: discord.abc.Messageable = None
+        self, guild: discord.Guild, entry_min: int, bet_min: int, channel: Optional[discord.abc.Messageable] = None
     ) -> int:
         """臨時レースを開催する（管理者用）。channel を指定すれば、掲示・馬券・レースはそこに出す。作ったレースの番号を返す。"""
         eco = self.bot.economy.for_guild(guild.id)
-        channel = channel or announce_channel(guild, eco)
-        race_id = eco.race_create_special(time.time(), entry_min, bet_min, channel.id if channel else 0)
+        target = channel or announce_channel(guild, eco)
+        target_id = getattr(target, "id", 0)
+        race_id = eco.race_create_special(time.time(), entry_min, bet_min, target_id)
         await self._announce_entry(guild, eco, race_id)
         return race_id
 
@@ -237,7 +239,7 @@ class HorseCog(commands.Cog):
             if channel is None:
                 continue
             try:
-                await channel.get_partial_message(message_id).edit(embed=embed, view=None)
+                await cast(discord.TextChannel, channel).get_partial_message(message_id).edit(embed=embed, view=None)
             except discord.HTTPException as exc:  # 消されていても、進行には関係ない
                 logthrottle.warn(("horse-retire", channel.id), f"競馬の古い投稿を書き換えられません: {exc!r}")
 

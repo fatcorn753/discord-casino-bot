@@ -5,6 +5,7 @@
 
 import re
 import time
+from typing import Any, cast
 
 import discord
 
@@ -48,7 +49,9 @@ async def refresh_entry_card(interaction: discord.Interaction, eco, race_id: int
     if channel is None:
         return
     try:
-        await channel.get_partial_message(race["message_id"]).edit(embed=card_embed(eco, race))
+        await (
+            cast(discord.TextChannel, channel).get_partial_message(race["message_id"]).edit(embed=card_embed(eco, race))
+        )
     except discord.HTTPException:  # 消されていても、進行には関係ない
         pass
 
@@ -131,11 +134,11 @@ class RaceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"horse:(?P
         self.act, self.race_id = act, race_id
 
     @classmethod
-    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match):
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Item[Any], match: re.Match[str]):
         return cls(match["act"], int(match["id"]))
 
     async def callback(self, interaction: discord.Interaction):
-        eco = interaction.client.economy.for_guild(interaction.guild_id)
+        eco = ui.bot_of(interaction).economy.for_guild(ui.guild_id_of(interaction))
         race = eco.race_get(self.race_id)
         if race is None:
             return await interaction.response.send_message(
@@ -193,7 +196,7 @@ class GoldCarrotView(discord.ui.View):
 
     def _make_pick(self, attr: str):
         async def callback(interaction: discord.Interaction):
-            setattr(self, attr, interaction.data["values"][0])
+            setattr(self, attr, ui.selected_values(interaction)[0])
             self._build()
             await interaction.response.edit_message(embed=self.embed(), view=self)
 
@@ -275,9 +278,8 @@ class StakeModal(discord.ui.Modal):
             interaction.user.id, self.panel.race["id"], self.panel.kind, lanes, stake, time.time()
         )
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("買えませんでした", result), ephemeral=True
-            )
+            await interaction.response.send_message(embed=ui.error_embed("買えませんでした", result), ephemeral=True)
+            return
         await self.panel.announce_bets(interaction, result)
         lines = [
             f"{r['lane']}枠 {r['name']}　オッズ **{r['odds']:.1f}**（的中すれば {ui.pelica(horse_mod.payout(stake, r['odds']))}）"
@@ -295,13 +297,15 @@ class StakeModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         raw = self.stake.value.replace(",", "").strip()
         if not raw.isdigit():
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed("金額が正しくありません", "半角の数字で入れてください。"), ephemeral=True
             )
-        eco = self.panel.bot.economy.for_guild(interaction.guild_id)
+            return
+        eco = self.panel.bot.economy.for_guild(ui.guild_id_of(interaction))
         lanes = self.panel.picked()
         if self.panel.kind in horse_mod.MULTI_KINDS:
-            return await self._submit_many(interaction, eco, lanes, int(raw))
+            await self._submit_many(interaction, eco, lanes, int(raw))
+            return
         ok, result = eco.race_bet(
             interaction.user.id,
             self.panel.race["id"],
@@ -311,9 +315,8 @@ class StakeModal(discord.ui.Modal):
             time.time(),
         )
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("買えませんでした", result), ephemeral=True
-            )
+            await interaction.response.send_message(embed=ui.error_embed("買えませんでした", result), ephemeral=True)
+            return
         picks = (
             "→".join(map(str, result["lanes"]))
             if result["kind"] == "exacta"
@@ -490,20 +493,20 @@ class BetPanel(discord.ui.View):
         await interaction.response.edit_message(embed=self.embed(eco), view=self)
 
     async def _on_kind(self, interaction: discord.Interaction):
-        self.kind = interaction.data["values"][0]
+        self.kind = ui.selected_values(interaction)[0]
         await self._redraw(interaction)
 
     async def _on_many_singles(self, interaction: discord.Interaction):
-        self.multi = [int(v) for v in interaction.data["values"]]
+        self.multi = [int(v) for v in ui.selected_values(interaction)]
         await self._redraw(interaction)
 
     async def _on_many(self, interaction: discord.Interaction):
-        self.lanes = [int(v) for v in interaction.data["values"]] + [0] * 3
+        self.lanes = [int(v) for v in ui.selected_values(interaction)] + [0] * 3
         await self._redraw(interaction)
 
     def _make_exacta(self, index: int):
         async def callback(interaction: discord.Interaction):
-            self.lanes[index] = int(interaction.data["values"][0])
+            self.lanes[index] = int(ui.selected_values(interaction)[0])
             await self._redraw(interaction)
 
         return callback
@@ -644,15 +647,15 @@ class Stable(discord.ui.View):
         await interaction.response.edit_message(embed=self.embed(), view=self)
 
     async def _on_pick(self, interaction: discord.Interaction):
-        self.horse_id = int(interaction.data["values"][0])
+        self.horse_id = int(ui.selected_values(interaction)[0])
         await self._redraw(interaction)
 
     async def _on_src(self, interaction: discord.Interaction):
-        self.src = interaction.data["values"][0]
+        self.src = ui.selected_values(interaction)[0]
         await self._redraw(interaction)
 
     async def _on_dst(self, interaction: discord.Interaction):
-        self.dst = interaction.data["values"][0]
+        self.dst = ui.selected_values(interaction)[0]
         await self._redraw(interaction)
 
     async def _on_carrot(self, interaction: discord.Interaction):

@@ -13,9 +13,15 @@ from core import labor as labor_mod
 from core import relics as relics_mod
 from core import shop as shop_mod
 from core import teiai
+from core.eco_base import EcoBase
 
 
-class LaborMixin:
+def _set_counts(row: dict, workers: list) -> None:
+    for k in labor_mod.WORKERS:
+        row[k] = sum(1 for w in workers if w["kind"] == k)
+
+
+class LaborMixin(EcoBase):
     def _labor_row(self, user_id: int, now: float, day: str, rng=None) -> dict:
         """行を読む（無ければ作る）。日が変わっていたら、今日の稼ぎを 0 に戻し、疲労は時間で回復させる。呼び出し側のトランザクション内で使う。
 
@@ -142,11 +148,6 @@ class LaborMixin:
             )
         ]
 
-    @staticmethod
-    def _set_counts(row: dict, workers: list) -> None:
-        for k in labor_mod.WORKERS:
-            row[k] = sum(1 for w in workers if w["kind"] == k)
-
     def _idle_settle(self, user_id: int, row: dict, now: float, rng=None) -> None:
         """作業員の稼ぎを pot に足し、切れた契約を決算する（更新なら契約料を払い、払えなければ退職）。"""
         workers = self._workers_of(user_id)
@@ -187,7 +188,7 @@ class LaborMixin:
             row["day_earned"] += plan["gain"]
             row["earned_total"] += plan["gain"]
             workers = self._workers_of(user_id)
-        self._set_counts(row, workers)
+        _set_counts(row, workers)
         row["idle_at"] = now
 
     def _labor_save(self, user_id: int, row: dict) -> None:
@@ -305,7 +306,7 @@ class LaborMixin:
             gone = set(plan["removed"])
             renewed = dict(plan["renewed"])
             stay = [{**w, "expires_at": renewed.get(w["id"], w["expires_at"])} for w in workers if w["id"] not in gone]
-            self._set_counts(row, stay)
+            _set_counts(row, stay)
             row["workers"] = len(stay)
             row["slots"] = labor_mod.slots(row["dorm"])
             row["rate"] = labor_mod.idle_rate(self._counts(row))

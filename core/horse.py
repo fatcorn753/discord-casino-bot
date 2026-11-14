@@ -14,45 +14,49 @@ import itertools
 import math
 import random
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
-STAT_KEYS = ("speed", "stamina", "power", "guts")
-STAT_NAMES = {"speed": "スピード", "stamina": "スタミナ", "power": "パワー", "guts": "根性"}
-STAT_TOTAL = 200  # 4つの合計（固定）
-RENTAL_STAT_TOTAL = STAT_TOTAL - 10  # レンタル馬の合計（買った馬より弱い）
-STAT_MIN, STAT_MAX = 20, 80
-DEFAULT_STATS = {"speed": 50, "stamina": 50, "power": 50, "guts": 50}
-CARROT_POINTS = 5  # にんじん1本で動かせるポイント
+from core import catalogs
 
-GOLD_CARROT_POINTS = 5  # 金にんじん1本で、2か所に5点ずつ（合計10点）増やせる
-GOLD_CARROT_MAX = 1  # 1頭に使える金にんじんの数（合計 +10 点まで）
+_CFG = catalogs.horse()
 
-FIELD_SIZE = 8  # 1レースの出走頭数
-NAME_MAX = 12
-MAX_HORSES = 3  # 1人が持てる馬の数
+STAT_KEYS = tuple(s.key for s in _CFG.stats)
+STAT_NAMES = {s.key: s.name for s in _CFG.stats}
+STAT_TOTAL = _CFG.stat_total
+RENTAL_STAT_TOTAL = STAT_TOTAL - _CFG.rental_stat_penalty
+STAT_MIN, STAT_MAX = _CFG.stat_min, _CFG.stat_max
+DEFAULT_STATS = {s.key: s.default for s in _CFG.stats}
+CARROT_POINTS = _CFG.carrot_points
 
-COATS = ["栗毛", "鹿毛", "黒鹿毛", "青毛", "芦毛", "白毛", "栃栗毛", "月毛"]
-SILKS = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "⬛", "⬜", "🟫"]  # 勝負服の色
+GOLD_CARROT_POINTS = _CFG.gold_carrot_points
+GOLD_CARROT_MAX = _CFG.gold_carrot_max
 
-DISTANCES = (1000, 1200, 1600, 1800, 2000, 2400, 3000)
-GOINGS = ("良", "稍重", "重", "不良")
-GOING_PENALTY = {"良": 0.0, "稍重": 0.012, "重": 0.03, "不良": 0.05}
-GOING_WEIGHT = (60, 25, 11, 4)  # 馬場の出やすさ（良が多い）
-FORM_MARK = {1: "◎", 0: "○", -1: "△"}  # 調子（毎レース、ランダム）
-FORM_MULT = {1: 1.015, 0: 1.0, -1: 0.985}
+FIELD_SIZE = _CFG.field_size
+NAME_MAX = _CFG.name_max
+MAX_HORSES = _CFG.max_horses
 
-TAKEOUT = 0.15  # 控除率（オッズは、公正な倍率の 1 - TAKEOUT 倍）
-ODDS_SIMS = 8000  # estimate（本当の確率を調べる検証用）の、シミュレーション回数
-MAX_ODDS = 99.9
-MIN_STAKE, MAX_STAKE = 100, 50_000  # 1回の賭け金
-MAX_RACE_STAKE = 150_000  # 1人が1レースに賭けられる合計
+COATS = list(_CFG.coats)
+SILKS = list(_CFG.silks)
 
-ENTRY_FEE = 1_000  # 出走料（レンタル馬も同じ。帝愛の馬=NPCは払わない）
-PRIZES = (12_000, 5_000, 2_000)  # 1着・2着・3着の賞金（馬主へ）。固定額だが、原資（下記）を超えない
+DISTANCES = _CFG.distances
+GOINGS = tuple(g.name for g in _CFG.goings)
+GOING_PENALTY = {g.name: g.penalty for g in _CFG.goings}
+GOING_WEIGHT = tuple(g.weight for g in _CFG.goings)
+FORM_MARK = {f.value: f.mark for f in _CFG.forms}
+FORM_MULT = {f.value: f.mult for f in _CFG.forms}
 
-MAJOR_HOUR = 21  # 重賞（看板レース）になる、定時レースの発走時刻
-MAJOR_PRIZES = (24_000, 10_000, 4_000)  # 重賞の賞金（通常の2倍）
-MAJOR_HOUSE_TOPUP = 10_000  # 重賞で、出走料だけでは足りないとき、帝愛の手元現金から補う上限（1レースあたり）
+TAKEOUT = _CFG.takeout
+ODDS_SIMS = _CFG.odds_sims
+MAX_ODDS = _CFG.max_odds
+MIN_STAKE, MAX_STAKE = _CFG.min_stake, _CFG.max_stake
+MAX_RACE_STAKE = _CFG.max_race_stake
+
+ENTRY_FEE = _CFG.entry_fee
+PRIZES = _CFG.prizes
+
+MAJOR_HOUR = _CFG.major_hour
+MAJOR_PRIZES = _CFG.major_prizes
+MAJOR_HOUSE_TOPUP = _CFG.major_house_topup
 
 
 def is_major_race(race: dict, tz_hours: float = 9.0) -> bool:
@@ -72,8 +76,8 @@ def prize_pool_scale(real_entries: int, placed_prizes: int, topup: int = 0) -> f
     return min(1.0, (real_entries * ENTRY_FEE + max(0, topup)) / placed_prizes)
 
 
-TICKS = 60  # 平均的な馬が走り切るティック数
-MAX_TICKS = 140
+TICKS = _CFG.ticks
+MAX_TICKS = _CFG.max_ticks
 
 
 @dataclass(frozen=True)
@@ -111,9 +115,9 @@ class Track:
 
 
 # ---- 脚質（逃げ・先行・差し・追込） ---- #
-STYLE_NAMES = {"nige": "逃げ", "senko": "先行", "sashi": "差し", "oikomi": "追込"}
-STYLE_MARK = {"nige": "🏃", "senko": "🚶", "sashi": "🎯", "oikomi": "💨"}
-STYLE_BY_STAT = {"speed": "nige", "power": "senko", "stamina": "sashi", "guts": "oikomi"}
+STYLE_NAMES = {s.key: s.name for s in _CFG.styles}
+STYLE_MARK = {s.key: s.mark for s in _CFG.styles}
+STYLE_BY_STAT = {s.key: s.style for s in _CFG.stats}
 
 
 def style_of(stats: dict) -> str:
@@ -131,11 +135,11 @@ def valid_stats(stats: dict) -> bool:
     )
 
 
-MAX_RACES = 32  # 定年（約8日間の現役生活）。これに達すると、次からは出走できず、自動で引退する
-RETIRE_WIN = 5_000  # 引退金: 1勝ごと
-RETIRE_PLACE = 2_000  # 3着以内（勝ちを除く）1回ごと
-RETIRE_LOSS = 2_000  # 3着に入れなかった1回ごとの、引退費用
-RETIRE_MAX, RETIRE_FEE_MAX = 60_000, 20_000  # 引退金の上限・引退費用の上限
+MAX_RACES = _CFG.max_races
+RETIRE_WIN = _CFG.retire_win
+RETIRE_PLACE = _CFG.retire_place
+RETIRE_LOSS = _CFG.retire_loss
+RETIRE_MAX, RETIRE_FEE_MAX = _CFG.retire_max, _CFG.retire_fee_max
 
 
 def retire_value(races: int, wins: int, places: int) -> int:
@@ -202,14 +206,14 @@ def speed_coef(distance: int) -> float:
     return min(0.09, 0.05 * 1800 / distance)
 
 
-FATIGUE_MAX = 0.18  # バテたときの、最大の減速
-NOISE = 0.03  # 毎ティックの運
-LUCK = 0.020  # レース全体の運（展開）
+FATIGUE_MAX = _CFG.fatigue_max
+NOISE = _CFG.noise
+LUCK = _CFG.luck
 
 # ---- 脚質による展開（逃げ・先行が多いほどハイペースになり、終盤は差し・追込が伸びる） ---- #
-PACE_FACTOR = 0.05  # 前に行く馬の割合が、平均（50%）からどれだけずれるかで、展開の強さが決まる
-STYLE_EARLY = {"nige": 0.025, "senko": 0.012, "sashi": -0.010, "oikomi": -0.022}  # 序盤（p<0.35）の加減速
-STYLE_LATE = {"nige": -0.015, "senko": 0.0, "sashi": 0.018, "oikomi": 0.030}  # 終盤（p>=0.70）の加減速
+PACE_FACTOR = _CFG.pace_factor
+STYLE_EARLY = {s.key: s.early for s in _CFG.styles}
+STYLE_LATE = {s.key: s.late for s in _CFG.styles}
 
 
 def style_curve(style: str, p: float, pace_shift: float) -> float:
@@ -242,17 +246,17 @@ def _mult(r: Runner, p: float, track: Track, luck: float, spurt: float, style: s
     return m * FORM_MULT[r.form] * (1 + luck)
 
 
-def simulate(runners: list, track: Track, rng: random.Random, keep_frames: bool = False) -> dict:
+def simulate(runners: list, track: Track, rng: random.Random, keep_frames: bool = False) -> dict[str, Any]:
     """1レース走らせる。{"order": 着順（lane の並び）, "times": 着順ごとのゴール時刻, "frames": ティックごとの進み（keep_frames のとき）}。"""
     n = len(runners)
     pos = [0.0] * n
-    finish = [None] * n
+    finish: list[Optional[float]] = [None] * n
     luck = [rng.gauss(0, LUCK) for _ in runners]
     spurt = [max(0.0, (r.guts - 20) / 60 * 0.08 * rng.uniform(0.5, 1.5)) for r in runners]  # ラストスパート（根性）
     styles = [r.effective_style for r in runners]
     pace = sum(1 for s in styles if s in ("nige", "senko")) / n if n else 0.5
     pace_shift = (pace - 0.5) * PACE_FACTOR
-    frames = [[0.0] * n] if keep_frames else None
+    frames: list[list[float]] = [[0.0] * n] if keep_frames else []
     for t in range(1, MAX_TICKS + 1):
         for i, r in enumerate(runners):
             if finish[i] is not None:
@@ -267,11 +271,9 @@ def simulate(runners: list, track: Track, rng: random.Random, keep_frames: bool 
             frames.append(list(pos))
         if all(f is not None for f in finish):
             break
-    for i in range(n):
-        if finish[i] is None:
-            finish[i] = MAX_TICKS + (1 - pos[i])
-    order = sorted(range(n), key=lambda i: (finish[i], rng.random()))
-    out = {"order": order, "times": [finish[i] for i in order], "finish": finish}
+    final_times = [MAX_TICKS + (1 - pos[i]) if finish[i] is None else finish[i] for i in range(n)]
+    order = sorted(range(n), key=lambda i: (final_times[i], rng.random()))
+    out: dict[str, Any] = {"order": order, "times": [final_times[i] for i in order], "finish": final_times}
     if keep_frames:
         out["frames"] = frames
     return out
@@ -314,12 +316,10 @@ def estimate_all(runners: list, track: Track, sims: int = ODDS_SIMS, seed: int =
 
 
 # ---- 戦績で決めるオッズ ----
-RECORD_PRIOR_RUNS = (
-    4  # 戦績を信じる強さ（この回数ぶんの「平均的な成績」を足して薄める。出走が少ない馬ほど、平均に寄る）
-)
-FIRST_RUN_FACTOR = 0.75  # 初出走の馬は、確率をこの倍率で見積もる（オッズが高くなる）
-FORM_ODDS = {1: 1.15, 0: 1.0, -1: 0.85}  # 調子による、確率の補正（◎ は低く、△ は高くなる）
-PLACE_CAP = 0.95  # 3着以内率の上限
+RECORD_PRIOR_RUNS = _CFG.record_prior_runs
+FIRST_RUN_FACTOR = _CFG.first_run_factor
+FORM_ODDS = {f.value: f.odds_mult for f in _CFG.forms}
+PLACE_CAP = _CFG.place_cap
 
 
 def npc_record(rng: random.Random) -> tuple:
@@ -422,8 +422,8 @@ def payout(stake: int, odds: float) -> int:
 
 
 # ---- 開催の時刻と馬券の種類 ----
-WEEKDAY_HOURS = (9, 12, 15, 18, 21)  # 平日（月〜金）: 9時から3時間おき
-WEEKEND_HOURS = (9, 13, 17, 21)  # 休日（土日）: 9時から4時間おき
+WEEKDAY_HOURS = _CFG.weekday_hours
+WEEKEND_HOURS = _CFG.weekend_hours
 
 
 def schedule_for(d: datetime.date) -> tuple:
@@ -432,22 +432,14 @@ def schedule_for(d: datetime.date) -> tuple:
     return tuple((h, 0) for h in hours)
 
 
-ENTRY_OPEN_MIN = 120  # 発走の何分前に、出走の申し込みを始めるか
-ENTRY_LEAD_MIN = 60  # 発走の何分前に、出走の申し込みを締め切るか（そのあと出馬表とオッズが出る）
-# 1回のレースは4時間の周期: 申し込み1時間（発走の2〜1時間前）→ 出馬表・馬券1時間（発走の1時間前〜）→ 発走・結果（次の申し込みまで2時間）
-BET_LEAD_SEC = 120  # 発走の何秒前に、馬券の発売を締め切るか
-BET_KINDS = {
-    "win": "単勝",  # 1着
-    "place": "複勝",  # 3着以内
-    "quinella": "馬連",  # 1・2着の2頭（順不同）
-    "wide": "ワイド",  # 3着以内に入る2頭（順不同）
-    "exacta": "馬単",  # 1着と2着（順番どおり）
-    "trio": "三連複",  # 1〜3着の3頭（順不同）
-}
-MULTI_KINDS = ("win", "place")  # 1頭ずつの馬券。画面では、何頭でもまとめて選べる（同じ金額ずつ、別々の馬券として買う）
-COMBO_SIZE = {"quinella": 2, "wide": 2, "exacta": 2, "trio": 3}  # 組み合わせの馬券で選ぶ頭数
-COMBO_TAKEOUT = 0.20  # 組み合わせの馬券の控除率（当たりにくいぶん、控除は大きい）
-MAX_COMBO_ODDS = 100.0  # 組み合わせの馬券のオッズの上限（1発の払い戻しが大きくなりすぎない）
+ENTRY_OPEN_MIN = _CFG.entry_open_min
+ENTRY_LEAD_MIN = _CFG.entry_lead_min
+BET_LEAD_SEC = _CFG.bet_lead_sec
+BET_KINDS = dict(_CFG.bet_kinds)
+MULTI_KINDS = _CFG.multi_kinds
+COMBO_SIZE = dict(_CFG.combo_size)
+COMBO_TAKEOUT = _CFG.combo_takeout
+MAX_COMBO_ODDS = _CFG.max_combo_odds
 
 
 def combo_key(kind: str, lanes) -> str:
@@ -470,39 +462,8 @@ def combo_hit(kind: str, lanes, order_lanes: list) -> bool:
     return False
 
 
-NPC_NAMES = [
-    "ハヤテノツバサ",
-    "ミッドナイトブルー",
-    "サクラフブキ",
-    "ゴールデンキャロット",
-    "カミナリボルト",
-    "ダイヤモンドロード",
-    "ナイトメアランナー",
-    "ツキノヒカリ",
-    "アカツキレッド",
-    "シルバーアロー",
-    "ドリームチェイサー",
-    "イナズマライダー",
-    "ブラックサンダー",
-    "ハルノオトメ",
-    "ワイルドハート",
-    "ロイヤルクラウン",
-    "キタノカゼ",
-    "スターライトダッシュ",
-    "ホワイトファング",
-    "ユメノツヅキ",
-    "ライジングサン",
-    "オオゾラノキセキ",
-    "ジェットストリーム",
-    "ミラクルバンブー",
-    "ブルーコメット",
-    "アサヒノプリンス",
-    "テンカイチ",
-    "ニチダイラグビー",
-    "アリジゴク",
-    "トンデミーナ",
-]
-BANNED_NAME_CHARS = set("@<>`*_~|\\\n\r\t#:/")  # メンション・リンク・装飾を防ぐ
+NPC_NAMES = list(_CFG.npc_names)
+BANNED_NAME_CHARS = set(_CFG.banned_name_chars)  # メンション・リンク・装飾を防ぐ
 
 
 def check_name(name: str) -> tuple:

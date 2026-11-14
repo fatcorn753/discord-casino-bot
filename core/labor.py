@@ -11,40 +11,32 @@
 import math
 import random
 
-TOOLS = ("pick", "glove")
-TOOL_NAME = {"pick": "ツルハシ", "glove": "手袋"}
-TOOL_MARK = {"pick": "⛏", "glove": "🧤"}
-TOOL_EFFECT = {"pick": "稼ぎが増える", "glove": "疲れにくくなる"}
-MAX_LEVEL = 10
-UPGRADE_COST = (
-    150,
-    400,
-    900,
-    1_800,
-    3_500,
-    7_000,
-    14_000,
-    28_000,
-    56_000,
-    112_000,
-)  # 次のレベルへ上げる値段（レベル0→1, 1→2, …）。ほぼ倍々
+from core import catalogs
 
-MAX_CLICKS_PER_DAY = 1_000  # 「働く」を押せる、1日の回数の上限（作業員の稼ぎ・鉱石は対象外）。超えた分は、1回あたり OVER_CAP_PAY ペリカしか稼げない
-# 回数で区切るので、ツルハシを強化するほど、1日に稼げる額もそのまま増える（ペリカの額で区切ると、上限に届くのが早くなるだけになってしまう）
-OVER_CAP_PAY = 1
+_CFG = catalogs.labor()
 
-BASE_PAY = 10  # 工具なしの、1回の稼ぎ
-PAY_PER_LEVEL = 4  # ツルハシ1段ごとの加算（Lv10 で最大 50）
-FATIGUE_MAX = 100.0
-FATIGUE_GAIN = 3.0  # 工具なしの、1回で溜まる疲労
-GAIN_CUT_PER_LEVEL = 0.4  # 手袋1段ごとの軽減（Lv5 まで。Lv5 で 1.0）
-LATE_GAIN_CUT_PER_LEVEL = 0.1  # Lv6 以降の軽減（0 や負にならないよう、小さくする。Lv10 で 2.0）
-EARLY_LEVELS = 5
-MIN_PAY_RATE = 0.2  # 疲労が満タンのときの、稼ぎの割合（空のときは 1.0）
-RECOVER_PER_SEC = 0.1  # 疲労の自然回復（100 回復するのに約17分）
+TOOLS = tuple(t.key for t in _CFG.tools)
+TOOL_NAME = {t.key: t.name for t in _CFG.tools}
+TOOL_MARK = {t.key: t.mark for t in _CFG.tools}
+TOOL_EFFECT = {t.key: t.effect for t in _CFG.tools}
+MAX_LEVEL = _CFG.max_level
+UPGRADE_COST = _CFG.upgrade_cost
 
-DRINK_RECOVER = 60.0  # 栄養ドリンコ（ショップ）1本で回復する疲労
-CLICK_INTERVAL = 1.0  # 連打の最短間隔（秒）
+MAX_CLICKS_PER_DAY = _CFG.max_clicks_per_day
+OVER_CAP_PAY = _CFG.over_cap_pay
+
+BASE_PAY = _CFG.base_pay
+PAY_PER_LEVEL = _CFG.pay_per_level
+FATIGUE_MAX = _CFG.fatigue_max
+FATIGUE_GAIN = _CFG.fatigue_gain
+GAIN_CUT_PER_LEVEL = _CFG.gain_cut_per_level
+LATE_GAIN_CUT_PER_LEVEL = _CFG.late_gain_cut_per_level
+EARLY_LEVELS = _CFG.early_levels
+MIN_PAY_RATE = _CFG.min_pay_rate
+RECOVER_PER_SEC = _CFG.recover_per_sec
+
+DRINK_RECOVER = _CFG.drink_recover
+CLICK_INTERVAL = _CFG.click_interval
 
 
 def clamp_level(level: int) -> int:
@@ -100,27 +92,21 @@ def click_outcome(pick: int, glove: int, fatigue: float) -> dict:
 # ---------------------------------------------------------------- #
 # 鉱脈ヒット・作業コンボ・今日の地層（手掘りを気持ちよくする、見習い〜職人の全員に効く）
 # ---------------------------------------------------------------- #
-CRIT_BASE = 0.05  # 鉱脈ヒットの確率（ツルハシLv0）
-CRIT_PER_LEVEL = 0.01  # ツルハシ1Lvごとに上乗せ（Lv10で+10%）
-CRIT_WORKER_BONUS = 0.002  # 雇用中の作業員1人ごとに上乗せ（現場シナジー）
-CRIT_MAX = 0.30  # 鉱脈ヒット率の上限
-CRIT_MULT = 5  # 鉱脈ヒットの稼ぎの倍率
-CRIT_ORE_CHANCE = 0.15  # 鉱脈ヒットのとき、さらに鉱石も掘り当てる確率
-# 手掘り用の小さな鉱石表（ヒットの中での相対比。ダイヤ・伝説級は出ない。(id, 名前, 印, 相対比, 売値)）
-CRIT_ORES = (
-    ("coal", "石炭", "⚫", 45, 3),
-    ("copper", "銅", "🟤", 40, 60),
-    ("silver", "銀", "⚪", 12, 240),
-    ("gold", "金", "🟡", 3, 1_200),
-)
+CRIT_BASE = _CFG.crit_base
+CRIT_PER_LEVEL = _CFG.crit_per_level
+CRIT_WORKER_BONUS = _CFG.crit_worker_bonus
+CRIT_MAX = _CFG.crit_max
+CRIT_MULT = _CFG.crit_mult
+CRIT_ORE_CHANCE = _CFG.crit_ore_chance
+CRIT_ORES = tuple((o.id, o.name, o.mark, o.weight, o.value) for o in _CFG.crit_ores)
 
-COMBO_SIZE = 10  # 「働く」が、この回数に届くごとに
-COMBO_BONUS = 0.20  # コンボ達成時の、その1回の稼ぎの上乗せ（+20%）
+COMBO_SIZE = _CFG.combo_size
+COMBO_BONUS = _CFG.combo_bonus
 
-TERRAIN_KINDS = ("hit", "fatigue", "silver", "none")
-TERRAIN_HIT_BONUS = 0.05  # 鉱脈ヒット率 +5%
-TERRAIN_FATIGUE_CUT = 0.20  # 疲労の溜まりが20%軽くなる
-TERRAIN_SILVER_MULT = 2  # 手掘りの銀の出やすさが2倍
+TERRAIN_KINDS = _CFG.terrain_kinds
+TERRAIN_HIT_BONUS = _CFG.terrain_hit_bonus
+TERRAIN_FATIGUE_CUT = _CFG.terrain_fatigue_cut
+TERRAIN_SILVER_MULT = _CFG.terrain_silver_mult
 
 
 def terrain_today(day: str) -> str:
@@ -156,71 +142,34 @@ def roll_crit_ore(rng, terrain: str) -> str:
 # ---------------------------------------------------------------- #
 # 雇用（作業員）。放置でも稼げる。数字はここだけを直せばよい
 # ---------------------------------------------------------------- #
-WORKERS = ("apprentice", "miner", "craftsman", "foreman")
-WORKER_NAME = {
-    "apprentice": "見習い",
-    "miner": "坑夫",
-    "craftsman": "職人",
-    "foreman": "監督",
-}
-WORKER_MARK = {"apprentice": "🧒", "miner": "👷", "craftsman": "🧑‍🔧", "foreman": "🕴️"}
-WORKER_RATE = {
-    "apprentice": 1.8,
-    "miner": 10.05,
-    "craftsman": 23.55,
-    "foreman": 0,
-}  # 作業員の稼ぎ（1時間）。毎日受け取る人の、契約料の約3割（監督は掘らない）
-CONTRACT_DAYS = 1  # 契約の期間（日）。切れたら、自動更新（オンの場合）か、退職。1日で、勝ち負けが分かる
-# 契約料（雇うときと、更新のときに払う）。毎日受け取る人が、契約の1日（24時間）に稼ぐ、作業員の稼ぎ（約3割）と鉱石の期待値（約5割）の合計を上回る
-CONTRACT_FEE = {"apprentice": 150, "miner": 520, "craftsman": 1_160, "foreman": 640}
-FOREMAN_LUCK = 0.25  # 監督1人ごとに、レア鉱石の出やすさが増える割合（作業員の稼ぎは増えない）
+WORKERS = tuple(w.key for w in _CFG.workers)
+WORKER_NAME = {w.key: w.name for w in _CFG.workers}
+WORKER_MARK = {w.key: w.mark for w in _CFG.workers}
+WORKER_RATE = {w.key: w.rate for w in _CFG.workers}
+CONTRACT_DAYS = _CFG.contract_days
+CONTRACT_FEE = {w.key: w.contract_fee for w in _CFG.workers}
+FOREMAN_LUCK = _CFG.foreman_luck
 
-COAL_P = 0.40  # 石炭が出る確率（働いた1時間ごと。見習いでも、半分近い時間で何か掘れる）
+COAL_P = _CFG.coal_p
 
-# 鉱石。働いた1時間ごとに1回、掘る（外れもある）。(id, 名前, 印, 出る確率, 売値)。確率は、ORE_POWER=1 の作業員のもの
-ORES = (
-    ("copper", "銅", "🟤", 0.06, 60),
-    ("silver", "銀", "⚪", 0.015, 240),
-    ("gold", "金", "🟡", 0.003, 1_200),
-    ("diamond", "ダイヤ", "💎", 0.0004, 9_000),
-    ("legend", "伝説の鉱石", "🌟", 0.00004, 90_000),
-    (
-        "coal",
-        "石炭",
-        "⚫",
-        COAL_P,
-        3,
-    ),  # ありふれた鉱石。出やすさは、作業員の種類・監督に関係なく同じ（鉱石が全く出ない、をなくす）
-)
-FLAT = ("coal",)  # 出やすさに ORE_POWER・監督の運をかけない鉱石
+ORES = tuple((o.id, o.name, o.mark, COAL_P if o.prob is None else o.prob, o.value) for o in _CFG.ores)
+FLAT = _CFG.flat_ores
 ORE_NAME = {o[0]: o[1] for o in ORES}
 ORE_MARK = {o[0]: o[2] for o in ORES}
 ORE_VALUE = {o[0]: o[4] for o in ORES}
-ORE_BIG = ("diamond", "legend")  # 公開で知らせる当たり
-# 作業員の種類ごとの、鉱石の出やすさ（確率にかける。契約料に比例して、期待値は契約料の約3.5割）
-ORE_POWER = {"apprentice": 0.12, "miner": 0.415, "craftsman": 0.95, "foreman": 0.0}
+ORE_BIG = _CFG.ore_big
+ORE_POWER = {w.key: w.ore_power for w in _CFG.workers}
 
-# 発掘品（コレクション用の宝石・化石・遺物）。ふつうの作業員が、鉱石を掘るときに、まれに見つける（ペリカにはならず、持ち物になる）。
-# 売値は決まっていない。競売の画面（ショップの「🕴️ 帝愛の競売」）で、プレイヤーどうしが売り買いする。value は、取引の値段の幅の目安（定価の0.1〜5倍。同じ2人の取引の上限は10万）
-# (id, 名前, 印, 出る確率（働いた1時間ごと。RELIC_POWER=1 の作業員のもの）, 目安の価値)。ペリカを新しく作らない（買い手が払う）
-RELICS = (
-    ("fossil", "三葉虫の化石", "🐚", 0.0033, 1_500),
-    ("bone", "恐竜の骨", "🦴", 0.0017, 4_000),
-    ("meteor", "隕石の欠片", "☄️", 0.00067, 10_000),
-    ("vase", "古代文明の壺", "🏺", 0.00027, 25_000),
-    ("crown", "王家の黄金冠", "👑", 0.000067, 60_000),
-    ("tear", "竜の涙", "🔮", 0.000017, 100_000),
-)
-RELIC_ID = {r[0]: f"relic_{r[0]}" for r in RELICS}  # ショップの品のID（core/shop.py）
-RELIC_BIG = ("crown", "tear")  # 公開で知らせる当たり
-# 作業員の種類ごとの、発掘品の出やすさ（確率にかける。上位の作業員ほど出やすい。監督の運も効く。監督は掘らない）
-RELIC_POWER = {"apprentice": 0.5, "miner": 0.8, "craftsman": 1.0, "foreman": 0.0}
+RELICS = tuple((r.id, r.name, r.mark, r.prob, r.value) for r in _CFG.relics)
+RELIC_ID = {r[0]: f"relic_{r[0]}" for r in RELICS}
+RELIC_BIG = _CFG.relic_big
+RELIC_POWER = {w.key: w.relic_power for w in _CFG.workers}
 
-SLOTS_BASE = 5  # 雇える人数（監督も数える）
-DORM_COST = (2_000, 6_000, 15_000, 40_000, 100_000)  # 寮を1段上げる値段。1段ごとに +1人
-DORM_MAX = 5
+SLOTS_BASE = _CFG.slots_base
+DORM_COST = _CFG.dorm_cost
+DORM_MAX = _CFG.dorm_max
 
-STOCK_HOURS = 24.0  # 受け取らずに貯められる時間（超えた分は消える）
+STOCK_HOURS = _CFG.stock_hours
 
 
 def contract_fee(kind: str) -> int:
@@ -406,13 +355,10 @@ def settle_plan(
 
 
 # ---- 自動操作の疑いを確かめる（持ち主用の記録の集計。決めつけず、数字を見せるだけ）----
-CLICK_GAP_MAX = 600.0  # 前の押下からこれ以内なら、「続けて押している」間隔として数える（秒）
-
-# 自動操作（BOTなど）の疑いがあるときの、早めの打ち止め。BANではなく、その日はそこで止まるだけ（翌日には戻る）
-# 「機械的に規則正しい」の基準は、運営の「クリック履歴」画面（cogs/_admin_embeds.py）と共通
-MECH_CV_MAX = 0.1  # 間隔のばらつき（標準偏差 ÷ 平均）がこれ未満なら、機械的に規則正しいとみなす
-MECH_MIN_CLICKS = 100  # 1時間にこれ未満しか押していなければ、ばらつきでは判定しない（サンプルが少なすぎる）
-SUSPECT_HOURS = 3  # 直近、これだけ連続した「完了した時間」が、ずっと機械的に規則正しければ、自動操作とみなす
+CLICK_GAP_MAX = _CFG.click_gap_max
+MECH_CV_MAX = _CFG.mech_cv_max
+MECH_MIN_CLICKS = _CFG.mech_min_clicks
+SUSPECT_HOURS = _CFG.suspect_hours
 
 
 def is_mechanical_hour(h: dict) -> bool:

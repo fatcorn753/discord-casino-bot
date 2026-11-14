@@ -6,7 +6,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from cogs import _admin_embeds, _shop_embeds, help_cog, quiz_cog, raffle_cog
+from cogs import _admin_embeds, _shop_embeds, _teiai_escape, _teiai_panel, help_cog, labor_cog, quiz_cog, raffle_cog
 from core import (
     bonds,
     catalogs,
@@ -14,6 +14,8 @@ from core import (
     eco_types,
     economy,
     events,
+    horse,
+    labor,
     loans,
     market,
     market_events,
@@ -26,6 +28,7 @@ from core import (
     relics,
     shop,
     skins,
+    teiai,
     weekly,
 )
 from games import blackjack, chinchiro, pachinko, roulette, rtplevel, slot
@@ -39,7 +42,10 @@ def test_all_yaml_catalogs_load_and_validate() -> None:
     assert len(catalogs.bonds().kinds) == len(bonds.KINDS)
     assert len(catalogs.missions().universal) == len(missions.UNIVERSAL)
     assert len(catalogs.events().games) == len(events.GAMES)
+    assert len(catalogs.labor().ores) == len(labor.ORE_VALUE)
+    assert len(catalogs.horse().npc_names) == len(horse.NPC_NAMES)
     assert len(catalogs.market().market.symbols) == len(market.SYMBOLS)
+    assert len(catalogs.teiai().statuses) == len(teiai.STATUS_LABEL)
     assert len(catalogs.economy().wallet.medals) == len(ranking.MEDALS)
     assert len(catalogs.games().slot.symbols) == len(slot.SYMBOLS)
     assert len(catalogs.help_pages().pages) == len(help_cog.PAGES)
@@ -51,6 +57,9 @@ def test_cross_catalog_consistency() -> None:
     assert p2p.SLOT_OF_KIND.items() <= _shop_embeds.SLOT_OF_KIND.items()
     assert _shop_embeds.EFFECT_OF_ITEM == eco_types.CONSUMABLE_EFFECTS
     assert skins.check_catalog() == []
+    assert set(horse.BET_KINDS) == set(horse.MULTI_KINDS) | set(horse.COMBO_SIZE)
+    assert labor.CLICK_GAP_MAX > 0 and labor.SUSPECT_HOURS > 0
+    assert len(_teiai_escape.PROGRESS) > 0 and len(_teiai_panel.LEVEL_TEXT) == 4
     assert sum(p for _, _, p in pachinko.ROUNDS) == pytest.approx(1.0)
     assert 0.95 < pachinko.rtp() < 1.0
     assert missions.JACKPOT_ART.startswith("```") and missions.JACKPOT_ART.endswith("```")
@@ -75,8 +84,15 @@ def test_cross_catalog_consistency() -> None:
 def test_python_runtime_types_preserved() -> None:
     assert isinstance(roulette.RED, set)
     assert all(isinstance(n, int) for n in roulette.RED)
+    assert isinstance(horse.FORM_MARK, dict)
+    assert all(isinstance(k, int) for k in horse.FORM_MARK)
+    assert isinstance(horse.COATS, list)
+    assert isinstance(horse.SILKS, list)
+    assert isinstance(horse.NPC_NAMES, list)
+    assert isinstance(horse.BANNED_NAME_CHARS, set)
     assert isinstance(market.GAINS_TAX_BRACKETS, tuple)
     assert isinstance(ranking.MEDALS, dict)
+    assert ranking.MEDALS == labor_cog.MEDALS
     assert all(isinstance(k, int) for k in ranking.MEDALS)
     assert isinstance(chinchiro.DICE_FACES, dict)
     assert all(isinstance(k, int) for k in chinchiro.DICE_FACES)

@@ -15,8 +15,6 @@
 
 import datetime
 import math
-import os
-import sqlite3
 import time
 from typing import Optional, Self
 
@@ -91,21 +89,10 @@ class Economy(
         """
         db = EcoDb(db_path)
         self._bind_db(db, 0, strict)
-        self._migrate_to_guild_scope(legacy_guild_id)
+        schema.migrate_to_guild_scope(self._conn, self._db_path, legacy_guild_id)
         self._init_schema()
-        self._retire_autoplay()
-
-    def _retire_autoplay(self) -> None:
-        """廃止した自動プレイの表が残っていたら、預け中の分を残高に戻してから表を消す（預けた額を失わせない）。"""
         with self._lock, self._conn:
-            if not self._conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='autoplay'").fetchone():
-                return
-            for row in self._conn.execute("SELECT guild_id, user_id, pot FROM autoplay").fetchall():
-                if row["pot"] > 0:
-                    view = self.for_guild(row["guild_id"])
-                    view._ensure(row["user_id"])
-                    view._apply(row["user_id"], row["pot"], "自動プレイ精算")
-            self._conn.execute("DROP TABLE autoplay")
+            schema.retire_autoplay(self._conn)
 
     # ------------------------------------------------------------------ #
     # サーバー単位の見え方                                                #
@@ -124,69 +111,7 @@ class Economy(
             raise RuntimeError("サーバーが指定されていません。economy.for_guild(サーバーID) を通して使ってください。")
         return self.guild_id
 
-    # ------------------------------------------------------------------ #
-    # 記録の形（スキーマ）と、サーバー別になる前の記録の移行                #
-    # ------------------------------------------------------------------ #
-    def _migrate_to_guild_scope(self, legacy_guild_id: Optional[int]) -> None:
-        """サーバー別になる前の記録（users に guild_id が無い）を、指定したサーバーのものとして引き継ぐ。"""
-        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(users)")}
-        if not cols or "guild_id" in cols:
-            return  # 新規、または移行済み
-        if legacy_guild_id is None:
-            raise RuntimeError(
-                "古い形式の記録があります。引き継ぎ先のサーバーIDを、config.json の legacy_guild_id に設定してください。"
-            )
-        gid = int(legacy_guild_id)
-        if gid <= 0:
-            raise ValueError(f"legacy_guild_id が不正です: {legacy_guild_id!r}")
-        backup = self._db_path + ".before-guild-scope"
-        if not os.path.exists(backup):  # 万一に備えて、移行の前に記録を丸ごと退避する
-            tmp = backup + ".tmp"  # 途中で落ちた不完全なファイルを、退避済みと誤認しないよう最後に改名する
-            dst = sqlite3.connect(tmp)
-            self._conn.backup(dst)
-            dst.close()
-            os.replace(tmp, backup)
-        c = self._conn
-        have = {r["name"] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        c.execute("BEGIN IMMEDIATE")
-        try:
-            c.execute("ALTER TABLE users RENAME TO users_old")
-            c.execute(schema.USERS_DDL)
-            c.execute(
-                "INSERT INTO users (guild_id, user_id, balance, daily_streak, last_daily, games_played, total_wagered, "
-                "total_won, biggest_win, created_at) SELECT ?, user_id, balance, daily_streak, last_daily, games_played, "
-                "total_wagered, total_won, biggest_win, created_at FROM users_old",
-                (gid,),
-            )
-            c.execute("DROP TABLE users_old")
-            c.execute("DROP INDEX IF EXISTS ledger_user")
-            for t in ("ledger", "escrow"):  # 無い表は、あとの _init_schema が新しい形で作る
-                if t in have:
-                    c.execute(f"ALTER TABLE {t} ADD COLUMN guild_id INTEGER NOT NULL DEFAULT 0")
-                    c.execute(f"UPDATE {t} SET guild_id=?", (gid,))
-            if "inventory" in have:
-                c.execute("ALTER TABLE inventory RENAME TO inventory_old")
-                c.execute(schema.INVENTORY_DDL)
-                c.execute(
-                    "INSERT INTO inventory (guild_id, user_id, item_id, qty) SELECT ?, user_id, item_id, qty FROM inventory_old",
-                    (gid,),
-                )
-                c.execute("DROP TABLE inventory_old")
-            if "profile" in have:
-                c.execute("ALTER TABLE profile RENAME TO profile_old")
-                c.execute(schema.PROFILE_DDL)
-                c.execute(
-                    "INSERT INTO profile (guild_id, user_id, title, card_color, card_icon, daily_boost, insurance) "
-                    "SELECT ?, user_id, title, card_color, card_icon, daily_boost, insurance FROM profile_old",
-                    (gid,),
-                )
-                c.execute("DROP TABLE profile_old")
-            c.execute("COMMIT")
-        except Exception:
-            c.execute("ROLLBACK")
-            raise
-
-    def _init_schema(self):
+    def _init_schema(self) -> None:
         with self._lock, self._conn:
             schema.create_tables(self._conn)
             schema.add_missing_columns(self._conn)
