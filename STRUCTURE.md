@@ -44,7 +44,7 @@
 | パス | 内容 |
 |---|---|
 | `loader.py` | 読み込む Cog モジュール一覧（`COG_MODULES`）と `load_all_cogs()`（`main.py` とテストで共有） |
-| `shared/` | 共通 Discord 基盤（`bot.py` / `ui.py` / `confirm.py` / `approval_guard.py` / `ranking.py` / `announce.py` / `amount.py` / `horse_display.py`） |
+| `shared/` | 共通 Discord 基盤（`bot.py` / `ui.py` / `confirm.py` / `messages.py` / `approval_guard.py` / `ranking.py` / `announce.py` / `amount.py` / `horse_display.py`） |
 | `casino/` | `/カジノ`。`cog.py` と進行演出（`common.py`・`simple.py`・`blackjack.py`・`chinchiro.py`・`pachinko.py`） |
 | `economy/` | `/ペリカ`。残高・デイリー・ランキング（掲示板の自動更新を含む）・送金・履歴 |
 | `teiai/` | `/ペリカ 帝愛` のパネル（`panel.py`）と海外逃亡の演出（`escape.py`） |
@@ -93,7 +93,8 @@
 
 | パス | 内容 |
 |---|---|
-| `types.py` | 結果データクラス（`DailyResult` 等）と共有定数（`INITIAL_BALANCE`・`DAILY_*`・`PART_LABELS` 等） |
+| `types.py` | 結果データクラス（`DailyResult` 等）と共有定数（`INITIAL_BALANCE`・`DAILY_*`・`PART_LABELS`・`asset_groups` 等） |
+| `errors.py` | 構造化エラー・通知イベント（`Failure`・`Notice`・`fail`・`notice`） |
 | `approval.py` | サーバー許可リストと承認状態の純粋判定 |
 | `nick.py` | 称号をニックネームの後ろに付け外しする文字列処理 |
 | `relics.py` | 発掘品の効果（持っている間、種類ごとに +1%） |
