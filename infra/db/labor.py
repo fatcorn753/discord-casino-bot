@@ -22,6 +22,36 @@ def _set_counts(row: dict, workers: list) -> None:
         row[k] = sum(1 for w in workers if w["kind"] == k)
 
 
+def _counts(row: dict) -> dict:
+    return {k: row[k] for k in labor_mod.WORKERS}
+
+
+def _ores_of(row: dict) -> dict:
+    """受け取る前の稼ぎに含まれる鉱石 {鉱石: 個数}。"""
+    try:
+        return {k: int(n) for k, n in json.loads(row.get("ores") or "{}").items() if k in labor_mod.ORE_VALUE}
+    except (ValueError, AttributeError):
+        return {}
+
+
+def _relics_of(row: dict) -> dict:
+    """受け取る前の発掘品 {品のID: 個数}。"""
+    try:
+        return {k: int(n) for k, n in json.loads(row.get("relics") or "{}").items() if k in shop_mod.BY_ID}
+    except (ValueError, AttributeError):
+        return {}
+
+
+class _NoRoll:
+    """見込みの表示では、鉱石の抽選をしない（random() が 1.0 なら、何も出ない）。"""
+
+    def random(self) -> float:
+        return 1.0
+
+
+_NO_ROLL = _NoRoll()
+
+
 class LaborMixin(EcoBase):
     def _labor_row(self, user_id: int, now: float, day: str, rng=None) -> dict:
         """行を読む（無ければ作る）。日が変わっていたら、今日の稼ぎを 0 に戻し、疲労は時間で回復させる。呼び出し側のトランザクション内で使う。
@@ -92,18 +122,6 @@ class LaborMixin(EcoBase):
             )
         return True, new_id
 
-    @staticmethod
-    def _counts(row: dict) -> dict:
-        return {k: row[k] for k in labor_mod.WORKERS}
-
-    @staticmethod
-    def _ores_of(row: dict) -> dict:
-        """受け取る前の稼ぎに含まれる鉱石 {鉱石: 個数}。"""
-        try:
-            return {k: int(n) for k, n in json.loads(row.get("ores") or "{}").items() if k in labor_mod.ORE_VALUE}
-        except (ValueError, AttributeError):
-            return {}
-
     FINDS_KEEP = 40  # 1人ぶん残す、掘り出しの履歴の数
 
     def _labor_log_finds(self, user_id: int, finds: list) -> None:
@@ -131,14 +149,6 @@ class LaborMixin(EcoBase):
                     (self._g(), user_id, *labor_mod.FLAT, limit),
                 )
             ]
-
-    @staticmethod
-    def _relics_of(row: dict) -> dict:
-        """受け取る前の発掘品 {品のID: 個数}。"""
-        try:
-            return {k: int(n) for k, n in json.loads(row.get("relics") or "{}").items() if k in shop_mod.BY_ID}
-        except (ValueError, AttributeError):
-            return {}
 
     def _workers_of(self, user_id: int) -> list:
         return [
@@ -176,12 +186,12 @@ class LaborMixin(EcoBase):
             row["pot"] += plan["gain"] - plan["pot_spent"]
             row["pot_workers"] = min(row["pot"], max(0, row["pot_workers"] + plan["gain"] - plan["pot_spent"]))
             if plan["relics"]:
-                held = self._relics_of(row)
+                held = _relics_of(row)
                 for k, n in plan["relics"].items():
                     held[k] = held.get(k, 0) + n
                 row["relics"] = json.dumps(held)
             if plan["ores"]:
-                found = self._ores_of(row)
+                found = _ores_of(row)
                 for k, n in plan["ores"].items():
                     found[k] = found.get(k, 0) + n
                 row["ores"] = json.dumps(found)
@@ -246,11 +256,6 @@ class LaborMixin(EcoBase):
         """いまの状態（画面用）。口座や行は、まだ無ければ作らない（読むだけ）。契約の決算は、したことにして見せる（書き込まない）。"""
         now = time.time() if now is None else now
 
-        class _NoRoll:  # 見込みの表示では、鉱石の抽選をしない（random() が 1.0 なら、何も出ない）
-            @staticmethod
-            def random():
-                return 1.0
-
         with self._lock:
             r = self._conn.execute(
                 "SELECT * FROM labor WHERE guild_id=? AND user_id=?", (self._g(), user_id)
@@ -300,7 +305,7 @@ class LaborMixin(EcoBase):
                 now,
                 row["pot"],
                 row["balance"],
-                _NoRoll,
+                _NO_ROLL,
                 wage_bonus=buffs.get("wage", 0.0),
                 luck_bonus=buffs.get("luck", 0.0),
             )
@@ -310,9 +315,9 @@ class LaborMixin(EcoBase):
             _set_counts(row, stay)
             row["workers"] = len(stay)
             row["slots"] = labor_mod.slots(row["dorm"])
-            row["rate"] = labor_mod.idle_rate(self._counts(row))
-            row["relics"] = self._relics_of(row)  # 決算ずみの発掘品
-            row["ores"] = self._ores_of(row)  # 決算ずみの鉱石（見込みの分は、掘るまで分からない）
+            row["rate"] = labor_mod.idle_rate(_counts(row))
+            row["relics"] = _relics_of(row)  # 決算ずみの発掘品
+            row["ores"] = _ores_of(row)  # 決算ずみの鉱石（見込みの分は、掘るまで分からない）
             row["idle_pending"] = plan["gain"]  # まだ数えていない、作業員の稼ぎ（見込み）
             row["pot_total"] = row["pot"] + plan["gain"] - plan["pot_spent"]
             row["pot_workers_total"] = min(
@@ -407,7 +412,7 @@ class LaborMixin(EcoBase):
                 earned_total=row["earned_total"] + pay,
             )
             if ore:
-                found = self._ores_of(row)
+                found = _ores_of(row)
                 found[ore] = found.get(ore, 0) + 1
                 row["ores"] = json.dumps(found)
             self._labor_log_click(user_id, now, pay, now - row["last_click_before"])
@@ -461,8 +466,8 @@ class LaborMixin(EcoBase):
         now = time.time() if now is None else now
         with self._lock, self._conn:
             row = self._labor_row(user_id, now, day)
-            ores = self._ores_of(row)
-            relics = self._relics_of(row)
+            ores = _ores_of(row)
+            relics = _relics_of(row)
             row["skimmed"] = 0
             amount = self._labor_flush(user_id, row)
             for item_id, n in relics.items():
@@ -528,7 +533,7 @@ class LaborMixin(EcoBase):
         with self._lock, self._conn:
             self._ensure(user_id)
             row = self._labor_row(user_id, now, day)  # 先に、いままでの稼ぎと契約を決算する
-            if sum(self._counts(row).values()) >= labor_mod.slots(row["dorm"]):
+            if sum(_counts(row).values()) >= labor_mod.slots(row["dorm"]):
                 self._labor_save(user_id, row)
                 return False, fail("labor_slots_full")
             cost = labor_mod.contract_fee(kind)

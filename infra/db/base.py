@@ -227,7 +227,10 @@ class EcoBase:
     def _pin_reason(self, symbol: str, action: str) -> Optional[Failure]:
         raise NotImplementedError
 
-    def holdings(self, user_id: int) -> list[dict[str, Any]]:
+    def _gains_tax(self, user_id: int, profit: int, taxable: bool, what: str) -> int:
+        raise NotImplementedError
+
+    def holdings(self, user_id: int) -> list[tuple[str, int, int]]:
         raise NotImplementedError
 
     def latest_prices(self) -> dict[str, Any]:
