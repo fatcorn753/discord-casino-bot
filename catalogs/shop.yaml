@@ -1,0 +1,361 @@
+# ショップの商品一覧・種類ラベル・在庫補充ルール
+role_prefix: "ペリカ・"
+insurance_cap: 1000
+
+auto_used:
+  - streak_guard
+  - horse_voucher
+  - carrot
+  - gold_carrot
+  - labor_drink
+
+kind_labels:
+  title: "🏷️ 称号"
+  card_color: "🎨 カードの色"
+  card_icon: "🖼️ カードのアイコン"
+  consumable: "🎟️ 消耗品"
+  racing: "🐎 競馬"
+  market: "🕴️ 帝愛市"
+  relic: "🏺 発掘品"
+  color_role: "🌈 名前の色（ロール）"
+  skin_dice: "🎲 演出（チンチロ用）"
+  skin_table: "🃏 演出（パチンコ・ブラックジャック用）"
+  collection: "🏆 コレクション"
+
+stock_rules:
+  labor_drink:
+    max: 10
+    per_hour: 2.0
+
+items:
+  # 称号: 残高カードとランキングの名前の横に表示される
+  - id: title_rookie
+    name: "見習いギャンブラー"
+    kind: title
+    price: 2000
+    mark: "🎲"
+  - id: title_broke
+    name: "破産常連"
+    kind: title
+    price: 3000
+    mark: "💸"
+  - id: title_regular
+    name: "常連"
+    kind: title
+    price: 5000
+    mark: "🎰"
+  - id: title_zawa
+    name: "ざわ…ざわ…"
+    kind: title
+    price: 8000
+    mark: "😨"
+  - id: title_underground
+    name: "地下の住人"
+    kind: title
+    price: 12000
+    mark: "🕳️"
+  - id: title_lucky
+    name: "強運の持ち主"
+    kind: title
+    price: 20000
+    mark: "🍀"
+  - id: title_emperor
+    name: "地下の帝王"
+    kind: title
+    price: 100000
+    mark: "🔱"
+  - id: title_creditor
+    name: "債権王"
+    kind: title
+    price: 500000
+    mark: "💰"
+  - id: title_fixer
+    name: "フィクサー"
+    kind: title
+    price: 2000000
+    mark: "🕴️"
+  - id: title_100oku
+    name: "百億の男"
+    kind: title
+    price: 10000000
+    mark: "💴"
+  # 限定称号（買えない）。週間ランキング1位に、次の発表まで贈られる
+  - id: title_weekly_king
+    name: "👑週間王者"
+    kind: title
+    price: 0
+    desc: "先週のゲームの稼ぎ1位に贈られる。次の発表まで持てる"
+    limited: true
+
+  # 残高カードの色
+  - id: cardcolor_red
+    name: "赤"
+    kind: card_color
+    price: 3000
+    value: 0xE74C3C
+    mark: "🔴"
+  - id: cardcolor_blue
+    name: "青"
+    kind: card_color
+    price: 3000
+    value: 0x3498DB
+    mark: "🔵"
+  - id: cardcolor_green
+    name: "緑"
+    kind: card_color
+    price: 3000
+    value: 0x2ECC71
+    mark: "🟢"
+  - id: cardcolor_gold
+    name: "金"
+    kind: card_color
+    price: 3000
+    value: 0xF1C40F
+    mark: "🟡"
+  - id: cardcolor_purple
+    name: "紫"
+    kind: card_color
+    price: 3000
+    value: 0x9B59B6
+    mark: "🟣"
+  - id: cardcolor_dark
+    name: "黒"
+    kind: card_color
+    price: 3000
+    value: 0x2C2F33
+    mark: "⚫"
+
+  # 残高カードのアイコン
+  - id: cardicon_slot
+    name: "スロット"
+    kind: card_icon
+    price: 3000
+    value: "🎰"
+  - id: cardicon_gem
+    name: "宝石"
+    kind: card_icon
+    price: 3000
+    value: "💎"
+  - id: cardicon_fire
+    name: "炎"
+    kind: card_icon
+    price: 3000
+    value: "🔥"
+  - id: cardicon_moon
+    name: "月"
+    kind: card_icon
+    price: 3000
+    value: "🌙"
+  - id: cardicon_dragon
+    name: "龍"
+    kind: card_icon
+    price: 3000
+    value: "🐉"
+  - id: cardicon_crown
+    name: "王冠"
+    kind: card_icon
+    price: 5000
+    value: "👑"
+
+  # 消耗品・競馬・帝愛市
+  - id: daily_double
+    name: "デイリー2倍券"
+    kind: consumable
+    price: 3000
+    desc: "次のデイリーが2倍"
+    mark: "🎟️"
+  - id: insurance
+    name: "保険券"
+    kind: consumable
+    price: 2000
+    desc: "負けた1回の賭け金の半分が戻る（最大{insurance_cap:,}）"
+    mark: "🛡️"
+  - id: streak_guard
+    name: "連続守り券"
+    kind: consumable
+    price: 16000
+    desc: "受け取れなかった日を1日ぶん埋める（持つだけで自動で使われる）"
+    mark: "🔥"
+  - id: labor_drink
+    name: "栄養ドリンコ"
+    kind: consumable
+    price: 300
+    desc: "地下作業の疲労を60回復する（`/地下 作業` の画面で飲む）"
+    mark: "🥤"
+  - id: horse_voucher
+    name: "競走馬（購入券）"
+    kind: racing
+    price: 30000
+    desc: "競走馬を1頭迎える（`/競馬 厩舎`・3頭まで）"
+    mark: "🐎"
+  - id: carrot
+    name: "にんじん"
+    kind: racing
+    price: 1000
+    desc: "馬のステータスを5点動かす（`/競馬 厩舎`）"
+    mark: "🥕"
+  - id: insider_memo
+    name: "裏情報メモ（決算）"
+    kind: market
+    price: 5000
+    desc: "次の決算の方向についての、極秘メモ。確度 80%（2割はガセ）。決算ごとに1人1枚・サーバーで5枚まで"
+    mark: "🕴️"
+  - id: gold_carrot
+    name: "金にんじん"
+    kind: racing
+    price: 50000
+    desc: "馬のステータスの合計を10点増やす。5点ずつ、好きなところへ（`/競馬 厩舎`・1頭に1本まで）"
+    mark: "🥇"
+
+  # ゲーム演出の変更品（見た目は skins.yaml）
+  - id: skin_kuro
+    name: "黒服の立会い"
+    kind: skin_dice
+    price: 30000
+    desc: "黒服が立ち会い、実況する"
+    mark: "🕴️"
+  - id: skin_gold_dice
+    name: "黄金の賽"
+    kind: skin_dice
+    price: 150000
+    desc: "黄金の賽の演出になる"
+    mark: "🎲"
+  - id: skin_glass_dice
+    name: "血のマニキュア / ガラスの賽"
+    kind: skin_dice
+    price: 500000
+    desc: "高レート向けの特別演出"
+    mark: "💅"
+  - id: skin_vip
+    name: "VIP黒薔薇シート"
+    kind: skin_table
+    price: 300000
+    desc: "黒薔薇のVIP席の演出になる"
+    mark: "🌹"
+  - id: skin_numa
+    name: "沼（第3クギ突破仕様演出）"
+    kind: skin_table
+    price: 1000000
+    desc: "パチンコが、沼の演出になる"
+    mark: "🌀"
+
+  # コレクション
+  - id: col_beer
+    name: "キンキンに冷えたビール"
+    kind: collection
+    price: 13500
+    value: "🍺"
+  - id: col_yakitori
+    name: "焼き鳥・柿ピー盛り合わせ"
+    kind: collection
+    price: 25000
+    value: "🍢"
+  - id: col_gaishutsu
+    name: "1日外出録（外出許可証レプリカ）"
+    kind: collection
+    price: 50000
+    value: "🎫"
+  - id: col_sunglasses
+    name: "黒服のサングラス"
+    kind: collection
+    price: 100000
+    value: "🕶️"
+  - id: col_teppan
+    name: "焼き土下座用の鉄板・炭火セット"
+    kind: collection
+    price: 250000
+    value: "🔥"
+  - id: col_megaphone
+    name: "利根川の拡声器"
+    kind: collection
+    price: 500000
+    value: "🎙️"
+  - id: col_gold_bar
+    name: "純金の延べ棒（1kg）"
+    kind: collection
+    price: 1000000
+    value: "🪙"
+  - id: col_stock
+    name: "帝愛グループ特別優待株券（額装）"
+    kind: collection
+    price: 3000000
+    value: "🏢"
+  - id: col_throne
+    name: "兵藤会長の玉座"
+    kind: collection
+    price: 10000000
+    value: "👑"
+
+  # サーバー内の名前の色（ロール）
+  - id: role_red
+    name: "赤"
+    kind: color_role
+    price: 20000
+    value: 0xE74C3C
+    mark: "🔴"
+  - id: role_orange
+    name: "橙"
+    kind: color_role
+    price: 20000
+    value: 0xE67E22
+    mark: "🟠"
+  - id: role_yellow
+    name: "黄"
+    kind: color_role
+    price: 20000
+    value: 0xF1C40F
+    mark: "🟡"
+  - id: role_green
+    name: "緑"
+    kind: color_role
+    price: 20000
+    value: 0x2ECC71
+    mark: "🟢"
+  - id: role_cyan
+    name: "水色"
+    kind: color_role
+    price: 20000
+    value: 0x1ABC9C
+    mark: "🩵"
+  - id: role_blue
+    name: "青"
+    kind: color_role
+    price: 20000
+    value: 0x3498DB
+    mark: "🔵"
+  - id: role_purple
+    name: "紫"
+    kind: color_role
+    price: 20000
+    value: 0x9B59B6
+    mark: "🟣"
+  - id: role_pink
+    name: "桃"
+    kind: color_role
+    price: 20000
+    value: 0xFF69B4
+    mark: "🩷"
+  - id: role_gold
+    name: "金"
+    kind: color_role
+    price: 20000
+    value: 0xD4AF37
+    mark: "🥇"
+  - id: role_silver
+    name: "銀"
+    kind: color_role
+    price: 20000
+    value: 0xBDC3C7
+    mark: "🥈"
+  - id: role_black
+    name: "黒"
+    kind: color_role
+    price: 20000
+    value: 0x010101
+    mark: "⚫"
+  - id: role_white
+    name: "白"
+    kind: color_role
+    price: 20000
+    value: 0xFEFEFE
+    mark: "⚪"

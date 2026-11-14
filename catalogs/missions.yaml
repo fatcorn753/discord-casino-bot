@@ -1,0 +1,114 @@
+# デイリーミッションと連勝・大勝ち演出
+blackjack_game: "ブラックジャック"
+games:
+  - "スロット"
+  - "ルーレット"
+  - "チンチロ"
+  - "ブラックジャック"
+  - "パチンコ"
+
+min_bet: 100
+complete_bonus: 500
+per_day: 3
+
+universal:
+  - id: play5
+    name: "ゲームを5回遊ぶ"
+    kind: play
+    target: 5
+    reward: 300
+  - id: play10
+    name: "ゲームを10回遊ぶ"
+    kind: play
+    target: 10
+    reward: 500
+  - id: win3
+    name: "3回勝つ"
+    kind: win
+    target: 3
+    reward: 400
+  - id: win5
+    name: "5回勝つ"
+    kind: win
+    target: 5
+    reward: 600
+  - id: wager5k
+    name: "合計5,000ペリカ賭ける"
+    kind: wager
+    target: 5000
+    reward: 400
+  - id: wager20k
+    name: "合計20,000ペリカ賭ける"
+    kind: wager
+    target: 20000
+    reward: 700
+  - id: streak2
+    name: "2連勝する"
+    kind: streak
+    target: 2
+    reward: 400
+  - id: streak3
+    name: "3連勝する"
+    kind: streak
+    target: 3
+    reward: 700
+
+other_game_play_target: 3
+other_game_play_reward: 400
+other_game_win_target: 2
+other_game_win_reward: 600
+
+blackjack_missions:
+  - id: "game_ブラックジャック"
+    name: "ブラックジャックを3回遊ぶ"
+    kind: play_game
+    target: 3
+    reward: 300
+    game: "ブラックジャック"
+  - id: "gwin_ブラックジャック"
+    name: "ブラックジャックで2回勝つ"
+    kind: game_win
+    target: 2
+    reward: 400
+    game: "ブラックジャック"
+  - id: bj_double
+    name: "ブラックジャックでダブルダウンに成功する"
+    kind: tag
+    target: 1
+    reward: 600
+    game: "ブラックジャック"
+    tag: double_win
+  - id: bj_natural
+    name: "ナチュラルブラックジャックを出す"
+    kind: tag
+    target: 1
+    reward: 700
+    game: "ブラックジャック"
+    tag: natural
+
+big_win:
+  id: big3x
+  name: "賭け金の3倍以上の利益を1回で出す"
+  kind: big_win
+  target: 3
+  reward: 600
+
+jackpot_multiplier: 50
+
+win_tiers:
+  - min_ratio: 50
+    message: "🎰💥 **超特大ジャックポット級！！** 💥🎰"
+  - min_ratio: 10
+    message: "💎✨ **特大勝ち！！** ✨💎"
+  - min_ratio: 3
+    message: "🎉 **大勝ち！** 🎉"
+
+jackpot_art: |-
+  ```
+   *  .  *  .  *  .  *  .  *
+   +=======================+
+   |   J A C K P O T !!!   |
+   |      7   7   7        |
+   +=======================+
+   *  .  *  .  *  .  *  .  *
+  ```

@@ -1,0 +1,67 @@
+# 経済共通・貸付・クイズ報酬・週間ランキング・プレイヤー間取引の定数
+wallet:
+  initial_balance: 3000
+  consumable_effects:
+    daily_double: daily_boost
+    insurance: insurance
+  medals:
+    1: "🥇"
+    2: "🥈"
+    3: "🥉"
+
+loans:
+  user_min_principal: 100
+  min_term_days: 1
+  max_term_days: 30
+  offer_hours: 24
+  max_borrower_open: 1
+  max_lender_open: 5
+  max_lender_active: 10
+  remind_hours: 24
+  late_min_rate_tenths: 20
+  late_cap: 2
+
+quizpay:
+  user_min_minutes: 1
+  user_max_minutes: 10080
+  user_default_minutes: 4320
+  min_participants: 2
+  min_games_for_reward: 3
+  open_limit: 2
+  daily_limit: 3
+  base_reward: 100
+  max_bonus: 200
+  target_rate: 0.40
+  reward_scale_base: 100
+  participation_rate: 1.0
+
+weekly:
+  min_plays: 5
+  announce_top: 5
+
+p2p:
+  fee_rate: 0.05
+  max_active: 5
+  fixed_days: 7
+  auction_hours: [1, 6, 24, 72]
+  min_increment_rate: 0.05
+  min_increment: 100
+  snipe_seconds: 300
+  pair_daily_limit: 100000
+  min_price: 100
+  item_price_range: [0.10, 5.0]
+  horse_price_range: [3000, 300000]
+  escrow_owner: -3
+  tradable_kinds:
+    - consumable
+    - racing
+    - card_color
+    - card_icon
+    - skin_dice
+    - skin_table
+    - color_role
+  slot_of_kind:
+    card_color: card_color
+    card_icon: card_icon
+    skin_dice: skin_dice
+    skin_table: skin_table
