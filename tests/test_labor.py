@@ -23,6 +23,7 @@ def text(embed) -> str:
 
 _REAL_ROLL = lab.roll_ores
 _REAL_RELICS = lab.roll_relics
+_REAL_STRATUM = lab.daily_stratum
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +33,9 @@ def no_ores(monkeypatch):
     monkeypatch.setattr(
         lab, "roll_relics", lambda *a, **k: {}
     )  # 発掘品も、掘らない（まれに出て、テストがぶれるのを防ぐ）
+    monkeypatch.setattr(lab, "roll_click_bonus", lambda *a, **k: {"crit": False, "ore": None})
+    monkeypatch.setattr(lab, "daily_stratum", lambda day: dict(lab.NEUTRAL_STRATUM))
+    monkeypatch.setattr(lab, "COMBO_BONUS_RATE", 0.0)
     for kind, rate in (("apprentice", 1.0), ("miner", 3.75), ("craftsman", 8.25)):
         monkeypatch.setitem(
             lab.WORKER_RATE, kind, rate
@@ -1089,3 +1093,45 @@ def test_labor_click_stops_early_after_three_mechanical_hours(eco):
     r = eco.labor_click(U, T0, DAY)
     assert r["ok"] and r["pay"] == lab.OVER_CAP_PAY  # 上限にはまだ届いていないのに、早めに打ち止め
     assert eco.labor_state(U, T0 + 1, DAY)["day_click"] < lab.MAX_CLICKS_PER_DAY
+
+
+# ----------------------------- 鉱脈ヒット・コンボ・今日の地層 ----------------------------- #
+def test_crit_chance_scales_with_pick_workers_and_stratum():
+    assert lab.crit_chance(10, 0) > lab.crit_chance(5, 0) > lab.crit_chance(0, 0)
+    assert lab.crit_chance(0, 4) > lab.crit_chance(0, 0)
+    rich = next(s for s in lab.STRATA if s["id"] == "rich_vein")
+    assert lab.crit_chance(5, 0, rich) > lab.crit_chance(5, 0)
+
+
+def test_daily_stratum_is_deterministic_and_varies_across_days(monkeypatch):
+    monkeypatch.setattr(lab, "daily_stratum", _REAL_STRATUM)
+    assert lab.daily_stratum("")["id"] == "normal"
+    days = [f"2026-11-{d:02d}" for d in range(10, 25)]
+    assert lab.daily_stratum(days[0]) == lab.daily_stratum(days[0])
+    assert len({lab.daily_stratum(d)["id"] for d in days}) >= 3
+
+
+def test_labor_click_applies_crit_combo_and_hand_ore(eco, monkeypatch):
+    monkeypatch.setattr(lab, "COMBO_BONUS_RATE", 0.5)
+    monkeypatch.setattr(lab, "roll_click_bonus", lambda *a, **k: {"crit": True, "ore": "copper"})
+    # 1〜9回目は会心+手掘り鉱石、10回目はさらにコンボ加算
+    for i in range(9):
+        r = eco.labor_click(U, T0 + i * 2000, DAY)
+        assert r["crit"] is True and r["ore"] == "copper" and r["combo"] is False
+        assert r["pay"] == round(10 * lab.CRIT_MULT) and r["ore_pay"] == lab.ORE_VALUE["copper"]
+    tenth = eco.labor_click(U, T0 + 9 * 2000, DAY)
+    assert tenth["combo"] is True and tenth["pay"] == round(10 * lab.CRIT_MULT) + round(10 * 0.5)
+    state = eco.labor_state(U, T0 + 9 * 2000 + 1, DAY)
+    assert state["ores"].get("copper") == 10
+
+
+def test_work_panel_shows_stratum_and_crit_note(eco, monkeypatch):
+    rich = next(s for s in lab.STRATA if s["id"] == "rich_vein")
+    monkeypatch.setattr(lab, "daily_stratum", lambda day: dict(rich))
+    monkeypatch.setattr(lab, "roll_click_bonus", lambda *a, **k: {"crit": True, "ore": "gold"})
+    view = make_view(eco)
+    assert "今日の地層" in text(labor_cog.panel_embed(view.state))
+    it = SimpleNamespace(user=SimpleNamespace(id=U), response=Resp())
+    asyncio.run(view._work(it))
+    desc = it.response.edits[-1]["embed"].description
+    assert "鉱脈ヒット" in desc and "金" in desc
