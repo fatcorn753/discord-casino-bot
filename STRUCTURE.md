@@ -73,6 +73,7 @@
 
 | パス | 内容 |
 |---|---|
+| `catalogs.py` / `catalog_types.py` | `ICatalogs` カタログ取得契約と読み取り専用構造型プロトコル |
 | `clock.py` | `IClock`（現在時刻・日付の抽象契約） |
 | `session.py` | `ISessionGuard`（二重プレイ防止セッション管理の契約） |
 | `economy.py` | `IGuildScopable` / `IGuildApprovalStore` / `IRankingReader` / `IEscrowPort` / `IWalletPort` / `IEconomy` |
@@ -115,7 +116,7 @@
 | パス | 内容 |
 |---|---|
 | `paths.py` | ルート・`catalogs/`・`config.json`・`data/casino.db` の基準パス解決 |
-| `catalogs.py` | `catalogs/` 配下の YAML を読み込み・Pydantic 型検証・キャッシュする窓口 |
+| `catalogs.py` | `catalogs/` 配下の YAML を読み込み・Pydantic 型検証・キャッシュする `YamlCatalogs(ICatalogs)` 実装と `bind_catalogs()` |
 | `clock.py` | `ConfigClock(IClock)` とタイムゾーンに基づく現在時刻・日付の取得 |
 | `logthrottle.py` | 同じ原因のログを出し続けないための間引き |
 
