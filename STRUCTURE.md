@@ -61,6 +61,7 @@
 | `_horse_views.py` | 競馬の画面の部品（出馬表・厩舎・馬券のボタンとモーダル） |
 | `_teiai_panel.py` / `_teiai_escape.py` | `/ペリカ 帝愛` のパネル / 海外逃亡の演出 |
 | `_amount.py` | 金額の入力欄に、自分の残高を見せる部品 |
+| `_shared.py` | 複数の Cog で共有する Discord 依存の小さな部品（`announce_channel` など） |
 
 ## `play/` — ゲームの進行（ボタン・演出）
 
@@ -92,9 +93,10 @@
 | `economy.py` | `Economy` 本体。残高・デイリー・送金・ランキング。下の `eco_*.py` を部品として混ぜ込んでいる |
 | `schema.py` | DB の表の定義（作成）と、古い版への列の追加・データの移行 |
 | `eco_types.py` | `Economy` と各部品が共有する定数と、結果を返す入れ物 |
-| `ui.py` | 埋め込みの生成と、ペリカの表記 |
+| `ui.py` | 埋め込みの生成・ペリカの表記・所有者チェックつき View（`OwnerView`） |
+| `clock.py` | タイムゾーン（`config.json` の `utc_offset_hours`）に基づく現在時刻・日付の取得 |
 | `session.py` | 同じ人が同時に複数のゲームを始めないようにする（二重プレイ対策） |
-| `confirm.py` | 実行者だけが押せる確認ボタン |
+| `confirm.py` | 実行者だけが押せる確認ボタンと、セッション保護つき確認応答（`user_session`・`confirmed_reply`） |
 | `logthrottle.py` | 同じ原因のログを、出し続けないための間引き |
 
 ### `eco_*.py` — `Economy` に混ぜ込む、DB を触る部品
@@ -163,6 +165,7 @@
 | `test_shop.py` / `test_shop_panel.py` / `test_skins_collection.py` / `test_nick.py` | ショップ・スキン・称号 |
 | `test_loans.py` / `test_quiz*.py` / `test_raffle.py` / `test_events.py` / `test_missions.py` / `test_weekly.py` / `test_leaderboard.py` / `test_history_stats.py` | 貸付・クイズ・抽選・イベント・ミッション・ランキング・履歴 |
 | `test_approval.py` / `test_purge.py` / `test_channel_target.py` / `test_public_results.py` / `test_amount.py` / `test_autoplay_retired.py` | 承認・発言削除・投稿先の指定・結果の公開・金額入力・廃止した機能の確認 |
+| `test_shared_ui.py` | 共通部品（`core/clock`・`OwnerView`・`user_session`・`confirmed_reply`・`announce_channel`） |
 
 ## 変更するとき、どこを見るか
 
