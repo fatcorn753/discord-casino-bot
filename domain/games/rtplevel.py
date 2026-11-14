@@ -5,13 +5,13 @@
 
     倍率 = 1 + (レベル - 3) × STEP ÷ 勝ち分の平均（W）
 
-W は「賭けた額あたり、勝ち分が平均いくらか」。スロット・ルーレット・パチンコは正確に計算でき、
-チンチロとブラックジャックは、シミュレーションで求めた目安を使う（ブラックジャックは打ち方で変わる）。
+W は「賭けた額あたり、勝ち分が平均いくらか」。各ゲームの RTP プロファイル（Strategy）で計算する。
 """
 
 import itertools
+from typing import Optional
 
-from domain.games import pachinko, slot
+from domain.games import pachinko, roulette, slot
 from domain.ports import get_catalogs
 
 _CFG = get_catalogs().games().rtplevel
@@ -28,7 +28,7 @@ BLACKJACK_RTP, BLACKJACK_W = _CFG.blackjack_rtp, _CFG.blackjack_w  # 「17まで
 ROULETTE_DEFAULT_KIND = _CFG.roulette_default_kind
 
 
-def _slot_stats() -> tuple:
+def _slot_stats() -> tuple[float, float]:
     total = sum(slot.WEIGHTS.values())
     rtp = share = 0.0
     for reels in itertools.product(slot.SYMBOLS, repeat=3):
@@ -44,27 +44,55 @@ def _slot_stats() -> tuple:
 SLOT_RTP, SLOT_W = _slot_stats()
 
 
-def _roulette_stats(kind: str) -> tuple:
-    from domain.games import roulette
+class IRtpProfile:
+    """ゲームごとの基準還元率・平均勝ち分を計算する Strategy インターフェース。"""
 
-    mult = roulette.BETS[kind][1]
-    p = sum(1 for n in range(37) if roulette.wins(kind, n, 17)) / 37
-    return p * mult, p * (mult - 1)
+    def stats(self, kind: Optional[str] = None) -> tuple[float, float]:
+        raise NotImplementedError
+
+
+class FixedRtpProfile(IRtpProfile):
+    """事前シミュレーションで求めた固定の (RTP, W) を返すプロファイル。"""
+
+    def __init__(self, rtp: float, win_share: float) -> None:
+        self._rtp = rtp
+        self._win_share = win_share
+
+    def stats(self, kind: Optional[str] = None) -> tuple[float, float]:
+        return self._rtp, self._win_share
+
+
+class RouletteRtpProfile(IRtpProfile):
+    def __init__(self, default_kind: str) -> None:
+        self._default_kind = default_kind
+
+    def stats(self, kind: Optional[str] = None) -> tuple[float, float]:
+        mult = roulette.BETS[kind or self._default_kind][1]
+        p = sum(1 for n in range(37) if roulette.wins(kind or self._default_kind, n, 17)) / 37
+        return p * mult, p * (mult - 1)
+
+
+class PachinkoRtpProfile(IRtpProfile):
+    def stats(self, kind: Optional[str] = None) -> tuple[float, float]:
+        rtp = pachinko.rtp()
+        return rtp, rtp - pachinko.hit_rate()
+
+
+PROFILES: dict[str, IRtpProfile] = {
+    "スロット": FixedRtpProfile(SLOT_RTP, SLOT_W),
+    "ルーレット": RouletteRtpProfile(ROULETTE_DEFAULT_KIND),
+    "パチンコ": PachinkoRtpProfile(),
+    "チンチロ": FixedRtpProfile(CHINCHIRO_RTP, CHINCHIRO_W),
+    "ブラックジャック": FixedRtpProfile(BLACKJACK_RTP, BLACKJACK_W),
+}
 
 
 def base_stats(game: str, kind: str | None = None) -> tuple[float, float]:
     """(いまの還元率, 勝ち分の平均 W)。"""
-    if game == "スロット":
-        return SLOT_RTP, SLOT_W
-    if game == "ルーレット":
-        return _roulette_stats(kind or ROULETTE_DEFAULT_KIND)
-    if game == "パチンコ":
-        return pachinko.rtp(), pachinko.rtp() - pachinko.hit_rate()
-    if game == "チンチロ":
-        return CHINCHIRO_RTP, CHINCHIRO_W
-    if game == "ブラックジャック":
-        return BLACKJACK_RTP, BLACKJACK_W
-    raise KeyError(game)
+    profile = PROFILES.get(game)
+    if profile is None:
+        raise KeyError(game)
+    return profile.stats(kind)
 
 
 def factor(game: str, level: int, kind: str | None = None) -> float:

@@ -1,12 +1,12 @@
 """ファイナル総資産: ペリカに換算できるものを、すべて合計した資産（ランキングと、人ごとの内訳）。
 
 `/ペリカ ランキング` の純資産（現金・預金・株・債券など）に、馬・持ち物・発掘品・地下作業の工具・預かり中のお金・貸し借りなどを足したもの。
-売れない着せ替え・コレクションも、買値で数える。評価の元は、次のとおり（売値ではなく、目安の価値）。
+各資産カテゴリの集計は IAssetCollector を実装する独立コレクタとして分離し、CompositeAssetCollector で合成する（OCP）。
 """
 
 import json
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from domain import horse as horse_mod
 from domain import labor as labor_mod
@@ -25,14 +25,155 @@ from domain.types import (
 )
 from infra.db.base import EcoBase
 
+AddPart = Callable[[int, str, int], None]
+
+
+def _item_worth(item_id: str) -> tuple[int, bool]:
+    """(持ち物の1個あたりの価値, 発掘品か)。値段のない限定品は 0。"""
+    if item_id in shop.RELIC_VALUE:
+        return shop.RELIC_VALUE[item_id], True
+    item = shop.BY_ID.get(item_id)
+    return (item.price if item else 0), False
+
+
+def _add_item_value(add: AddPart, uid: int, item_id: str, qty: int) -> None:
+    worth, relic = _item_worth(item_id)
+    add(uid, "relics" if relic else "items", worth * qty)
+
+
+class IAssetCollector:
+    """1 つの資産カテゴリを parts 辞書へ加算するコレクタ契約。"""
+
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        raise NotImplementedError
+
+
+class CompositeAssetCollector(IAssetCollector):
+    """複数の IAssetCollector を束ねて順次適用する Composite。"""
+
+    def __init__(self, collectors: tuple[IAssetCollector, ...]) -> None:
+        self._collectors = collectors
+
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        for collector in self._collectors:
+            collector.collect(eco, guild_id, add, now)
+
+
+class CashAndDebtCollector(IAssetCollector):
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        for r in eco._conn.execute("SELECT user_id, balance, debt FROM users WHERE guild_id=?", (guild_id,)):
+            add(r["user_id"], "cash", r["balance"])
+            add(r["user_id"], "debt", -r["debt"])
+
+
+class BankAssetCollector(IAssetCollector):
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        for uid, v in eco.bank_values().items():
+            add(uid, "deposit", v)
+
+
+class CryptoAssetCollector(IAssetCollector):
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        for uid, v in eco.crypto_values().items():
+            add(uid, "crypto", v)
+        for uid, v in eco.margin_equity().items():
+            add(uid, "crypto", v)
+
+
+class BondAssetCollector(IAssetCollector):
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        for uid, v in eco.bond_values().items():
+            add(uid, "bonds", v)
+
+
+class OptionAssetCollector(IAssetCollector):
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        for uid, v in eco.option_values().items():
+            add(uid, "options", v)
+
+
+class InventoryAssetCollector(IAssetCollector):
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        for r in eco._conn.execute(
+            "SELECT user_id, item_id, qty FROM inventory WHERE guild_id=? AND qty>0", (guild_id,)
+        ):
+            _add_item_value(add, r["user_id"], r["item_id"], r["qty"])
+
+
+class LaborAssetCollector(IAssetCollector):
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        for r in eco._conn.execute(
+            "SELECT user_id, relics, pot, pick, glove, dorm FROM labor WHERE guild_id=?", (guild_id,)
+        ):
+            add(r["user_id"], "pot", r["pot"])
+            add(
+                r["user_id"],
+                "tools",
+                labor_mod.upgrade_spent(r["pick"])
+                + labor_mod.upgrade_spent(r["glove"])
+                + labor_mod.dorm_spent(r["dorm"]),
+            )
+            try:
+                waiting = json.loads(r["relics"] or "{}")
+            except ValueError:
+                waiting = {}
+            for item_id, qty in waiting.items():
+                _add_item_value(add, r["user_id"], item_id, int(qty))
+
+
+class HorseAssetCollector(IAssetCollector):
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        for r in eco._conn.execute(
+            "SELECT owner_id, races, wins, places FROM horses WHERE guild_id=? AND owner_id>0 AND rented_day IS NULL",
+            (guild_id,),
+        ):
+            add(r["owner_id"], "horses", eco.horse_worth(r["races"], r["wins"], r["places"]))
+
+
+class P2PAssetCollector(IAssetCollector):
+    """競り・出品中の品・馬は売り手、入札中のお金は入札者の資産として加算する。"""
+
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        for r in eco._conn.execute("SELECT * FROM market_listings WHERE guild_id=? AND status='active'", (guild_id,)):
+            if r["kind"] == "item":
+                _add_item_value(add, r["seller_id"], r["ref"], r["qty"])
+            else:
+                h = eco._conn.execute("SELECT races, wins, places FROM horses WHERE id=?", (int(r["ref"]),)).fetchone()
+                if h:
+                    add(r["seller_id"], "horses", eco.horse_worth(h["races"], h["wins"], h["places"]))
+            if r["bidder_id"]:
+                add(r["bidder_id"], "escrow", r["bid"])
+
+
+class LoanAssetCollector(IAssetCollector):
+    def collect(self, eco: "AssetMixin", guild_id: int, add: AddPart, now: float) -> None:
+        for r in eco._conn.execute(
+            "SELECT * FROM loans WHERE guild_id=? AND status IN ('active','overdue')", (guild_id,)
+        ):
+            left = eco.loan_remaining(dict(r), now)
+            add(r["lender_id"], "loans_lent", left)
+            add(r["borrower_id"], "loans_owed", -left)
+
+
+DEFAULT_ASSET_COLLECTOR = CompositeAssetCollector(
+    (
+        CashAndDebtCollector(),
+        BankAssetCollector(),
+        CryptoAssetCollector(),
+        BondAssetCollector(),
+        OptionAssetCollector(),
+        InventoryAssetCollector(),
+        LaborAssetCollector(),
+        HorseAssetCollector(),
+        P2PAssetCollector(),
+        LoanAssetCollector(),
+    )
+)
+
 
 class AssetMixin(EcoBase):
     def _item_worth(self, item_id: str) -> tuple:
-        """(持ち物の1個あたりの価値, 発掘品か)。値段のない限定品は 0。"""
-        if item_id in shop.RELIC_VALUE:
-            return shop.RELIC_VALUE[item_id], True
-        item = shop.BY_ID.get(item_id)
-        return (item.price if item else 0), False
+        return _item_worth(item_id)
 
     def horse_worth(self, races: int, wins: int, places: int) -> int:
         """馬1頭の評価額: 購入価格に、いま引退したときの引退金（戦績が悪ければ引退費用）を足す。0 未満にはしない。"""
@@ -48,70 +189,11 @@ class AssetMixin(EcoBase):
                 for r in self._conn.execute("SELECT user_id FROM users WHERE guild_id=?", (g,))
             }
 
-            def add(uid, key, value):
+            def add(uid: int, key: str, value: int) -> None:
                 if uid in parts and value:
                     parts[uid][key] += value
 
-            for r in self._conn.execute("SELECT user_id, balance, debt FROM users WHERE guild_id=?", (g,)):
-                add(r["user_id"], "cash", r["balance"])
-                add(r["user_id"], "debt", -r["debt"])
-            for uid, v in self.bank_values().items():
-                add(uid, "deposit", v)
-            for uid, v in self.crypto_values().items():
-                add(uid, "crypto", v)
-            for uid, v in self.margin_equity().items():
-                add(uid, "crypto", v)
-            for uid, v in self.bond_values().items():
-                add(uid, "bonds", v)
-            for uid, v in self.option_values().items():
-                add(uid, "options", v)
-
-            def item(uid, item_id, qty):
-                worth, relic = self._item_worth(item_id)
-                add(uid, "relics" if relic else "items", worth * qty)
-
-            for r in self._conn.execute("SELECT user_id, item_id, qty FROM inventory WHERE guild_id=? AND qty>0", (g,)):
-                item(r["user_id"], r["item_id"], r["qty"])
-            for r in self._conn.execute(
-                "SELECT user_id, relics, pot, pick, glove, dorm FROM labor WHERE guild_id=?", (g,)
-            ):
-                add(r["user_id"], "pot", r["pot"])
-                add(
-                    r["user_id"],
-                    "tools",
-                    labor_mod.upgrade_spent(r["pick"])
-                    + labor_mod.upgrade_spent(r["glove"])
-                    + labor_mod.dorm_spent(r["dorm"]),
-                )
-                try:
-                    waiting = json.loads(r["relics"] or "{}")
-                except ValueError:
-                    waiting = {}
-                for item_id, qty in waiting.items():
-                    item(r["user_id"], item_id, int(qty))
-            for r in self._conn.execute(
-                "SELECT owner_id, races, wins, places FROM horses WHERE guild_id=? AND owner_id>0 AND rented_day IS NULL",
-                (g,),
-            ):
-                add(r["owner_id"], "horses", self.horse_worth(r["races"], r["wins"], r["places"]))
-            # 競りに出している品・馬は、まだ持ち主のもの。入札中のお金は、預かり中でも入札した人のもの
-            for r in self._conn.execute("SELECT * FROM market_listings WHERE guild_id=? AND status='active'", (g,)):
-                if r["kind"] == "item":
-                    item(r["seller_id"], r["ref"], r["qty"])
-                else:
-                    h = self._conn.execute(
-                        "SELECT races, wins, places FROM horses WHERE id=?", (int(r["ref"]),)
-                    ).fetchone()
-                    if h:
-                        add(r["seller_id"], "horses", self.horse_worth(h["races"], h["wins"], h["places"]))
-                if r["bidder_id"]:
-                    add(r["bidder_id"], "escrow", r["bid"])
-            for r in self._conn.execute(
-                "SELECT * FROM loans WHERE guild_id=? AND status IN ('active','overdue')", (g,)
-            ):
-                left = self.loan_remaining(dict(r), now)
-                add(r["lender_id"], "loans_lent", left)
-                add(r["borrower_id"], "loans_owed", -left)
+            DEFAULT_ASSET_COLLECTOR.collect(self, g, add, now)
         return parts
 
     def final_assets(self, user_ids: Optional[set] = None, now: Optional[float] = None) -> list:
