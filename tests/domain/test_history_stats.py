@@ -8,7 +8,7 @@ import pytest
 
 from cogs.economy.cog import EconomyCog
 from cogs.market.cog import MarketCog
-from domain import history
+from cogs.shared.messages import format_history
 from infra.db.economy import Economy
 from services.session import Sessions
 
@@ -28,27 +28,27 @@ def row(delta, reason, bal, ts=1_000_000):
 # ----------------------------- 履歴 ----------------------------- #
 def test_one_game_is_one_line_with_net_and_final_balance():
     rows = [row(95 + 100, "払い戻し:コイン", 3195), row(-100, "賭け:コイン", 3000)]  # 新しい順
-    lines = history.format_history(rows)
+    lines = format_history(rows)
     assert len(lines) == 1 and "コイン 賭100" in lines[0] and "**+95**" in lines[0] and "3,195ペリカ" in lines[0]
 
 
 def test_losing_game_without_payout_row_and_double_down_and_penalty():
-    assert history.format_history([row(-100, "賭け:コイン", 2900)])[0].count("**-100**") == 1
+    assert format_history([row(-100, "賭け:コイン", 2900)])[0].count("**-100**") == 1
     bj = [
         row(400, "払い戻し:ブラックジャック", 3400),
         row(-200, "追加の賭け:ブラックジャック", 3000),
         row(-200, "賭け:ブラックジャック", 3200),
     ]
-    line = history.format_history(bj)[0]
+    line = format_history(bj)[0]
     assert "賭400" in line and "**+0**" in line  # 賭け金は追加分も合計、損益は差し引き
     chin = [row(-300, "追加の支払い:チンチロ", 2400), row(-100, "賭け:チンチロ", 2700)]
-    line = history.format_history(chin)[0]
-    assert "賭100" in line and "**-400**" in line and len(history.format_history(chin)) == 1
+    line = format_history(chin)[0]
+    assert "賭100" in line and "**-400**" in line and len(format_history(chin)) == 1
 
 
 def test_transfers_show_the_person_and_other_rows_are_kept():
     rows = [row(-1100, "送金（送）→42", 1900), row(500, "送金（受）←7", 3000), row(1000, "デイリーボーナス", 2500)]
-    lines = history.format_history(rows)
+    lines = format_history(rows)
     assert "送金 → <@42>" in lines[0] and "送金 ← <@7>" in lines[1] and "デイリーボーナス" in lines[2]
 
 
@@ -56,8 +56,8 @@ def test_consecutive_games_do_not_merge_and_limit_applies():
     rows = []
     for i in range(20):
         rows += [row(100, "払い戻し:コイン", 1000 + i), row(-50, "賭け:コイン", 900 + i)]
-    assert len(history.format_history(rows, 12)) == 12 and all(
-        line.count("コイン 賭50") == 1 for line in history.format_history(rows, 12)
+    assert len(format_history(rows, 12)) == 12 and all(
+        line.count("コイン 賭50") == 1 for line in format_history(rows, 12)
     )
 
 

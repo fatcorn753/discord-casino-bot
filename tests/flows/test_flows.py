@@ -534,7 +534,7 @@ def test_transfer_blocked_while_playing_and_needs_min_games(bot, tmp_path):
 
     eco = bot.economy
     r = eco.transfer(1, 2, 100, 0.1, 20_000, 0.0, TRANSFER_MIN_GAMES)
-    assert not r.ok and "回以上" in r.reason  # 1回も遊んでいない人は送れない
+    assert not r.ok and r.reason.code == "transfer_min_games"  # 1回も遊んでいない人は送れない
     for _ in range(TRANSFER_MIN_GAMES):
         eco.settle(eco.place_bet(1, 10, "テスト"), 10, "テスト")
     assert eco.transfer(1, 2, 100, 0.1, 20_000, 0.0, TRANSFER_MIN_GAMES).ok

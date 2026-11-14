@@ -43,9 +43,9 @@ def test_stats_total_is_fixed_and_carrot_moves_points_within_limits():
     assert ok and new["speed"] == 45 and new["guts"] == 55 and sum(new.values()) == h.STAT_TOTAL
     assert not h.move_points(s, "speed", "speed")[0]
     low = {"speed": 20, "stamina": 60, "power": 60, "guts": 60}
-    assert "最低" in h.move_points(low, "speed", "guts")[1]
+    assert h.move_points(low, "speed", "guts")[1].code == "horse_stat_at_min"
     high = {"speed": 80, "stamina": 40, "power": 40, "guts": 40}
-    assert "最高" in h.move_points(high, "stamina", "speed")[1]
+    assert h.move_points(high, "stamina", "speed")[1].code == "horse_stat_at_max"
 
 
 def test_random_stats_are_always_valid():
@@ -173,19 +173,19 @@ def test_race_slots_are_four_a_day_on_weekends():
 # ----------------------------- 馬 ----------------------------- #
 def test_horse_needs_a_voucher_and_is_limited_to_three(eco):
     ok, reason = eco.horse_create(U, "なし", "栗毛", "🟥")
-    assert not ok and "購入券" in reason
+    assert not ok and reason.code == "horse_no_voucher"
     ids = [make_horse(eco, U, f"馬{i}") for i in range(3)]
     assert len(set(ids)) == 3
     give(eco, U, shop.HORSE_VOUCHER)
     ok, reason = eco.horse_create(U, "4頭目", "栗毛", "🟥")
-    assert not ok and "3 頭" in reason and eco.inventory(U)[shop.HORSE_VOUCHER] == 1  # 券は減らない
+    assert not ok and reason.code == "horse_max_owned" and eco.inventory(U)[shop.HORSE_VOUCHER] == 1  # 券は減らない
     assert not eco.horse_create(V, "x", "ない毛色", "🟥")[0]
 
 
 def test_carrot_moves_five_points_and_is_consumed(eco):
     hid = make_horse(eco)
     ok, reason = eco.horse_carrot(U, hid, "speed", "guts")
-    assert not ok and "にんじん" in reason
+    assert not ok and reason.code == "horse_no_carrot"
     give(eco, U, shop.CARROT, 2)
     ok, stats = eco.horse_carrot(U, hid, "speed", "guts")
     assert ok and stats["speed"] == 45 and stats["guts"] == 55 and eco.inventory(U)[shop.CARROT] == 1
@@ -195,7 +195,7 @@ def test_carrot_moves_five_points_and_is_consumed(eco):
 
 def test_gold_carrot_adds_ten_points_in_two_picks(eco):
     hid = make_horse(eco)
-    assert "金にんじん" in eco.horse_gold_carrot(U, hid, "speed", "guts")[1]  # 持っていない
+    assert eco.horse_gold_carrot(U, hid, "speed", "guts")[1].code == "horse_no_gold_carrot"  # 持っていない
     give(eco, U, shop.GOLD_CARROT, 3)
     assert not eco.horse_gold_carrot(V, hid, "speed", "guts")[0]  # 他人の馬には使えない
     ok, stats = eco.horse_gold_carrot(U, hid, "speed", "guts")
@@ -211,7 +211,9 @@ def test_gold_carrot_is_limited_to_one_per_horse(eco):
     give(eco, U, shop.GOLD_CARROT, 3)
     assert eco.horse_gold_carrot(U, hid, "speed", "guts")[0]
     ok, why = eco.horse_gold_carrot(U, hid, "power", "power")
-    assert not ok and "1 本まで" in why and eco.inventory(U)[shop.GOLD_CARROT] == 2  # 失敗では減らない
+    assert (
+        not ok and why.code == "horse_gold_carrot_max" and eco.inventory(U)[shop.GOLD_CARROT] == 2
+    )  # 失敗では減らない
     assert eco.horse_get(hid)["bonus"] == 10
 
 
@@ -225,7 +227,7 @@ def test_gold_carrot_cannot_push_one_stat_over_the_max(eco):
     give(eco, U, shop.GOLD_CARROT, 1)
     eco._conn.execute("UPDATE horses SET speed=75 WHERE id=?", (other,))
     ok, why = eco.horse_gold_carrot(U, other, "speed", "speed")  # 75+10=85 は不可
-    assert not ok and "最高" in why
+    assert not ok and why.code == "horse_stat_at_max"
 
 
 def test_retire_value_rewards_a_good_record_and_charges_for_a_bad_one():
@@ -254,12 +256,12 @@ def test_retire_is_refused_for_other_owners_scheduled_horses_and_when_the_fee_ca
     rid = open_race(eco)
     assert eco.race_register(U, hid, rid, NOW + 1)[0]
     ok, why = eco.horse_retire(U, hid)
-    assert not ok and "出走予定" in why
+    assert not ok and why.code == "horse_busy_no_retire"
     eco.race_withdraw(U, hid, rid, NOW + 2)
     eco._conn.execute("UPDATE horses SET races=20, wins=0, places=0 WHERE id=?", (hid,))
     eco._conn.execute("UPDATE users SET balance=100 WHERE guild_id=? AND user_id=?", (eco._g(), U))
     ok, why = eco.horse_retire(U, hid)
-    assert not ok and "足りません" in why and eco.horse_get(hid)["owner_id"] == U
+    assert not ok and why.code == "horse_retire_fee_short" and eco.horse_get(hid)["owner_id"] == U
 
 
 def test_closing_entries_copies_the_record_and_gives_npcs_one(eco):
@@ -285,9 +287,7 @@ def test_full_race_flow_pays_bettors_and_owners_and_is_settled_once(eco):
     before = eco.balance(U)
     assert eco.race_register(U, hid, rid, NOW + 1) == (True, "")
     assert eco.balance(U) == before - h.ENTRY_FEE
-    assert (
-        "1頭" in eco.race_register(U, hid, rid, NOW + 2)[1] or "出走予定" in eco.race_register(U, hid, rid, NOW + 2)[1]
-    )
+    assert eco.race_register(U, hid, rid, NOW + 2)[1].code in ("race_one_horse_per_owner", "race_horse_busy")
     field_ = eco.race_close_entries(rid, random.Random(1))
     assert len(field_["runners"]) == h.FIELD_SIZE
     eco.race_set_odds(rid, h.make_odds(field_["runners"]))
@@ -316,18 +316,19 @@ def test_full_race_flow_pays_bettors_and_owners_and_is_settled_once(eco):
 def test_bet_rules(eco):
     rid = open_race(eco)
     eco.credit(V, 300_000, "テスト")
-    assert "まだ" in eco.race_bet(V, rid, "win", 1, 100, NOW + 1)[1]  # 締切前（発売前）は買えない
+    assert eco.race_bet(V, rid, "win", 1, 100, NOW + 1)[1].code == "race_bet_unavailable"  # 締切前（発売前）は買えない
     field_ = eco.race_close_entries(rid, random.Random(2))
     eco.race_set_odds(rid, h.make_odds(field_["runners"]))
-    assert "締め切りました" in eco.race_bet(V, rid, "win", 1, 100, NOW + 10_000)[1]
-    assert "賭け金" in eco.race_bet(V, rid, "win", 1, 50, NOW + 700)[1]
-    assert "賭け金" in eco.race_bet(V, rid, "win", 1, h.MAX_STAKE + 1, NOW + 700)[1]
-    assert "種類" in eco.race_bet(V, rid, "bogus", 1, 100, NOW + 700)[1]
-    assert "出走しません" in eco.race_bet(V, rid, "win", 9, 100, NOW + 700)[1]
+    assert eco.race_bet(V, rid, "win", 1, 100, NOW + 10_000)[1].code == "race_bet_closed"
+    assert eco.race_bet(V, rid, "win", 1, 50, NOW + 700)[1].code == "race_stake_range"
+    assert eco.race_bet(V, rid, "win", 1, h.MAX_STAKE + 1, NOW + 700)[1].code == "race_stake_range"
+    assert eco.race_bet(V, rid, "bogus", 1, 100, NOW + 700)[1].code == "race_select_bet_kind"
+    assert eco.race_bet(V, rid, "win", 9, 100, NOW + 700)[1].code == "race_lane_not_running"
     for _ in range(3):
         assert eco.race_bet(V, rid, "place", 1, h.MAX_STAKE, NOW + 700)[0]
-    assert "合計" in eco.race_bet(V, rid, "place", 1, 100, NOW + 700)[1]
-    assert "足りません" in eco.race_bet(W, rid, "win", 1, 100, NOW + 700)[1] or eco.balance(W) >= 100
+    assert eco.race_bet(V, rid, "place", 1, 100, NOW + 700)[1].code == "race_max_stake"
+    ok_w, why_w = eco.race_bet(W, rid, "win", 1, 100, NOW + 700)
+    assert (not ok_w and why_w.code == "insufficient_balance") or eco.balance(W) >= 100
 
 
 def test_bet_locks_in_the_odds_and_place_pays_for_top_three(eco):
@@ -354,7 +355,7 @@ def test_registration_rules_withdraw_and_close(eco):
     bal = eco.balance(U)
     assert eco.race_withdraw(U, a, rid, NOW + 2) == (True, "") and eco.balance(U) == bal + h.ENTRY_FEE
     assert not eco.race_withdraw(U, a, rid, NOW + 2)[0]
-    assert "締め切りました" in eco.race_register(U, a, rid, NOW + 700)[1]
+    assert eco.race_register(U, a, rid, NOW + 700)[1].code == "race_entry_closed"
     field_ = eco.race_close_entries(rid, random.Random(1))
     assert len(field_["runners"]) == h.FIELD_SIZE and eco.race_close_entries(rid) is None  # 締切は1回だけ
     names = [e["name"] for e in eco.race_entries(rid)]
@@ -439,10 +440,10 @@ def test_combo_bets_validate_picks_and_lock_in_the_odds(eco):
     rid = _race_with_odds(eco)
     eco.credit(V, 100_000, "テスト")
     at = NOW + 700
-    assert "2 頭" in eco.race_bet(V, rid, "quinella", [1], 100, at)[1]
-    assert "違う馬" in eco.race_bet(V, rid, "quinella", [3, 3], 100, at)[1]
-    assert "3 頭" in eco.race_bet(V, rid, "trio", [1, 2], 100, at)[1]
-    assert "出走しません" in eco.race_bet(V, rid, "wide", [1, 9], 100, at)[1]
+    assert eco.race_bet(V, rid, "quinella", [1], 100, at)[1].code == "race_select_distinct_horses"
+    assert eco.race_bet(V, rid, "quinella", [3, 3], 100, at)[1].code == "race_select_distinct_horses"
+    assert eco.race_bet(V, rid, "trio", [1, 2], 100, at)[1].code == "race_select_distinct_horses"
+    assert eco.race_bet(V, rid, "wide", [1, 9], 100, at)[1].code == "race_lane_not_running"
     ok, bet = eco.race_bet(V, rid, "exacta", [5, 2], 200, at)
     assert ok and bet["lanes"] == [5, 2] and bet["odds"] == eco.race_odds(rid, "exacta", [5, 2])
     assert eco.race_odds(rid, "exacta", [2, 5]) is not None  # 順番が違えば、別の馬券
@@ -513,13 +514,13 @@ def test_auction_horse_price_falls_and_only_katagi_with_room_can_buy(eco):
     assert not eco.auction_buy_horse(U, hid).ok  # 破産者は買えない
     res = eco.auction_buy_horse(V, hid, listed_at)
     assert res.ok and eco.horse_get(hid)["owner_id"] == V and eco.horse_get(hid)["name"] == "競売馬"
-    assert "売れて" in eco.auction_buy_horse(V, hid).reason  # もう売れた
+    assert eco.auction_buy_horse(V, hid).reason.code == "auction_horse_sold"  # もう売れた
     for i in range(2):
         make_horse(eco, V, f"馬{i}")
     other = make_horse(eco, W, "別の馬")
     eco._conn.execute("UPDATE users SET balance=0, debt=20000 WHERE user_id=?", (W,))
     assert eco.bankrupt(W)[0]
-    assert "3 頭" in eco.auction_buy_horse(V, other).reason  # すでに3頭
+    assert eco.auction_buy_horse(V, other).reason.code == "horse_max_owned"  # すでに3頭
 
 
 # ----------------------------- 臨時レースは、出走予定の馬も出せる ----------------------------- #
@@ -557,7 +558,7 @@ def test_a_horse_in_a_special_race_can_enter_a_regular_race_but_two_regular_race
     )
     other_regular = eco._conn.execute("SELECT MAX(id) FROM horse_races").fetchone()[0]
     ok, why = eco.race_register(U, hid, other_regular, opens + 5)
-    assert not ok and "ほかのレースに出走予定" in why  # 定時どうしは、これまでどおり、重ねて出せない
+    assert not ok and why.code == "race_horse_busy"  # 定時どうしは、これまでどおり、重ねて出せない
 
 
 def test_npc_silks_never_overlap_other_horses_but_player_silks_may(tmp_path):
@@ -594,7 +595,7 @@ def test_horse_at_max_races_cannot_enter_and_auto_retires_on_the_final_race(eco)
     eco._conn.execute("UPDATE horses SET races=? WHERE id=?", (h.MAX_RACES, hid))
     eco._conn.commit()
     rid = open_race(eco)
-    assert "定年" in eco.race_register(U, hid, rid, NOW + 1)[1]
+    assert eco.race_register(U, hid, rid, NOW + 1)[1].code == "horse_retired_by_age"
 
     eco._conn.execute("UPDATE horses SET races=? WHERE id=?", (h.MAX_RACES - 1, hid))
     eco._conn.commit()
@@ -607,7 +608,7 @@ def test_horse_at_max_races_cannot_enter_and_auto_retires_on_the_final_race(eco)
     assert len(retired) == 1
     assert eco.horse_get(hid)["owner_id"] == -2  # 持ち馬から消える
     rid3 = open_race(eco)
-    assert "自分の馬" in eco.race_register(U, hid, rid3, NOW + 1)[1]  # もう自分の馬ではない（引退済み）
+    assert eco.race_register(U, hid, rid3, NOW + 1)[1].code == "horse_select_own"  # もう自分の馬ではない（引退済み）
 
 
 # ----------------------------- レンタル ----------------------------- #
@@ -627,13 +628,13 @@ def test_rental_does_not_count_toward_max_horses(eco):
     for i in range(h.MAX_HORSES):
         make_horse(eco, U, f"馬{i}")  # レンタルがあっても、3頭まで買える
     ok, reason = eco.horse_create(U, "もう1頭", "栗毛", "🟥")
-    assert not ok and "持てる馬" in reason
+    assert not ok and reason.code == "horse_max_owned"
 
 
 def test_buying_the_rental_needs_a_voucher_and_keeps_its_stats(eco):
     rental = eco.rental_ensure(U, NOW, 9.0)
     ok, reason = eco.horse_buy_rental(U, NOW, 9.0)
-    assert not ok and "購入券" in reason
+    assert not ok and reason.code == "horse_no_voucher"
     give(eco, U, shop.HORSE_VOUCHER)
     ok, hid = eco.horse_buy_rental(U, NOW, 9.0)
     assert ok and hid == rental["id"]
@@ -648,7 +649,7 @@ def test_rental_horse_cannot_be_adjusted_or_retired_or_listed(eco):
     assert not eco.horse_gold_carrot(U, rental["id"], "speed", "guts")[0]
     assert not eco.horse_retire(U, rental["id"])[0]
     ok, reason = eco.p2p_list(U, "horse", str(rental["id"]), 1, "fixed", 30_000, None, NOW)
-    assert not ok and "レンタル" in reason
+    assert not ok and reason.code == "p2p_rental_not_tradable"
 
 
 def test_unbought_rental_is_replaced_the_next_day(eco):

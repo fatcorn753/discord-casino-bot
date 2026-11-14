@@ -173,3 +173,14 @@ def test_announce_channel_preference_and_permissions():
 
     guild_none = SimpleNamespace(id=1, me=object(), system_channel=blocked_ch, get_channel=lambda _cid: None)
     assert announce_channel(guild_none, eco_no_board) is None
+
+
+def test_messages_format_failures_notices_and_memo():
+    from cogs.shared.messages import format_failure, format_memo, format_notice
+    from domain.earnings import MemoInfo
+    from domain.errors import fail, notice
+
+    assert "1,000ペリカ" in format_failure(fail("insufficient_balance", balance=1000))
+    assert "<t:123:R>" in format_failure(fail("escape_cooldown", ready=123))
+    assert "<@42>" in format_notice(notice("cds_default_payout", target_id=42, pay=500))
+    assert "<t:999:F>" in format_memo(MemoInfo("CSトークン", 1, 999.0, 0.8))

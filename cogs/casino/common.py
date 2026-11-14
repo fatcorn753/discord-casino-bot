@@ -6,6 +6,7 @@ from typing import Any
 import discord
 
 from cogs.shared import ui
+from cogs.shared.messages import format_notices
 from domain import approval, events, missions, skins, teiai
 from domain.games import rtplevel
 from domain.games.rtplevel import MIN_BET as MIN_BET  # noqa: F401
@@ -85,7 +86,7 @@ class GameContext:
             print(f"警告: 精算済みの預かり金を再度精算しようとしました（{self.game}, escrow={self.escrow_id}）")
             return 0
         net, self.penalty_taken, self.insured_refund = result
-        self.notices = self.economy.take_notices(self.user_id)
+        self.notices = format_notices(self.economy.take_notices(self.user_id))
         try:  # 連勝・ミッションの記録は演出なので、失敗しても精算の結果は変えない
             self.events = self.economy.record_play(self.user_id, self.game, self.bet, net, local_today(self.bot), tags)
         except Exception as exc:

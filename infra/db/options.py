@@ -14,6 +14,7 @@ from typing import Optional
 
 from domain import market as market_mod
 from domain import options as opt
+from domain.errors import fail
 from domain.options import name_of as name_of  # noqa: F401
 from infra.db.base import EcoBase
 
@@ -69,22 +70,22 @@ class OptionMixin(EcoBase):
         """
         now = time.time() if now is None else now
         if kind not in opt.KINDS or symbol not in market_mod.BY_KEY:
-            return False, "指定が正しくありません。"
+            return False, fail("invalid_spec")
         if kind == opt.PAIR and (symbol2 is None or symbol2 not in market_mod.BY_KEY or symbol2 == symbol):
-            return False, "ペア・ワラントは、ちがう2つの銘柄を選んでください。"
+            return False, fail("option_pair_same_symbol")
         if strike_pct is not None and not 0 < strike_pct <= opt.MAX_TARGET_PCT / 100:
-            return False, f"目標割合は、1〜{opt.MAX_TARGET_PCT}% にしてください。"
+            return False, fail("option_target_pct_range", max_pct=opt.MAX_TARGET_PCT)
         with self._lock, self._conn:
             self._ensure(user_id)
             if amount < opt.MIN_PREMIUM:
-                return False, f"掛け金は {opt.MIN_PREMIUM:,}ペリカ 以上からです。"
+                return False, fail("option_min_premium", min_premium=opt.MIN_PREMIUM)
             if self._debt(user_id) > 0:
-                return False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、買えません。"
+                return False, fail("debt_blocks_buy", debt=self._debt(user_id))
             prices = self.latest_prices()
             spot = prices.get(symbol)
             spot2 = prices.get(symbol2) if kind == opt.PAIR and symbol2 is not None else None
             if spot is None or (kind == opt.PAIR and spot2 is None):
-                return False, "まだ価格がありません。"
+                return False, fail("market_no_price")
             seconds, events = opt.OPTION_HOURS * 3600, self._option_events(now)
             if kind == opt.PAIR:
                 assert symbol2 is not None
@@ -100,15 +101,12 @@ class OptionMixin(EcoBase):
                 units = int(amount / per_unit) if per_unit > 0 else 0
                 cost = math.ceil(round(units * per_unit, 6))
             if units < 1:
-                return False, "その掛け金では 1口も買えません。掛け金を増やしてください。"
+                return False, fail("option_buy_too_small")
             if self._balance(user_id) < cost:
-                return False, f"残高が足りません（{cost:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。"
+                return False, fail("option_insufficient_balance", cost=cost, balance=self._balance(user_id))
             if self._open_premium(user_id) + cost > opt.MAX_OPEN_PREMIUM:
                 left = max(0, opt.MAX_OPEN_PREMIUM - self._open_premium(user_id))
-                return (
-                    False,
-                    f"持てるオプションの掛け金は、合計 {opt.MAX_OPEN_PREMIUM:,}ペリカ までです（あと {left:,}ペリカ）。",
-                )
+                return False, fail("option_max_open_premium", max_open=opt.MAX_OPEN_PREMIUM, left=left)
             label = opt.KINDS[kind][0]
             self._apply(user_id, -cost, f"{label}購入:{market_mod.BY_KEY[symbol].name}")
             self._bank_income(cost, opt.YIELD_SHARE, now)
@@ -147,38 +145,35 @@ class OptionMixin(EcoBase):
         """
         now = time.time() if now is None else now
         if kind not in opt.SHORT_NAMES or symbol not in market_mod.BY_KEY:
-            return False, "指定が正しくありません。"
+            return False, fail("invalid_spec")
         if strike_pct is not None and not 0 < strike_pct <= opt.MAX_TARGET_PCT / 100:
-            return False, f"目標割合は、1〜{opt.MAX_TARGET_PCT}% にしてください。"
+            return False, fail("option_target_pct_range", max_pct=opt.MAX_TARGET_PCT)
         with self._lock, self._conn:
             self._ensure(user_id)
             if amount < opt.MIN_PREMIUM:
-                return False, f"証拠金は {opt.MIN_PREMIUM:,}ペリカ 以上からです。"
+                return False, fail("option_min_margin", min_premium=opt.MIN_PREMIUM)
             if self._debt(user_id) > 0:
-                return False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、売れません。"
+                return False, fail("debt_blocks_sell", debt=self._debt(user_id))
             spot = self.latest_prices().get(symbol)
             if spot is None:
-                return False, "まだ価格がありません。"
+                return False, fail("market_no_price")
             strike = opt.strike_for(kind, spot, opt.default_strike_pct(symbol) if strike_pct is None else strike_pct)
             seconds = opt.OPTION_HOURS * 3600
             per_margin = opt.margin_per_unit(strike)
             units = int(amount / per_margin)
             if units < 1:
-                return False, "その証拠金では 1口も売れません。証拠金を増やしてください。"
+                return False, fail("option_write_too_small")
             margin = math.ceil(round(units * per_margin, 6))
             bid = opt.bid_per_unit(kind, symbol, spot, strike, seconds, now, self._option_events(now))
             premium = int(bid * units)
             if self._balance(user_id) < margin:
-                return False, f"証拠金が足りません（{margin:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。"
+                return False, fail("margin_insufficient_collateral", need=margin, balance=self._balance(user_id))
             if self._open_margin(user_id) + margin > opt.MAX_SHORT_MARGIN:
                 left = max(0, opt.MAX_SHORT_MARGIN - self._open_margin(user_id))
-                return (
-                    False,
-                    f"預けられる裸売りの証拠金は、合計 {opt.MAX_SHORT_MARGIN:,}ペリカ までです（あと {left:,}ペリカ）。",
-                )
+                return False, fail("option_max_short_margin", max_margin=opt.MAX_SHORT_MARGIN, left=left)
             available = int(self._bank_sync(now)["cash"] - self._bank_locks(now))
             if premium > available:
-                return False, "いま帝愛銀行の手元の現金が足りず、プレミアムを払えません（準備率が低いとき）。"
+                return False, fail("option_bank_no_cash")
             self._apply(user_id, -margin, f"{opt.SHORT_NAMES[kind]}の証拠金:{market_mod.BY_KEY[symbol].name}")
             paid = self._bank_pay(premium, now)
             if paid:
@@ -277,7 +272,7 @@ class OptionMixin(EcoBase):
             (option_id, self._g(), user_id),
         ).fetchone()
         if row is None:
-            return False, "その番号のオプションは持っていません。"
+            return False, fail("option_not_found")
         prices = self.latest_prices()
         if row["side"] == "short":
             cost = self.option_close_cost(row, now, prices)

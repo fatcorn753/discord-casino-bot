@@ -13,6 +13,7 @@ from domain import labor as labor_mod
 from domain import relics as relics_mod
 from domain import shop as shop_mod
 from domain import teiai
+from domain.errors import fail
 from infra.db.base import EcoBase
 
 
@@ -72,9 +73,9 @@ class LaborMixin(EcoBase):
         """同じ発掘品を MERGE_COUNT 個つかって、★が1つ増えた1個に合体する。(成功か, 理由か合体後の品のID)。"""
         base, star = relics_mod.split_id(item_id)
         if base not in relics_mod.BUFFS:
-            return False, "発掘品ではありません。"
+            return False, fail("relic_not_relic")
         if star >= relics_mod.STAR_MAX:
-            return False, f"★{relics_mod.STAR_MAX} は最上位で、これ以上は合体できません。"
+            return False, fail("relic_max_star", star_max=relics_mod.STAR_MAX)
         new_id = relics_mod.star_id(base, star + 1)
         with self._lock, self._conn:
             self._ensure(user_id)
@@ -83,7 +84,7 @@ class LaborMixin(EcoBase):
                 (relics_mod.MERGE_COUNT, self._g(), user_id, item_id, relics_mod.MERGE_COUNT),
             )
             if cur.rowcount == 0:
-                return False, f"合体には、同じ発掘品が {relics_mod.MERGE_COUNT}個 要ります（出品中の品は数えません）。"
+                return False, fail("relic_need_more", count=relics_mod.MERGE_COUNT)
             self._conn.execute(
                 "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, 1) "
                 "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + 1",
@@ -490,27 +491,27 @@ class LaborMixin(EcoBase):
             row = self._labor_row(user_id, now, day)
             if row["fatigue"] < 1:
                 self._labor_save(user_id, row)
-                return False, "疲れていません。"
+                return False, fail("labor_not_tired")
             if not self._consume(user_id, shop_mod.LABOR_DRINK):
                 self._labor_save(user_id, row)
-                return False, "栄養ドリンコを持っていません（ショップの消耗品で買えます）。"
+                return False, fail("labor_no_drink")
             row["fatigue"] = max(0.0, row["fatigue"] - labor_mod.DRINK_RECOVER)
             self._labor_save(user_id, row)
             return True, ""
 
     def labor_upgrade(self, user_id: int, tool: str, now: Optional[float] = None, day: str = "") -> tuple:
-        """工具を1段強化する（ペリカを払う）。(ok, 理由) を返す。"""
+        """工具を1段強化する（ペリカを払う）。(ok, Failure | "") を返す。"""
         if tool not in labor_mod.TOOLS:
-            return False, "そんな工具はありません。"
+            return False, fail("labor_unknown_tool")
         now = time.time() if now is None else now
         with self._lock, self._conn:
             self._ensure(user_id)
             row = self._labor_row(user_id, now, day)
             cost = labor_mod.upgrade_cost(row[tool])
             if cost is None:
-                return False, f"{labor_mod.TOOL_NAME[tool]}は、もう最大です。"
+                return False, fail("labor_tool_max", tool_name=labor_mod.TOOL_NAME[tool])
             if self._balance(user_id) < cost:
-                return False, f"ペリカが足りません（{cost:,} 必要）。"
+                return False, fail("labor_insufficient_balance", cost=cost)
             self._apply(user_id, -cost, f"地下作業:{labor_mod.TOOL_NAME[tool]}の強化")
             row[tool] += 1
             self._labor_save(user_id, row)
@@ -520,20 +521,20 @@ class LaborMixin(EcoBase):
     # 雇用                                                              #
     # ---------------------------------------------------------------- #
     def labor_hire(self, user_id: int, kind: str, now: Optional[float] = None, day: str = "") -> tuple:
-        """作業員を1人雇う（契約料を払う。契約は CONTRACT_DAYS 日）。(ok, 理由) を返す。"""
+        """作業員を1人雇う（契約料を払う。契約は CONTRACT_DAYS 日）。(ok, Failure | "") を返す。"""
         if kind not in labor_mod.WORKERS:
-            return False, "そんな作業員はいません。"
+            return False, fail("labor_unknown_worker")
         now = time.time() if now is None else now
         with self._lock, self._conn:
             self._ensure(user_id)
             row = self._labor_row(user_id, now, day)  # 先に、いままでの稼ぎと契約を決算する
             if sum(self._counts(row).values()) >= labor_mod.slots(row["dorm"]):
                 self._labor_save(user_id, row)
-                return False, "人数がいっぱいです（寮を強化するか、誰かを解雇してください）。"
+                return False, fail("labor_slots_full")
             cost = labor_mod.contract_fee(kind)
             if self._balance(user_id) < cost:
                 self._labor_save(user_id, row)
-                return False, f"ペリカが足りません（契約料 {cost:,} 必要）。"
+                return False, fail("labor_hire_insufficient_balance", cost=cost)
             self._apply(user_id, -cost, f"地下作業:{labor_mod.WORKER_NAME[kind]}と契約")
             self._conn.execute(
                 "INSERT INTO labor_workers (guild_id, user_id, kind, expires_at) VALUES (?, ?, ?, ?)",
@@ -543,21 +544,21 @@ class LaborMixin(EcoBase):
             return True, ""
 
     def labor_dismiss(self, user_id: int, kind: str, now: Optional[float] = None, day: str = "") -> tuple:
-        """作業員を1人解雇する（契約料は戻らない）。契約がいちばん早く切れる人から。(ok, 理由) を返す。"""
+        """作業員を1人解雇する（契約料は戻らない）。契約がいちばん早く切れる人から。(ok, Failure | "") を返す。"""
         if kind not in labor_mod.WORKERS:
-            return False, "そんな作業員はいません。"
+            return False, fail("labor_unknown_worker")
         now = time.time() if now is None else now
         with self._lock, self._conn:
             row = self._labor_row(user_id, now, day)
             target = next((w for w in self._workers_of(user_id) if w["kind"] == kind), None)
             self._labor_save(user_id, row)
             if target is None:
-                return False, f"{labor_mod.WORKER_NAME[kind]}は、いません。"
+                return False, fail("labor_worker_absent", worker_name=labor_mod.WORKER_NAME[kind])
             self._conn.execute("DELETE FROM labor_workers WHERE id=?", (target["id"],))
             return True, ""
 
     def labor_dorm(self, user_id: int, now: Optional[float] = None, day: str = "") -> tuple:
-        """寮を1段強化する（雇える人数が +1）。(ok, 理由) を返す。"""
+        """寮を1段強化する（雇える人数が +1）。(ok, Failure | "") を返す。"""
         now = time.time() if now is None else now
         with self._lock, self._conn:
             self._ensure(user_id)
@@ -565,10 +566,10 @@ class LaborMixin(EcoBase):
             cost = labor_mod.dorm_cost(row["dorm"])
             if cost is None:
                 self._labor_save(user_id, row)
-                return False, "寮は、もう最大です。"
+                return False, fail("labor_dorm_max")
             if self._balance(user_id) < cost:
                 self._labor_save(user_id, row)
-                return False, f"ペリカが足りません（{cost:,} 必要）。"
+                return False, fail("labor_insufficient_balance", cost=cost)
             self._apply(user_id, -cost, "地下作業:寮の強化")
             row["dorm"] += 1
             self._labor_save(user_id, row)

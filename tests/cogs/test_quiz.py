@@ -43,7 +43,8 @@ def test_correct_answer_pays_once_and_wrong_pays_nothing(eco):
     qid = add(eco)
     ok, res = eco.quiz_answer(1, qid, "東京", NOW)
     assert ok and res["correct"] and res["reward"] == 100 and eco.balance(1) == INITIAL_BALANCE + 100
-    assert eco.quiz_answer(1, qid, "東京", NOW) == (False, "この問題にはもう答えています。")  # 二重に受け取れない
+    ok_dup, why_dup = eco.quiz_answer(1, qid, "東京", NOW)
+    assert not ok_dup and why_dup.code == "quiz_already_answered"  # 二重に受け取れない
     ok, res = eco.quiz_answer(2, qid, "大阪", NOW)
     assert ok and not res["correct"] and res["answer"] == "東京" and eco.balance(2) == INITIAL_BALANCE
     assert not eco.quiz_answer(2, qid, "東京", NOW)[0]  # 間違えたあとのやり直し不可
@@ -340,7 +341,8 @@ def test_correct_answer_is_paid_from_the_authors_balance(eco):
 
 def test_author_cannot_answer_and_does_not_see_it_in_next(eco):
     ok, qid = post(eco)
-    assert eco.quiz_answer(AUTHOR, qid, "東京", NOW) == (False, "自分が出した問題には答えられません。")
+    ok_ans, why_ans = eco.quiz_answer(AUTHOR, qid, "東京", NOW)
+    assert not ok_ans and why_ans.code == "quiz_self_answer"
     assert eco.quiz_next(AUTHOR, NOW) == (None, 0) and eco.quiz_next(1, NOW)[0]["id"] == qid
 
 
@@ -380,9 +382,8 @@ def test_debt_from_a_quiz_is_withheld_from_the_authors_income_and_blocks_new_que
     assert eco.debt(AUTHOR) == 1000 + teiai.SEED
     eco._apply(AUTHOR, 400, "収入", income=400)  # 収入の3割（120）が、天引きされる
     assert eco.debt(AUTHOR) == 1000 + teiai.SEED - 120
-    assert (
-        "借金が" in eco.quiz_post(AUTHOR, "問題", ["a", "b", "c", "d"], "", 100, 60, 1, NOW)[1]
-    )  # 借金中は出題できない
+    ok_post, why_post = eco.quiz_post(AUTHOR, "問題", ["a", "b", "c", "d"], "", 100, 60, 1, NOW)
+    assert not ok_post and why_post.code == "debt_blocks_quiz"  # 借金中は出題できない
 
 
 def test_wrong_answers_never_create_debt(eco):
@@ -397,7 +398,7 @@ def test_post_limits(eco):
     assert not post(eco, reward=INITIAL_BALANCE + 1)[0]  # 報酬に足りない残高
     assert post(eco)[0] and post(eco)[0]
     ok, reason = post(eco)
-    assert not ok and "同時に出せる問題は 2" in reason
+    assert not ok and reason.code == "quiz_open_limit" and reason.params["limit"] == 2
     eco.stats(7)
     eco._conn.execute("UPDATE users SET debt=100 WHERE user_id=7")
     assert not post(eco, author=7)[0]  # 借金中
@@ -408,7 +409,7 @@ def test_post_limits(eco):
     assert post(eco, author=other, now=NOW + 20)[0]
     eco.quiz_withdraw(other, 5, NOW + 30)
     ok, reason = post(eco, author=other, now=NOW + 40)
-    assert not ok and "24時間に 3" in reason
+    assert not ok and reason.code == "quiz_daily_limit" and reason.params["limit"] == 3
 
 
 def test_settle_pays_base_plus_bonus_once_after_expiry(eco):

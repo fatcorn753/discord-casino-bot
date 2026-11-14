@@ -6,6 +6,7 @@
 import random
 from typing import Optional
 
+from domain.errors import fail
 from infra.db.base import EcoBase
 
 
@@ -35,10 +36,10 @@ class RaffleMixin(EcoBase):
     def raffle_open(self, host_id: int, fee: int, closes: float, channel_id: int) -> tuple:
         """抽選を始める。(成功か, 理由) を返す。募集中のものがあれば始められない。"""
         if fee < 1:
-            return False, "参加費は1ペリカ以上にしてください。"
+            return False, fail("raffle_min_fee")
         with self._lock, self._conn:
             if self._raffle_open_row() is not None:
-                return False, "すでに募集中の抽選があります。"
+                return False, fail("raffle_already_open")
             self._conn.execute(
                 "INSERT INTO raffle (guild_id, host_id, fee, closes, channel_id) VALUES (?, ?, ?, ?, ?)",
                 (self._g(), host_id, fee, closes, channel_id),
@@ -62,19 +63,16 @@ class RaffleMixin(EcoBase):
         with self._lock, self._conn:
             row = self._raffle_open_row()
             if row is None or now >= row["closes"]:
-                return False, "募集は終わりました。"
+                return False, fail("raffle_closed")
             self._ensure(user_id)
             if self._conn.execute(
                 "SELECT 1 FROM raffle_entries WHERE raffle_id=? AND user_id=?", (row["id"], user_id)
             ).fetchone():
-                return False, "すでに参加しています。"
+                return False, fail("raffle_already_joined")
             if self._debt(user_id) > 0:
-                return False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、参加できません。"
+                return False, fail("debt_blocks_raffle", debt=self._debt(user_id))
             if self._balance(user_id) < row["fee"]:
-                return (
-                    False,
-                    f"残高が足りません（参加費 {row['fee']:,}ペリカ、いまの残高 {self._balance(user_id):,}ペリカ）。",
-                )
+                return False, fail("raffle_insufficient_balance", fee=row["fee"], balance=self._balance(user_id))
             self._apply(user_id, -row["fee"], "抽選参加費")
             self._conn.execute("INSERT INTO raffle_entries (raffle_id, user_id) VALUES (?, ?)", (row["id"], user_id))
             return True, ""

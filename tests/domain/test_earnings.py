@@ -154,8 +154,8 @@ def test_memo_arrives_by_chance_once_per_earnings_and_is_sometimes_wrong(eco):
     assert a.earnings_memo(1, ts(2026, 11, 9, 10), random.Random(1)) is None  # 決算が登録されていない
     ev = eco.earnings_ensure(ts(2026, 11, 8, 12), TZ, random.Random(5))
     always = SimpleNamespace(random=lambda: 0.0)
-    text = a.earnings_memo(1, ts(2026, 11, 9, 10), always)
-    assert text and "極秘メモ" in text and "ガセ" in text and market.BY_KEY[ev["symbol"]].name in text
+    memo = a.earnings_memo(1, ts(2026, 11, 9, 10), always)
+    assert memo and memo.symbol_name == market.BY_KEY[ev["symbol"]].name and memo.truth == ea.MEMO_TRUTH
     assert a.earnings_memo(1, ts(2026, 11, 9, 11), always) is None  # 同じ決算では、1人1回
     assert a.earnings_memo(2, ts(2026, 11, 9, 11), always)  # 別の人には届く
     never = SimpleNamespace(random=lambda: 0.99)
@@ -211,16 +211,16 @@ def test_insider_memo_is_sold_at_the_teiai_market_with_a_stock_limit_and_one_per
     for uid in range(1, ea.SHOP_STOCK + 1):
         a.credit(uid, price + 100, "テスト")
         before = a.balance(uid)
-        ok, text = a.insider_buy(uid, now, SimpleNamespace(random=lambda: 0.0))
-        assert ok and "極秘メモ" in text and "80%" in text and a.balance(uid) == before - price
+        ok, memo = a.insider_buy(uid, now, SimpleNamespace(random=lambda: 0.0))
+        assert ok and memo.truth == ea.SHOP_TRUTH and a.balance(uid) == before - price
     assert a.insider_stock(now)["left"] == 0
     a.credit(99, price + 100, "テスト")
     paid_before = a.balance(99)
     ok, why = a.insider_buy(99, now)
-    assert not ok and "売り切れ" in why and a.balance(99) == paid_before  # 払っていない
+    assert not ok and why.code == "insider_sold_out" and a.balance(99) == paid_before  # 払っていない
     a.credit(1, price, "テスト")
     ok, why = a.insider_buy(1, now)
-    assert not ok and "もう買っています" in why
+    assert not ok and why.code == "insider_already_bought"
 
 
 def test_insider_memo_is_right_about_eighty_percent_when_bought(eco):
@@ -231,9 +231,9 @@ def test_insider_memo_is_right_about_eighty_percent_when_bought(eco):
     for i in range(300):
         _event(eco, now)
         a.credit(1000 + i, 50_000, "テスト")
-        ok, text = a.insider_buy(1000 + i, now, rng)
+        ok, memo = a.insider_buy(1000 + i, now, rng)
         assert ok
-        hits += "上方修正" in text
+        hits += memo.hint > 0
         with eco._lock, eco._conn:
             eco._conn.execute("DELETE FROM earnings")
             eco._conn.execute("DELETE FROM earnings_shop")
@@ -247,7 +247,7 @@ def test_insider_buy_refuses_debtors_and_the_broke_without_charging(eco):
     a.balance(7)
     a.debit_up_to(7, a.balance(7) - 50, "テスト")
     ok, why = a.insider_buy(7, now)
-    assert not ok and "足りません" in why and a.balance(7) == 50
+    assert not ok and why.code == "insufficient_balance_need" and a.balance(7) == 50
 
 
 def test_shop_panel_has_a_market_tab_and_buying_shows_the_memo_privately(eco, monkeypatch):

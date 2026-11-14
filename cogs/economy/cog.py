@@ -13,9 +13,9 @@ from discord.ext import commands, tasks
 from cogs.shared import ranking, ui
 from cogs.shared.amount import balance_choices
 from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
+from cogs.shared.messages import format_failure, format_history, format_memo
 from cogs.teiai.panel import TeiaiPanel, panel_embed
 from domain import approval, shop, teiai
-from domain import history as history_mod
 from domain import missions as missions_mod
 from domain.types import DAILY_BASE, DAILY_STREAK_BONUS, DAILY_STREAK_CAP
 from infra import catalogs, logthrottle
@@ -262,7 +262,7 @@ class EconomyCog(commands.Cog):
             )
         )
         if memo:  # 本人にだけ見える
-            await interaction.followup.send(embed=ui.embed("🕴️ 黒服の噂話", memo, ui.DARK), ephemeral=True)
+            await interaction.followup.send(embed=ui.embed("🕴️ 黒服の噂話", format_memo(memo), ui.DARK), ephemeral=True)
 
     @group.command(name="返済", description="帝愛への借金を、手元のペリカから返す（金額を省くと、返せる限り全額）")
     @app_commands.rename(amount="金額")
@@ -270,7 +270,9 @@ class EconomyCog(commands.Cog):
     async def repay(self, interaction: discord.Interaction, amount: Optional[app_commands.Range[int, 1]] = None):
         ok, result = self.g(interaction).repay_debt(interaction.user.id, amount)
         if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("返せません", result), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.error_embed("返せません", format_failure(result)), ephemeral=True
+            )
         eco = self.g(interaction)
         left = eco.debt(interaction.user.id)
         text = f"帝愛に **{ui.pelica(result)}** 返しました。" + (
@@ -317,7 +319,9 @@ class EconomyCog(commands.Cog):
             return
         ok, result = eco.bankrupt(uid)
         if not ok:
-            return await interaction.followup.send(embed=ui.error_embed("破産できません", result), ephemeral=True)
+            return await interaction.followup.send(
+                embed=ui.error_embed("破産できません", format_failure(result)), ephemeral=True
+            )
         lines = [
             f"差し押さえた額: **{ui.pelica(result['seized'])}**（うちショップの品の換金 {ui.pelica(result['shop_value'])}）",
             f"帝愛への配当: **{ui.pelica(result['senior_paid'])}**",
@@ -558,7 +562,7 @@ class EconomyCog(commands.Cog):
                 uid, member.id, amount, TRANSFER_FEE_RATE, TRANSFER_DAILY_LIMIT, day_start, TRANSFER_MIN_GAMES
             )
             if not res.ok:
-                return await reply(embed=ui.error_embed("送金できません", res.reason), ephemeral=True)
+                return await reply(embed=ui.error_embed("送金できません", format_failure(res.reason)), ephemeral=True)
             await reply(
                 embed=ui.ok_embed(
                     "送金しました",
@@ -571,7 +575,7 @@ class EconomyCog(commands.Cog):
     @group.command(name="履歴", description="最近の増減を表示（自分だけに見えます）")
     async def history(self, interaction: discord.Interaction):
         rows = self.g(interaction).history(interaction.user.id, 60)  # 1ゲームは複数の行なので、多めに読んでまとめる
-        lines = history_mod.format_history(rows, 12)
+        lines = format_history(rows, 12)
         await interaction.response.send_message(
             embed=ui.embed("🧾 最近の増減", "\n".join(lines) or "まだ記録がありません。", ui.INFO),
             ephemeral=True,

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 import discord
 
 from cogs.shared import ui
+from cogs.shared.messages import format_failure
 from cogs.teiai.escape import run_escape
 from domain import teiai
 from infra import catalogs
@@ -145,10 +146,10 @@ class AmountModal(discord.ui.Modal):
         eco, uid = self.panel.eco(interaction), interaction.user.id
         if self.mode == "deposit":
             ok, result = eco.bank_deposit(uid, int(raw))
-            text = f"帝愛に預けました。いまの預金: **{ui.pelica(result)}**" if ok else result
+            text = f"帝愛に預けました。いまの預金: **{ui.pelica(result)}**" if ok else format_failure(result)
         else:
             ok, result = eco.bank_withdraw(uid, int(raw) if raw else None)
-            text = f"**{ui.pelica(result)}** を引き出しました。" if ok else result
+            text = f"**{ui.pelica(result)}** を引き出しました。" if ok else format_failure(result)
         embed = ui.ok_embed("完了", text) if ok else ui.error_embed("できませんでした", text)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -172,7 +173,9 @@ class StakeModal(discord.ui.Modal):
         eco, uid = self.panel.eco(interaction), interaction.user.id
         ok, result = eco.cds_buy(uid, self.target_id, int(raw))
         if not ok:
-            await interaction.response.send_message(embed=ui.error_embed("買えませんでした", result), ephemeral=True)
+            await interaction.response.send_message(
+                embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True
+            )
             return
         mine = self.target_id == uid
         text = (
@@ -264,7 +267,7 @@ class TeiaiPanel(ui.OwnerView):
                     ui.GOLD,
                 )
             )
-        embed = ui.error_embed("借りられません", result)
+        embed = ui.error_embed("借りられません", format_failure(result))
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="🚢 海外逃亡チャンス！！", style=discord.ButtonStyle.danger, row=1)

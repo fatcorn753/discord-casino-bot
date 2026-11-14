@@ -9,6 +9,7 @@ import sqlite3
 import threading
 from typing import Any, Optional, Self
 
+from domain.errors import Failure, Notice
 from domain.market import DEFAULT as DEFAULT_SYMBOL
 from domain.types import CryptoResult
 
@@ -27,7 +28,7 @@ class EcoDb:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
-        self.notices: dict[tuple[int, int], list[str]] = {}
+        self.notices: dict[tuple[int, int], list[Notice]] = {}
 
     def close(self) -> None:
         with self.lock:
@@ -43,7 +44,7 @@ class EcoBase:
     _lock: threading.RLock
     guild_id: int
     _strict: bool
-    _notices: dict[tuple[int, int], list[str]]
+    _notices: dict[tuple[int, int], list[Notice]]
 
     HORSE_PRICE: int
     SIDE_NAME: dict[str, str]
@@ -99,7 +100,7 @@ class EcoBase:
     def _after_debt_change(self, user_id: int) -> None:
         raise NotImplementedError
 
-    def _note(self, user_id: int, text: str) -> None:
+    def _note(self, user_id: int, code: str, **params: Any) -> None:
         raise NotImplementedError
 
     def _owe(self, user_id: int, shortfall: int, reason: str) -> int:
@@ -220,7 +221,7 @@ class EcoBase:
     ) -> dict[str, Any]:
         raise NotImplementedError
 
-    def _pin_reason(self, symbol: str, action: str) -> str:
+    def _pin_reason(self, symbol: str, action: str) -> Optional[Failure]:
         raise NotImplementedError
 
     def holdings(self, user_id: int) -> list[dict[str, Any]]:

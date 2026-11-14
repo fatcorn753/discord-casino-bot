@@ -8,6 +8,7 @@ from typing import Optional
 
 from domain import market as market_mod
 from domain import teiai
+from domain.errors import Failure, fail
 from domain.market import DEFAULT
 from domain.types import CryptoResult
 from infra.db.base import EcoBase
@@ -58,9 +59,9 @@ class CryptoMixin(EcoBase):
             r = self._conn.execute("SELECT pin FROM market_fair WHERE symbol=?", (symbol,)).fetchone()
             return r["pin"] if r else 0
 
-    def _pin_reason(self, symbol: str, action: str) -> str:
-        """張り付き中で、この売買が約定しないなら、その理由。通るなら空文字。（ユーザーの売買だけ。ロスカットなどの強制決済は、張り付き価格で執行する）"""
-        return market_mod.pin_lock_reason(symbol, self.market_pin(symbol), action)
+    def _pin_reason(self, symbol: str, action: str) -> Optional[Failure]:
+        """張り付き中で、この売買が約定しないなら Failure を返す。通るなら None。"""
+        return market_mod.pin_lock_failure(symbol, self.market_pin(symbol), action)
 
     def market_history(self, since: float, symbol: str = DEFAULT) -> list:
         """since（UNIX時間）以降の価格の列 [(時刻, 価格, 出来事), ...]。古い順。"""
@@ -113,26 +114,24 @@ class CryptoMixin(EcoBase):
         with self._lock, self._conn:
             self._ensure(user_id)
             if amount <= 0 or price <= 0:
-                return CryptoResult(False, "金額が正しくありません。")
+                return CryptoResult(False, fail("crypto_invalid_amount"))
             if reason := self._pin_reason(symbol, "buy_spot"):
                 return CryptoResult(False, reason, balance=self._balance(user_id))
             if self._debt(user_id) > 0:
                 return CryptoResult(
                     False,
-                    f"借金が {self._debt(user_id):,}ペリカ 残っているので、買えません。",
+                    fail("debt_blocks_buy", debt=self._debt(user_id)),
                     balance=self._balance(user_id),
                 )
             if self._balance(user_id) < amount:
                 return CryptoResult(
                     False,
-                    f"ペリカが足りません（残高 {self._balance(user_id):,}ペリカ）。",
+                    fail("crypto_insufficient_balance", balance=self._balance(user_id)),
                     balance=self._balance(user_id),
                 )
             units, total, fee = market_mod.buy_quote(amount, price)
             if units < 1:
-                return CryptoResult(
-                    False, "その金額では 0.001枚も買えません。金額を増やしてください。", balance=self._balance(user_id)
-                )
+                return CryptoResult(False, fail("crypto_amount_too_small"), balance=self._balance(user_id))
             self._apply(
                 user_id,
                 -total,
@@ -155,20 +154,19 @@ class CryptoMixin(EcoBase):
                 return CryptoResult(False, reason)
             return self._crypto_sell_locked(user_id, units, price, symbol, taxable=True)
 
-    def _collateral_drop_reason(self, user_id: int, symbol: str, units: Optional[int], price: float) -> str:
-        """現物を売ると、担保が減って維持率が OPEN_RATIO を下回るなら、その理由（問題なければ空文字）。信用取引がなければ常に問題なし。"""
+    def _collateral_drop_reason(
+        self, user_id: int, symbol: str, units: Optional[int], price: float
+    ) -> Optional[Failure]:
+        """現物を売ると、担保が減って維持率が OPEN_RATIO を下回るなら Failure。信用取引がなければ None。"""
         have, _cost = self.crypto_holding(user_id, symbol)
         if have <= 0 or not self._margin_rows(user_id):
-            return ""
+            return None
         sold = have if units is None else min(units, have)
         drop = market_mod.sell_quote(sold, price)[0] * market_mod.COLLATERAL_HAIRCUT["spot"]
         after = self._margin_status_locked(user_id, {**self.latest_prices(), symbol: price}, drop_collateral=drop)
         if after["ratio"] is not None and after["ratio"] < market_mod.OPEN_RATIO:
-            return (
-                f"信用取引の担保になっているので、売れません（売ると維持率が {after['ratio']:.0%}・{market_mod.OPEN_RATIO:.0%} 以上が必要）。"
-                "先に建玉を決済してください。"
-            )
-        return ""
+            return fail("crypto_collateral_locked", ratio=after["ratio"], open_ratio=market_mod.OPEN_RATIO)
+        return None
 
     def _gains_tax(self, user_id: int, profit: int, taxable: bool, what: str) -> int:
         """利益 profit にかかる税を、帝愛の銀行（預金者の利回り）へ納める。納めた額を返す。強制執行・ロスカットでは取らない（taxable=False）。"""
@@ -187,13 +185,13 @@ class CryptoMixin(EcoBase):
         name = market_mod.BY_KEY[symbol].name
         have, cost = self.crypto_holding(user_id, symbol)
         if have <= 0:
-            return CryptoResult(False, f"{name}を持っていません。")
+            return CryptoResult(False, fail("crypto_not_held", name=name))
         units = have if units is None else units
         if units < 1 or units > have:
-            return CryptoResult(False, f"売れるのは 0.001〜{market_mod.lots(have)} です（持っている分）。")
+            return CryptoResult(False, fail("crypto_sell_range", max_lots=market_mod.lots(have)))
         proceeds, fee = market_mod.sell_quote(units, price)
         if proceeds < 1 and units != have:
-            return CryptoResult(False, "その数量では受け取れる額が 1ペリカ未満です。もう少し多く売ってください。")
+            return CryptoResult(False, fail("crypto_proceeds_too_small"))
         removed = (
             cost if units == have else round(cost * units / have)
         )  # 端数の按分は四捨五入（切り捨てだと取得額が少しずつ残る）
@@ -350,20 +348,24 @@ class CryptoMixin(EcoBase):
         with self._lock, self._conn:
             self._ensure(user_id)
             if leverage not in self.MARGIN_LEVERAGES or units < 1 or price <= 0:
-                return CryptoResult(False, "指定が正しくありません。")
+                return CryptoResult(False, fail("invalid_spec"))
             if side == "long" and (reason := self._pin_reason(symbol, "open_long")):
                 return CryptoResult(False, reason, balance=self._balance(user_id))
             if self._debt(user_id) > 0:
                 return CryptoResult(
                     False,
-                    f"借金が {self._debt(user_id):,}ペリカ 残っているので、{label}はできません。",
+                    fail("margin_debt_blocks", debt=self._debt(user_id), label=label),
                     balance=self._balance(user_id),
                 )
             other = "long" if side == "short" else "short"
             if self.margin_position(user_id, symbol, other)[0] > 0:
                 return CryptoResult(
                     False,
-                    f"{market_mod.BY_KEY[symbol].name}の{self.SIDE_NAME[other]}を建てています。先に決済してください。",
+                    fail(
+                        "margin_opposite_open",
+                        name=market_mod.BY_KEY[symbol].name,
+                        other_label=self.SIDE_NAME[other],
+                    ),
                     balance=self._balance(user_id),
                 )
             notional = units * price / market_mod.UNIT
@@ -371,13 +373,13 @@ class CryptoMixin(EcoBase):
             if margin < self.SHORT_MIN_MARGIN:
                 return CryptoResult(
                     False,
-                    f"担保が {self.SHORT_MIN_MARGIN}ペリカ 未満になる量です。枚数を増やしてください。",
+                    fail("margin_min_collateral", min_margin=self.SHORT_MIN_MARGIN),
                     balance=self._balance(user_id),
                 )
             if self._balance(user_id) < margin:
                 return CryptoResult(
                     False,
-                    f"担保が足りません（{margin:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。",
+                    fail("margin_insufficient_collateral", need=margin, balance=self._balance(user_id)),
                     balance=self._balance(user_id),
                 )
             prices = {**self.latest_prices(), symbol: price}
@@ -385,8 +387,7 @@ class CryptoMixin(EcoBase):
             if after["ratio"] is not None and after["ratio"] < market_mod.OPEN_RATIO:
                 return CryptoResult(
                     False,
-                    f"口座の維持率が足りなくなります（建てると {after['ratio']:.0%}・{market_mod.OPEN_RATIO:.0%} 以上が必要）。"
-                    "枚数を減らすか、レバレッジを下げるか、現物や債券を担保に持ってください。",
+                    fail("margin_ratio_too_low", ratio=after["ratio"], open_ratio=market_mod.OPEN_RATIO),
                     balance=self._balance(user_id),
                 )
             name = market_mod.BY_KEY[symbol].name
@@ -428,10 +429,10 @@ class CryptoMixin(EcoBase):
         """
         have, entry_value, margin = self.margin_position(user_id, symbol, side)
         if have <= 0:
-            return CryptoResult(False, f"{self.SIDE_NAME[side]}を建てていません。")
+            return CryptoResult(False, fail("margin_not_open", label=self.SIDE_NAME[side]))
         units = have if units is None else units
         if units < 1 or units > have:
-            return CryptoResult(False, f"決済できるのは 0.001〜{market_mod.lots(have)} です（建てている分）。")
+            return CryptoResult(False, fail("margin_close_range", max_lots=market_mod.lots(have)))
         whole = units == have
         part_margin = margin if whole else round(margin * units / have)
         part_entry = entry_value if whole else entry_value * units / have
@@ -507,8 +508,11 @@ class CryptoMixin(EcoBase):
                 break
             self._note(
                 user_id,
-                f"💥 口座の維持率が {market_mod.LOSSCUT_RATIO:.0%} を下回り、{market_mod.BY_KEY[symbol].name}の{self.SIDE_NAME[side]}が強制決済されました"
-                f"（損益 {res.profit:+,}ペリカ）。",
+                "margin_losscut",
+                losscut_ratio=market_mod.LOSSCUT_RATIO,
+                symbol_name=market_mod.BY_KEY[symbol].name,
+                side_label=self.SIDE_NAME[side],
+                profit=res.profit,
             )
             cut.append((symbol, side, -res.profit))
         return cut

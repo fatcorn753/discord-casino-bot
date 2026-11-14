@@ -7,6 +7,7 @@
 
 import datetime
 import math
+from dataclasses import dataclass
 
 from domain.ports import get_catalogs
 
@@ -86,9 +87,15 @@ def memo_direction(direction: int, rng, truth: float = MEMO_TRUTH) -> int:
     return direction if rng.random() < truth else -direction
 
 
-def memo_text(symbol_name: str, hint: int, release_at: float, truth: float = MEMO_TRUTH) -> str:
-    word = "大幅な上方修正の噂" if hint > 0 else "大幅な下方修正の噂"
-    return (
-        f"【極秘メモ】<t:{int(release_at)}:F> の {symbol_name} の決算、**{word}**あり…？\n"
-        f"（確度 {truth:.0%} ／ ガセの確率 {1 - truth:.0%}。信じるかは、あなた次第。周りには黙っておくか、煽るか…）"
-    )
+@dataclass(frozen=True)
+class MemoInfo:
+    """裏情報メモの構造化データ（Discord 記法による文面組み立ては cogs 側で行う）。"""
+
+    symbol_name: str
+    hint: int
+    release_at: float
+    truth: float
+
+
+def build_memo(symbol_name: str, hint: int, release_at: float, truth: float = MEMO_TRUTH) -> MemoInfo:
+    return MemoInfo(symbol_name=symbol_name, hint=hint, release_at=release_at, truth=truth)

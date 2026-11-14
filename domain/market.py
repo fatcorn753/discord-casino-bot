@@ -9,6 +9,7 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
+from domain.errors import Failure, fail
 from domain.ports import get_catalogs
 
 _CFG = get_catalogs().market().market
@@ -83,14 +84,12 @@ PIN_LOCKS = dict(_CFG.pin_locks)
 PIN_ACTION_TEXT = dict(_CFG.pin_action_text)
 
 
-def pin_lock_reason(symbol: str, pin: int, action: str) -> str:
-    """張り付き中に action が約定しないなら、その理由。通るなら空文字。"""
+def pin_lock_failure(symbol: str, pin: int, action: str) -> Optional[Failure]:
+    """張り付き中で action が約定しないなら Failure を返す。通るなら None。"""
     if action not in PIN_LOCKS.get(pin, ()):
-        return ""
-    name = BY_KEY[symbol].name
-    if pin < 0:
-        return f"🚨 {name} は**ストップ安に張り付いています**。{PIN_ACTION_TEXT[action]}は、買い手がいなくて約定しません（下げが止まるまで、待つしかありません）。"
-    return f"🚀 {name} は**ストップ高に張り付いています**。{PIN_ACTION_TEXT[action]}は、売り手がいなくて約定しません（上げが止まるまで、待つしかありません）。"
+        return None
+    code = "market_pin_limit_down" if pin < 0 else "market_pin_limit_up"
+    return fail(code, symbol=symbol, action=action)
 
 
 PIN_MARK = dict(_CFG.pin_mark)

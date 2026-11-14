@@ -10,10 +10,8 @@ from typing import Optional
 from domain import horse as horse_mod
 from domain import p2p, teiai
 from domain import shop as shop_mod
-from infra import catalogs
+from domain.errors import Failure, fail
 from infra.db.base import EcoBase
-
-GRACE_LOCK_TEXT = catalogs.economy().wallet.grace_lock_text
 
 
 class P2PMixin(EcoBase):
@@ -39,12 +37,12 @@ class P2PMixin(EcoBase):
             (self._g(), now - 86400, a, b, b, a),
         ).fetchone()[0]
 
-    def _p2p_can_receive(self, buyer_id: int, row) -> str:
-        """買い手が、この出品を受け取れないなら、その理由。受け取れるなら空文字。"""
+    def _p2p_can_receive(self, buyer_id: int, row) -> Optional[Failure]:
+        """買い手が、この出品を受け取れないなら Failure。受け取れるなら None。"""
         if row["kind"] == "horse":
             if self._horse_count(buyer_id) >= horse_mod.MAX_HORSES:
-                return f"持てる馬は {horse_mod.MAX_HORSES} 頭までです（出品中の馬も数えます）。"
-            return ""
+                return fail("p2p_horse_limit", max_horses=horse_mod.MAX_HORSES)
+            return None
         item = shop_mod.BY_ID[row["ref"]]
         if (
             item.unique
@@ -53,26 +51,23 @@ class P2PMixin(EcoBase):
                 (self._g(), buyer_id, row["ref"]),
             ).fetchone()
         ):
-            return "すでに持っています。"
-        return ""
+            return fail("already_owned")
+        return None
 
-    def _p2p_buyer_check(self, buyer_id: int, row, amount: int, now: float) -> str:
-        """買う・入札するときの、共通の確認。問題があれば、その理由。"""
+    def _p2p_buyer_check(self, buyer_id: int, row, amount: int, now: float) -> Optional[Failure]:
+        """買う・入札するときの、共通の確認。問題があれば Failure。"""
         if buyer_id == row["seller_id"]:
-            return "自分の出品は、買えません。"
+            return fail("p2p_self_buy")
         if self.status(buyer_id, now) != teiai.KATAGI:
-            return "取引で買えるのは、借金も延滞もないカタギだけです。"
+            return fail("p2p_katagi_only")
         if self._balance(buyer_id) < amount:
-            return f"ペリカが足りません（{amount:,}ペリカ必要・残高 {self._balance(buyer_id):,}ペリカ）。"
+            return fail("insufficient_balance_need", need=amount, balance=self._balance(buyer_id))
         if reason := self._p2p_can_receive(buyer_id, row):
             return reason
         used = self._p2p_pair_total(row["seller_id"], buyer_id, now)
         if used + amount > p2p.PAIR_DAILY_LIMIT:
-            return (
-                f"同じ相手との取引は、24時間で合計 {p2p.PAIR_DAILY_LIMIT:,}ペリカ までです"
-                f"（いま {used:,}ペリカ・今回 {amount:,}ペリカ）。"
-            )
-        return ""
+            return fail("p2p_pair_limit", limit=p2p.PAIR_DAILY_LIMIT, used=used, amount=amount)
+        return None
 
     # ---------------------------------------------------------------- #
     # 出品                                                              #
@@ -88,26 +83,26 @@ class P2PMixin(EcoBase):
         hours: Optional[int] = None,
         now: Optional[float] = None,
     ) -> tuple:
-        """出品する。(成功か, 理由か出品の番号)。品・馬は、出品の間、預かる。"""
+        """出品する。(成功か, Failure か出品の番号)。品・馬は、出品の間、預かる。"""
         now = time.time() if now is None else now
         if kind not in ("item", "horse") or mode not in ("fixed", "auction"):
-            return False, "出品の指定が正しくありません。"
+            return False, fail("p2p_invalid_spec")
         if mode == "auction" and (hours is None or hours not in p2p.AUCTION_HOURS):
-            return False, f"競りの長さは、{'・'.join(map(str, p2p.AUCTION_HOURS))} 時間から選んでください。"
+            return False, fail("p2p_invalid_auction_hours", hours=p2p.AUCTION_HOURS)
         with self._lock, self._conn:
             self._ensure(user_id)
             if self.grace_until(user_id) is not None:
-                return False, GRACE_LOCK_TEXT
+                return False, fail("grace_lock")
             active = self._conn.execute(
                 "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active'",
                 (self._g(), user_id),
             ).fetchone()[0]
             if active >= p2p.MAX_ACTIVE:
-                return False, f"同時に出せるのは {p2p.MAX_ACTIVE} 件までです。"
+                return False, fail("p2p_max_active", max_active=p2p.MAX_ACTIVE)
             item, have, horse = None, None, None
             if kind == "item":
                 if not p2p.tradable(ref):
-                    return False, "その品は、取引できません（称号・コレクション・限定品・帝愛市の品は不可）。"
+                    return False, fail("p2p_item_not_tradable")
                 item = shop_mod.BY_ID[ref]
                 qty = 1 if item.unique else qty
                 have = self._conn.execute(
@@ -115,24 +110,24 @@ class P2PMixin(EcoBase):
                     (self._g(), user_id, ref),
                 ).fetchone()
                 if qty < 1 or have is None or have["qty"] < qty:
-                    return False, "その数は、持っていません。"
+                    return False, fail("p2p_insufficient_qty")
                 lo, hi = p2p.price_range("item", ref, qty)
             else:
                 qty = 1
                 horse = self.horse_get(int(ref)) if str(ref).isdigit() else None
                 if horse is None or horse["owner_id"] != user_id:
-                    return False, "自分の馬を選んでください。"
+                    return False, fail("horse_select_own")
                 if horse["rented_day"] is not None:
-                    return False, "レンタル馬は出品できません。"
+                    return False, fail("p2p_rental_not_tradable")
                 if self._conn.execute(
                     "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
                     "WHERE e.horse_id=? AND r.status IN ('entry','betting')",
                     (horse["id"],),
                 ).fetchone():
-                    return False, "出走予定のレースが終わるまで、出品できません。"
+                    return False, fail("p2p_horse_in_race")
                 lo, hi = p2p.price_range("horse")
             if not lo <= price <= hi:
-                return False, f"値段は {lo:,}〜{hi:,}ペリカ にしてください（定価の幅に収めます）。"
+                return False, fail("p2p_price_range", lo=lo, hi=hi)
             if item is not None and have is not None:
                 self._conn.execute(
                     "UPDATE inventory SET qty = qty - ? WHERE guild_id=? AND user_id=? AND item_id=?",
@@ -197,10 +192,7 @@ class P2PMixin(EcoBase):
         self._bank_income(fee, teiai.AUCTION_YIELD_SHARE, now)
         self._p2p_give(buyer_id, row)
         self._p2p_close(row["id"], "sold", now, buyer_id, price)
-        self._note(
-            row["seller_id"],
-            f"🤝 **{label}** が **{price:,}ペリカ** で売れました（手数料 {fee:,}ペリカ・受け取り {price - fee:,}ペリカ）。",
-        )
+        self._note(row["seller_id"], "p2p_sold", label=label, price=price, fee=fee, net=price - fee)
 
     # ---------------------------------------------------------------- #
     # 買う・入札・取り消し                                              #
@@ -226,12 +218,12 @@ class P2PMixin(EcoBase):
         with self._lock, self._conn:
             self._ensure(buyer_id)
             if self.grace_until(buyer_id) is not None:
-                return False, GRACE_LOCK_TEXT
+                return False, fail("grace_lock")
             row = self.p2p_get(listing_id)
             if row is None or row["status"] != "active" or row["end_at"] <= now:
-                return False, "その出品は、もうありません。"
+                return False, fail("p2p_not_found")
             if row["mode"] != "fixed":
-                return False, "これは競りです。入札してください。"
+                return False, fail("p2p_is_auction")
             if reason := self._p2p_buyer_check(buyer_id, row, row["price"], now):
                 return False, reason
             self._apply(buyer_id, -row["price"], f"取引:購入（{self.p2p_label(row)}）")
@@ -239,32 +231,29 @@ class P2PMixin(EcoBase):
             return True, row["price"]
 
     def p2p_bid(self, bidder_id: int, listing_id: int, amount: int, now: Optional[float] = None) -> tuple:
-        """競りに入札する。お金は、残高から預かる（抜かれたら、返る）。(成功か, 理由か新しい締切)。"""
+        """競りに入札する。お金は、残高から預かる（抜かれたら、返る）。(成功か, Failure か新しい締切)。"""
         now = time.time() if now is None else now
         with self._lock, self._conn:
             self._ensure(bidder_id)
             if self.grace_until(bidder_id) is not None:
-                return False, GRACE_LOCK_TEXT
+                return False, fail("grace_lock")
             row = self.p2p_get(listing_id)
             if row is None or row["status"] != "active" or row["end_at"] <= now:
-                return False, "その出品は、もうありません。"
+                return False, fail("p2p_not_found")
             if row["mode"] != "auction":
-                return False, "これは定価の出品です。「買う」を押してください。"
+                return False, fail("p2p_is_fixed")
             if row["bidder_id"] == bidder_id:
-                return False, "いま、あなたが最高入札者です。"
+                return False, fail("p2p_already_highest_bidder")
             need = p2p.min_next_bid(row["price"], row["bid"])
             if amount < need:
-                return False, f"入札は {need:,}ペリカ 以上にしてください。"
+                return False, fail("p2p_bid_min", need=need)
             if reason := self._p2p_buyer_check(bidder_id, row, amount, now):
                 return False, reason
             label = self.p2p_label(row)
             if row["bidder_id"]:  # 抜かれた人に、預かっていたお金を返す
                 self._ensure(row["bidder_id"])
                 self._apply(row["bidder_id"], row["bid"], f"取引:入札の返金（{label}）")
-                self._note(
-                    row["bidder_id"],
-                    f"📉 **{label}** の入札を、**{amount:,}ペリカ** で抜かれました（預かっていた {row['bid']:,}ペリカ は返りました）。",
-                )
+                self._note(row["bidder_id"], "p2p_outbid", label=label, amount=amount, refund=row["bid"])
             self._apply(bidder_id, -amount, f"取引:入札（{label}）")
             end_at = p2p.end_after_bid(row["end_at"], now)
             self._conn.execute(
@@ -279,9 +268,9 @@ class P2PMixin(EcoBase):
         with self._lock, self._conn:
             row = self.p2p_get(listing_id)
             if row is None or row["status"] != "active" or row["seller_id"] != user_id:
-                return False, "取り消せる出品が見つかりません。"
+                return False, fail("p2p_cancel_not_found")
             if row["bidder_id"]:
-                return False, "入札が入っているので、取り消せません。"
+                return False, fail("p2p_cancel_has_bid")
             self._p2p_give(user_id, row)
             self._p2p_close(listing_id, "cancelled", now)
             return True, ""
@@ -309,10 +298,7 @@ class P2PMixin(EcoBase):
             if row["bidder_id"]:  # 最高入札者に、預かっていたお金を返す
                 self._ensure(row["bidder_id"])
                 self._apply(row["bidder_id"], row["bid"], f"取引:入札の返金（{label}・出品者の取引停止）")
-                self._note(
-                    row["bidder_id"],
-                    f"⚠️ **{label}** の出品者が取引できなくなったため、競りは中止され、入札 {row['bid']:,}ペリカ は返りました。",
-                )
+                self._note(row["bidder_id"], "p2p_seller_pulled_back", label=label, refund=row["bid"])
             self._p2p_give(user_id, row)
             self._p2p_close(row["id"], "cancelled", now)
             pulled["listings"] += 1
@@ -367,30 +353,24 @@ class P2PMixin(EcoBase):
                     reason = self._p2p_can_receive(buyer, row)
                     used = self._p2p_pair_total(row["seller_id"], buyer, now)
                     if not reason and used + row["bid"] > p2p.PAIR_DAILY_LIMIT:
-                        reason = "同じ相手との取引の上限を超えます。"
+                        reason = fail("p2p_pair_limit_short")
                     if not reason:
                         self._p2p_sell(row, buyer, row["bid"], now)
-                        self._note(buyer, f"🎉 **{label}** を **{row['bid']:,}ペリカ** で落札しました。")
+                        self._note(buyer, "p2p_won", label=label, bid=row["bid"])
                         out.append((row, "sold"))
                         continue
                     self._apply(
                         buyer, row["bid"], f"取引:入札の返金（{label}）"
                     )  # 受け取れないので、返金して出品も戻す
-                    self._note(
-                        buyer,
-                        f"⚠️ **{label}** は落札しましたが、{reason}そのため取引は成立せず、{row['bid']:,}ペリカ は返りました。",
-                    )
+                    self._note(buyer, "p2p_won_failed", label=label, reason=reason, refund=row["bid"])
                     self._p2p_give(row["seller_id"], row)
                     self._p2p_close(row["id"], "expired", now)
-                    self._note(
-                        row["seller_id"],
-                        f"**{label}** は、買い手が受け取れず、取引が成立しませんでした（品は戻りました）。",
-                    )
+                    self._note(row["seller_id"], "p2p_buyer_cannot_receive", label=label)
                     out.append((row, "failed"))
                     continue
                 self._p2p_give(row["seller_id"], row)  # 売れ残り: 売り手へ戻す
                 self._p2p_close(row["id"], "expired", now)
-                self._note(row["seller_id"], f"**{label}** は、売れ残りました（品は戻りました）。")
+                self._note(row["seller_id"], "p2p_unsold", label=label)
                 out.append((row, "expired"))
         return out
 

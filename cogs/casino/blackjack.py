@@ -16,6 +16,7 @@ from cogs.casino.common import (
 )
 from cogs.shared import ui
 from cogs.shared.confirm import confirm_action
+from cogs.shared.messages import format_failure
 from domain.games import blackjack as rules
 from infra import catalogs
 
@@ -169,7 +170,10 @@ class BlackjackView(OwnerView):
             can, why = eco.can_borrow_for_bet(interaction.user.id, need)
             if not can:
                 return await interaction.response.send_message(
-                    embed=ui.error_embed("ダブルできません", f"倍にするためのペリカが足りません。{why}"), ephemeral=True
+                    embed=ui.error_embed(
+                        "ダブルできません", f"倍にするためのペリカが足りません。{format_failure(why)}"
+                    ),
+                    ephemeral=True,
                 )
             agreed = await confirm_action(
                 interaction,

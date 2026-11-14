@@ -121,19 +121,6 @@ def describe_alert(alert: dict) -> str:
     )
 
 
-def event_text(ev: dict, now: float) -> str:
-    sym = market.BY_KEY[ev["symbol"]]
-    if phase(ev, now) == "active":
-        return (
-            f"⚡ **発生中**　{sym.emoji}{sym.name} の値動きが **{ev['factor']:g}倍**（<t:{int(ev['end_ts'])}:R> まで）。"
-            "上がるか下がるかは分かりませんが、大きく動きます。"
-        )
-    return (
-        f"📢 **予告**　{sym.emoji}{sym.name} の値動きが、<t:{int(ev['start_ts'])}:R> から {DURATION_MIN}分間、**{ev['factor']:g}倍**になります。"
-        "上がるか下がるかは分かりませんが、大きく動きます。オプションの値段には、もう織り込まれています。"
-    )
-
-
 def current(events: list, now: float) -> Optional[dict]:
     """終わっていないイベント（予告中か発生中）を1つ返す。"""
     live = [e for e in events if phase(e, now) != "done"]

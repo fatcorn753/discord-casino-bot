@@ -73,7 +73,7 @@ def test_long_and_short_of_the_same_symbol_cannot_coexist_but_other_symbols_can(
     a = eco.for_guild(G)
     assert a.long_open(U, 2_000, 1000.0, 2, "cs").ok
     refused = a.short_open(U, 2_000, 1000.0, 2, "cs")
-    assert not refused.ok and "信用買い" in refused.reason
+    assert not refused.ok and refused.reason.code == "margin_opposite_open"
     assert a.short_open(U, 1_000, 1000.0, 2, "gold").ok
     assert sorted((side, sym) for side, sym, *_ in a.margin_positions(U)) == [("long", "cs"), ("short", "gold")]
 
@@ -94,7 +94,7 @@ def test_a_position_that_leaves_the_ratio_below_the_open_limit_is_refused(eco, m
     a.credit(U, 20_000, "テスト")
     price = START["numa"]  # σ 1.2%: 必要証拠金が大きい
     refused = a.long_open(U, 10_000, price, 5, "numa")  # 担保20% < 必要24%
-    assert not refused.ok and "維持率" in refused.reason and a.long_position(U, "numa")[0] == 0
+    assert not refused.ok and refused.reason.code == "margin_ratio_too_low" and a.long_position(U, "numa")[0] == 0
     assert a.long_open(U, 10_000, price, 3, "numa").ok  # 3倍なら 139% で通る
     assert a.margin_status(U)["ratio"] >= market.OPEN_RATIO
 
@@ -120,9 +120,9 @@ def test_collateral_cannot_be_sold_if_the_ratio_would_fall_below_the_open_limit(
     a.bond_buy(U, "normal", 1_000, time.time())  # 担保評価 950
     assert a.long_open(U, 40_000, price, 5, "numa").ok  # 16,000ペリカ分・担保3,200・必要3,840 → 維持率 150%
     sold = a.crypto_sell(U, None, START["cs"], "cs")  # 売ると 108%
-    assert not sold.ok and "担保" in sold.reason and a.crypto_holding(U, "cs")[0] > 0
+    assert not sold.ok and sold.reason.code == "crypto_collateral_locked" and a.crypto_holding(U, "cs")[0] > 0
     ok, why = a.bond_cancel(U, a.bond_list(U)["active"][0]["id"])  # 解約すると 125%
-    assert not ok and "担保" in why
+    assert not ok and why.code == "crypto_collateral_locked"
     assert a.long_close(U, None, price, "numa").ok  # 建玉を閉じれば、売れる・解約できる
     assert a.crypto_sell(U, None, START["cs"], "cs").ok
     assert a.bond_cancel(U, a.bond_list(U)["active"][0]["id"])[0]

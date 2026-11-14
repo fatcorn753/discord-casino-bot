@@ -5,11 +5,12 @@
 
 import random
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from domain import market as market_mod
 from domain import shop as shop_mod
 from domain import teiai
+from domain.errors import Notice, fail, notice
 from infra import catalogs
 from infra.db.base import EcoBase
 
@@ -22,12 +23,12 @@ class DebtMixin(EcoBase):
     # ------------------------------------------------------------------ #
     # 結果の画面に出す一言（強制執行・種銭など。精算のあとに、画面が取り出して表示する）
     # ------------------------------------------------------------------ #
-    def _note(self, user_id: int, text: str) -> None:
+    def _note(self, user_id: int, code: str, **params: Any) -> None:
         notes = self._notices.setdefault((self._g(), user_id), [])
-        notes.append(text)
+        notes.append(notice(code, **params))
         del notes[:-MAX_NOTICES]  # 本人が遊ばないままたまり続けないよう、新しい数件だけ残す
 
-    def take_notices(self, user_id: int) -> list:
+    def take_notices(self, user_id: int) -> list[Notice]:
         """たまっている一言を取り出す（取り出すと空になる）。"""
         return self._notices.pop((self._g(), user_id), [])
 
@@ -119,7 +120,7 @@ class DebtMixin(EcoBase):
                 balance,
                 f"帝愛の利息（トイチ・日利{teiai.DEBT_RATE_PER_DAY:.0%}・{counted}日分）+{add:,}",
             )
-            self._note(user_id, f"🕴️ 帝愛の利息が付きました（+{add:,}ペリカ。日利{teiai.DEBT_RATE_PER_DAY:.0%}）。")
+            self._note(user_id, "debt_interest", add=add, rate=teiai.DEBT_RATE_PER_DAY)
         return add
 
     def _after_debt_change(self, user_id: int) -> None:
@@ -183,7 +184,7 @@ class DebtMixin(EcoBase):
             taken = self._deposit_take(user_id, need - covered)
             if taken:
                 self._ledger(user_id, 0, self._balance(user_id), f"強制執行:預金の差し押さえ（{taken:,}ペリカ）")
-                self._note(user_id, f"💥 帝愛への預金が差し押さえられました（{taken:,}ペリカ）。")
+                self._note(user_id, "seize_deposit", taken=taken)
                 covered += taken
         if covered >= need:
             return covered
@@ -195,7 +196,10 @@ class DebtMixin(EcoBase):
             result = self._margin_close_locked(user_id, side, None, prices[symbol], f"強制執行:{name}決済", symbol)
             self._note(
                 user_id,
-                f"💥 {market_mod.BY_KEY[symbol].name}の{name}が強制決済されました（戻り {result.money:,}ペリカ）。",
+                "seize_margin",
+                symbol_name=market_mod.BY_KEY[symbol].name,
+                side_label=name,
+                money=result.money,
             )
             covered += self._take_cash(user_id, need - covered, reason)
         for symbol, units, _ in self.holdings(user_id):  # 現物を、銘柄の順に差し押さえ
@@ -204,7 +208,9 @@ class DebtMixin(EcoBase):
             result = self._crypto_sell_locked(user_id, None, prices[symbol], symbol)
             self._note(
                 user_id,
-                f"💥 保有していた{market_mod.BY_KEY[symbol].name}が差し押さえられました（{result.money:,}ペリカ）。",
+                "seize_spot",
+                symbol_name=market_mod.BY_KEY[symbol].name,
+                money=result.money,
             )
             covered += self._take_cash(user_id, need - covered, reason)
         for row in self._conn.execute(  # オプションを、時価（売値）で売って充てる
@@ -215,7 +221,7 @@ class DebtMixin(EcoBase):
                 break
             ok, got = self._option_close_locked(user_id, row["id"], time.time())
             if ok and got > 0:
-                self._note(user_id, f"💥 オプションが差し押さえられました（{got:,}ペリカ）。")
+                self._note(user_id, "seize_option", got=got)
                 covered += self._take_cash(user_id, need - covered, reason)
         for row in self._conn.execute(
             "SELECT id, kind FROM bonds WHERE guild_id=? AND user_id=? AND status='active' ORDER BY id",
@@ -225,7 +231,7 @@ class DebtMixin(EcoBase):
                 break
             ok, refund = self._bond_cancel_locked(user_id, row["id"])
             if ok:
-                self._note(user_id, f"💥 通常債が強制売却されました（{refund:,}ペリカ）。")
+                self._note(user_id, "seize_bond", refund=refund)
                 covered += self._take_cash(user_id, need - covered, reason)
         return covered
 
@@ -236,41 +242,33 @@ class DebtMixin(EcoBase):
             "UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (amount, self._g(), user_id)
         )
         self._grace_update(user_id)
-        self._note(
-            user_id, f"🕴️ 帝愛ファイナンスから種銭 {amount:,}ペリカ が貸し付けられました。「これで取り返してこい…！」"
-        )
+        self._note(user_id, "seed_loan", amount=amount)
 
     def borrow_seed(self, user_id: int) -> tuple:
         """（いつでも）手元が種銭の枠に満たなければ、枠まで帝愛から借りる。借金が増え、地下労働者になる。(成功か, 理由か借りた額)。"""
         with self._lock, self._conn:
             self._ensure(user_id)
             if self.status(user_id) == teiai.BANKRUPT:
-                return False, "破産者は、完済するまで、帝愛から借りられません。"
+                return False, fail("seed_bankrupt_blocked")
             if self.grace_until(user_id) is not None:
-                return False, "破産猶予の間は、新しく借りられません。"
+                return False, fail("seed_grace_blocked")
             short = teiai.SEED - self._balance(user_id)
             if short <= 0:
-                return (
-                    False,
-                    f"手元が {teiai.SEED:,}ペリカ 以上あるので、借りられません（借りられるのは、枠の {teiai.SEED:,}ペリカ に足りない分まで）。",
-                )
+                return False, fail("seed_not_needed", seed=teiai.SEED)
             self._seed(user_id, short)
             return True, short
 
     def can_borrow_for_bet(self, user_id: int, need: int) -> tuple:
-        """（ダブルダウンなど）手元が足りない need を、帝愛の信用で借りて賭けられるか。(可否, 理由)。借りられるのは、種銭の枠まで。"""
+        """（ダブルダウンなど）手元が足りない need を、帝愛の信用で借りて賭けられるか。(可否, Failure | "")。借りられるのは、種銭の枠まで。"""
         with self._lock:
             if need <= 0:
                 return True, ""
             if self.status(user_id) == teiai.BANKRUPT:
-                return False, "破産者は、帝愛の信用を使えません。"
+                return False, fail("credit_bankrupt_blocked")
             if self.grace_until(user_id) is not None:
-                return False, "破産猶予の間は、帝愛の信用を使えません。"
+                return False, fail("credit_grace_blocked")
             if need > teiai.SEED:
-                return (
-                    False,
-                    f"帝愛の信用で借りられるのは、1回 {teiai.SEED:,}ペリカ までです（足りない額: {need:,}ペリカ）。",
-                )
+                return False, fail("credit_limit_exceeded", seed=teiai.SEED, need=need)
             return True, ""
 
     def _seed_if_empty(self, user_id: int) -> int:
@@ -317,14 +315,14 @@ class DebtMixin(EcoBase):
             self._ensure(user_id)
             debt, balance = self._debt(user_id), self._balance(user_id)
             if debt <= 0:
-                return False, "帝愛への借金はありません。"
+                return False, fail("repay_no_debt")
             pay = min(debt, balance) if amount is None else amount
             if pay <= 0:
-                return False, f"手元にペリカがありません（いまの残高: {balance:,}ペリカ）。"
+                return False, fail("repay_no_cash", balance=balance)
             if pay > debt:
-                return False, f"返す額が借金を超えています（借金: {debt:,}ペリカ）。"
+                return False, fail("repay_exceeds_debt", debt=debt)
             if pay > balance:
-                return False, f"残高が足りません（いまの残高: {balance:,}ペリカ）。"
+                return False, fail("insufficient_balance", balance=balance)
             self._conn.execute(
                 "UPDATE users SET balance=balance-?, debt=debt-? WHERE guild_id=? AND user_id=?",
                 (pay, pay, self._g(), user_id),
@@ -415,18 +413,18 @@ class DebtMixin(EcoBase):
         with self._lock, self._conn:
             self._ensure(user_id)
             if self.status(user_id, now) == teiai.BANKRUPT:
-                return False, "破産者は、逃亡できません（すでに全財産を差し押さえられています）。"
+                return False, fail("escape_bankrupt_blocked")
             debt = self._debt(user_id)
             if debt < teiai.ESCAPE_MIN_DEBT:
-                return False, f"逃亡を試せるのは、帝愛の借金が {teiai.ESCAPE_MIN_DEBT:,}ペリカ 以上のときだけです。"
+                return False, fail("escape_min_debt", min_debt=teiai.ESCAPE_MIN_DEBT)
             row = self._conn.execute(
                 "SELECT escape_at, escape_tries FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
             ).fetchone()
             if row["escape_tries"] >= teiai.ESCAPE_MAX_TRIES:
-                return False, f"逃亡のチャンスは、通算 {teiai.ESCAPE_MAX_TRIES} 回までです。もう使い切りました。"
+                return False, fail("escape_max_tries", max_tries=teiai.ESCAPE_MAX_TRIES)
             ready = (row["escape_at"] or 0) + teiai.ESCAPE_COOLDOWN_HOURS * 3600
             if now < ready:
-                return False, f"警戒が厳しく、次に試せるのは <t:{int(ready)}:R> です。"
+                return False, fail("escape_cooldown", ready=ready)
             self._conn.execute(
                 "UPDATE users SET escape_at=?, escape_tries=escape_tries+1 WHERE guild_id=? AND user_id=?",
                 (now, self._g(), user_id),
@@ -457,7 +455,7 @@ class DebtMixin(EcoBase):
         with self._lock, self._conn:
             self._ensure(user_id)
             if self.status(user_id) == teiai.BANKRUPT:
-                return False, "すでに破産者です。"
+                return False, fail("bankrupt_already")
             loans = [
                 dict(r)
                 for r in self._conn.execute(
@@ -466,7 +464,7 @@ class DebtMixin(EcoBase):
                 )
             ]
             if self._debt(user_id) <= 0 and not loans:
-                return False, "借金も貸付の借り入れもないので、破産できません。"
+                return False, fail("bankrupt_no_debt")
             debt_before = self._debt(user_id)
             self.p2p_pull_back(user_id)  # 取引の出品・入札を取り下げて、品・馬・入札のお金を、差し押さえの対象に戻す
             in_grace = self.grace_until(user_id) is not None  # 猶予に入ってからの破産は、客観的なクレジットイベント

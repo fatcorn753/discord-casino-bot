@@ -123,11 +123,11 @@ def test_income_is_withheld_for_debt(eco):
 
 def test_upgrade_costs_pelica_and_changes_numbers(eco):
     ok, why = eco.labor_upgrade(U, "pick", T0, DAY)
-    assert not ok and "足りません" in why
+    assert not ok and why.code == "labor_insufficient_balance"
     eco.credit(U, 5_000, "テスト")
     assert eco.labor_upgrade(U, "pick", T0, DAY) == (True, "")
     assert eco.balance(U) == 5_000 - 150 and eco.labor_state(U, T0, DAY)["pick"] == 1
-    assert eco.labor_click(U, T0 + 2, DAY)["pay"] == 14
+    assert eco.labor_click(U, T0 + 2, DAY, rng=SimpleNamespace(random=lambda: 0.99))["pay"] == 14
     assert eco.labor_upgrade(U, "bogus", T0, DAY)[0] is False
     for _ in range(10):
         eco.labor_upgrade(U, "glove", T0, DAY)
@@ -182,9 +182,10 @@ def test_panel_work_and_collect_update_message(eco):
 
 
 def test_ranking_total_today_and_my_rank(eco):
+    no_crit = SimpleNamespace(random=lambda: 0.99)
     for uid, n in ((1, 3), (2, 9), (3, 5)):
         for i in range(n):
-            eco.labor_click(uid, T0 + i * 1.5, DAY)
+            eco.labor_click(uid, T0 + i * 1.5, DAY, rng=no_crit)
     top = eco.labor_top(2, None, 3)
     assert [r[1] for r in top["rows"]] == [2, 3] and top["rows"][0][0] == 1
     assert top["me"][0] == 2 and top["me"][3] == 3  # 3 番目の人が、2位
@@ -218,7 +219,7 @@ def test_worker_numbers():
 
 def test_hire_costs_the_contract_fee_and_sets_a_one_day_term(eco):
     ok, why = eco.labor_hire(U, "apprentice", T0, DAY)
-    assert not ok and "足りません" in why
+    assert not ok and why.code == "labor_hire_insufficient_balance"
     eco.credit(U, 5_000, "テスト")
     assert eco.labor_hire(U, "apprentice", T0, DAY) == (True, "")
     fee = lab.CONTRACT_FEE["apprentice"]
@@ -254,11 +255,12 @@ def test_slots_and_dorm(eco):
     for _ in range(5):
         assert eco.labor_hire(U, "apprentice", T0, DAY)[0]
     ok, why = eco.labor_hire(U, "apprentice", T0, DAY)
-    assert not ok and "いっぱい" in why
+    assert not ok and why.code == "labor_slots_full"
     assert eco.labor_dorm(U, T0, DAY) == (True, "") and eco.labor_hire(U, "apprentice", T0, DAY)[0]
     for _ in range(4):
         eco.labor_dorm(U, T0, DAY)
-    assert eco.labor_dorm(U, T0, DAY) == (False, "寮は、もう最大です。")
+    ok_dorm, why_dorm = eco.labor_dorm(U, T0, DAY)
+    assert not ok_dorm and why_dorm.code == "labor_dorm_max"
 
 
 def test_dismiss_frees_a_slot_without_refund(eco):
@@ -341,7 +343,7 @@ def test_drink_is_a_shop_item_and_recovers_fatigue(eco):
     click(eco, 25)
     now = T0 + 25 * 1.5
     ok, why = eco.labor_drink(U, now, DAY)
-    assert not ok and "持っていません" in why  # 買っていない
+    assert not ok and why.code == "labor_no_drink"  # 買っていない
     eco.credit(U, 1_000, "テスト")
     assert buy_drink(eco, 3).ok
     assert eco.labor_state(U, now, DAY)["drinks"] == 3
@@ -355,7 +357,8 @@ def test_drink_is_not_wasted_when_not_tired(eco):
 
     eco.credit(U, 1_000, "テスト")
     buy_drink(eco, 1)
-    assert eco.labor_drink(U, T0, DAY) == (False, "疲れていません。")
+    ok_drink, why_drink = eco.labor_drink(U, T0, DAY)
+    assert not ok_drink and why_drink.code == "labor_not_tired"
     assert eco.labor_state(U, T0, DAY)["drinks"] == 1  # 減らない
 
 
@@ -1048,7 +1051,8 @@ def test_click_count_is_capped_per_day_and_workers_are_not(eco, monkeypatch):
     monkeypatch.setattr(lab, "MAX_CLICKS_PER_DAY", 4)
     monkeypatch.setattr(lab, "click_pay", lambda pick, fatigue: 30)
     monkeypatch.setattr(lab, "pay_per_click", lambda pick: 30)
-    pays = [eco.labor_click(U, T0 + i * 2, DAY)["pay"] for i in range(8)]
+    no_crit = SimpleNamespace(random=lambda: 0.99)
+    pays = [eco.labor_click(U, T0 + i * 2, DAY, rng=no_crit)["pay"] for i in range(8)]
     assert pays[:4] == [30] * 4  # 上限（回数）までは、ふつうに稼げる
     assert pays[4:] == [lab.OVER_CAP_PAY] * 4  # 上限を超えたら、1ペリカずつ
     assert eco.labor_state(U, T0 + 20, DAY)["day_click"] == 8

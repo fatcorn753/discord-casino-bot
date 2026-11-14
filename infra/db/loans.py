@@ -10,6 +10,7 @@ import time
 from typing import Optional
 
 from domain import loans as loans_mod
+from domain.errors import Failure, fail
 from infra.db.base import EcoBase
 
 
@@ -93,28 +94,28 @@ class LoanMixin(EcoBase):
             }
 
     # ---- 募集（借りたい人が出す。最初に貸すと言った人が貸し手になる） ---- #
-    def _loan_borrow_block(self, user_id: int) -> Optional[str]:
+    def _loan_borrow_block(self, user_id: int) -> Optional[Failure]:
         """いま、この人が貸付を借りられない理由（借りられるなら None）。承諾・募集・貸すときに、同じ条件で確かめる。"""
         if self.loan_blacklisted(user_id):
-            return "破産のブラックリストの間は、貸付を借りられません（完済して7日たつと解除されます）。"
+            return fail("loan_blacklisted")
         late = self._conn.execute(
             "SELECT COUNT(*) FROM loans WHERE guild_id=? AND borrower_id=? AND status='overdue'", (self._g(), user_id)
         ).fetchone()[0]
         if late:
-            return "延滞中の貸付があるので、借りられません。先に返してください。"
+            return fail("loan_has_overdue")
         return None
 
     def loan_request(
         self, borrower_id: int, principal: int, rate_tenths: int, term_days: int, channel_id: int, now: float
     ) -> tuple:
-        """借りたい人の募集を出す（貸す人はまだ決まっていない）。(成功か, 理由か貸付の番号) を返す。"""
+        """借りたい人の募集を出す（貸す人はまだ決まっていない）。(成功か, Failure か貸付の番号) を返す。"""
         low = loans_mod.USER_MIN_PRINCIPAL
         if principal < low:
-            return False, f"金額は {low:,}ペリカ 以上にしてください。"
+            return False, fail("loan_min_principal", min_principal=low)
         if rate_tenths < 0:
-            return False, "日利は 0 以上にしてください。"
+            return False, fail("loan_min_rate")
         if not loans_mod.MIN_TERM_DAYS <= term_days <= loans_mod.MAX_TERM_DAYS:
-            return False, f"期間は {loans_mod.MIN_TERM_DAYS}〜{loans_mod.MAX_TERM_DAYS}日 にしてください。"
+            return False, fail("loan_term_range", min_days=loans_mod.MIN_TERM_DAYS, max_days=loans_mod.MAX_TERM_DAYS)
         with self._lock, self._conn:
             self._ensure(borrower_id)
             reason = self._loan_borrow_block(borrower_id)
@@ -125,10 +126,7 @@ class LoanMixin(EcoBase):
                 (self._g(), borrower_id),
             ).fetchone()[0]
             if opened >= loans_mod.MAX_BORROWER_OPEN:
-                return (
-                    False,
-                    f"出せる募集は、同時に {loans_mod.MAX_BORROWER_OPEN} 件までです。先の募集を取り下げてください。",
-                )
+                return False, fail("loan_max_borrower_open", max_open=loans_mod.MAX_BORROWER_OPEN)
             cur = self._conn.execute(
                 "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires, channel_id) "
                 "VALUES (?, 0, ?, ?, ?, ?, 'request', ?, ?, ?)",
@@ -152,26 +150,26 @@ class LoanMixin(EcoBase):
                 self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone()
             )
             if loan is None or loan["status"] != "request":
-                return False, "この募集はもう終わっています（ほかの人が貸したか、取り下げられました）。"
+                return False, fail("loan_request_ended")
             if lender_id == loan["borrower_id"]:
-                return False, "自分の募集には、貸せません。"
+                return False, fail("loan_self_lend")
             if now >= loan["offer_expires"]:
-                return False, "募集の期限が過ぎました。"
+                return False, fail("loan_request_expired")
             self._ensure(loan["borrower_id"])
             reason = self._loan_borrow_block(
                 loan["borrower_id"]
             )  # 募集を出したあとで、借りられない状態になっていないか
             if reason:
-                return False, "借りる人が、いまは借りられない状態です。" + reason
+                return False, fail("loan_borrower_blocked", inner=reason)
             self._ensure(lender_id)
             if self._balance(lender_id) < loan["principal"]:
-                return False, f"残高が足りません（いまの残高: {self._balance(lender_id):,}ペリカ）。"
+                return False, fail("insufficient_balance", balance=self._balance(lender_id))
             active = self._conn.execute(
                 "SELECT COUNT(*) FROM loans WHERE guild_id=? AND lender_id=? AND status IN ('active','overdue')",
                 (self._g(), lender_id),
             ).fetchone()[0]
             if active >= loans_mod.MAX_LENDER_ACTIVE:
-                return False, f"同時に貸せるのは {loans_mod.MAX_LENDER_ACTIVE} 件までです。"
+                return False, fail("loan_max_lender_active", max_active=loans_mod.MAX_LENDER_ACTIVE)
             self._apply(lender_id, -loan["principal"], f"貸付→{loan['borrower_id']}（#{loan_id}）")
             self._apply(loan["borrower_id"], loan["principal"], f"借入←{lender_id}（#{loan_id}）")
             self._conn.execute(
@@ -194,17 +192,17 @@ class LoanMixin(EcoBase):
         """貸す提案を作る。(成功か, 理由か貸付の番号) を返す。"""
         low = loans_mod.USER_MIN_PRINCIPAL
         if lender_id == borrower_id:
-            return False, "自分には貸せません。"
+            return False, fail("loan_self_offer")
         if principal < low:
-            return False, f"金額は {low:,}ペリカ 以上にしてください。"
+            return False, fail("loan_min_principal", min_principal=low)
         if rate_tenths < 0:
-            return False, "日利は 0 以上にしてください。"
+            return False, fail("loan_min_rate")
         if not loans_mod.MIN_TERM_DAYS <= term_days <= loans_mod.MAX_TERM_DAYS:
-            return False, f"期間は {loans_mod.MIN_TERM_DAYS}〜{loans_mod.MAX_TERM_DAYS}日 にしてください。"
+            return False, fail("loan_term_range", min_days=loans_mod.MIN_TERM_DAYS, max_days=loans_mod.MAX_TERM_DAYS)
         with self._lock, self._conn:
             self._ensure(lender_id)
             if self._balance(lender_id) < principal:
-                return False, f"残高が足りません（いまの残高: {self._balance(lender_id):,}ペリカ）。"
+                return False, fail("insufficient_balance", balance=self._balance(lender_id))
             opened = self._conn.execute(
                 "SELECT COUNT(*) FROM loans WHERE guild_id=? AND lender_id=? AND status='offer'", (self._g(), lender_id)
             ).fetchone()[0]
@@ -213,9 +211,9 @@ class LoanMixin(EcoBase):
                 (self._g(), lender_id),
             ).fetchone()[0]
             if opened >= loans_mod.MAX_LENDER_OPEN:
-                return False, f"承諾待ちの提案は {loans_mod.MAX_LENDER_OPEN} 件までです。"
+                return False, fail("loan_max_lender_open", max_open=loans_mod.MAX_LENDER_OPEN)
             if active >= loans_mod.MAX_LENDER_ACTIVE:
-                return False, f"同時に貸せるのは {loans_mod.MAX_LENDER_ACTIVE} 件までです。"
+                return False, fail("loan_max_lender_active", max_active=loans_mod.MAX_LENDER_ACTIVE)
             cur = self._conn.execute(
                 "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires, channel_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, 'offer', ?, ?, ?)",
@@ -250,11 +248,11 @@ class LoanMixin(EcoBase):
                 self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone()
             )
             if loan is None or loan["status"] != "offer":
-                return False, "この提案はもう終わっています。"
+                return False, fail("loan_offer_ended")
             if user_id != loan["borrower_id"]:
-                return False, "この提案を承諾できるのは、借りる本人だけです。"
+                return False, fail("loan_accept_borrower_only")
             if now >= loan["offer_expires"]:
-                return False, "承諾の期限が過ぎました。"
+                return False, fail("loan_offer_expired")
             self._ensure(user_id)
             reason = self._loan_borrow_block(
                 user_id
@@ -263,7 +261,7 @@ class LoanMixin(EcoBase):
                 return False, reason
             self._ensure(loan["lender_id"])
             if self._balance(loan["lender_id"]) < loan["principal"]:
-                return False, "貸す側の残高が足りなくなったので、成立しませんでした。"
+                return False, fail("loan_lender_insufficient_balance")
             self._apply(loan["lender_id"], -loan["principal"], f"貸付→{user_id}（#{loan_id}）")
             self._apply(user_id, loan["principal"], f"借入←{loan['lender_id']}（#{loan_id}）")
             self._conn.execute(
@@ -279,9 +277,9 @@ class LoanMixin(EcoBase):
                 self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone()
             )
             if loan is None or loan["status"] != "offer":
-                return False, "この提案はもう終わっています。"
+                return False, fail("loan_offer_ended")
             if user_id != loan["borrower_id"]:
-                return False, "断れるのは、借りる本人だけです。"
+                return False, fail("loan_decline_borrower_only")
             self._conn.execute("UPDATE loans SET status='declined' WHERE id=?", (loan_id,))
             return True, ""
 
@@ -292,36 +290,36 @@ class LoanMixin(EcoBase):
                 self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone()
             )
             if loan is None or loan["status"] not in ("offer", "request"):
-                return False, "この提案はもう終わっています。"
+                return False, fail("loan_offer_ended")
             owner = loan["borrower_id"] if loan["status"] == "request" else loan["lender_id"]
             if user_id != owner:
-                return False, "取り下げられるのは、" + (
-                    "募集を出した人だけです。" if loan["status"] == "request" else "貸す側だけです。"
+                return False, fail(
+                    "loan_cancel_requester_only" if loan["status"] == "request" else "loan_cancel_lender_only"
                 )
             self._conn.execute("UPDATE loans SET status='cancelled' WHERE id=?", (loan_id,))
             return True, ""
 
     # ---- 返済 ----
     def loan_repay(self, loan_id: int, user_id: int, amount: Optional[int], now: float) -> tuple:
-        """借りた人が返す。amount が None なら全額（残高の範囲で）。(成功か, 理由か返した額) を返す。"""
+        """借りた人が返す。amount が None なら全額（残高の範囲で）。(成功か, Failure か返した額) を返す。"""
         with self._lock, self._conn:
             loan = _loan_row(
                 self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone()
             )
             if loan is None or loan["status"] not in ("active", "overdue"):
-                return False, "返す貸付が見つかりません。"
+                return False, fail("loan_repay_not_found")
             if loan["borrower_id"] != user_id:
-                return False, "返せるのは、借りた本人だけです。"
+                return False, fail("loan_repay_borrower_only")
             at = now  # 延滞中は、いまの時刻まで遅延損害金が付く
             remaining = self.loan_remaining(loan, at)
             self._ensure(user_id)
             pay = min(remaining, self._balance(user_id)) if amount is None else amount
             if pay <= 0:
-                return False, f"残高がありません（いまの残高: {self._balance(user_id):,}ペリカ）。"
+                return False, fail("repay_no_cash", balance=self._balance(user_id))
             if pay > remaining:
-                return False, f"返す額が残りを超えています（残り {remaining:,}ペリカ）。"
+                return False, fail("loan_repay_exceeds_remaining", remaining=remaining)
             if pay > self._balance(user_id):
-                return False, f"残高が足りません（いまの残高: {self._balance(user_id):,}ペリカ）。"
+                return False, fail("insufficient_balance", balance=self._balance(user_id))
             self._loan_pay(loan, pay)
             if self.loan_remaining(loan, at) <= 0:
                 self._conn.execute("UPDATE loans SET status='repaid' WHERE id=?", (loan_id,))

@@ -12,6 +12,7 @@ import discord
 from cogs.shared import ui
 from cogs.shared.horse_display import bar as bar  # noqa: F401
 from cogs.shared.horse_display import stat_lines as stat_lines  # noqa: F401
+from cogs.shared.messages import format_failure
 from domain import horse as horse_mod
 from domain import shop
 
@@ -203,7 +204,9 @@ class GoldCarrotView(discord.ui.View):
         eco = self.stable.eco(interaction)
         ok, result = eco.horse_gold_carrot(interaction.user.id, self.horse_id, self.first, self.second)
         if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("使えません", result), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.error_embed("使えません", format_failure(result)), ephemeral=True
+            )
         self.stop()
         await interaction.response.edit_message(
             embed=ui.ok_embed("金にんじんを使いました", f"{stat_lines(result)}"), view=None
@@ -241,7 +244,7 @@ class RetireView(discord.ui.View):
         ok, result = eco.horse_retire(interaction.user.id, self.horse["id"])
         if not ok:
             return await interaction.response.send_message(
-                embed=ui.error_embed("引退させられません", result), ephemeral=True
+                embed=ui.error_embed("引退させられません", format_failure(result)), ephemeral=True
             )
         self.stop()
         remaining = eco.horse_list(interaction.user.id)
@@ -272,7 +275,9 @@ class StakeModal(discord.ui.Modal):
             interaction.user.id, self.panel.race["id"], self.panel.kind, lanes, stake, time.time()
         )
         if not ok:
-            await interaction.response.send_message(embed=ui.error_embed("買えませんでした", result), ephemeral=True)
+            await interaction.response.send_message(
+                embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True
+            )
             return
         await self.panel.announce_bets(interaction, result)
         lines = [
@@ -309,7 +314,9 @@ class StakeModal(discord.ui.Modal):
             time.time(),
         )
         if not ok:
-            await interaction.response.send_message(embed=ui.error_embed("買えませんでした", result), ephemeral=True)
+            await interaction.response.send_message(
+                embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True
+            )
             return
         picks = (
             "→".join(map(str, result["lanes"]))
@@ -655,7 +662,9 @@ class Stable(discord.ui.View):
     async def _on_carrot(self, interaction: discord.Interaction):
         ok, result = self.eco(interaction).horse_carrot(interaction.user.id, self.horse_id, self.src, self.dst)
         if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("動かせません", result), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.error_embed("動かせません", format_failure(result)), ephemeral=True
+            )
         await self._redraw(interaction)
 
     async def _on_gold(self, interaction: discord.Interaction):
@@ -687,7 +696,7 @@ class Stable(discord.ui.View):
         ok, reason = eco.race_register(interaction.user.id, self.horse_id, race["id"], time.time())
         if not ok:
             return await interaction.response.send_message(
-                embed=ui.error_embed("申し込めません", reason), ephemeral=True
+                embed=ui.error_embed("申し込めません", format_failure(reason)), ephemeral=True
             )
         await self._redraw(interaction)
         await refresh_entry_card(interaction, eco, race["id"])
@@ -702,7 +711,7 @@ class Stable(discord.ui.View):
         ok, reason = eco.race_withdraw(interaction.user.id, self.horse_id, race["id"], time.time())
         if not ok:
             return await interaction.response.send_message(
-                embed=ui.error_embed("取り下げられません", reason), ephemeral=True
+                embed=ui.error_embed("取り下げられません", format_failure(reason)), ephemeral=True
             )
         await self._redraw(interaction)
         await refresh_entry_card(interaction, eco, race["id"])
@@ -711,7 +720,9 @@ class Stable(discord.ui.View):
         eco = self.eco(interaction)
         ok, result = eco.horse_buy_rental(interaction.user.id, time.time(), self._tz())
         if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("買えません", result), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.error_embed("買えません", format_failure(result)), ephemeral=True
+            )
         horse = eco.horse_get(result)
         await self._redraw(interaction)
         await interaction.followup.send(

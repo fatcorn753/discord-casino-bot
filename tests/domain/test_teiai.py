@@ -110,7 +110,7 @@ def test_a_shortfall_seizes_crypto_then_bonds_before_becoming_debt(eco):
     assert eco.status(U) == teiai.UNDERGROUND
     assert 0 < owed < 5_000  # 差し押さえた分だけ、借金は減る
     notes = eco.take_notices(U)
-    assert any("差し押さえ" in n for n in notes) and any("通常債" in n for n in notes)
+    assert any(n.code == "seize_spot" for n in notes) and any(n.code == "seize_bond" for n in notes)
 
 
 def test_assets_are_kept_when_cash_covers_the_shortfall(eco):
@@ -127,7 +127,7 @@ def test_a_debtor_with_an_empty_hand_gets_the_seed_money(eco):
     eco._conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (U,))
     assert eco._owe(U, 2_000, "テスト") == 2_000
     assert eco.balance(U) == teiai.SEED and eco.debt(U) == 2_000 + teiai.SEED
-    assert any("種銭" in n for n in eco.take_notices(U))
+    assert any(n.code == "seed_loan" for n in eco.take_notices(U))
 
 
 def test_a_shortfall_keeps_the_daily_streak(eco):
@@ -142,13 +142,13 @@ def test_a_shortfall_keeps_the_daily_streak(eco):
 # ----------------------------- 返済 ----------------------------- #
 def test_repay_debt_rules(eco):
     indebt(eco, debt=1_000, balance=400)
-    assert eco.repay_debt(U, 2_000) == (False, "返す額が借金を超えています（借金: 1,000ペリカ）。")
-    assert eco.repay_debt(U, 500) == (False, "残高が足りません（いまの残高: 400ペリカ）。")
+    assert eco.repay_debt(U, 2_000)[1].code == "repay_exceeds_debt"
+    assert eco.repay_debt(U, 500)[1].code == "insufficient_balance"
     assert eco.repay_debt(U) == (True, 400) and eco.debt(U) == 600 and eco.balance(U) == 0
     assert eco.repay_debt(U)[0] is False  # 手元が空
     eco.credit(U, 5_000, "付与")
     assert eco.repay_debt(U) == (True, 600) and eco.debt(U) == 0
-    assert eco.repay_debt(U) == (False, "帝愛への借金はありません。")
+    assert eco.repay_debt(U)[1].code == "repay_no_debt"
 
 
 # ----------------------------- 身分と差し押さえ凍結 ----------------------------- #
@@ -245,8 +245,8 @@ def test_bankruptcy_keeps_the_senior_debt_up_to_the_floor_and_blocks_new_loans(e
         "VALUES (0, ?, ?, 100, 0, 5, 'offer', 0, ?)",
         (A, U, time.time() + DAY),
     )
-    assert "ブラックリスト" in eco.loan_accept(1, U, time.time())[1]  # ブラックリストの間は、借りられない
-    assert eco.bankrupt(U) == (False, "すでに破産者です。")
+    assert eco.loan_accept(1, U, time.time())[1].code == "loan_blacklisted"  # ブラックリストの間は、借りられない
+    assert eco.bankrupt(U)[1].code == "bankrupt_already"
 
 
 def test_a_bankrupt_person_returns_to_katagi_when_the_debt_is_paid_but_the_loan_blacklist_lasts_seven_days(eco):
@@ -618,7 +618,7 @@ def test_escape_failure_adds_a_fine_and_starts_the_cooldown(eco):
     assert ok and not r["escaped"] and r["fine"] == 2_000 and eco.debt(U) == 22_000
     assert eco.balance(U) == 1_000  # 失敗では、財産は取られない
     ok, reason = eco.escape_attempt(U, now=NOW_E + 3600, rng=_Roll(0.0))
-    assert not ok and "次に試せる" in reason and eco.debt(U) == 22_000
+    assert not ok and reason.code == "escape_cooldown" and eco.debt(U) == 22_000
     ok, r = eco.escape_attempt(U, now=NOW_E + teiai.ESCAPE_COOLDOWN_HOURS * 3600 + 1, rng=_Roll(0.0))
     assert ok and r["escaped"]
 
@@ -630,7 +630,7 @@ def test_escape_has_a_minimum_fine_and_a_minimum_debt(eco):
     _in_debt(eco, 4_999)
     eco._conn.execute("UPDATE users SET escape_at=NULL WHERE user_id=?", (U,))
     ok, reason = eco.escape_attempt(U, now=NOW_E, rng=_Roll(0.0))
-    assert not ok and "以上" in reason
+    assert not ok and reason.code == "escape_min_debt"
 
 
 def test_escape_is_one_percent_and_only_two_tries_in_total(eco):
@@ -642,7 +642,7 @@ def test_escape_is_one_percent_and_only_two_tries_in_total(eco):
     assert eco.escape_attempt(U, now=NOW_E + day, rng=_Roll(0.99))[1]["escaped"] is False
     assert eco.escape_left(U) == 0
     ok, reason = eco.escape_attempt(U, now=NOW_E + 3 * day, rng=_Roll(0.0))
-    assert not ok and "2" in reason  # 3回目は、当たりの目でも試せない
+    assert not ok and reason.code == "escape_max_tries" and reason.params["max_tries"] == 2
 
 
 def test_escape_is_not_available_to_bankrupts(eco):

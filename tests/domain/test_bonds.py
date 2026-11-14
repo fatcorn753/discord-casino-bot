@@ -73,7 +73,8 @@ def test_only_normal_bonds_can_be_sold_at_the_dcf_price(eco):
     eco.bond_buy(1, "junk", 1000, NOW)
     by_kind = {r["kind"]: r["id"] for r in eco.bond_list(1)["active"]}
     ids = [by_kind["normal"], by_kind["junk"]]
-    assert eco.bond_cancel(1, ids[1], NOW) == (False, "ジャンク債は売れません（満期まで持つだけです）。")
+    ok_sell, why_sell = eco.bond_cancel(1, ids[1], NOW)
+    assert not ok_sell and why_sell.code == "bond_not_sellable" and why_sell.params["name"] == "ジャンク債"
     ok, got = eco.bond_cancel(1, ids[0], NOW)  # 買った直後: 満期の2,080を、72時間ぶん割り引く
     assert ok and got == int(2080 * math.exp(-bonds.SALE_DISCOUNT_PER_HOUR * 72)) and 1900 < got < 2000
     assert eco.balance(1) == INITIAL_BALANCE - 3000 + got
@@ -140,7 +141,7 @@ def test_buy_guards(eco):
     eco.credit(3, 20_000, "テスト")
     assert eco.bond_buy(3, "junk", 6000, NOW)[0] is True
     ok, reason = eco.bond_buy(3, "junk", 6000, NOW)  # ジャンク債は合計10,000まで
-    assert not ok and "あと 4,000" in reason
+    assert not ok and reason.code == "bond_max_total" and reason.params["room"] == 4000
     assert eco.bond_buy(3, "normal", 1000, NOW)[0]  # 種類ごとに別の上限
 
 

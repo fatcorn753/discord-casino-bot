@@ -8,6 +8,7 @@ from typing import Optional
 
 from domain import shop as shop_mod
 from domain import teiai
+from domain.errors import fail
 from domain.types import CONSUMABLE_EFFECTS, PurchaseResult
 from infra.db.base import EcoBase
 
@@ -57,34 +58,33 @@ class ShopMixin(EcoBase):
     ) -> PurchaseResult:
         """購入。支払い・持ち物の追加を1回の処理で行う。持っているもの（消耗品以外）は買えない。在庫のある品は、在庫の数まで。"""
         if qty < 1 or price <= 0:
-            return PurchaseResult(False, "個数と値段は1以上にしてください。")
+            return PurchaseResult(False, fail("shop_invalid_qty_or_price"))
         total = price * qty
         now = time.time() if now is None else now
         with self._lock, self._conn:
             self._ensure(user_id)
             stock = self.shop_stock(user_id, item_id, now)
             if stock is not None and qty > stock["stock"]:
-                when = f"（次の補充: <t:{int(stock['next_at'])}:R>）" if stock["next_at"] else ""
                 return PurchaseResult(
                     False,
-                    f"在庫が足りません（いまの在庫: {stock['stock']}個）{when}。在庫は1人ずつ別々で、時間がたつと補充されます。",
+                    fail("shop_out_of_stock", stock=stock["stock"], next_at=stock["next_at"]),
                     self._balance(user_id),
                 )
             have = self._conn.execute(
                 "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=?", (self._g(), user_id, item_id)
             ).fetchone()
             if unique and have:
-                return PurchaseResult(False, "すでに持っています。", self._balance(user_id))
+                return PurchaseResult(False, fail("already_owned"), self._balance(user_id))
             if self._debt(user_id) > 0:
                 return PurchaseResult(
                     False,
-                    f"借金が {self._debt(user_id):,}ペリカ 残っているので、買い物はできません。",
+                    fail("debt_blocks_shopping", debt=self._debt(user_id)),
                     self._balance(user_id),
                 )
             if self._balance(user_id) < total:
                 return PurchaseResult(
                     False,
-                    f"ペリカが足りません（{total:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。",
+                    fail("insufficient_balance_need", need=total, balance=self._balance(user_id)),
                     self._balance(user_id),
                 )
             self._apply(user_id, -total, f"購入:{label}" + (f"×{qty}" if qty > 1 else ""))

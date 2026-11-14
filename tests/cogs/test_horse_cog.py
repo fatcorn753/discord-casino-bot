@@ -282,10 +282,15 @@ def test_race_bet_many_checks_the_total_before_buying_anything(setup):
     eco.set_balance(V, 1_000, "テスト")
     rid, race, now = _open_race(eco)
     ok, why = eco.race_bet_many(V, rid, "place", [1, 2, 3], 500, now)  # 合計 1,500 で足りない
-    assert not ok and "足りません" in why and eco.balance(V) == 1_000 and eco.race_bets(V, rid) == []
+    assert (
+        not ok
+        and why.code == "race_insufficient_balance_many"
+        and eco.balance(V) == 1_000
+        and eco.race_bets(V, rid) == []
+    )
     eco.set_balance(V, 100_000, "テスト")
     ok, why = eco.race_bet_many(V, rid, "place", list(range(1, 9)), h.MAX_STAKE, now)  # 合計が1レースの上限を超える
-    assert not ok and "合計" in why and eco.race_bets(V, rid) == []
+    assert not ok and why.code == "race_max_stake_many" and eco.race_bets(V, rid) == []
 
 
 @pytest.mark.filterwarnings("ignore::DeprecationWarning")

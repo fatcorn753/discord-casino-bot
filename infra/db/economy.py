@@ -20,6 +20,7 @@ from typing import Optional, Self
 
 from domain import market as market_mod
 from domain import teiai
+from domain.errors import fail
 from domain.ports import IEconomy
 from domain.shop import STREAK_GUARD
 from domain.types import (  # noqa: F401  (他のモジュールが infra.db.economy から読む)
@@ -561,9 +562,9 @@ class Economy(
     ) -> TransferResult:
         """sender から receiver へ送る。手数料は送る側が上乗せで払う。1日の送金額に上限がある。"""
         if sender == receiver:
-            return TransferResult(False, "自分には送金できません。")
+            return TransferResult(False, fail("transfer_self"))
         if amount <= 0:
-            return TransferResult(False, "金額は1以上にしてください。")
+            return TransferResult(False, fail("amount_must_be_positive"))
         fee = (
             math.ceil(round(amount * fee_rate, 6)) if fee_rate else 0
         )  # 切り上げ（少額でも手数料は最低1）。1日の上限には数えない
@@ -582,17 +583,15 @@ class Economy(
                 ).fetchone()["games_played"]
                 < min_games
             ):
-                return TransferResult(
-                    False, f"送金は、{min_games}回以上ゲームで遊んでからできます（複数アカウントでの稼ぎ対策です）。"
-                )
+                return TransferResult(False, fail("transfer_min_games", min_games=min_games))
             if sent_today + amount > daily_limit:
                 return TransferResult(
-                    False, f"1日の送金は合計 {daily_limit:,} ペリカまでです（今日は {sent_today:,} ペリカ送金済み）。"
+                    False, fail("transfer_daily_limit", daily_limit=daily_limit, sent_today=sent_today)
                 )
             if self._debt(sender) > 0:
-                return TransferResult(False, f"借金が {self._debt(sender):,}ペリカ 残っているので、送金はできません。")
+                return TransferResult(False, fail("debt_blocks_transfer", debt=self._debt(sender)))
             if self._balance(sender) < amount + fee:
-                return TransferResult(False, f"残高が足りません（送金額 {amount:,} + 手数料 {fee:,} が必要です）。")
+                return TransferResult(False, fail("transfer_insufficient_balance", amount=amount, fee=fee))
             self._apply(
                 sender, -amount, f"送金（送）→{receiver}"
             )  # 手数料は別の行にする（1日の上限は、送った額だけで数えるため）

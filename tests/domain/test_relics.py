@@ -186,5 +186,5 @@ def test_merge_ten_into_one_star_and_stack_further(eco):
 def test_max_star_and_non_relics_cannot_merge(eco):
     give(eco, "relic_tear_s3", 10)
     ok, reason = eco.relic_merge(U, "relic_tear_s3")
-    assert not ok and "最上位" in reason
+    assert not ok and reason.code == "relic_max_star"
     assert not eco.relic_merge(U, "carrot")[0]

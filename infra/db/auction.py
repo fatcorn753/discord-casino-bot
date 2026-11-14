@@ -10,6 +10,7 @@ from typing import Optional
 
 from domain import shop as shop_mod
 from domain import teiai
+from domain.errors import fail
 from domain.types import PurchaseResult
 from infra.db.base import EcoBase
 
@@ -75,19 +76,17 @@ class AuctionMixin(EcoBase):
         now = time.time() if now is None else now
         item = shop_mod.BY_ID.get(item_id)
         if item is None or qty < 1:
-            return PurchaseResult(False, "その品は競売にありません。")
+            return PurchaseResult(False, fail("auction_item_unavailable"))
         with self._lock, self._conn:
             self._ensure(user_id)
             if self.status(user_id, now) != teiai.KATAGI:
-                return PurchaseResult(
-                    False, "競売で買えるのは、借金も延滞もないカタギだけです。", self._balance(user_id)
-                )
+                return PurchaseResult(False, fail("auction_katagi_only"), self._balance(user_id))
             have = self._conn.execute(
                 "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
                 (self._g(), user_id, item_id),
             ).fetchone()
             if item.unique and have:
-                return PurchaseResult(False, "すでに持っています。", self._balance(user_id))
+                return PurchaseResult(False, fail("already_owned"), self._balance(user_id))
             if item.unique:
                 qty = 1
             rows = self._conn.execute(
@@ -96,7 +95,7 @@ class AuctionMixin(EcoBase):
                 (self._g(), item_id),
             ).fetchall()
             if sum(r["qty"] for r in rows) < qty:
-                return PurchaseResult(False, "その数は残っていません。", self._balance(user_id))
+                return PurchaseResult(False, fail("auction_insufficient_qty"), self._balance(user_id))
             take, total, need = [], 0, qty
             for r in rows:
                 n = min(need, r["qty"])
@@ -108,7 +107,7 @@ class AuctionMixin(EcoBase):
             if self._balance(user_id) < total:
                 return PurchaseResult(
                     False,
-                    f"ペリカが足りません（{total:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。",
+                    fail("insufficient_balance_need", need=total, balance=self._balance(user_id)),
                     self._balance(user_id),
                 )
             self._apply(user_id, -total, f"競売:{shop_mod.label(item)}" + (f"×{qty}" if qty > 1 else ""))

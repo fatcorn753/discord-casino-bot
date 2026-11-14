@@ -64,11 +64,11 @@ def test_limit_down_locks_selling_spot_closing_long_and_selling_calls_but_not_bu
     assert ok
     pin(eco, "cs", -1)
     sold = a.crypto_sell(U, None, 70.0)
-    assert not sold.ok and "ストップ安" in sold.reason and "約定しません" in sold.reason
+    assert not sold.ok and sold.reason.code == "market_pin_limit_down"
     closed = a.long_close(U, None, 70.0)
-    assert not closed.ok and "ストップ安" in closed.reason
+    assert not closed.ok and closed.reason.code == "market_pin_limit_down"
     ok, why = a.option_sell(U, a.option_list(U)["active"][0]["id"])
-    assert not ok and "ストップ安" in why
+    assert not ok and why.code == "market_pin_limit_down"
     assert a.crypto_buy(U, 1_000, 70.0).ok  # 逆張りの買いは通る
     pin(eco, "teio", -1)
     assert a.short_close(U, None, 70.0, "teio").ok  # 空売りの買い戻しは通る（利益確定）
@@ -82,11 +82,11 @@ def test_limit_up_locks_buying_spot_opening_long_and_covering_shorts_but_not_sel
     pin(eco, "cs", 1)
     pin(eco, "teio", 1)
     bought = a.crypto_buy(U, 1_000, 130.0)
-    assert not bought.ok and "ストップ高" in bought.reason
+    assert not bought.ok and bought.reason.code == "market_pin_limit_up"
     opened = a.long_open(U, 1_000, 130.0, 2)
-    assert not opened.ok and "ストップ高" in opened.reason
+    assert not opened.ok and opened.reason.code == "market_pin_limit_up"
     cover = a.short_close(U, None, 130.0, "teio")
-    assert not cover.ok and "ストップ高" in cover.reason and "売り手がいなくて" in cover.reason
+    assert not cover.ok and cover.reason.code == "market_pin_limit_up"
     a.credit(2, 500_000, "テスト")
     pin(eco, "cs", 0)
     assert a.crypto_buy(2, 20_000, 100.0).ok

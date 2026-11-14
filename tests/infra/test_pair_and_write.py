@@ -145,7 +145,7 @@ def test_write_gives_the_premium_now_and_locks_the_margin(eco):
 
 def test_write_needs_bank_cash_for_the_premium(eco):
     ok, why = eco.option_write(U, opt.CALL, "numa", 3_000)  # 銀行に現金がない
-    assert not ok and "帝愛銀行" in why and eco.balance(U) == INITIAL_BALANCE
+    assert not ok and why.code == "option_bank_no_cash" and eco.balance(U) == INITIAL_BALANCE
 
 
 def test_write_rules(eco):
@@ -155,7 +155,7 @@ def test_write_rules(eco):
     assert not eco.option_write(U, opt.CALL, "cs", INITIAL_BALANCE + 1)[0]  # 残高不足
     with eco._lock, eco._conn:
         eco._conn.execute("UPDATE users SET debt=100 WHERE user_id=?", (U,))
-    assert "借金" in eco.option_write(U, opt.CALL, "cs", 1_000)[1]
+    assert eco.option_write(U, opt.CALL, "cs", 1_000)[1].code == "debt_blocks_sell"
 
 
 def test_write_margin_cap(eco):
@@ -163,7 +163,7 @@ def test_write_margin_cap(eco):
     eco.credit(U, 100_000, "テスト")
     assert eco.option_write(U, opt.PUT, "cs", 15_000)[0]
     ok, why = eco.option_write(U, opt.PUT, "cs", 10_000)
-    assert not ok and f"{opt.MAX_SHORT_MARGIN:,}" in why
+    assert not ok and why.code == "option_max_short_margin" and why.params["max_margin"] == opt.MAX_SHORT_MARGIN
 
 
 def test_write_expires_worthless_the_premium_is_the_profit(eco):

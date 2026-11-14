@@ -10,6 +10,7 @@ from typing import Optional
 
 from domain import bonds as bonds_mod
 from domain import market as market_mod
+from domain.errors import fail
 from infra.db.base import EcoBase
 
 
@@ -17,23 +18,26 @@ class BondMixin(EcoBase):
     """債券（元本を預かり、満期に利息つきで返す。ジャンク債は倒産することがある）。購入・満期の決着・解約。"""
 
     def bond_buy(self, user_id: int, kind_key: str, amount: int, now: float) -> tuple:
-        """債券を買う。(成功か, 理由) を返す。"""
+        """債券を買う。(成功か, Failure | "") を返す。"""
         kind = bonds_mod.KINDS.get(kind_key)
         if kind is None:
-            return False, "債券の種類が正しくありません。"
+            return False, fail("bond_invalid_kind")
         with self._lock, self._conn:
             self._ensure(user_id)
             if amount < bonds_mod.MIN_AMOUNT:
-                return False, f"{bonds_mod.MIN_AMOUNT:,}ペリカ以上で買ってください。"
+                return False, fail("bond_min_amount", min_amount=bonds_mod.MIN_AMOUNT)
             if self._debt(user_id) > 0:
-                return False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、買えません。"
+                return False, fail("debt_blocks_buy", debt=self._debt(user_id))
             if self._balance(user_id) < amount:
-                return False, f"残高が足りません（いまの残高: {self._balance(user_id):,}ペリカ）。"
+                return False, fail("insufficient_balance", balance=self._balance(user_id))
             held = self._bond_held(user_id, kind_key)
             if held + amount > kind.max_total:
-                return (
-                    False,
-                    f"{kind.name}は元本の合計が {kind.max_total:,}ペリカ まで（いま {held:,}ペリカ 保有）。あと {kind.max_total - held:,}ペリカ まで買えます。",
+                return False, fail(
+                    "bond_max_total",
+                    name=kind.name,
+                    max_total=kind.max_total,
+                    held=held,
+                    room=kind.max_total - held,
                 )
             self._apply(user_id, -amount, f"債券購入:{kind.name}")
             self._conn.execute(
@@ -124,10 +128,8 @@ class BondMixin(EcoBase):
                 drop = row["principal"] * market_mod.COLLATERAL_HAIRCUT.get(row["kind"], 0.0)
                 after = self._margin_status_locked(user_id, self.latest_prices(), drop_collateral=drop)
                 if after["ratio"] is not None and after["ratio"] < market_mod.OPEN_RATIO:
-                    return (
-                        False,
-                        f"信用取引の担保になっているので、売れません（売ると維持率が {after['ratio']:.0%}・{market_mod.OPEN_RATIO:.0%} 以上が必要）。"
-                        "先に建玉を決済してください。",
+                    return False, fail(
+                        "crypto_collateral_locked", ratio=after["ratio"], open_ratio=market_mod.OPEN_RATIO
                     )
             return self._bond_cancel_locked(user_id, bond_id, now)
 
@@ -138,10 +140,10 @@ class BondMixin(EcoBase):
             (bond_id, self._g(), user_id),
         ).fetchone()
         if row is None:
-            return False, "その番号の債券は持っていません。"
+            return False, fail("bond_not_found")
         kind = bonds_mod.KINDS[row["kind"]]
         if not kind.sellable:
-            return False, f"{kind.name}は売れません（満期まで持つだけです）。"
+            return False, fail("bond_not_sellable", name=kind.name)
         refund = bonds_mod.sale_value(kind, row["principal"], time.time() if now is None else now, row["due"])
         self._apply(user_id, refund, "返金:債券売却")  # もともと自分のお金なので、借金の徴収はしない
         self._conn.execute("UPDATE bonds SET status='cancelled', paid=? WHERE id=?", (refund, bond_id))

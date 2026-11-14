@@ -15,6 +15,7 @@ from discord.ext import commands, tasks
 
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
+from cogs.shared.messages import format_failure
 from domain import approval
 from infra import catalogs, logthrottle
 
@@ -105,7 +106,7 @@ class RaffleCog(commands.Cog):
         fee = fee or random.randint(RANDOM_FEE_RANGE[0] // 100, RANDOM_FEE_RANGE[1] // 100) * 100
         ok, reason = eco.raffle_open(host_id, fee, time.time() + minutes * 60, channel.id)
         if not ok:
-            return False, reason
+            return False, format_failure(reason)
         raffle = eco.raffle_get()
         try:
             message = await ui.send_channel(
@@ -180,7 +181,7 @@ class RaffleCog(commands.Cog):
         ok, reason = eco.raffle_join(interaction.user.id, time.time())
         if not ok:
             return await interaction.response.send_message(
-                embed=ui.error_embed("参加できません", reason), ephemeral=True
+                embed=ui.error_embed("参加できません", format_failure(reason)), ephemeral=True
             )
         raffle = eco.raffle_get()
         await interaction.response.edit_message(embed=raffle_embed(raffle))

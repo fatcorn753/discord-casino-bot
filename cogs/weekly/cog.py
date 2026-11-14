@@ -9,6 +9,7 @@ from discord.ext import commands, tasks
 
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
+from cogs.shared.messages import format_standings_lines
 from domain import approval, shop, weekly
 from infra import catalogs, logthrottle
 from infra.clock import local_now
@@ -64,7 +65,7 @@ class WeeklyCog(commands.Cog):
         return announce_channel(guild, eco)
 
     def build_embed(self, week: str, result: dict) -> discord.Embed:
-        lines = weekly.standings_lines(result["standings"])
+        lines = format_standings_lines(result["standings"], weekly.MEDALS)
         champ = result["champion"]
         if champ:
             lines += [

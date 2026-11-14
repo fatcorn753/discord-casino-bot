@@ -22,6 +22,7 @@ from cogs.market.embeds import (
 )
 from cogs.shared import ui
 from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
+from cogs.shared.messages import format_failure
 from domain import bonds, market
 from domain import options as opt
 from infra import catalogs
@@ -106,7 +107,7 @@ async def buy_spot(
         price = cog._price(sym.key)  # 確認を待つ間に動いた価格で、確定する
         res = cog.g(interaction).crypto_buy(uid, amount, price, sym.key)
         if not res.ok:
-            await reply(embed=ui.error_embed("買えませんでした", res.reason), ephemeral=True)
+            await reply(embed=ui.error_embed("買えませんでした", format_failure(res.reason)), ephemeral=True)
             return
         await reply(
             embed=ui.ok_embed(
@@ -160,7 +161,7 @@ async def margin_close(
         price = cog._price(sym.key)
         res = cog.g(interaction).margin_close(uid, side, units, price, sym.key)
         if not res.ok:
-            await reply(embed=ui.error_embed(f"{cannot[:-2]}ませんでした", res.reason), ephemeral=True)
+            await reply(embed=ui.error_embed(f"{cannot[:-2]}ませんでした", format_failure(res.reason)), ephemeral=True)
             return
         left, left_entry, left_margin = cog.g(interaction).margin_position(uid, sym.key, side)
         rest = (
@@ -221,7 +222,7 @@ async def sell_spot(
         price = cog._price(sym.key)
         res = cog.g(interaction).crypto_sell(uid, units, price, sym.key)
         if not res.ok:
-            await reply(embed=ui.error_embed("売れませんでした", res.reason), ephemeral=True)
+            await reply(embed=ui.error_embed("売れませんでした", format_failure(res.reason)), ephemeral=True)
             return
         left, left_cost = cog.g(interaction).crypto_holding(uid, sym.key)
         pct = market.pnl_percent(price, have, cost)  # 売った分の、取得価格に対する増減
@@ -300,7 +301,7 @@ async def margin_order(
         eco = cog.g(interaction)
         res = (eco.short_open if side == "short" else eco.long_open)(uid, units, price, leverage, sym.key)
         if not res.ok:
-            await reply(embed=ui.error_embed(f"{label}できませんでした", res.reason), ephemeral=True)
+            await reply(embed=ui.error_embed(f"{label}できませんでした", format_failure(res.reason)), ephemeral=True)
             return
         have, entry_value, margin_all = eco.margin_position(uid, sym.key, side)
         await reply(
@@ -383,7 +384,7 @@ async def option_buy(
             uid, kind, sym.key, amount, symbol2=symbol2, strike_pct=None if pair else strike_pct
         )
         if not res_ok:
-            await reply(embed=ui.error_embed(f"{name}を買えませんでした", res), ephemeral=True)
+            await reply(embed=ui.error_embed(f"{name}を買えませんでした", format_failure(res)), ephemeral=True)
             return
         await reply(
             embed=ui.ok_embed(
@@ -451,7 +452,7 @@ async def option_write(
             return
         ok, res = cog.g(interaction).option_write(uid, kind, sym.key, amount, strike_pct=strike_pct)
         if not ok:
-            await reply(embed=ui.error_embed(f"{label}できませんでした", res), ephemeral=True)
+            await reply(embed=ui.error_embed(f"{label}できませんでした", format_failure(res)), ephemeral=True)
             return
         await reply(
             embed=ui.ok_embed(
@@ -509,7 +510,7 @@ async def option_sell(
         return
     ok, got = eco.option_sell(interaction.user.id, option_id)
     if not ok:
-        await reply(embed=ui.error_embed("できませんでした", got), ephemeral=True)
+        await reply(embed=ui.error_embed("できませんでした", format_failure(got)), ephemeral=True)
         return
     if short:
         pnl = row["premium"] + got - row["margin"]  # got は、証拠金の戻り（マイナスなら、借金にした額）
@@ -538,7 +539,9 @@ async def bond_buy(cog, interaction: discord.Interaction, kind_key: str, amount:
         return
     ok, reason = eco.bond_buy(interaction.user.id, kind_key, amount, time.time())
     if not ok:
-        await interaction.response.send_message(embed=ui.error_embed("買えません", reason), ephemeral=True)
+        await interaction.response.send_message(
+            embed=ui.error_embed("買えません", format_failure(reason)), ephemeral=True
+        )
         return
     await interaction.response.send_message(embed=bond_buy_embed(kind_key, amount, time.time()))
 
@@ -546,7 +549,9 @@ async def bond_buy(cog, interaction: discord.Interaction, kind_key: str, amount:
 async def bond_cancel(cog, interaction: discord.Interaction, bond_id: int) -> None:
     ok, result = cog.g(interaction).bond_cancel(interaction.user.id, bond_id)
     if not ok:
-        await interaction.response.send_message(embed=ui.error_embed("売れません", result), ephemeral=True)
+        await interaction.response.send_message(
+            embed=ui.error_embed("売れません", format_failure(result)), ephemeral=True
+        )
         return
     await interaction.response.send_message(  # 公開（ほかの売買の結果と同じ）
         embed=ui.ok_embed(

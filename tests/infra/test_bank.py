@@ -40,7 +40,7 @@ def test_only_katagi_can_deposit_and_minimum_applies(eco):
     eco.credit(A, 5_000, "テスト")
     assert not eco.bank_deposit(A, 50, NOW)[0]  # 最低額
     go_into_debt(eco, B, 10_000)
-    assert "カタギ" in eco.bank_deposit(B, 100, NOW)[1]
+    assert eco.bank_deposit(B, 100, NOW)[1].code == "bank_katagi_only"
     assert not eco.bank_deposit(A, 10**9, NOW)[0]  # 残高不足
 
 
@@ -58,10 +58,10 @@ def test_withdraw_is_limited_by_available_cash_first_come_first_served(eco):
     eco.bank_deposit(A, 10_000, NOW)
     eco.bank_deposit(B, 10_000, NOW)  # 預金 20,000・現金 4,000
     ok, got = eco.bank_withdraw(A, None, NOW)  # 全額 10,000 は、現金 4,000 を超える
-    assert not ok and "4,000" in got
+    assert not ok and got.code == "bank_available_limit" and got.params["available"] == 4_000
     assert eco.bank_withdraw(A, 4_000, NOW) == (True, 4_000)  # 早い者勝ち
     ok, why = eco.bank_withdraw(B, 1_000, NOW)  # 現金が尽きた
-    assert not ok and "預金封鎖" in why and eco.bank_status(NOW)["level"] == "frozen"
+    assert not ok and why.code == "bank_frozen" and eco.bank_status(NOW)["level"] == "frozen"
 
 
 def test_grace_locks_reserve_and_triggers_a_run(eco):
@@ -148,7 +148,7 @@ def test_cds_buy_rules(eco):
     ok, odds = eco.cds_buy(A, T, 500)
     assert ok and odds == teiai.CDS_MAX_ODDS
     go_into_debt(eco, T, 20_000)
-    assert "猶予" in eco.cds_buy(A, T, 500)[1]  # 猶予に入ってからは掛けられない
+    assert eco.cds_buy(A, T, 500)[1].code == "cds_target_in_grace"  # 猶予に入ってからは掛けられない
 
 
 def test_cds_on_someone_else_pays_only_on_forced_bankruptcy_and_capped_by_their_debt(eco):
@@ -234,7 +234,7 @@ def test_self_cds_total_payout_is_capped(eco):
     eco.credit(B, 100_000, "テスト")
     assert eco.cds_buy(B, B, 3_000, NOW)[0]  # 15倍・見込み 45,000
     ok, why = eco.cds_buy(B, B, 1_000, NOW)  # 合計 60,000 > 50,000
-    assert not ok and "5" in why and "まで" in why
+    assert not ok and why.code == "cds_self_cap" and why.params["cap"] == teiai.CDS_SELF_CAP
     assert eco.cds_buy(B, B, 300, NOW)[0]  # 合計 49,500 までなら買える
 
 
@@ -263,7 +263,12 @@ def test_credit_is_limited_to_the_seed_frame(eco):
     eco.debit_up_to(B, eco.balance(B), "テスト")
     eco.credit(B, 1, "テスト")
     ok, why = eco.can_borrow_for_bet(B, 3_500)
-    assert not ok and "3,000" in why and not eco.add_to_escrow(eid2, 3_500, credit=True)
+    assert (
+        not ok
+        and why.code == "credit_limit_exceeded"
+        and why.params["seed"] == teiai.SEED
+        and not eco.add_to_escrow(eid2, 3_500, credit=True)
+    )
 
 
 def test_deposits_are_seized_when_cash_runs_out(eco):

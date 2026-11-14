@@ -7,6 +7,7 @@ import json
 from typing import Optional
 
 from domain import quizpay as quizpay_mod
+from domain.errors import fail
 from infra.db.base import EcoBase
 from infra.db.schema import new_quiz_order
 
@@ -125,19 +126,19 @@ class QuizMixin(EcoBase):
         with self._lock, self._conn:
             q = _quiz_row(self._conn.execute("SELECT * FROM quiz_questions WHERE id=?", (quiz_id,)).fetchone())
             if q is None or (q["expires"] is not None and now >= q["expires"]):
-                return False, "この問題は終了しました。"
+                return False, fail("quiz_ended")
             author = q["author_id"]
             if author:
                 if q["guild_id"] != self._g():
-                    return False, "この問題は、出題されたサーバーでだけ答えられます。"
+                    return False, fail("quiz_wrong_guild")
                 if user_id == author:
-                    return False, "自分が出した問題には答えられません。"
+                    return False, fail("quiz_self_answer")
             self._ensure(user_id)
             if self._conn.execute(
                 "SELECT 1 FROM quiz_answers WHERE question_id=? AND guild_id=? AND user_id=?",
                 (quiz_id, self._g(), user_id),
             ).fetchone():
-                return False, "この問題にはもう答えています。"
+                return False, fail("quiz_already_answered")
             correct = chosen == q["choices"][0]
             # 出題者がいる問題は、ゲームを3回以上遊んだ人だけが報酬をもらえる（正解にはなる）。遊んでいない人の回答は、出題者の報酬にも数えない
             eligible = not author or self._games_played(user_id) >= quizpay_mod.MIN_GAMES_FOR_REWARD
@@ -217,23 +218,17 @@ class QuizMixin(EcoBase):
         with self._lock, self._conn:
             self._ensure(author_id)
             if self._debt(author_id) > 0:
-                return False, f"借金が {self._debt(author_id):,}ペリカ 残っているので、出題できません。"
+                return False, fail("debt_blocks_quiz", debt=self._debt(author_id))
             mine = self._conn.execute(
                 "SELECT created, expires, settled FROM quiz_questions WHERE author_id=? AND guild_id=?",
                 (author_id, self._g()),
             ).fetchall()
             if sum(1 for r in mine if not r["settled"] and r["expires"] > now) >= quizpay_mod.OPEN_LIMIT:
-                return (
-                    False,
-                    f"同時に出せる問題は {quizpay_mod.OPEN_LIMIT} つまでです。`/クイズ 取り下げ` で下げてから出してください。",
-                )
+                return False, fail("quiz_open_limit", limit=quizpay_mod.OPEN_LIMIT)
             if sum(1 for r in mine if r["created"] > now - 86400) >= quizpay_mod.DAILY_LIMIT:
-                return False, f"出題は、24時間に {quizpay_mod.DAILY_LIMIT} 問までです。"
+                return False, fail("quiz_daily_limit", limit=quizpay_mod.DAILY_LIMIT)
             if self._balance(author_id) < reward:
-                return (
-                    False,
-                    f"残高が報酬（{reward:,}ペリカ）に足りません。出題するには、正解1人ぶんの報酬が残高に必要です。",
-                )
+                return False, fail("quiz_insufficient_balance", reward=reward)
             cur = self._conn.execute(
                 "INSERT INTO quiz_questions (question, choices, explanation, shown_order, reward, expires, created, author_id, guild_id, channel_id, creator_name, msg_right, msg_wrong) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (

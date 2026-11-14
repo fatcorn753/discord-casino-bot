@@ -25,6 +25,7 @@ from cogs.p2p.embeds import (  # noqa: F401
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
 from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
+from cogs.shared.messages import format_failure
 from domain import approval, p2p
 from domain import shop as shop_mod
 from infra import catalogs, logthrottle
@@ -150,7 +151,9 @@ class SellModal(discord.ui.Modal):
         eco = self.view.cog.eco_of(interaction)
         ok, result = eco.p2p_list(interaction.user.id, kind, ref, qty or 1, self.mode, price, hours)
         if not ok:
-            await interaction.response.send_message(embed=ui.error_embed("出品できません", result), ephemeral=True)
+            await interaction.response.send_message(
+                embed=ui.error_embed("出品できません", format_failure(result)), ephemeral=True
+            )
             return
         row = eco.p2p_get(result)
         assert row is not None
@@ -256,7 +259,9 @@ class MineView(ui.OwnerView):
         listing_id = int(ui.selected_values(interaction)[0])
         ok, why = eco.p2p_cancel(self.user_id, listing_id)
         if not ok:
-            await interaction.response.send_message(embed=ui.error_embed("取り消せません", why), ephemeral=True)
+            await interaction.response.send_message(
+                embed=ui.error_embed("取り消せません", format_failure(why)), ephemeral=True
+            )
             return
         self.stop()
         await self.cog.refresh_post(getattr(interaction, "guild", None), listing_id)
@@ -355,7 +360,7 @@ class P2PCog(commands.Cog):
                 return
             done, result = eco.p2p_buy(uid, listing_id)
             if not done:
-                await reply(embed=ui.error_embed("買えませんでした", result), ephemeral=True)
+                await reply(embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True)
                 return
             await reply(
                 embed=ui.ok_embed(
@@ -390,7 +395,7 @@ class P2PCog(commands.Cog):
                 return
             done, result = eco.p2p_bid(uid, listing_id, amount)
             if not done:
-                await reply(embed=ui.error_embed("入札できませんでした", result), ephemeral=True)
+                await reply(embed=ui.error_embed("入札できませんでした", format_failure(result)), ephemeral=True)
                 return
             await reply(
                 embed=ui.ok_embed(

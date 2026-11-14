@@ -94,14 +94,14 @@ def test_buy_rules(eco):
     assert not eco.option_buy(U, "call", "cs", INITIAL_BALANCE + 1)[0]  # 残高不足
     with eco._lock, eco._conn:
         eco._conn.execute("UPDATE users SET debt=100 WHERE user_id=?", (U,))
-    assert "借金" in eco.option_buy(U, "call", "cs", 1_000)[1]
+    assert eco.option_buy(U, "call", "cs", 1_000)[1].code == "debt_blocks_buy"
 
 
 def test_open_premium_cap(eco):
     eco.credit(U, 100_000, "テスト")
     assert eco.option_buy(U, "call", "cs", 15_000)[0]
     ok, why = eco.option_buy(U, "put", "cs", 10_000)
-    assert not ok and f"{opt.MAX_OPEN_PREMIUM:,}" in why
+    assert not ok and why.code == "option_max_open_premium" and why.params["max_open"] == opt.MAX_OPEN_PREMIUM
 
 
 # ----------------------------- 満期の決済 ----------------------------- #
@@ -279,7 +279,7 @@ def test_target_validation_and_writing_with_a_target(eco):
     eco.credit(U, 100_000, "テスト")
     for bad in (0.0, -0.01, 0.51, 1.0):
         ok, why = eco.option_buy(U, opt.CALL, "cs", 1_000, 1.0, strike_pct=bad)
-        assert not ok and "目標割合" in why
+        assert not ok and why.code == "option_target_pct_range"
     eco.credit(A, 50_000, "テスト")
     eco.bank_deposit(A, 50_000, 1.0)
     ok, res = eco.option_write(U, opt.CALL, "cs", 5_000, 1.0, strike_pct=0.08)

@@ -151,7 +151,18 @@ def correlation_table(hist_by_symbol: dict[str, list]) -> str:
 def event_lines(events_rows: list, now: float) -> str:
     """市場イベント（ボラティリティ予告）。なければ空文字。"""
     ev = market_events.current(events_rows, now)
-    return market_events.event_text(ev, now) if ev else ""
+    if not ev:
+        return ""
+    sym = market.BY_KEY[ev["symbol"]]
+    if market_events.phase(ev, now) == "active":
+        return (
+            f"⚡ **発生中**　{sym.emoji}{sym.name} の値動きが **{ev['factor']:g}倍**（<t:{int(ev['end_ts'])}:R> まで）。"
+            "上がるか下がるかは分かりませんが、大きく動きます。"
+        )
+    return (
+        f"📢 **予告**　{sym.emoji}{sym.name} の値動きが、<t:{int(ev['start_ts'])}:R> から {market_events.DURATION_MIN}分間、**{ev['factor']:g}倍**になります。"
+        "上がるか下がるかは分かりませんが、大きく動きます。オプションの値段には、もう織り込まれています。"
+    )
 
 
 def earnings_lines(ev: Optional[dict]) -> str:

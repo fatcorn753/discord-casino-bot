@@ -49,16 +49,16 @@ def test_interest_is_simple_per_day_with_rounding_up_and_a_term_cap():
 # ----------------------------- 提案 ----------------------------- #
 def test_offer_validation(eco):
     cases = [
-        ((A, A, 1000, 20, 10), "自分には"),
-        ((A, B, 99, 20, 10), "金額は"),
-        ((A, B, 1000, -1, 10), "日利は"),
-        ((A, B, 1000, 20, 0), "期間は"),
-        ((A, B, 1000, 20, 31), "期間は"),
-        ((A, B, INITIAL_BALANCE + 1, 20, 10), "残高が足りません"),
+        ((A, A, 1000, 20, 10), "loan_self_offer"),
+        ((A, B, 99, 20, 10), "loan_min_principal"),
+        ((A, B, 1000, -1, 10), "loan_min_rate"),
+        ((A, B, 1000, 20, 0), "loan_term_range"),
+        ((A, B, 1000, 20, 31), "loan_term_range"),
+        ((A, B, INITIAL_BALANCE + 1, 20, 10), "insufficient_balance"),
     ]
-    for args, fragment in cases:
+    for args, code in cases:
         ok, reason = eco.loan_offer(*args, 777, NOW)
-        assert not ok and fragment in reason, (args, reason)
+        assert not ok and reason.code == code, (args, reason)
     assert eco.loan_offer(A, B, 1000, 1000, 10, 777, NOW)[0]  # 日利100%まで出せる
 
 
@@ -66,7 +66,7 @@ def test_open_offer_limit(eco):
     for _ in range(loans.MAX_LENDER_OPEN):
         offer(eco, principal=100)
     ok, reason = eco.loan_offer(A, B, 100, 20, 10, 777, NOW)
-    assert not ok and "承諾待ち" in reason
+    assert not ok and reason.code == "loan_max_lender_open"
 
 
 # ----------------------------- 承諾 ----------------------------- #
@@ -82,19 +82,16 @@ def test_accept_moves_the_money_and_starts_the_clock(eco):
 
 def test_accept_guards(eco):
     lid = offer(eco)
-    assert eco.loan_accept(lid, C, NOW + 1) == (False, "この提案を承諾できるのは、借りる本人だけです。")
-    assert eco.loan_accept(lid, B, NOW + loans.OFFER_HOURS * 3600) == (False, "承諾の期限が過ぎました。")
+    assert eco.loan_accept(lid, C, NOW + 1)[1].code == "loan_accept_borrower_only"
+    assert eco.loan_accept(lid, B, NOW + loans.OFFER_HOURS * 3600)[1].code == "loan_offer_expired"
     eco.balance(B)
     eco._conn.execute("UPDATE users SET bankrupt_at=?, blacklist_until=NULL WHERE user_id=?", (NOW, B))
-    assert "ブラックリスト" in eco.loan_accept(lid, B, NOW + 1)[1]  # 破産者のブラックリスト中は、借りられない
+    assert eco.loan_accept(lid, B, NOW + 1)[1].code == "loan_blacklisted"  # 破産者のブラックリスト中は、借りられない
     eco._conn.execute("UPDATE users SET bankrupt_at=NULL WHERE user_id=?", (B,))
     eco._conn.execute("UPDATE users SET balance=10 WHERE user_id=?", (A,))  # 貸す側の残高が減った
-    assert "貸す側の残高" in eco.loan_accept(lid, B, NOW + 1)[1]
+    assert eco.loan_accept(lid, B, NOW + 1)[1].code == "loan_lender_insufficient_balance"
     eco._conn.execute("UPDATE users SET balance=?", (INITIAL_BALANCE,))
-    assert eco.loan_accept(lid, B, NOW + 1)[0] and eco.loan_accept(lid, B, NOW + 2) == (
-        False,
-        "この提案はもう終わっています。",
-    )  # 二重に承諾できない
+    assert eco.loan_accept(lid, B, NOW + 1)[0] and eco.loan_accept(lid, B, NOW + 2)[1].code == "loan_offer_ended"
 
 
 def test_there_is_no_cap_on_how_many_loans_one_can_borrow_but_overdue_blocks_new_ones(eco):
@@ -104,7 +101,7 @@ def test_there_is_no_cap_on_how_many_loans_one_can_borrow_but_overdue_blocks_new
     assert eco.loan_accept(lid, B, NOW + 5) == (True, "")
     eco._conn.execute("UPDATE loans SET status='overdue' WHERE borrower_id=? AND id=1", (B,))
     lid2 = offer(eco, lender=201, principal=100)
-    assert "延滞中" in eco.loan_accept(lid2, B, NOW + 5)[1]
+    assert eco.loan_accept(lid2, B, NOW + 5)[1].code == "loan_has_overdue"
 
 
 def test_principal_and_rate_have_no_upper_limit_but_the_lenders_balance_still_applies(eco):
@@ -116,8 +113,8 @@ def test_principal_and_rate_have_no_upper_limit_but_the_lenders_balance_still_ap
 
 def test_decline_and_cancel(eco):
     lid = offer(eco)
-    assert eco.loan_decline(lid, C) == (False, "断れるのは、借りる本人だけです。")
-    assert eco.loan_cancel(lid, B) == (False, "取り下げられるのは、貸す側だけです。")
+    assert eco.loan_decline(lid, C)[1].code == "loan_decline_borrower_only"
+    assert eco.loan_cancel(lid, B)[1].code == "loan_cancel_lender_only"
     assert eco.loan_cancel(lid, A) == (True, "") and eco.loan_get(lid)["status"] == "cancelled"
     lid2 = offer(eco)
     assert eco.loan_decline(lid2, B) == (True, "") and eco.loan_get(lid2)["status"] == "declined"
@@ -133,7 +130,7 @@ def test_repay_in_full_pays_daily_interest_and_closes(eco):
     assert (
         eco.balance(A) == INITIAL_BALANCE + 60 and eco.balance(B) == INITIAL_BALANCE - 60
     )  # 貸した人が利息ぶん増え、借りた人が減る
-    assert eco.loan_repay(lid, B, None, day3) == (False, "返す貸付が見つかりません。")
+    assert eco.loan_repay(lid, B, None, day3)[1].code == "loan_repay_not_found"
 
 
 def test_partial_repayment_goes_to_principal_first_and_early_repay_saves_interest(eco):
@@ -141,18 +138,19 @@ def test_partial_repayment_goes_to_principal_first_and_early_repay_saves_interes
     assert eco.loan_repay(lid, B, 400, NOW + 10)[0] and eco.loan_get(lid)["paid"] == 400
     loan = eco.loan_get(lid)
     assert eco.loan_remaining(loan, NOW + 10) == 1020 - 400  # 1日目: 元本1000 + 利息20 − 400
-    assert eco.loan_repay(lid, B, 5000, NOW + 10) == (False, "返す額が残りを超えています（残り 620ペリカ）。")
+    ok_over, why_over = eco.loan_repay(lid, B, 5000, NOW + 10)
+    assert not ok_over and why_over.code == "loan_repay_exceeds_remaining" and why_over.params["remaining"] == 620
     assert eco.loan_repay(lid, B, 620, NOW + 10)[0] and eco.loan_get(lid)["status"] == "repaid"
     assert eco.balance(B) == INITIAL_BALANCE + 1000 - 1020
 
 
 def test_repay_guards(eco):
     lid = active(eco)
-    assert eco.loan_repay(lid, C, None, NOW + 5) == (False, "返せるのは、借りた本人だけです。")
+    assert eco.loan_repay(lid, C, None, NOW + 5)[1].code == "loan_repay_borrower_only"
     eco._conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (B,))
-    assert "残高がありません" in eco.loan_repay(lid, B, None, NOW + 5)[1]
+    assert eco.loan_repay(lid, B, None, NOW + 5)[1].code == "repay_no_cash"
     eco._conn.execute("UPDATE users SET balance=100 WHERE user_id=?", (B,))
-    assert "残高が足りません" in eco.loan_repay(lid, B, 500, NOW + 5)[1]
+    assert eco.loan_repay(lid, B, 500, NOW + 5)[1].code == "insufficient_balance"
     ok, paid = eco.loan_repay(lid, B, None, NOW + 5)  # 省略なら、残高の範囲で
     assert ok and paid == 100 and eco.loan_get(lid)["status"] == "active"
 
@@ -423,34 +421,34 @@ def test_request_then_first_lender_gets_it_and_money_moves(eco):
     assert loan["status"] == "active" and loan["lender_id"] == A and loan["due"] == NOW + 5 + 10 * DAY
     assert eco.balance(A) == INITIAL_BALANCE - 1000 and eco.balance(B) == INITIAL_BALANCE + 1000
     ok, reason = eco.loan_lend(lid, C, NOW + 6)  # 早い者勝ち: 2人目は貸せない
-    assert not ok and "もう終わって" in reason
+    assert not ok and reason.code == "loan_request_ended"
 
 
 def test_request_rules(eco):
     lid = request(eco)
     ok, reason = eco.loan_request(B, 1000, 20, 10, 777, NOW)  # 同時に出せるのは1件
-    assert not ok and "1 件" in reason
-    assert eco.loan_lend(lid, B, NOW)[1] == "自分の募集には、貸せません。"
-    assert "期限" in eco.loan_lend(lid, A, NOW + loans.OFFER_HOURS * 3600)[1]
+    assert not ok and reason.code == "loan_max_borrower_open"
+    assert eco.loan_lend(lid, B, NOW)[1].code == "loan_self_lend"
+    assert eco.loan_lend(lid, A, NOW + loans.OFFER_HOURS * 3600)[1].code == "loan_request_expired"
     ok, reason = eco.loan_request(C, 50, 20, 10, 777, NOW)
-    assert not ok and "以上" in reason
+    assert not ok and reason.code == "loan_min_principal"
     ok, reason = eco.loan_request(C, 1000, 20, 99, 777, NOW)
-    assert not ok and "期間" in reason
+    assert not ok and reason.code == "loan_term_range"
 
 
 def test_lender_needs_balance_and_borrower_state_is_rechecked(eco):
     lid = request(eco, principal=INITIAL_BALANCE + 1)
-    assert "残高が足りません" in eco.loan_lend(lid, A, NOW)[1]
+    assert eco.loan_lend(lid, A, NOW)[1].code == "insufficient_balance"
     lid2 = request(eco, borrower=C)
     eco._conn.execute("UPDATE users SET bankrupt_at=?, blacklist_until=? WHERE user_id=?", (NOW, time.time() + DAY, C))
     ok, reason = eco.loan_lend(lid2, A, NOW + 1)  # 募集のあとで破産者になった
-    assert not ok and "借りられない状態" in reason
+    assert not ok and reason.code == "loan_borrower_blocked"
     assert eco.balance(A) == INITIAL_BALANCE  # お金は動いていない
 
 
 def test_request_cancel_expire_and_borrower_block(eco):
     lid = request(eco)
-    assert eco.loan_cancel(lid, A) == (False, "取り下げられるのは、募集を出した人だけです。")
+    assert eco.loan_cancel(lid, A)[1].code == "loan_cancel_requester_only"
     assert eco.loan_cancel(lid, B) == (True, "")
     assert eco.loan_get(lid)["status"] == "cancelled"
     lid = request(eco)
@@ -458,7 +456,7 @@ def test_request_cancel_expire_and_borrower_block(eco):
     active(eco, lender=A, borrower=C)
     eco._conn.execute("UPDATE loans SET status='overdue' WHERE borrower_id=?", (C,))
     ok, reason = eco.loan_request(C, 1000, 20, 10, 777, NOW)
-    assert not ok and "延滞中" in reason
+    assert not ok and reason.code == "loan_has_overdue"
 
 
 def test_credit_info_counts_history_and_hides_assets(eco):

@@ -9,6 +9,7 @@ import discord
 
 from cogs.shared import ui
 from cogs.shared.confirm import confirm_action
+from cogs.shared.messages import format_failure
 from domain import teiai
 from infra import catalogs
 
@@ -53,7 +54,9 @@ async def run_escape(interaction: discord.Interaction, eco, after_success) -> No
         return
     done, result = eco.escape_attempt(uid)
     if not done:
-        return await interaction.followup.send(embed=ui.error_embed("逃亡できません", result), ephemeral=True)
+        return await interaction.followup.send(
+            embed=ui.error_embed("逃亡できません", format_failure(result)), ephemeral=True
+        )
     name = interaction.user.display_name
     title = f"🚢 {name} が、海外逃亡を試みる！！"
     message = await interaction.followup.send(

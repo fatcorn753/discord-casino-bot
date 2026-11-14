@@ -12,6 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs.shared import ui
+from cogs.shared.messages import format_failure
 from domain import labor as lab
 from domain import relics, shop
 
@@ -333,7 +334,8 @@ class LaborView(discord.ui.View):
     async def _drink(self, interaction: discord.Interaction):
         ok, reason = self.eco().labor_drink(self.user_id, time.time(), today(self.bot))
         await self._show(
-            interaction, f"🥤 ぐいっと飲んだ。疲労が {lab.DRINK_RECOVER:.0f} 回復した！" if ok else f"⚠ {reason}"
+            interaction,
+            f"🥤 ぐいっと飲んだ。疲労が {lab.DRINK_RECOVER:.0f} 回復した！" if ok else f"⚠ {format_failure(reason)}",
         )
 
     async def _collect(self, interaction: discord.Interaction):
@@ -370,7 +372,9 @@ class LaborView(discord.ui.View):
             ok, reason = self.eco().labor_hire(self.user_id, kind, time.time(), today(self.bot))
             await self._show(
                 interaction,
-                f"{lab.WORKER_MARK[kind]} **{lab.WORKER_NAME[kind]}** を雇った！" if ok else f"⚠ {reason}",
+                f"{lab.WORKER_MARK[kind]} **{lab.WORKER_NAME[kind]}** を雇った！"
+                if ok
+                else f"⚠ {format_failure(reason)}",
             )
 
         return callback
@@ -378,7 +382,9 @@ class LaborView(discord.ui.View):
     async def _dismiss(self, interaction: discord.Interaction):
         kind = ui.selected_values(interaction)[0]
         ok, reason = self.eco().labor_dismiss(self.user_id, kind, time.time(), today(self.bot))
-        await self._show(interaction, f"**{lab.WORKER_NAME[kind]}** を解雇した。" if ok else f"⚠ {reason}")
+        await self._show(
+            interaction, f"**{lab.WORKER_NAME[kind]}** を解雇した。" if ok else f"⚠ {format_failure(reason)}"
+        )
 
     async def _renew(self, interaction: discord.Interaction):
         want = not self.state["renew"]
@@ -392,12 +398,14 @@ class LaborView(discord.ui.View):
 
     async def _dorm(self, interaction: discord.Interaction):
         ok, reason = self.eco().labor_dorm(self.user_id, time.time(), today(self.bot))
-        await self._show(interaction, "🏠 寮を強化した！　雇える人数が増えた。" if ok else f"⚠ {reason}")
+        await self._show(
+            interaction, "🏠 寮を強化した！　雇える人数が増えた。" if ok else f"⚠ {format_failure(reason)}"
+        )
 
     async def _merge(self, interaction: discord.Interaction):
         ok, result = self.eco().relic_merge(self.user_id, ui.selected_values(interaction)[0])
         if not ok:
-            return await self._show(interaction, f"⚠ {result}")
+            return await self._show(interaction, f"⚠ {format_failure(result)}")
         item = shop.BY_ID[result]
         await self._show(interaction, f"🧬 合体した！　**{item.mark}{item.name}** ができた。{relics.buff_text(result)}")
 
@@ -408,7 +416,7 @@ class LaborView(discord.ui.View):
                 interaction,
                 f"{lab.TOOL_MARK[tool]} **{lab.TOOL_NAME[tool]}** を強化した！（{lab.TOOL_EFFECT[tool]}）"
                 if ok
-                else f"⚠ {reason}",
+                else f"⚠ {format_failure(reason)}",
             )
 
         return callback

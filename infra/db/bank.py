@@ -18,6 +18,7 @@ import time
 from typing import Optional
 
 from domain import teiai
+from domain.errors import fail
 from infra.db.base import EcoBase
 
 
@@ -190,11 +191,11 @@ class BankMixin(EcoBase):
         with self._lock, self._conn:
             self._ensure(user_id)
             if self.status(user_id, now) != teiai.KATAGI:
-                return False, "帝愛に預けられるのは、🟢 カタギだけです（借金か延滞がある人、破産者は預けられません）。"
+                return False, fail("bank_katagi_only")
             if amount < teiai.BANK_MIN_DEPOSIT:
-                return False, f"預金は {teiai.BANK_MIN_DEPOSIT:,}ペリカ 以上からです。"
+                return False, fail("bank_min_deposit", min_deposit=teiai.BANK_MIN_DEPOSIT)
             if self._balance(user_id) < amount:
-                return False, f"残高が足りません（いまの残高: {self._balance(user_id):,}ペリカ）。"
+                return False, fail("insufficient_balance", balance=self._balance(user_id))
             state = self._bank_sync(now)
             self._apply(user_id, -amount, "帝愛への預金")
             self._conn.execute(
@@ -213,19 +214,16 @@ class BankMixin(EcoBase):
             self._ensure(user_id)
             have = self.deposit_of(user_id)
             if have <= 0:
-                return False, "預金がありません。"
+                return False, fail("bank_no_deposit")
             want = have if amount is None else amount
             if want <= 0 or want > have:
-                return False, f"引き出せるのは 1〜{have:,}ペリカ です（いまの預金）。"
+                return False, fail("bank_withdraw_range", max_amount=have)
             state = self._bank_sync(now)
             available = int(state["cash"] - self._bank_locks(now))
             if available <= 0:
-                return False, "🚨 帝愛は支払停止中です（預金封鎖）。手元の現金が、引当金のロックで尽きています。"
+                return False, fail("bank_frozen")
             if want > available:
-                return (
-                    False,
-                    f"いま引き出せるのは {available:,}ペリカ までです（帝愛の利用可能現金）。残りは、現金が戻ってからです。",
-                )
+                return False, fail("bank_available_limit", available=available)
             self._conn.execute(
                 "UPDATE teiai_deposits SET amount=amount-? WHERE guild_id=? AND user_id=?", (want, self._g(), user_id)
             )
@@ -264,13 +262,10 @@ class BankMixin(EcoBase):
                 "UPDATE users SET grace_until=? WHERE guild_id=? AND user_id=?", (until, self._g(), user_id)
             )
             self.p2p_pull_back(user_id, now)  # 取引の出品・入札は、取り下げる（資産隠しの防止）
-            self._note(
-                user_id,
-                f"⚠️ 借金が {teiai.GRACE_DEBT:,}ペリカ に達し、**破産猶予**に入りました。<t:{int(until)}:R> までに借金を {teiai.GRACE_DEBT:,}ペリカ 未満へ戻せなければ、強制破産です。",
-            )
+            self._note(user_id, "grace_entered", grace_debt=teiai.GRACE_DEBT, until=until)
         elif row["debt"] < teiai.GRACE_DEBT and row["grace_until"] is not None:
             self._conn.execute("UPDATE users SET grace_until=NULL WHERE guild_id=? AND user_id=?", (self._g(), user_id))
-            self._note(user_id, "😮‍💨 借金が減り、破産猶予から抜けました。")
+            self._note(user_id, "grace_exited")
 
     def grace_until(self, user_id: int) -> Optional[float]:
         with self._lock:
@@ -335,20 +330,20 @@ class BankMixin(EcoBase):
         with self._lock, self._conn:
             self._ensure(buyer_id)
             if stake < teiai.CDS_MIN_STAKE:
-                return False, f"掛け金は {teiai.CDS_MIN_STAKE:,}ペリカ 以上からです。"
+                return False, fail("cds_min_stake", min_stake=teiai.CDS_MIN_STAKE)
             if (
                 self._conn.execute(
                     "SELECT 1 FROM users WHERE guild_id=? AND user_id=?", (self._g(), target_id)
                 ).fetchone()
                 is None
             ):
-                return False, "その人は、まだこのサーバーで遊んでいません。"
+                return False, fail("user_not_registered")
             if self._balance(buyer_id) < stake:
-                return False, f"残高が足りません（いまの残高: {self._balance(buyer_id):,}ペリカ）。"
+                return False, fail("insufficient_balance", balance=self._balance(buyer_id))
             if self.grace_until(target_id) is not None:
-                return False, "その人は、すでに破産猶予に入っているので、掛けられません。"
+                return False, fail("cds_target_in_grace")
             if self.status(target_id, now) == teiai.BANKRUPT:
-                return False, "その人は、破産者なので、掛けられません。"
+                return False, fail("cds_target_bankrupt")
             odds = self.cds_quote(target_id, now)["odds"]
             if buyer_id == target_id:  # 自分への保証は、積める額に上限がある
                 have = self._conn.execute(
@@ -358,10 +353,11 @@ class BankMixin(EcoBase):
                 ).fetchone()[0]
                 if have + stake * odds > teiai.CDS_SELF_CAP:
                     room = max(0, int((teiai.CDS_SELF_CAP - have) / odds))
-                    return (
-                        False,
-                        f"自分への CDS は、配当の見込みの合計が {teiai.CDS_SELF_CAP:,}ペリカ までです"
-                        f"（いま {int(have):,}ペリカ分。あと掛けられるのは {room:,}ペリカ）。",
+                    return False, fail(
+                        "cds_self_cap",
+                        cap=teiai.CDS_SELF_CAP,
+                        have=int(have),
+                        room=room,
                     )
             self._apply(buyer_id, -stake, f"CDS の掛け金（対象 {target_id}・{odds}倍）")
             self._bank_income(stake, teiai.PREMIUM_YIELD_SHARE, now)
@@ -410,7 +406,7 @@ class BankMixin(EcoBase):
             pay = self._bank_pay(min(shortfall - covered, int(r["stake"] * r["odds"])), now)
             self._conn.execute("UPDATE cds SET status='paid', paid=? WHERE id=?", (pay, r["id"]))
             covered += pay
-            self._note(user_id, f"🛡️ 自分への CDS が、借金 {pay:,}ペリカ を肩代わりしました（帝愛が払います）。")
+            self._note(user_id, "cds_self_covered", pay=pay)
         return covered
 
     def _cds_settle_default(self, target_id: int, debt_before: int, now: Optional[float] = None) -> int:
@@ -431,9 +427,7 @@ class BankMixin(EcoBase):
             if pay > 0:
                 self._ensure(buyer)
                 self._apply(buyer, pay, f"CDS の配当（対象 {target_id} が強制破産）", income=pay)
-                self._note(
-                    buyer, f"💀 CDS が的中しました。<@{target_id}> の強制破産で、{pay:,}ペリカ を受け取りました。"
-                )
+                self._note(buyer, "cds_default_payout", target_id=target_id, pay=pay)
             self._conn.execute("UPDATE cds SET status='paid', paid=? WHERE id=?", (pay, cid))
             total_paid += pay
         self._cds_void(target_id)

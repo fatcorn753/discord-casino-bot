@@ -89,7 +89,7 @@ def test_listing_validates_ownership_price_range_kind_and_the_active_limit(eco):
     for _ in range(p2p.MAX_ACTIVE):
         assert eco.p2p_list(S, "item", shop.INSURANCE, 1, "fixed", 2_000, None, NOW)[0]
     ok, why = eco.p2p_list(S, "item", shop.INSURANCE, 1, "fixed", 2_000, None, NOW)
-    assert not ok and f"{p2p.MAX_ACTIVE} 件" in why
+    assert not ok and why.code == "p2p_max_active" and why.params["max_active"] == p2p.MAX_ACTIVE
 
 
 def test_listing_an_equipped_cosmetic_unequips_it(eco):
@@ -116,11 +116,11 @@ def test_buying_pays_the_seller_minus_the_fee_and_moves_the_item(eco):
 def test_buy_checks_self_balance_debt_ownership_and_expiry(eco):
     give(eco, S, CARD)
     _, lid = eco.p2p_list(S, "item", CARD, 1, "fixed", shop.BY_ID[CARD].price, None, NOW)
-    assert "自分の出品" in eco.p2p_buy(S, lid, NOW + 1)[1]
+    assert eco.p2p_buy(S, lid, NOW + 1)[1].code == "p2p_self_buy"
     give(eco, B, CARD)
-    assert "すでに持っています" in eco.p2p_buy(B, lid, NOW + 1)[1]  # 見た目の品は、1つだけ
+    assert eco.p2p_buy(B, lid, NOW + 1)[1].code == "already_owned"  # 見た目の品は、1つだけ
     eco._conn.execute("UPDATE users SET balance=10 WHERE user_id=?", (C,))
-    assert "足りません" in eco.p2p_buy(C, lid, NOW + 1)[1] and eco.inventory(S).get(CARD) is None
+    assert eco.p2p_buy(C, lid, NOW + 1)[1].code == "insufficient_balance_need" and eco.inventory(S).get(CARD) is None
     assert not eco.p2p_buy(C, lid, NOW + p2p.FIXED_DAYS * 86400 + 1)[0]  # 期限切れ
 
 
@@ -130,7 +130,7 @@ def test_a_debtor_cannot_buy(eco):
     with eco._lock, eco._conn:
         eco._conn.execute("UPDATE users SET debt=5000 WHERE user_id=?", (B,))
     ok, why = eco.p2p_buy(B, lid, NOW + 1)
-    assert not ok and "カタギ" in why
+    assert not ok and why.code == "p2p_katagi_only"
 
 
 # ----------------------------- 馬の売買 ----------------------------- #
@@ -150,14 +150,14 @@ def test_a_horse_scheduled_for_a_race_cannot_be_listed_and_listing_does_not_free
     rid = eco.race_create_special(NOW, 10, 10)
     assert eco.race_register(S, hid, rid, NOW + 1)[0]
     ok, why = eco.p2p_list(S, "horse", str(hid), 1, "fixed", 40_000, None, NOW + 2)
-    assert not ok and "出走予定" in why
+    assert not ok and why.code == "p2p_horse_in_race"
     eco.race_withdraw(S, hid, rid, NOW + 3)
     others = [horse(eco, S, f"馬{i}") for i in range(horse_mod.MAX_HORSES - 1)]
     assert len(others) == horse_mod.MAX_HORSES - 1
     assert eco.p2p_list(S, "horse", str(hid), 1, "fixed", 40_000, None, NOW + 4)[0]
     give(eco, S, shop.HORSE_VOUCHER)
     ok, why = eco.horse_create(S, "4頭目", "栗毛", "🟥")  # 出品中の馬も数えるので、3頭を超えて持てない
-    assert not ok and "3 頭" in why
+    assert not ok and why.code == "horse_max_owned"
 
 
 def test_cancelling_a_horse_listing_returns_the_horse(eco):
@@ -172,7 +172,7 @@ def test_buyer_with_three_horses_cannot_buy_another(eco):
     hid = horse(eco, S)
     _, lid = eco.p2p_list(S, "horse", str(hid), 1, "fixed", 40_000, None, NOW)
     ok, why = eco.p2p_buy(B, lid, NOW + 1)
-    assert not ok and "3 頭" in why
+    assert not ok and why.code == "p2p_horse_limit"
 
 
 # ----------------------------- 競り ----------------------------- #
@@ -180,15 +180,17 @@ def test_bidding_escrows_money_refunds_the_outbid_and_extends_near_the_end(eco):
     give(eco, S, CARROT, 3)
     _, lid = eco.p2p_list(S, "item", CARROT, 3, "auction", 1_000, 1, NOW)
     b0, c0 = eco.balance(B), eco.balance(C)
-    assert "1,000" in eco.p2p_bid(B, lid, 900, NOW + 10)[1]  # 開始価格より低い
+    bid1 = eco.p2p_bid(B, lid, 900, NOW + 10)[1]
+    assert bid1.code == "p2p_bid_min" and bid1.params["need"] == 1_000  # 開始価格より低い
     ok, end = eco.p2p_bid(B, lid, 1_000, NOW + 10)
     assert ok and eco.balance(B) == b0 - 1_000  # お金は預かられる
-    assert "最高入札者" in eco.p2p_bid(B, lid, 1_500, NOW + 11)[1]
-    assert "1,100" in eco.p2p_bid(C, lid, 1_050, NOW + 12)[1]  # 5%（最低100）以上
+    assert eco.p2p_bid(B, lid, 1_500, NOW + 11)[1].code == "p2p_already_highest_bidder"
+    bid2 = eco.p2p_bid(C, lid, 1_050, NOW + 12)[1]
+    assert bid2.code == "p2p_bid_min" and bid2.params["need"] == 1_100  # 5%（最低100）以上
     ok, _ = eco.p2p_bid(C, lid, 1_200, NOW + 3_500)  # 締切（NOW+3600）の5分前を切ってから
     assert ok and eco.balance(B) == b0 and eco.balance(C) == c0 - 1_200  # 抜かれた人には、返る
     assert eco.p2p_get(lid)["end_at"] == NOW + 3_500 + p2p.SNIPE_SECONDS  # 締切が延びた
-    assert "競り" in eco.p2p_buy(B, lid, NOW + 3_501)[1]  # 競りは「買う」では買えない
+    assert eco.p2p_buy(B, lid, NOW + 3_501)[1].code == "p2p_is_auction"  # 競りは「買う」では買えない
     assert not eco.p2p_cancel(S, lid, NOW + 3_502)[0]  # 入札が入ったら、取り消せない
 
 
@@ -205,7 +207,9 @@ def test_auction_settles_to_the_highest_bidder_and_pays_the_seller_minus_the_fee
     done = eco.p2p_get(lid)
     assert done["status"] == "sold" and done["buyer_id"] == C and done["sold_price"] == 1_300
     assert eco.p2p_settle(NOW + 7_000) == []  # 二重に精算しない
-    assert any("落札" in n for n in eco.take_notices(C)) and any("売れました" in n for n in eco.take_notices(S))
+    assert any(n.code == "p2p_won" for n in eco.take_notices(C)) and any(
+        n.code == "p2p_sold" for n in eco.take_notices(S)
+    )
 
 
 def test_unsold_listings_return_to_the_seller(eco):
@@ -241,7 +245,7 @@ def test_same_pair_trades_are_capped_per_day_so_the_market_is_not_a_transfer_loo
         assert ok
         ok, why = eco.p2p_buy(B, lid, NOW + bought + 1)
         if not ok:
-            assert "24時間" in why and f"{p2p.PAIR_DAILY_LIMIT:,}" in why
+            assert why.code == "p2p_pair_limit" and why.params["limit"] == p2p.PAIR_DAILY_LIMIT
             break
         total += price
         bought += 1
@@ -657,19 +661,17 @@ def _into_grace(eco, uid):
 
 
 def test_a_user_in_grace_cannot_list_buy_or_bid(eco):
-    from infra.db import p2p as eco_p2p
-
     give(eco, S, CARROT, 2)
     _, fixed = eco.p2p_list(S, "item", CARROT, 1, "fixed", 1_000, None, NOW)
     _, auction = eco.p2p_list(S, "item", CARROT, 1, "auction", 1_000, 6, NOW)
     _into_grace(eco, B)
     give(eco, B, CARROT)
     ok, why = eco.p2p_list(B, "item", CARROT, 1, "fixed", 1_000, None, NOW)
-    assert not ok and why == eco_p2p.GRACE_LOCK_TEXT and eco.inventory(B)[CARROT] == 1  # 出品できない（品は、動かない）
+    assert not ok and why.code == "grace_lock" and eco.inventory(B)[CARROT] == 1  # 出品できない（品は、動かない）
     ok, why = eco.p2p_buy(B, fixed, NOW + 1)
-    assert not ok and why == eco_p2p.GRACE_LOCK_TEXT
+    assert not ok and why.code == "grace_lock"
     ok, why = eco.p2p_bid(B, auction, 1_000, NOW + 1)
-    assert not ok and why == eco_p2p.GRACE_LOCK_TEXT and eco.p2p_get(auction)["bid"] == 0
+    assert not ok and why.code == "grace_lock" and eco.p2p_get(auction)["bid"] == 0
 
 
 def test_entering_grace_pulls_back_the_listings_and_refunds_the_top_bidder(eco):
@@ -685,7 +687,7 @@ def test_entering_grace_pulls_back_the_listings_and_refunds_the_top_bidder(eco):
     assert eco.inventory(B)[CARROT] == 2 and [h["id"] for h in eco.horse_list(B)] == [horse_id]  # 持ち物へ戻った
     assert all(eco.p2p_get(i)["status"] == "cancelled" for i in (fixed, auction, mount))
     assert eco.balance(C) == c0  # 入札のお金は、返る
-    assert any("中止" in n for n in eco.take_notices(C))
+    assert any(n.code == "p2p_seller_pulled_back" for n in eco.take_notices(C))
     assert not eco.p2p_cancel(B, fixed, NOW + 10)[0]  # もう取り消せるものはない
 
 

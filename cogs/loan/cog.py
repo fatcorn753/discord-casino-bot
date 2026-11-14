@@ -19,6 +19,7 @@ from cogs.shared import ui
 from cogs.shared.amount import balance_choices
 from cogs.shared.announce import announce_channel
 from cogs.shared.confirm import confirm_action
+from cogs.shared.messages import format_failure
 from domain import approval, loans, teiai
 from domain.duration import format_minutes
 from infra import logthrottle
@@ -149,7 +150,9 @@ async def handle_lend(bot, interaction: discord.Interaction, loan_id: int) -> No
         return
     ok, reason = eco.loan_lend(loan_id, interaction.user.id, time.time())
     if not ok:
-        return await interaction.followup.send(embed=ui.error_embed("貸せませんでした", reason), ephemeral=True)
+        return await interaction.followup.send(
+            embed=ui.error_embed("貸せませんでした", format_failure(reason)), ephemeral=True
+        )
     loan = eco.loan_get(loan_id)
     embed = state_embed(
         loan,
@@ -186,7 +189,9 @@ async def handle_button(bot, interaction: discord.Interaction, act: str, loan_id
     else:
         ok, reason = eco.loan_cancel(loan_id, interaction.user.id)
     if not ok:
-        await interaction.response.send_message(embed=ui.error_embed("できません", reason), ephemeral=True)
+        await interaction.response.send_message(
+            embed=ui.error_embed("できません", format_failure(reason)), ephemeral=True
+        )
         return
     loan = eco.loan_get(loan_id)
     if act == "accept":
@@ -247,7 +252,7 @@ class LoanCog(commands.Cog):
         )
         if not ok:
             return await interaction.response.send_message(
-                embed=ui.error_embed("提案できません", result), ephemeral=True
+                embed=ui.error_embed("提案できません", format_failure(result)), ephemeral=True
             )
         loan = eco.loan_get(result)
         await interaction.response.send_message(
@@ -283,7 +288,7 @@ class LoanCog(commands.Cog):
         )
         if not ok:
             return await interaction.response.send_message(
-                embed=ui.error_embed("募集できません", result), ephemeral=True
+                embed=ui.error_embed("募集できません", format_failure(result)), ephemeral=True
             )
         loan = eco.loan_get(result)
         await interaction.response.send_message(
@@ -310,7 +315,9 @@ class LoanCog(commands.Cog):
     ):
         ok, result = self.g(interaction).loan_repay(loan_id, interaction.user.id, amount, time.time())
         if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("返せません", result), ephemeral=True)
+            return await interaction.response.send_message(
+                embed=ui.error_embed("返せません", format_failure(result)), ephemeral=True
+            )
         loan = self.g(interaction).loan_get(loan_id)
         left = self.g(interaction).loan_remaining(loan, time.time())
         note = (

@@ -541,7 +541,7 @@ def test_short_validation(eco):
     assert not a.short_close(U, None, 100.0).ok  # 建てていない
     a.balance(U)
     a._conn.execute("UPDATE users SET debt=100 WHERE user_id=?", (U,))
-    assert "借金" in a.short_open(U, 10_000, 100.0, 1).reason  # 借金中は建てられない
+    assert a.short_open(U, 10_000, 100.0, 1).reason.code == "margin_debt_blocks"  # 借金中は建てられない
 
 
 def test_losscut_closes_accounts_whose_maintenance_ratio_falls_below_100_percent(eco, monkeypatch):

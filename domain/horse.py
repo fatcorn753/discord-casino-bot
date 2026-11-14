@@ -16,6 +16,7 @@ import random
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from domain.errors import fail
 from domain.ports import get_catalogs
 
 _CFG = get_catalogs().horse()
@@ -149,27 +150,27 @@ def retire_value(races: int, wins: int, places: int) -> int:
 
 
 def add_points(stats: dict, first: str, second: str) -> tuple:
-    """金にんじん1本ぶん、first と second に GOLD_CARROT_POINTS 点ずつ足す（同じステータスでもよい）。(成功か, 理由か新しいステータス)。"""
+    """金にんじん1本ぶん、first と second に GOLD_CARROT_POINTS 点ずつ足す（同じステータスでもよい）。(成功か, Failure か新しいステータス)。"""
     if first not in STAT_KEYS or second not in STAT_KEYS:
-        return False, "増やすステータスを選んでください。"
+        return False, fail("horse_select_stat_to_add")
     new = dict(stats)
     for key in (first, second):
         new[key] += GOLD_CARROT_POINTS
     for key in (first, second):
         if new[key] > STAT_MAX:
-            return False, f"{STAT_NAMES[key]} は、これ以上は増やせません（最高 {STAT_MAX}）。"
+            return False, fail("horse_stat_at_max", stat=key, max=STAT_MAX)
     return True, new
 
 
 def move_points(stats: dict, src: str, dst: str, carrots: int = 1) -> tuple:
-    """にんじん carrots 本ぶん、src から dst へポイントを動かす。(成功か, 理由か新しいステータス)。"""
+    """にんじん carrots 本ぶん、src から dst へポイントを動かす。(成功か, Failure か新しいステータス)。"""
     if src == dst or src not in STAT_KEYS or dst not in STAT_KEYS:
-        return False, "動かす元と先は、別のステータスを選んでください。"
+        return False, fail("horse_select_distinct_stats")
     pts = CARROT_POINTS * carrots
     if stats[src] - pts < STAT_MIN:
-        return False, f"{STAT_NAMES[src]} は、これ以上は減らせません（最低 {STAT_MIN}）。"
+        return False, fail("horse_stat_at_min", stat=src, min=STAT_MIN)
     if stats[dst] + pts > STAT_MAX:
-        return False, f"{STAT_NAMES[dst]} は、これ以上は増やせません（最高 {STAT_MAX}）。"
+        return False, fail("horse_stat_at_max", stat=dst, max=STAT_MAX)
     new = dict(stats)
     new[src] -= pts
     new[dst] += pts
@@ -467,12 +468,12 @@ BANNED_NAME_CHARS = set(_CFG.banned_name_chars)  # メンション・リンク�
 
 
 def check_name(name: str) -> tuple:
-    """馬の名前が使えるか。(使えるか, 整えた名前か理由)。メンション・リンク・装飾に使う文字は禁止。"""
+    """馬の名前が使えるか。(使えるか, 整えた名前か Failure)。メンション・リンク・装飾に使う文字は禁止。"""
     name = name.strip()
     if not name:
-        return False, "名前を入れてください。"
+        return False, fail("horse_name_empty")
     if len(name) > NAME_MAX:
-        return False, f"名前は {NAME_MAX} 文字までです。"
+        return False, fail("horse_name_too_long", max=NAME_MAX)
     if any(c in BANNED_NAME_CHARS for c in name) or "http" in name.lower():
-        return False, "名前に使えない文字（@ < > ` * _ ~ | # : / など）か、リンクが入っています。"
+        return False, fail("horse_name_invalid_chars")
     return True, name

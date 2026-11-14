@@ -49,9 +49,9 @@ def test_purchase_charges_and_adds_to_inventory(eco):
 def test_cannot_buy_unique_item_twice_or_without_money(eco):
     assert buy(eco, "title_rookie").ok
     again = buy(eco, "title_rookie")
-    assert not again.ok and "持って" in again.reason and eco.balance(1) == INITIAL_BALANCE - 2_000
+    assert not again.ok and again.reason.code == "already_owned" and eco.balance(1) == INITIAL_BALANCE - 2_000
     poor = buy(eco, "col_sunglasses")  # 100,000 は足りない
-    assert not poor.ok and "足りません" in poor.reason and eco.balance(1) == INITIAL_BALANCE - 2_000
+    assert not poor.ok and poor.reason.code == "insufficient_balance_need" and eco.balance(1) == INITIAL_BALANCE - 2_000
     assert "title_emperor" not in eco.inventory(1)  # 失敗したら持ち物も増えない
 
 
@@ -555,7 +555,7 @@ def test_auction_buy_rejects_missing_or_unaffordable(eco):
     eco.balance(2)
     eco._conn.execute("UPDATE users SET balance=100 WHERE user_id=2")
     res = eco.auction_buy(2, CARD)
-    assert not res.ok and "足りません" in res.reason  # 払えないときは、買えない
+    assert not res.ok and res.reason.code == "insufficient_balance_need"  # 払えないときは、買えない
 
 
 def test_auction_screen_and_buy_flow(cog, eco):
@@ -606,7 +606,7 @@ def test_buying_more_than_the_stock_is_refused_and_changes_nothing(eco):
     assert buy_at(eco, rule.max, T0).ok
     before = eco.balance(1)
     res = buy_at(eco, 1, T0)
-    assert not res.ok and "在庫が足りません" in res.reason and "補充" in res.reason
+    assert not res.ok and res.reason.code == "shop_out_of_stock" and res.reason.params["next_at"] is not None
     assert eco.balance(1) == before and eco.inventory(1)[DRINK] == rule.max
     res = buy_at(eco, rule.max + 1, T0 + 10 * 3600)  # 補充されて満タンでも、上限を超えては買えない
     assert not res.ok
@@ -628,7 +628,7 @@ def test_stock_refills_over_time_and_keeps_the_fraction(eco):
 def test_a_failed_purchase_does_not_use_up_the_stock(eco):
     eco.set_balance(1, 0, "テスト")
     res = buy_at(eco, 3, T0)  # ペリカが足りない
-    assert not res.ok and "足りません" in res.reason
+    assert not res.ok and res.reason.code == "insufficient_balance_need"
     assert eco.shop_stock(1, DRINK, T0)["stock"] == shop.STOCK_RULES[DRINK].max
 
 

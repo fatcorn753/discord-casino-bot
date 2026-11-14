@@ -4,7 +4,6 @@
 """
 
 import datetime
-from typing import Optional
 
 from domain.ports import get_catalogs
 
@@ -32,13 +31,3 @@ def week_label(week: str) -> str:
     start = datetime.date.fromisoformat(week)
     end = start + datetime.timedelta(days=6)
     return f"{start.month}/{start.day}〜{end.month}/{end.day}"
-
-
-def standings_lines(rows: list, viewer_id: Optional[int] = None) -> list:
-    """[(user_id, 損益, ゲーム数), ...]（順位順）から、表示の行を作る。"""
-    lines = []
-    for rank, (uid, net, plays) in enumerate(rows, 1):
-        mark = MEDALS.get(rank, f"`{rank:>2}`")
-        me = "　◀ あなた" if viewer_id == uid else ""
-        lines.append(f"{mark} <@{uid}>　**{net:+,}ペリカ**（{plays}戦）{me}")
-    return lines

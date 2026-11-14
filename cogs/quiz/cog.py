@@ -21,6 +21,7 @@ from discord.ext import commands, tasks
 
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
+from cogs.shared.messages import format_failure
 from domain import approval, quizpay
 from domain.duration import format_minutes, parse_duration
 from infra import catalogs, logthrottle
@@ -175,7 +176,9 @@ async def record_answer(bot, interaction: discord.Interaction, quiz_id: int, pos
     eco = bot.economy.for_guild(guild_id)
     ok, result = eco.quiz_answer(interaction.user.id, quiz_id, quiz["order"][pos], time.time())
     if not ok:
-        await interaction.response.send_message(embed=ui.error_embed("答えられません", result), ephemeral=True)
+        await interaction.response.send_message(
+            embed=ui.error_embed("答えられません", format_failure(result)), ephemeral=True
+        )
         return
     await interaction.response.send_message(
         embed=result_embed(result, eco.quiz_next(interaction.user.id, time.time())[1], quiz), ephemeral=True
@@ -247,7 +250,7 @@ class AnswerView(ui.OwnerView):
             if not ok:
                 self.stop()
                 return await interaction.response.edit_message(
-                    embed=ui.error_embed("答えられません", result), view=None
+                    embed=ui.error_embed("答えられません", format_failure(result)), view=None
                 )
             _, more = eco.quiz_next(self.user_id, time.time())
             self.stop()
@@ -394,7 +397,9 @@ class UserModal(QuizForm, title="クイズを出題"):
             form.msg_wrong,
         )
         if not ok:
-            await interaction.response.send_message(embed=ui.error_embed("出題できません", result), ephemeral=True)
+            await interaction.response.send_message(
+                embed=ui.error_embed("出題できません", format_failure(result)), ephemeral=True
+            )
             return
         await interaction.response.send_message(
             embed=public_embed(eco.quiz_get(result)),

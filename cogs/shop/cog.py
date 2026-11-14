@@ -13,6 +13,7 @@ from discord.ext import commands, tasks
 
 from cogs.shared import ui
 from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
+from cogs.shared.messages import format_failure, format_memo
 from cogs.shop.discord_ops import ShopError, apply_title_nick, nick_blocker, set_color_role
 from cogs.shop.embeds import (  # noqa: F401
     EFFECT_OF_ITEM,
@@ -253,7 +254,7 @@ class ShopCog(commands.Cog):
                 return
             res = eco.auction_buy_horse(uid, horse_id)
             if not res.ok:
-                return await reply(embed=ui.error_embed("買えませんでした", res.reason), ephemeral=True)
+                return await reply(embed=ui.error_embed("買えませんでした", format_failure(res.reason)), ephemeral=True)
             await reply(
                 embed=ui.ok_embed(
                     "競売で競走馬を買いました",
@@ -293,7 +294,7 @@ class ShopCog(commands.Cog):
                 return
             res = self.g(interaction).auction_buy(uid, item_id, qty)
             if not res.ok:
-                return await reply(embed=ui.error_embed("買えませんでした", res.reason), ephemeral=True)
+                return await reply(embed=ui.error_embed("買えませんでした", format_failure(res.reason)), ephemeral=True)
             hint = "「🎒 持ち物」の画面で身につけましょう。" if it.unique else "「🎒 持ち物」の画面で使えます。"
             await reply(
                 embed=ui.ok_embed(
@@ -370,7 +371,7 @@ class ShopCog(commands.Cog):
                 return
             res = self.g(interaction).purchase(uid, it.id, shop.label(it), it.price, it.unique, qty)
             if not res.ok:
-                return await reply(embed=ui.error_embed("買えませんでした", res.reason), ephemeral=True)
+                return await reply(embed=ui.error_embed("買えませんでした", format_failure(res.reason)), ephemeral=True)
             hint = "「🎒 持ち物」の画面で身につけましょう。" if it.unique else "「🎒 持ち物」の画面で使えます。"
             await reply(
                 embed=ui.ok_embed(
@@ -409,11 +410,11 @@ class ShopCog(commands.Cog):
             )
             if reply is None:
                 return
-            done, text = eco.insider_buy(uid)
+            done, result = eco.insider_buy(uid)
             if not done:
-                await reply(embed=ui.error_embed("買えませんでした", text), ephemeral=True)
+                await reply(embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True)
                 return
-            await reply(embed=ui.embed("🕴️ 裏情報メモ（帝愛市）", text, ui.DARK), ephemeral=True)
+            await reply(embed=ui.embed("🕴️ 裏情報メモ（帝愛市）", format_memo(result), ui.DARK), ephemeral=True)
 
     # ------------------------------ 持ち物 ------------------------------ #
     def _inventory_embed(self, guild_id: int, user_id: int) -> discord.Embed:

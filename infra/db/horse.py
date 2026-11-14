@@ -13,6 +13,7 @@ from typing import Optional
 from domain import horse as horse_mod
 from domain import shop as shop_mod
 from domain import teiai
+from domain.errors import fail
 from domain.shop import CARROT, GOLD_CARROT, HORSE_VOUCHER
 from domain.types import PurchaseResult
 from infra.db.base import EcoBase
@@ -38,14 +39,14 @@ class HorseMixin(EcoBase):
         if not ok:
             return False, name
         if coat not in horse_mod.COATS or silks not in horse_mod.SILKS:
-            return False, "毛色と勝負服の色を、選び直してください。"
+            return False, fail("horse_invalid_look")
         with self._lock, self._conn:
             self._ensure(user_id)
             owned = self._horse_count(user_id)  # 出品中の馬も数える
             if owned >= horse_mod.MAX_HORSES:
-                return False, f"持てる馬は {horse_mod.MAX_HORSES} 頭までです。"
+                return False, fail("horse_max_owned", max_horses=horse_mod.MAX_HORSES)
             if not self._consume(user_id, HORSE_VOUCHER):
-                return False, "「競走馬（購入券）」を持っていません。ショップで買えます。"
+                return False, fail("horse_no_voucher")
             s = horse_mod.DEFAULT_STATS
             cur = self._conn.execute(
                 "INSERT INTO horses (guild_id, owner_id, name, coat, silks, speed, stamina, power, guts, created) "
@@ -98,12 +99,12 @@ class HorseMixin(EcoBase):
                 "SELECT * FROM horses WHERE guild_id=? AND owner_id=? AND rented_day=?", (self._g(), user_id, day)
             ).fetchone()
             if row is None:
-                return False, "いまレンタルしている馬がいません。"
+                return False, fail("horse_no_rental")
             owned = self._horse_count(user_id)
             if owned >= horse_mod.MAX_HORSES:
-                return False, f"持てる馬は {horse_mod.MAX_HORSES} 頭までです。"
+                return False, fail("horse_max_owned", max_horses=horse_mod.MAX_HORSES)
             if not self._consume(user_id, HORSE_VOUCHER):
-                return False, "「競走馬（購入券）」を持っていません。ショップで買えます。"
+                return False, fail("horse_no_voucher")
             self._conn.execute("UPDATE horses SET rented_day=NULL WHERE id=?", (row["id"],))
             return True, row["id"]
 
@@ -126,14 +127,14 @@ class HorseMixin(EcoBase):
         with self._lock, self._conn:
             h = self.horse_get(horse_id)
             if h is None or h["owner_id"] != user_id:
-                return False, "自分の馬を選んでください。"
+                return False, fail("horse_select_own")
             if h["rented_day"] is not None:
-                return False, "レンタル馬は、ステータスを調整できません（買うと調整できます）。"
+                return False, fail("horse_rental_no_stats")
             ok, result = horse_mod.move_points({k: h[k] for k in horse_mod.STAT_KEYS}, src, dst)
             if not ok:
                 return False, result
             if not self._consume(user_id, CARROT):
-                return False, "「にんじん」を持っていません。ショップで買えます。"
+                return False, fail("horse_no_carrot")
             self._conn.execute(
                 "UPDATE horses SET speed=?, stamina=?, power=?, guts=? WHERE id=?",
                 (result["speed"], result["stamina"], result["power"], result["guts"], horse_id),
@@ -148,20 +149,20 @@ class HorseMixin(EcoBase):
         with self._lock, self._conn:
             h = self.horse_get(horse_id)
             if h is None or h["owner_id"] != user_id:
-                return False, "自分の馬を選んでください。"
+                return False, fail("horse_select_own")
             if h["rented_day"] is not None:
-                return False, "レンタル馬は引退できません（買わなければ、日が替わると自然に消えます）。"
+                return False, fail("horse_rental_no_retire")
             busy = self._conn.execute(
                 "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
                 "WHERE e.horse_id=? AND r.status IN ('entry','betting')",
                 (horse_id,),
             ).fetchone()
             if busy:
-                return False, "出走予定のレースが終わるまで、引退できません。"
+                return False, fail("horse_busy_no_retire")
             value = horse_mod.retire_value(h["races"], h["wins"], h["places"])
             self._ensure(user_id)
             if value < 0 and self._balance(user_id) < -value:
-                return False, f"引退費用 {-value:,}ペリカ が足りません（残高 {self._balance(user_id):,}ペリカ）。"
+                return False, fail("horse_retire_fee_short", fee=-value, balance=self._balance(user_id))
             if value:
                 self._apply(
                     user_id,
@@ -177,16 +178,16 @@ class HorseMixin(EcoBase):
         with self._lock, self._conn:
             h = self.horse_get(horse_id)
             if h is None or h["owner_id"] != user_id:
-                return False, "自分の馬を選んでください。"
+                return False, fail("horse_select_own")
             if h["rented_day"] is not None:
-                return False, "レンタル馬は、ステータスを調整できません（買うと調整できます）。"
+                return False, fail("horse_rental_no_stats")
             if h["bonus"] >= horse_mod.GOLD_CARROT_MAX * 2 * horse_mod.GOLD_CARROT_POINTS:
-                return False, f"この馬には、金にんじんをもう使えません（1頭に {horse_mod.GOLD_CARROT_MAX} 本まで）。"
+                return False, fail("horse_gold_carrot_max", max_count=horse_mod.GOLD_CARROT_MAX)
             ok, result = horse_mod.add_points({k: h[k] for k in horse_mod.STAT_KEYS}, first, second)
             if not ok:
                 return False, result
             if not self._consume(user_id, GOLD_CARROT):
-                return False, "「金にんじん」を持っていません。ショップで買えます。"
+                return False, fail("horse_no_gold_carrot")
             self._conn.execute(
                 "UPDATE horses SET speed=?, stamina=?, power=?, guts=?, bonus=bonus+? WHERE id=?",
                 (
@@ -306,22 +307,19 @@ class HorseMixin(EcoBase):
         with self._lock, self._conn:
             race = self.race_get(race_id)
             if race is None or race["status"] != "entry" or now >= race["entry_close"]:
-                return False, "このレースの申し込みは、もう締め切りました。"
+                return False, fail("race_entry_closed")
             h = self.horse_get(horse_id)
             if h is None or h["owner_id"] != user_id:
-                return False, "自分の馬を選んでください。"
+                return False, fail("horse_select_own")
             if h["races"] >= horse_mod.MAX_RACES:
-                return (
-                    False,
-                    f"この馬は定年（{horse_mod.MAX_RACES}戦）に達したので、出走できません（引退済みのはずです）。",
-                )
+                return False, fail("horse_retired_by_age", max_races=horse_mod.MAX_RACES)
             rows = self.race_entries(race_id, registered_only=True)
             if any(e["owner_id"] == user_id for e in rows):
-                return False, "1人が1つのレースに出せる馬は、1頭までです。"
+                return False, fail("race_one_horse_per_owner")
             if len(rows) >= horse_mod.FIELD_SIZE:
-                return False, "出走枠が埋まりました。"
+                return False, fail("race_field_full")
             if any(e["name"] == h["name"] for e in rows):
-                return False, "同じ名前の馬がすでに出走します。"
+                return False, fail("race_duplicate_name")
             # 出走予定の馬は、ほかのレースに出せない。ただし、臨時レースは別（出走予定の馬も出せる。臨時に出ていても、定時に出せる）
             busy = (
                 None
@@ -333,11 +331,11 @@ class HorseMixin(EcoBase):
                 ).fetchone()
             )
             if busy:
-                return False, "この馬は、ほかのレースに出走予定です。"
+                return False, fail("race_horse_busy")
             fee = horse_mod.ENTRY_FEE
             self._ensure(user_id)
             if self._balance(user_id) < fee:
-                return False, f"出走料 {fee:,}ペリカ が足りません（残高 {self._balance(user_id):,}ペリカ）。"
+                return False, fail("race_entry_fee_short", fee=fee, balance=self._balance(user_id))
             self._apply(user_id, -fee, f"競馬:出走料（{h['name']}）")
             self._conn.execute(
                 "INSERT INTO horse_entries (race_id, lane, horse_id, owner_id, name, coat, silks) "
@@ -351,13 +349,13 @@ class HorseMixin(EcoBase):
         with self._lock, self._conn:
             race = self.race_get(race_id)
             if race is None or race["status"] != "entry" or now >= race["entry_close"]:
-                return False, "このレースの申し込みは、もう締め切りました。"
+                return False, fail("race_entry_closed")
             cur = self._conn.execute(
                 "DELETE FROM horse_entries WHERE race_id=? AND horse_id=? AND owner_id=? AND lane<0",
                 (race_id, horse_id, user_id),
             )
             if not cur.rowcount:
-                return False, "この馬は、申し込んでいません。"
+                return False, fail("race_not_entered")
             self._apply(user_id, horse_mod.ENTRY_FEE, "競馬:出走料の返金")
             return True, ""
 
@@ -482,38 +480,38 @@ class HorseMixin(EcoBase):
         （馬単は、1着・2着の順）。
         """
         if kind not in horse_mod.BET_KINDS:
-            return False, "馬券の種類を選んでください。"
+            return False, fail("race_select_bet_kind")
         lanes = list(lane) if isinstance(lane, (list, tuple)) else [lane]
         need = horse_mod.COMBO_SIZE.get(kind, 1)
         if len(lanes) != need or len(set(lanes)) != need:
-            return False, f"{horse_mod.BET_KINDS[kind]}は、違う馬を {need} 頭選んでください。"
+            return False, fail("race_select_distinct_horses", kind=kind, need=need)
         if not horse_mod.MIN_STAKE <= stake <= horse_mod.MAX_STAKE:
-            return False, f"賭け金は {horse_mod.MIN_STAKE:,}〜{horse_mod.MAX_STAKE:,}ペリカ にしてください。"
+            return False, fail("race_stake_range", min_stake=horse_mod.MIN_STAKE, max_stake=horse_mod.MAX_STAKE)
         with self._lock, self._conn:
             race = self.race_get(race_id)
             if race is None or race["status"] != "betting":
-                return False, "このレースの馬券は、まだ（またはもう）買えません。"
+                return False, fail("race_bet_unavailable")
             if now >= race["bet_close"]:
-                return False, "馬券の発売は、締め切りました。"
+                return False, fail("race_bet_closed")
             names = []
             for x in lanes:
                 entry = self._conn.execute(
                     "SELECT * FROM horse_entries WHERE race_id=? AND lane=?", (race_id, x)
                 ).fetchone()
                 if entry is None:
-                    return False, "その馬は出走しません。"
+                    return False, fail("race_lane_not_running")
                 names.append(entry["name"])
             odds = self.race_odds(race_id, kind, lanes)
             if odds is None:
-                return False, "オッズを計算中です。少し待ってから、もう一度買ってください。"
+                return False, fail("race_odds_pending")
             self._ensure(user_id)
             spent = self._conn.execute(
                 "SELECT COALESCE(SUM(stake), 0) FROM horse_bets WHERE race_id=? AND user_id=?", (race_id, user_id)
             ).fetchone()[0]
             if spent + stake > horse_mod.MAX_RACE_STAKE:
-                return False, f"1つのレースに賭けられるのは、合計 {horse_mod.MAX_RACE_STAKE:,}ペリカ までです。"
+                return False, fail("race_max_stake", max_race_stake=horse_mod.MAX_RACE_STAKE)
             if self._balance(user_id) < stake:
-                return False, f"残高が足りません（いまの残高: {self._balance(user_id):,}ペリカ）。"
+                return False, fail("insufficient_balance", balance=self._balance(user_id))
             label = "・".join(names)
             self._apply(user_id, -stake, f"競馬:馬券（{horse_mod.BET_KINDS[kind]}・{label}）")
             self._conn.execute(
@@ -542,12 +540,12 @@ class HorseMixin(EcoBase):
         先に、合計の賭け金（レースの上限・残高）を確かめてから買う。それでも途中で買えなくなったら、そこまでの馬券は残る。
         """
         if kind not in horse_mod.MULTI_KINDS:
-            return False, "まとめて買えるのは、単勝と複勝だけです。"
+            return False, fail("race_multi_only")
         lanes = list(dict.fromkeys(lanes))  # 同じ枠は1回だけ
         if not lanes:
-            return False, "馬を選んでください。"
+            return False, fail("race_select_horses")
         if not horse_mod.MIN_STAKE <= stake <= horse_mod.MAX_STAKE:
-            return False, f"賭け金は {horse_mod.MIN_STAKE:,}〜{horse_mod.MAX_STAKE:,}ペリカ にしてください。"
+            return False, fail("race_stake_range", min_stake=horse_mod.MIN_STAKE, max_stake=horse_mod.MAX_STAKE)
         with self._lock, self._conn:
             self._ensure(user_id)
             spent = self._conn.execute(
@@ -555,21 +553,19 @@ class HorseMixin(EcoBase):
             ).fetchone()[0]
             total = stake * len(lanes)
             if spent + total > horse_mod.MAX_RACE_STAKE:
-                return (
-                    False,
-                    f"1つのレースに賭けられるのは、合計 {horse_mod.MAX_RACE_STAKE:,}ペリカ までです"
-                    f"（今回は {total:,}、すでに {spent:,}）。",
+                return False, fail(
+                    "race_max_stake_many",
+                    max_race_stake=horse_mod.MAX_RACE_STAKE,
+                    total=total,
+                    spent=spent,
                 )
             if self._balance(user_id) < total:
-                return (
-                    False,
-                    f"残高が足りません（合計 {total:,}ペリカ 必要。いまの残高: {self._balance(user_id):,}ペリカ）。",
-                )
+                return False, fail("race_insufficient_balance_many", total=total, balance=self._balance(user_id))
             bought = []
             for lane in lanes:
                 ok, result = self.race_bet(user_id, race_id, kind, lane, stake, now)
                 if not ok:
-                    return False, f"{result}（先の {len(bought)} 頭ぶんは買えています）" if bought else result
+                    return False, fail("race_partial_bought", inner=result, bought=len(bought)) if bought else result
                 bought.append(result)
             return True, bought
 
@@ -748,22 +744,22 @@ class HorseMixin(EcoBase):
         with self._lock, self._conn:
             self._ensure(user_id)
             if self.status(user_id, now) != teiai.KATAGI:
-                return PurchaseResult(
-                    False, "競売で買えるのは、借金も延滞もないカタギだけです。", self._balance(user_id)
-                )
+                return PurchaseResult(False, fail("auction_katagi_only"), self._balance(user_id))
             row = self._conn.execute(
                 "SELECT * FROM horses WHERE id=? AND guild_id=? AND owner_id=-1", (horse_id, self._g())
             ).fetchone()
             if row is None:
-                return PurchaseResult(False, "その馬は、もう売れてしまいました。", self._balance(user_id))
+                return PurchaseResult(False, fail("auction_horse_sold"), self._balance(user_id))
             owned = self._horse_count(user_id)  # 出品中の馬も数える
             if owned >= horse_mod.MAX_HORSES:
-                return PurchaseResult(False, f"持てる馬は {horse_mod.MAX_HORSES} 頭までです。", self._balance(user_id))
+                return PurchaseResult(
+                    False, fail("horse_max_owned", max_horses=horse_mod.MAX_HORSES), self._balance(user_id)
+                )
             price = self.horse_auction_price(row["listed_at"], now)
             if self._balance(user_id) < price:
                 return PurchaseResult(
                     False,
-                    f"ペリカが足りません（{price:,}ペリカ必要・残高 {self._balance(user_id):,}ペリカ）。",
+                    fail("insufficient_balance_need", need=price, balance=self._balance(user_id)),
                     self._balance(user_id),
                 )
             self._apply(user_id, -price, f"競売:競走馬（{row['name']}）")

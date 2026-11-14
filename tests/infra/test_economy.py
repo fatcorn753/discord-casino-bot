@@ -114,7 +114,7 @@ def test_transfer_daily_limit(eco):
     eco.credit(1, 100_000, "テスト")
     assert eco.transfer(1, 2, 1000, 0.0, 1500, 0.0).ok
     blocked = eco.transfer(1, 2, 1000, 0.0, 1500, 0.0)
-    assert not blocked.ok and "1日の送金" in blocked.reason
+    assert not blocked.ok and blocked.reason.code == "transfer_daily_limit"
     assert eco.transfer(1, 2, 1000, 0.0, 1500, 1e12).ok  # 日付が変われば集計が戻る
 
 
@@ -171,14 +171,14 @@ def test_transfer_daily_limit_counts_only_the_amount_not_the_fee(eco):
     assert ok.ok and ok.fee == 2_000 and eco.balance(2) == INITIAL_BALANCE + 20_000
     assert eco.balance(1) == INITIAL_BALANCE + 100_000 - 22_000
     blocked = eco.transfer(1, 2, 1, 0.1, 20_000, 0.0)
-    assert not blocked.ok and "1日の送金" in blocked.reason  # 上限に達したあとは、1ペリカも送れない
+    assert not blocked.ok and blocked.reason.code == "transfer_daily_limit"  # 上限に達したあとは、1ペリカも送れない
     assert eco.transfer(1, 2, 100, 0.1, 20_000, 1e12).ok
 
 
 def test_history_shows_transfer_and_fee_as_one_line(eco):
-    from domain import history
+    from cogs.shared.messages import format_history
 
     eco.credit(1, 5_000, "テスト")
     eco.transfer(1, 2, 1_000, 0.1, 20_000, 0.0)
-    lines = history.format_history(eco.history(1, 10), 3)
+    lines = format_history(eco.history(1, 10), 3)
     assert "送金 → <@2>" in lines[0] and "-1,100" in lines[0] and "手数料" not in lines[0]

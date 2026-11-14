@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from domain.errors import Failure
 from domain.ports import get_catalogs
 
 _WALLET = get_catalogs().economy().wallet
@@ -50,14 +51,14 @@ class DailyResult:
 @dataclass(frozen=True)
 class PurchaseResult:
     ok: bool
-    reason: str = ""
+    reason: str | Failure = ""
     balance: int = 0
 
 
 @dataclass(frozen=True)
 class CryptoResult:
     ok: bool
-    reason: str = ""
+    reason: str | Failure = ""
     units: int = 0  # 売買した口数
     money: int = 0  # 買い: 支払った総額 / 売り: 受け取った額（どちらも手数料込み）
     fee: int = 0
@@ -69,7 +70,7 @@ class CryptoResult:
 @dataclass(frozen=True)
 class TransferResult:
     ok: bool
-    reason: str = ""
+    reason: str | Failure = ""
     received: int = 0
     fee: int = 0
     sender_balance: int = 0
