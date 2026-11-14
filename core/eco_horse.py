@@ -78,7 +78,7 @@ class HorseMixin:
                 "WHERE r.status IN ('entry','betting'))",
                 (self._g(), user_id, day),
             )
-            s = horse_mod.random_stats(rng)
+            s = horse_mod.random_stats(rng, horse_mod.RENTAL_STAT_TOTAL)  # 買った馬より、合計を10低くする
             name = rng.choice(horse_mod.NPC_NAMES)
             coat, silks = rng.choice(horse_mod.COATS), rng.choice(horse_mod.SILKS)
             ins = self._conn.execute(
@@ -608,11 +608,15 @@ class HorseMixin:
                 self._conn.execute("UPDATE horse_entries SET finish=? WHERE id=?", (place, e["id"]))
                 prize = round((horse_mod.PRIZES[place - 1] if place <= len(horse_mod.PRIZES) else 0) * scale)
                 if e["owner_id"]:
+                    horse = self.horse_get(e["horse_id"])
                     if prize:
                         prize = round(
                             prize * (1 + self._relic_buffs(e["owner_id"]).get("prize", 0.0))
                         )  # 発掘品（竜の涙）の効果
-                        skim = round(prize * teiai.HORSE_PRIZE_SKIM_RATE)
+                        rate = teiai.HORSE_PRIZE_SKIM_RATE
+                        if horse is not None and horse["rented_day"]:
+                            rate += teiai.HORSE_RENTAL_EXTRA_SKIM_RATE  # レンタル馬は、持ち馬よりさらにピンハネされる
+                        skim = round(prize * rate)
                         net = prize - skim
                         self._apply(e["owner_id"], net, f"競馬賞金:{e['name']}（{place}着）", income=net)
                         prizes[e["owner_id"]] = prizes.get(e["owner_id"], 0) + net

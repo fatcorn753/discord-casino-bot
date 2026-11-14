@@ -615,7 +615,7 @@ def test_rental_is_free_random_and_one_per_day(eco):
     before = eco.balance(U)
     row = eco.rental_ensure(U, NOW, 9.0)
     assert row["owner_id"] == U and row["rented_day"]
-    assert sum(row[k] for k in h.STAT_KEYS) == h.STAT_TOTAL
+    assert sum(row[k] for k in h.STAT_KEYS) == h.RENTAL_STAT_TOTAL  # 買った馬より合計が10低い
     same = eco.rental_ensure(U, NOW + 1, 9.0)
     assert same["id"] == row["id"]  # 同じ日なら、同じ馬
     assert eco.horse_list(U) == [row]
@@ -664,3 +664,18 @@ def test_prize_pool_scale_caps_at_the_entry_fees_collected():
     assert h.prize_pool_scale(5, 0) == 1.0  # 誰も入賞しなければ、削る必要がない
     assert h.prize_pool_scale(1, h.PRIZES[0]) == h.ENTRY_FEE / h.PRIZES[0]
     assert h.prize_pool_scale(100, h.PRIZES[0]) == 1.0  # 出走料が十分あれば、そのまま
+
+
+def test_rental_horse_prize_gets_an_extra_skim(eco):
+    rental = eco.rental_ensure(U, NOW, 9.0)
+    rid = open_race(eco)
+    assert eco.race_register(U, rental["id"], rid, NOW + 1) == (True, "")
+    field_ = eco.race_close_entries(rid, random.Random(1))
+    eco.race_set_odds(rid, h.make_odds(field_["runners"]))
+    result = eco.race_run(rid, random.Random(5))
+    mine = next(e for e in result["entries"] if e["owner_id"] == U)
+    if mine["finish"] <= 3:
+        gross = h.PRIZES[mine["finish"] - 1]
+        scale = h.prize_pool_scale(1, gross)
+        rate = teiai.HORSE_PRIZE_SKIM_RATE + teiai.HORSE_RENTAL_EXTRA_SKIM_RATE
+        assert result["prizes"].get(U, 0) == round(round(gross * scale) * (1 - rate))

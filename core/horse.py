@@ -18,6 +18,7 @@ from dataclasses import dataclass
 STAT_KEYS = ("speed", "stamina", "power", "guts")
 STAT_NAMES = {"speed": "スピード", "stamina": "スタミナ", "power": "パワー", "guts": "根性"}
 STAT_TOTAL = 200  # 4つの合計（固定）
+RENTAL_STAT_TOTAL = STAT_TOTAL - 10  # レンタル馬の合計（買った馬より弱い）
 STAT_MIN, STAT_MAX = 20, 80
 DEFAULT_STATS = {"speed": 50, "stamina": 50, "power": 50, "guts": 50}
 CARROT_POINTS = 5  # にんじん1本で動かせるポイント
@@ -143,15 +144,19 @@ def move_points(stats: dict, src: str, dst: str, carrots: int = 1) -> tuple:
     return True, new
 
 
-def random_stats(rng: random.Random) -> dict:
-    """範囲内で、合計が STAT_TOTAL になる、ランダムな配分（NPC 用）。"""
+def random_stats(rng: random.Random, total: int = STAT_TOTAL) -> dict:
+    """範囲内で、合計が total になる、ランダムな配分（NPC・レンタル馬用）。"""
     while True:
         raw = [rng.random() ** 0.8 + 0.25 for _ in STAT_KEYS]
-        scale = (STAT_TOTAL - STAT_MIN * len(STAT_KEYS)) / sum(raw)
+        scale = (total - STAT_MIN * len(STAT_KEYS)) / sum(raw)
         vals = [STAT_MIN + int(r * scale) for r in raw]
-        vals[0] += STAT_TOTAL - sum(vals)  # 端数は先頭に寄せる
+        vals[0] += total - sum(vals)  # 端数は先頭に寄せる
         stats = dict(zip(STAT_KEYS, vals))
-        if valid_stats(stats):
+        if (
+            set(stats) == set(STAT_KEYS)
+            and sum(stats.values()) == total
+            and all(STAT_MIN <= v <= STAT_MAX for v in stats.values())
+        ):
             return stats
 
 
