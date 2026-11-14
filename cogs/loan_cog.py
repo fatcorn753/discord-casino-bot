@@ -15,7 +15,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs._amount import balance_choices
-from cogs.weekly_cog import announce_channel
+from cogs._shared import announce_channel
 from core import approval, loans, logthrottle, teiai, ui
 from core.confirm import confirm_action
 from core.duration import format_minutes

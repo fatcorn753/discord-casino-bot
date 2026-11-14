@@ -11,7 +11,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from core import approval, logthrottle, nick, p2p, relics, shop, teiai, ui
-from core.confirm import confirm_action
+from core.confirm import confirm_action, confirmed_reply, user_session
 
 CONFIRM_FROM = 10_000  # この金額以上の購入は、確認ボタンを挟む
 MAX_QTY = 10
@@ -214,7 +214,7 @@ async def apply_title_nick(guild: discord.Guild, member: discord.Member, title: 
         )
 
 
-class ShopView(discord.ui.View):
+class ShopView(ui.OwnerView):
     """`/ショップ` の操作パネル。「ショップ」と「持ち物」の2つの画面を、同じメッセージの中で切り替える。
 
     見る画面は、同じメッセージを書き換える。買う・使う・外す・称号の表示は、既存の処理を呼び出し、
@@ -222,7 +222,7 @@ class ShopView(discord.ui.View):
     """
 
     def __init__(self, cog: "ShopCog", user_id: int, guild_id: int, screen: str = "shop", tab: str = "home"):
-        super().__init__(timeout=600)
+        super().__init__(user_id, timeout=600)
         self.cog, self.user_id, self.guild_id, self.screen, self.tab, self.qty = (
             cog,
             user_id,
@@ -562,14 +562,11 @@ class ShopView(discord.ui.View):
         self.add_item(back)
 
     # ---- 操作 ---- #
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                embed=ui.error_embed("これは他の人のパネルです", "`/ショップ` で自分のパネルを開けます。"),
-                ephemeral=True,
-            )
-            return False
-        return True
+    async def _reject_non_owner(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(
+            embed=ui.error_embed("これは他の人のパネルです", "`/ショップ` で自分のパネルを開けます。"),
+            ephemeral=True,
+        )
 
     async def _redraw(self, interaction: discord.Interaction) -> None:
         self._build()
@@ -903,31 +900,26 @@ class ShopCog(commands.Cog):
 
     async def buy_auction_horse(self, interaction: discord.Interaction, horse_id: int):
         """競売の馬を買う（買い物の間は「プレイ中」にする。buy_item と同じ理由）。"""
-        uid = interaction.user.id
-        reason = self.bot.sessions.try_start(uid)
-        if reason:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("いまは買えません", reason), ephemeral=True
-            )
-        try:
+        async with user_session(self.bot, interaction, "いまは買えません") as ok:
+            if not ok:
+                return
+            uid = interaction.user.id
             eco = self.g(interaction)
             horse = next((h for h in eco.auction_horses() if h["id"] == horse_id), None)
             if horse is None:
                 return await interaction.response.send_message(
                     embed=ui.error_embed("買えませんでした", "その馬は、もう売れてしまいました。"), ephemeral=True
                 )
-            if horse["price"] >= CONFIRM_FROM:
-                ok = await confirm_action(
-                    interaction,
-                    "競売で買いますか？",
-                    f"{horse['silks']} **{horse['name']}**\n約 {ui.pelica(horse['price'])} かかります。",
-                    "買う",
-                )
-                if ok is not True:
-                    return
-                reply = interaction.followup.send
-            else:
-                reply = interaction.response.send_message
+            reply = await confirmed_reply(
+                interaction,
+                horse["price"] >= CONFIRM_FROM,
+                "競売で買いますか？",
+                f"{horse['silks']} **{horse['name']}**\n約 {ui.pelica(horse['price'])} かかります。",
+                "買う",
+                confirm_fn=confirm_action,
+            )
+            if reply is None:
+                return
             res = eco.auction_buy_horse(uid, horse_id)
             if not res.ok:
                 return await reply(embed=ui.error_embed("買えませんでした", res.reason), ephemeral=True)
@@ -938,43 +930,36 @@ class ShopCog(commands.Cog):
                 ),
                 ephemeral=True,
             )
-        finally:
-            self.bot.sessions.end(uid)
 
     async def buy_auction(self, interaction: discord.Interaction, item_id: str, qty: int = 1):
         """競売で買う。買い物の間は「プレイ中」にする（buy_item と同じ理由）。"""
         it = shop.BY_ID.get(item_id)
-        uid = interaction.user.id
         if it is None:
             return await interaction.response.send_message(
                 embed=ui.error_embed("品が見つかりません", "競売の画面で選んでください。"), ephemeral=True
             )
-        reason = self.bot.sessions.try_start(uid)
-        if reason:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("いまは買えません", reason), ephemeral=True
-            )
-        try:
+        async with user_session(self.bot, interaction, "いまは買えません") as ok:
+            if not ok:
+                return
+            uid = interaction.user.id
             qty = 1 if it.unique else qty
             entry = next((x for x in self.g(interaction).auction_list() if x["item_id"] == item_id), None)
             if entry is None:
                 return await interaction.response.send_message(
                     embed=ui.error_embed("買えませんでした", "その品は、もう売れてしまいました。"), ephemeral=True
                 )
-            if entry["price"] * min(qty, entry["qty"]) >= CONFIRM_FROM:
-                ok = await confirm_action(
-                    interaction,
-                    "競売で買いますか？",
-                    f"**{shop.label(it)}**"
-                    + (f" ×{qty}" if qty > 1 else "")
-                    + f"\n約 {ui.pelica(entry['price'] * qty)} かかります。",
-                    "買う",
-                )
-                if ok is not True:
-                    return
-                reply = interaction.followup.send
-            else:
-                reply = interaction.response.send_message
+            reply = await confirmed_reply(
+                interaction,
+                entry["price"] * min(qty, entry["qty"]) >= CONFIRM_FROM,
+                "競売で買いますか？",
+                f"**{shop.label(it)}**"
+                + (f" ×{qty}" if qty > 1 else "")
+                + f"\n約 {ui.pelica(entry['price'] * qty)} かかります。",
+                "買う",
+                confirm_fn=confirm_action,
+            )
+            if reply is None:
+                return
             res = self.g(interaction).auction_buy(uid, item_id, qty)
             if not res.ok:
                 return await reply(embed=ui.error_embed("買えませんでした", res.reason), ephemeral=True)
@@ -988,8 +973,6 @@ class ShopCog(commands.Cog):
                 ),
                 ephemeral=True,
             )
-        finally:
-            self.bot.sessions.end(uid)
 
     # ------------------------------ 購入 ------------------------------ #
     async def buy_item(self, interaction: discord.Interaction, item: str, qty: int = 1):
@@ -1010,13 +993,10 @@ class ShopCog(commands.Cog):
         if it.id == shop.INSIDER_MEMO:
             return await self._buy_insider_memo(interaction, it)
         # 買い物の間は「プレイ中」にする。ゲーム中に残高を減らして倍払いを避ける／確認待ちの間にゲームを始める、を防ぐ
-        uid = interaction.user.id
-        reason = self.bot.sessions.try_start(uid)
-        if reason:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("いまは買えません", reason), ephemeral=True
-            )
-        try:
+        async with user_session(self.bot, interaction, "いまは買えません") as ok:
+            if not ok:
+                return
+            uid = interaction.user.id
             if it.unique:
                 qty = 1
             total = it.price * qty
@@ -1047,18 +1027,16 @@ class ShopCog(commands.Cog):
                     ),
                     ephemeral=True,
                 )
-            if total >= CONFIRM_FROM:
-                ok = await confirm_action(
-                    interaction,
-                    "購入しますか？",
-                    f"**{shop.label(it)}**" + (f" ×{qty}" if qty > 1 else "") + f"\n{ui.pelica(total)} かかります。",
-                    "買う",
-                )
-                if ok is not True:
-                    return
-                reply = interaction.followup.send
-            else:
-                reply = interaction.response.send_message
+            reply = await confirmed_reply(
+                interaction,
+                total >= CONFIRM_FROM,
+                "購入しますか？",
+                f"**{shop.label(it)}**" + (f" ×{qty}" if qty > 1 else "") + f"\n{ui.pelica(total)} かかります。",
+                "買う",
+                confirm_fn=confirm_action,
+            )
+            if reply is None:
+                return
             res = self.g(interaction).purchase(uid, it.id, shop.label(it), it.price, it.unique, qty)
             if not res.ok:
                 return await reply(embed=ui.error_embed("買えませんでした", res.reason), ephemeral=True)
@@ -1072,18 +1050,13 @@ class ShopCog(commands.Cog):
                 ),
                 ephemeral=True,
             )
-        finally:
-            self.bot.sessions.end(uid)
 
     async def _buy_insider_memo(self, interaction: discord.Interaction, it) -> None:
         """帝愛市の、裏情報メモ。持ち物には増えず、買うとその場で、本人にだけメモが見える。"""
-        uid = interaction.user.id
-        reason = self.bot.sessions.try_start(uid)
-        if reason:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("いまは買えません", reason), ephemeral=True
-            )
-        try:
+        async with user_session(self.bot, interaction, "いまは買えません") as ok:
+            if not ok:
+                return
+            uid = interaction.user.id
             eco = self.g(interaction)
             stock = eco.insider_stock()
             if stock is None or stock["left"] <= 0:  # 確認ボタンを出す前に、売っているかを調べる
@@ -1093,21 +1066,21 @@ class ShopCog(commands.Cog):
                     else "この決算の裏情報メモは、売り切れです（サーバーで5枚まで）。"
                 )
                 return await interaction.response.send_message(embed=ui.error_embed("買えません", why), ephemeral=True)
-            ok = await confirm_action(
+            reply = await confirmed_reply(
                 interaction,
+                True,
                 "購入しますか？",
                 f"**{it.name}**\n{ui.pelica(it.price)} かかります（残り {stock['left']}/{stock['total']} 枚）。\n"
                 "確度は 80% で、2割はガセです。",
                 "買う",
+                confirm_fn=confirm_action,
             )
-            if ok is not True:
+            if reply is None:
                 return
             done, text = eco.insider_buy(uid)
             if not done:
-                return await interaction.followup.send(embed=ui.error_embed("買えませんでした", text), ephemeral=True)
-            await interaction.followup.send(embed=ui.embed("🕴️ 裏情報メモ（帝愛市）", text, ui.DARK), ephemeral=True)
-        finally:
-            self.bot.sessions.end(uid)
+                return await reply(embed=ui.error_embed("買えませんでした", text), ephemeral=True)
+            await reply(embed=ui.embed("🕴️ 裏情報メモ（帝愛市）", text, ui.DARK), ephemeral=True)
 
     # ------------------------------ 持ち物 ------------------------------ #
     def _inventory_embed(self, guild_id: int, user_id: int) -> discord.Embed:

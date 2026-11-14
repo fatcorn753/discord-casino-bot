@@ -12,7 +12,7 @@ import time
 import discord
 from discord.ext import commands, tasks
 
-from cogs.weekly_cog import announce_channel
+from cogs._shared import announce_channel
 from core import approval, logthrottle, ui
 
 MIN_FEE = 500  # 参加費の最小。上限はない

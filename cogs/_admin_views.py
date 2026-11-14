@@ -8,14 +8,14 @@ import discord
 
 from cogs._admin_embeds import announce_embed
 from cogs._admin_purge import PurgeResult, delete_own_messages
-from cogs.weekly_cog import announce_channel
+from cogs._shared import announce_channel
 from core import ui
 
 if TYPE_CHECKING:
     from cogs.approval_cog import ApprovalCog
 
 
-class AnnounceConfirm(discord.ui.View):
+class AnnounceConfirm(ui.OwnerView):
     """送信前の確認。持ち主本人だけが押せる。"""
 
     def __init__(
@@ -29,12 +29,9 @@ class AnnounceConfirm(discord.ui.View):
         data: bytes,
         channel=None,
     ):
-        super().__init__(timeout=300)
-        self.cog, self.owner_id, self.guilds, self.channel = cog, owner_id, guilds, channel
+        super().__init__(owner_id, timeout=300)
+        self.cog, self.guilds, self.channel = cog, guilds, channel
         self.title, self.body, self.filename, self.data = title, body, filename, data
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.owner_id
 
     @discord.ui.button(label="送信する", style=discord.ButtonStyle.success)
     async def send(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -75,14 +72,13 @@ class AnnounceConfirm(discord.ui.View):
         )
 
 
-class QuizBulkConfirm(discord.ui.View):
+class QuizBulkConfirm(ui.OwnerView):
     """一括登録の確認。持ち主本人だけが押せる。"""
 
     def __init__(self, cog: "ApprovalCog", owner_id: int, quizzes: list, announce: bool, guild=None, channel=None):
-        super().__init__(timeout=300)
-        self.cog, self.owner_id, self.quizzes, self.announce, self.guild, self.channel = (
+        super().__init__(owner_id, timeout=300)
+        self.cog, self.quizzes, self.announce, self.guild, self.channel = (
             cog,
-            owner_id,
             quizzes,
             announce,
             guild,
@@ -93,9 +89,6 @@ class QuizBulkConfirm(discord.ui.View):
         if self.guild is None:
             return "全サーバーの告知チャンネル"
         return f"{self.guild.name} の " + (f"#{self.channel.name}" if self.channel is not None else "告知チャンネル")
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.owner_id
 
     @discord.ui.button(label="登録する", style=discord.ButtonStyle.success)
     async def register(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -149,15 +142,12 @@ class AnnounceModal(discord.ui.Modal, title="お知らせの本文"):
         await interaction.followup.send(embeds=[head, preview], files=files, view=view, ephemeral=True)
 
 
-class PurgeConfirm(discord.ui.View):
+class PurgeConfirm(ui.OwnerView):
     """Bot の発言を消す前の確認。持ち主本人だけが押せる。元に戻せないので、押すまで何も消さない。"""
 
     def __init__(self, cog: "ApprovalCog", owner_id: int, channel):
-        super().__init__(timeout=300)
-        self.cog, self.owner_id, self.channel = cog, owner_id, channel
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.owner_id
+        super().__init__(owner_id, timeout=300)
+        self.cog, self.channel = cog, channel
 
     @staticmethod
     def report(result: PurgeResult, done: bool) -> discord.Embed:

@@ -13,10 +13,10 @@ import discord
 from discord.ext import commands, tasks
 
 from cogs._horse_views import stat_lines
-from cogs.weekly_cog import announce_channel
+from cogs._shared import announce_channel
 from core import approval, logthrottle, p2p, ui
 from core import shop as shop_mod
-from core.confirm import confirm_action
+from core.confirm import confirm_action, confirmed_reply, user_session
 
 CONFIRM_FROM = 10_000  # この金額以上の購入・入札は、確認ボタンを挟む
 SHOWN = 25
@@ -150,19 +150,16 @@ class BidModal(discord.ui.Modal):
         await self.view.cog.do_bid(interaction, self.view.listing_id, amount)
 
 
-class DetailView(discord.ui.View):
+class DetailView(ui.OwnerView):
     """出品の詳細。「買う」（定価）か「入札する」（競り）。"""
 
     def __init__(self, cog: "P2PCog", user_id: int, listing_id: int, mode: str):
-        super().__init__(timeout=300)
+        super().__init__(user_id, timeout=300)
         self.cog, self.user_id, self.listing_id = cog, user_id, listing_id
         label = "🛒 買う" if mode == "fixed" else "🔨 入札する"
         go = discord.ui.Button(label=label, style=discord.ButtonStyle.success)
         go.callback = self._on_go
         self.add_item(go)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
 
     async def _on_go(self, interaction: discord.Interaction):
         eco = self.cog.eco_of(interaction)
@@ -235,11 +232,11 @@ class SellModal(discord.ui.Modal):
         )
 
 
-class SellView(discord.ui.View):
+class SellView(ui.OwnerView):
     """出品の画面。出す品・馬を選んで、「定価で出す」か「競りに出す」を押す。"""
 
     def __init__(self, cog: "P2PCog", user_id: int, guild_id: int):
-        super().__init__(timeout=300)
+        super().__init__(user_id, timeout=300)
         self.cog, self.user_id, self.target = cog, user_id, None
         eco = cog.bot.economy.for_guild(guild_id)
         self.options = []
@@ -271,9 +268,6 @@ class SellView(discord.ui.View):
             ui.INFO,
         )
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
-
     async def _on_pick(self, interaction: discord.Interaction):
         self.target = interaction.data["values"][0]
         for option in self.options:  # 選んだものを、選択肢に残して見せる
@@ -292,11 +286,11 @@ class SellView(discord.ui.View):
         return callback
 
 
-class MineView(discord.ui.View):
+class MineView(ui.OwnerView):
     """自分の取引。出している品（取り消せる）と、入札中の競り。"""
 
     def __init__(self, cog: "P2PCog", user_id: int, guild_id: int):
-        super().__init__(timeout=300)
+        super().__init__(user_id, timeout=300)
         self.cog, self.user_id, self.guild_id = cog, user_id, guild_id
         eco = cog.bot.economy.for_guild(guild_id)
         self.data = eco.p2p_mine(user_id)
@@ -320,9 +314,6 @@ class MineView(discord.ui.View):
         e.add_field(name="出している（入札が入った競りは、取り消せません）", value=sell[:1024], inline=False)
         e.add_field(name="入札中（あなたが最高入札者）", value=bid[:1024], inline=False)
         return e
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return interaction.user.id == self.user_id
 
     async def _on_cancel(self, interaction: discord.Interaction):
         eco = self.cog.bot.economy.for_guild(self.guild_id)
@@ -395,30 +386,26 @@ class P2PCog(commands.Cog):
 
     # ------------------------------ 買う・入札 ------------------------------ #
     async def do_buy(self, interaction: discord.Interaction, listing_id: int) -> None:
-        uid = interaction.user.id
         eco = self.eco_of(interaction)
         row = eco.p2p_get(listing_id)
         if row is None or row["status"] != "active":
             return await interaction.response.send_message(
                 embed=ui.error_embed("買えません", "その出品は、もうありません。"), ephemeral=True
             )
-        reason = self.bot.sessions.try_start(uid)
-        if reason:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("いまは買えません", reason), ephemeral=True
+        async with user_session(self.bot, interaction, "いまは買えません") as ok:
+            if not ok:
+                return
+            uid = interaction.user.id
+            reply = await confirmed_reply(
+                interaction,
+                row["price"] >= CONFIRM_FROM,
+                "購入しますか？",
+                f"**{eco.p2p_label(row)}**\n{ui.pelica(row['price'])} かかります。",
+                "買う",
+                confirm_fn=confirm_action,
             )
-        try:
-            reply = interaction.response.send_message
-            if row["price"] >= CONFIRM_FROM:
-                ok = await confirm_action(
-                    interaction,
-                    "購入しますか？",
-                    f"**{eco.p2p_label(row)}**\n{ui.pelica(row['price'])} かかります。",
-                    "買う",
-                )
-                if ok is not True:
-                    return
-                reply = interaction.followup.send
+            if reply is None:
+                return
             done, result = eco.p2p_buy(uid, listing_id)
             if not done:
                 return await reply(embed=ui.error_embed("買えませんでした", result), ephemeral=True)
@@ -430,34 +417,28 @@ class P2PCog(commands.Cog):
                 ephemeral=True,
             )
             await self.refresh_post(getattr(interaction, "guild", None), listing_id)  # 告知を「売れました」に
-        finally:
-            self.bot.sessions.end(uid)
 
     async def do_bid(self, interaction: discord.Interaction, listing_id: int, amount: int) -> None:
-        uid = interaction.user.id
         eco = self.eco_of(interaction)
         row = eco.p2p_get(listing_id)
         if row is None or row["status"] != "active":
             return await interaction.response.send_message(
                 embed=ui.error_embed("入札できません", "その出品は、もうありません。"), ephemeral=True
             )
-        reason = self.bot.sessions.try_start(uid)
-        if reason:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("いまは入札できません", reason), ephemeral=True
+        async with user_session(self.bot, interaction, "いまは入札できません") as ok:
+            if not ok:
+                return
+            uid = interaction.user.id
+            reply = await confirmed_reply(
+                interaction,
+                amount >= CONFIRM_FROM,
+                "入札しますか？",
+                f"**{eco.p2p_label(row)}**\n{ui.pelica(amount)} を、残高から預かります（抜かれたら返ります）。",
+                "入札する",
+                confirm_fn=confirm_action,
             )
-        try:
-            reply = interaction.response.send_message
-            if amount >= CONFIRM_FROM:
-                ok = await confirm_action(
-                    interaction,
-                    "入札しますか？",
-                    f"**{eco.p2p_label(row)}**\n{ui.pelica(amount)} を、残高から預かります（抜かれたら返ります）。",
-                    "入札する",
-                )
-                if ok is not True:
-                    return
-                reply = interaction.followup.send
+            if reply is None:
+                return
             done, result = eco.p2p_bid(uid, listing_id, amount)
             if not done:
                 return await reply(embed=ui.error_embed("入札できませんでした", result), ephemeral=True)
@@ -469,8 +450,6 @@ class P2PCog(commands.Cog):
                 ephemeral=True,
             )
             await self.refresh_post(getattr(interaction, "guild", None), listing_id)  # 告知の最高入札・締切を更新
-        finally:
-            self.bot.sessions.end(uid)
 
     # ------------------------------ 画面（競売の画面から開く） ------------------------------ #
     async def open_detail(self, interaction: discord.Interaction, listing_id: int) -> None:

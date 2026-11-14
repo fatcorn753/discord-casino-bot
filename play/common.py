@@ -1,22 +1,17 @@
 """ゲーム共通の流れ: 賭け金の検証と預かり、精算、ボタンの持ち主確認、結果の表示。"""
 
-import datetime
 import time
 
 import discord
 
 from core import approval, events, missions, skins, teiai, ui
+from core.clock import local_now
 from games import rtplevel
 
 MIN_BET = 10
 
 
-def local_now(bot) -> datetime.datetime:
-    tz = datetime.timezone(datetime.timedelta(hours=float(bot.config.get("utc_offset_hours", 9))))
-    return datetime.datetime.now(tz)
-
-
-def local_today(bot) -> datetime.date:
+def local_today(bot):
     return local_now(bot).date()
 
 
@@ -226,21 +221,22 @@ def _celebration(ctx: GameContext, net: int) -> tuple:
     return head, tail
 
 
-class ReplayView(discord.ui.View):
+class ReplayView(ui.OwnerView):
     """結果の下に出す「もう一度」ボタン。遊んだ本人だけが押せて、押すと新しいゲームが始まる。"""
 
     def __init__(self, bot, user_id: int, bet: int, replay, timeout: float = 90):
-        super().__init__(timeout=timeout)
+        super().__init__(
+            user_id,
+            timeout=timeout,
+            owner_message="これは他の人のゲームです。`/カジノ` で自分も遊べます。",
+        )
         self.bot, self.user_id, self.bet, self.replay = bot, user_id, bet, replay
         self.origin = None  # この結果を出したメッセージの元になった interaction（時間切れでボタンを消すのに使う）
         self.again.label = f"🔁 同じ額でもう一度（{bet:,}）"
         self.double.label = f"⏫ 倍にして（{bet * 2:,}）"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "これは他の人のゲームです。`/カジノ` で自分も遊べます。", ephemeral=True
-            )
+        if not await super().interaction_check(interaction):
             return False
         if not approval.is_allowed(self.bot.economy, self.bot.config, interaction.guild_id, interaction.user.id):
             await interaction.response.send_message(
@@ -265,20 +261,16 @@ class ReplayView(discord.ui.View):
                 log_display_failure("ボタンの片付け", "時間切れ", exc)
 
 
-class OwnerView(discord.ui.View):
+class OwnerView(ui.OwnerView):
     """賭けた本人だけが押せるボタン。エラーや時間切れでも、賭け金を失わないようにする。"""
 
     def __init__(self, ctx: GameContext, timeout: float = 90):
-        super().__init__(timeout=timeout)
+        super().__init__(
+            ctx.user_id,
+            timeout=timeout,
+            owner_message="これは他の人のゲームです。`/カジノ` で自分も遊べます。",
+        )
         self.ctx = ctx
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.ctx.user_id:
-            await interaction.response.send_message(
-                "これは他の人のゲームです。`/カジノ` で自分も遊べます。", ephemeral=True
-            )
-            return False
-        return True
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, item) -> None:
         print(f"ゲーム中のエラー: {self.ctx.game}: {error!r}")

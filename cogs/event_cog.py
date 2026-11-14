@@ -10,9 +10,9 @@ import time
 import discord
 from discord.ext import commands, tasks
 
-from cogs.economy_cog import local_now
-from cogs.weekly_cog import announce_channel
+from cogs._shared import announce_channel
 from core import approval, events, logthrottle, ui
+from core.clock import local_now
 
 
 class EventCog(commands.Cog):

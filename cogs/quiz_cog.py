@@ -19,7 +19,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from cogs.weekly_cog import announce_channel
+from cogs._shared import announce_channel
 from core import approval, logthrottle, quizpay, ui
 from core.duration import format_minutes, parse_duration
 
@@ -219,24 +219,19 @@ def public_view(qid: int) -> discord.ui.View:
     return view
 
 
-class AnswerView(discord.ui.View):
+class AnswerView(ui.OwnerView):
     """4択のボタン。押した人が挑戦者本人のときだけ受け付け、答えたらボタンを外す。"""
 
     def __init__(self, cog: "QuizCog", user_id: int, quiz: dict, order: list):
-        super().__init__(timeout=600)
+        super().__init__(user_id, timeout=600)
         self.cog, self.user_id, self.quiz, self.order = cog, user_id, quiz, order
         for i in range(4):
             btn = discord.ui.Button(label=LETTERS[i], style=discord.ButtonStyle.primary)
             btn.callback = self._make_callback(i)
             self.add_item(btn)
 
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                embed=ui.error_embed("挑戦者本人だけが答えられます"), ephemeral=True
-            )
-            return False
-        return True
+    async def _reject_non_owner(self, interaction: discord.Interaction) -> None:
+        await interaction.response.send_message(embed=ui.error_embed("挑戦者本人だけが答えられます"), ephemeral=True)
 
     def _make_callback(self, index: int):
         async def callback(interaction: discord.Interaction):

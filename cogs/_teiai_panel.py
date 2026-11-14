@@ -190,23 +190,19 @@ class TargetView(discord.ui.View):
         self.add_item(TargetSelect(panel))
 
 
-class TeiaiPanel(discord.ui.View):
+class TeiaiPanel(ui.OwnerView):
     """パネルの下のボタン（押せるのはコマンドを使った本人だけ）。"""
 
     def __init__(self, bot, uid: int):
-        super().__init__(timeout=300)
+        super().__init__(
+            uid,
+            timeout=300,
+            owner_message="この画面を使えるのは、コマンドを使った本人だけです。",
+        )
         self.bot, self.uid = bot, uid
 
     def eco(self, interaction: discord.Interaction):
         return self.bot.economy.for_guild(interaction.guild.id)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.uid:
-            await interaction.response.send_message(
-                "この画面を使えるのは、コマンドを使った本人だけです。", ephemeral=True
-            )
-            return False
-        return True
 
     @discord.ui.button(label="預ける", style=discord.ButtonStyle.success)
     async def deposit(self, interaction: discord.Interaction, button: discord.ui.Button):

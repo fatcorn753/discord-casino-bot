@@ -11,10 +11,11 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs._amount import balance_choices, own_balance, typed_amount
+from cogs._shared import announce_channel
 from cogs.bond_cog import KIND_CHOICES, describe_done, due_text
 from core import approval, bonds, earnings, logthrottle, market, market_events, ui
 from core import options as opt
-from core.confirm import confirm_action
+from core.confirm import confirm_action, confirmed_reply, user_session
 from core.eco_options import name_of
 from core.economy import Economy
 
@@ -34,11 +35,11 @@ ORDER_CHOICES = SYMBOL_CHOICES + [
 CORRELATION_MINUTES = 24 * 60  # 銘柄どうしの連動を調べる、直近の長さ（分）
 
 
-class HoldingsView(discord.ui.View):
+class HoldingsView(ui.OwnerView):
     """/証券 保有 の、ボタンで決済する画面（開いた本人だけが操作できる）。"""
 
     def __init__(self, cog, user_id: int, guild_id: int):
-        super().__init__(timeout=300)
+        super().__init__(user_id, timeout=300, owner_message="自分の `/証券 保有` で操作してください。")
         self.cog, self.user_id = cog, user_id
         for code, label in cog.positions(user_id, guild_id)[:20]:
             button = discord.ui.Button(label=label[:80], style=discord.ButtonStyle.secondary)
@@ -50,12 +51,6 @@ class HoldingsView(discord.ui.View):
             await self.cog.settle_position(interaction, code)
 
         return callback
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("自分の `/証券 保有` で操作してください。", ephemeral=True)
-            return False
-        return True
 
 
 class OptionAmountModal(discord.ui.Modal):
@@ -82,11 +77,11 @@ class OptionAmountModal(discord.ui.Modal):
         await self.cog._option_buy(interaction, self.kind, self.symbol, int(raw))
 
 
-class MarketView(discord.ui.View):
+class MarketView(ui.OwnerView):
     """/証券 市況 の、銘柄と期間のチャートを切り替える画面（自動更新はしない。開いた本人だけが操作できる）。"""
 
     def __init__(self, cog, user_id: int, guild_id: int, period: str = "24h"):
-        super().__init__(timeout=300)
+        super().__init__(user_id, timeout=300, owner_message="自分の `/証券 市況` で操作してください。")
         self.cog, self.user_id, self.guild_id = cog, user_id, guild_id
         self.symbol, self.period = None, period
         self.symbol_select = discord.ui.Select(
@@ -134,12 +129,6 @@ class MarketView(discord.ui.View):
     async def _on_period(self, interaction: discord.Interaction):
         self.period = self.period_select.values[0]
         await interaction.response.edit_message(embed=self._embed(), view=self)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("自分の `/証券 市況` で操作してください。", ephemeral=True)
-            return False
-        return True
 
 
 def tax_line(res) -> str:
@@ -251,8 +240,6 @@ class MarketCog(commands.Cog):
 
     async def _earnings_posts(self) -> None:
         """決算の予告（月曜9:00）と発表の結果を、各サーバーの告知チャンネルに投稿する。"""
-        from cogs.weekly_cog import announce_channel
-
         now = time.time()
         embeds = []
         for r in self.eco.earnings_to_announce(now):
@@ -502,25 +489,15 @@ class MarketCog(commands.Cog):
     # ------------------------------ 売買 ------------------------------ #
     async def _trade(self, interaction: discord.Interaction, action):
         """売買（action(uid)）の間は「プレイ中」にして、ゲームの最中に残高を動かせないようにする（ショップの購入と同じ）。"""
-        uid = interaction.user.id
-        reason = self.bot.sessions.try_start(uid)
-        if reason:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("いまは取引できません", reason), ephemeral=True
-            )
-        try:
-            await action(uid)
-        finally:
-            self.bot.sessions.end(uid)
+        async with user_session(self.bot, interaction, "いまは取引できません") as ok:
+            if ok:
+                await action(interaction.user.id)
 
     @staticmethod
     async def _confirmed_reply(interaction: discord.Interaction, needed: bool, title: str, text: str, label: str):
         """大きな取引は、確認ボタンを出す。進んでよければ「返信に使う関数」を返し、やめたなら None を返す。
         確認を挟んだときは、最初の返信がすでに確認画面に使われているので、あとの返信は followup になる。"""
-        if not needed:
-            return interaction.response.send_message
-        ok = await confirm_action(interaction, title, text, label)
-        return interaction.followup.send if ok is True else None
+        return await confirmed_reply(interaction, needed, title, text, label, confirm_fn=confirm_action)
 
     @staticmethod
     async def _reject_lots_and_ratio(interaction: discord.Interaction, lots, ratio) -> bool:

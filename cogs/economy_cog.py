@@ -15,7 +15,8 @@ from cogs._teiai_panel import TeiaiPanel, panel_embed
 from core import approval, logthrottle, ranking, shop, teiai, ui
 from core import history as history_mod
 from core import missions as missions_mod
-from core.confirm import confirm_action
+from core.clock import local_now
+from core.confirm import confirm_action, confirmed_reply, user_session
 from core.economy import Economy
 
 TRANSFER_FEE_RATE = 0.10  # 送る側が、送金額の10%を手数料として払う
@@ -61,11 +62,6 @@ def next_reset(bot) -> datetime.datetime:
     return datetime.datetime.combine(now.date() + datetime.timedelta(days=1), datetime.time(), tzinfo=now.tzinfo)
 
 
-def local_now(bot) -> datetime.datetime:
-    tz = datetime.timezone(datetime.timedelta(hours=float(bot.config.get("utc_offset_hours", 9))))
-    return datetime.datetime.now(tz)
-
-
 def manage_guild_or_owner():
     """サーバー管理権限を持つ人、または Bot の持ち主（owner_ids）だけが使える。"""
 
@@ -80,11 +76,15 @@ def manage_guild_or_owner():
     return app_commands.check(predicate)
 
 
-class RankingView(discord.ui.View):
+class RankingView(ui.OwnerView):
     """ランキングの切り替え（純資産 / 総資産）と、自分の資産の内訳。押せるのは、開いた本人だけ。"""
 
     def __init__(self, eco, user_id: int):
-        super().__init__(timeout=300)
+        super().__init__(
+            user_id,
+            timeout=300,
+            owner_message="これは他の人のランキングです。`/ペリカ ランキング` で自分のを開けます。",
+        )
         self.eco, self.user_id = eco, user_id
 
     def embed(self, mode: str) -> discord.Embed:
@@ -103,14 +103,6 @@ class RankingView(discord.ui.View):
             self.user_id,
             footer="純資産 = 現金 − 借金 + 預金・株・債券・オプションの評価額 ｜ ペリカはサーバーごとに別々です",
         )
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "これは他の人のランキングです。`/ペリカ ランキング` で自分のを開けます。", ephemeral=True
-            )
-            return False
-        return True
 
     async def _switch(self, interaction: discord.Interaction, mode: str) -> None:
         # 全員分の資産の計算に時間がかかっても、3秒の期限で「失敗」にならないよう、先に応答してから書き換える
@@ -531,13 +523,10 @@ class EconomyCog(commands.Cog):
                 embed=ui.error_embed("送れません", "Bot には送金できません。"), ephemeral=True
             )
         # 送金の間は「プレイ中」にする。ゲーム中に残高を逃がして負けや倍払いを避ける／確認待ちの間にゲームを始める、を防ぐ
-        uid = interaction.user.id
-        reason = self.bot.sessions.try_start(uid)
-        if reason:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("いまは送れません", reason), ephemeral=True
-            )
-        try:
+        async with user_session(self.bot, interaction, "いまは送れません") as ok:
+            if not ok:
+                return
+            uid = interaction.user.id
             fee = math.ceil(round(amount * TRANSFER_FEE_RATE, 6))
             # 確認ボタンを出す前に、残高を先に調べる（足りないのに確認だけさせない）
             if self.g(interaction).balance(uid) < amount + fee:
@@ -547,18 +536,16 @@ class EconomyCog(commands.Cog):
                     ),
                     ephemeral=True,
                 )
-            if amount >= TRANSFER_CONFIRM_FROM:
-                ok = await confirm_action(
-                    interaction,
-                    "送金しますか？",
-                    f"{member.mention} に **{ui.pelica(amount)}** を送ります。\n手数料: {ui.pelica(fee)}（合計 {ui.pelica(amount + fee)} が引かれます）",
-                    "送金する",
-                )
-                if ok is not True:
-                    return
-                reply = interaction.followup.send
-            else:
-                reply = interaction.response.send_message
+            reply = await confirmed_reply(
+                interaction,
+                amount >= TRANSFER_CONFIRM_FROM,
+                "送金しますか？",
+                f"{member.mention} に **{ui.pelica(amount)}** を送ります。\n手数料: {ui.pelica(fee)}（合計 {ui.pelica(amount + fee)} が引かれます）",
+                "送金する",
+                confirm_fn=confirm_action,
+            )
+            if reply is None:
+                return
             now = local_now(self.bot)
             day_start = datetime.datetime.combine(now.date(), datetime.time(), tzinfo=now.tzinfo).timestamp()
             res = self.g(interaction).transfer(
@@ -574,8 +561,6 @@ class EconomyCog(commands.Cog):
                 ),
                 allowed_mentions=discord.AllowedMentions(users=[member]),
             )
-        finally:
-            self.bot.sessions.end(uid)
 
     @group.command(name="履歴", description="最近の増減を表示（自分だけに見えます）")
     async def history(self, interaction: discord.Interaction):

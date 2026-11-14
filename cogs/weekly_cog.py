@@ -7,24 +7,12 @@ Bot が止まっていて月曜0時を逃しても、次に起動したときに
 import discord
 from discord.ext import commands, tasks
 
-from cogs.economy_cog import local_now
+from cogs._shared import announce_channel  # 互換性のため公開名を残す
 from core import approval, logthrottle, shop, ui, weekly
+from core.clock import local_now
 
 CHECK_MINUTES = 5
 KING = shop.BY_ID[shop.WEEKLY_KING]
-
-
-def announce_channel(guild: discord.Guild, eco):
-    """自動の告知を投稿するチャンネル。ランキング掲示のチャンネル、無ければシステムチャンネル。投稿できなければ None。"""
-    board = eco.get_leaderboard(guild.id)
-    candidates = [guild.get_channel(board["channel_id"])] if board else []
-    candidates.append(guild.system_channel)
-    for ch in candidates:
-        if ch is not None:
-            perms = ch.permissions_for(guild.me)
-            if perms.view_channel and perms.send_messages and perms.embed_links:
-                return ch
-    return None
 
 
 class WeeklyCog(commands.Cog):
