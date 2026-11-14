@@ -177,7 +177,7 @@
 
 ## 変更するとき、どこを見るか
 
-- 数字を調整したい（稼ぎ・確率・値段）: `core/*.py` の純粋なロジック（`labor.py`・`teiai.py`・`bonds.py` など）か、`games/`。
-- 画面・文言を変えたい: `cogs/*_cog.py` と `play/`。
+- 数字・商品・確率・ヘルプ定義などを調整したい: `catalogs/*.yaml`（PR #41/#42 対象外の定義から順次移行。読み込みと型検証は `core/catalogs.py`）または `core/*.py`・`games/`。
+- 画面・文言を変えたい: `cogs/*_cog.py`・`cogs/_*.py` と `play/`。
 - DB の表や列を足したい: `core/schema.py`（表の定義と、古い版への列の追加・移行）と、対応する `core/eco_*.py`。
 - 新しい機能を足す: ロジックを `core/`（または `games/`）、DB を触る部分を `core/eco_*.py`、コマンドを `cogs/`、テストを `tests/` に置く。
