@@ -9,9 +9,9 @@
 import math
 from dataclasses import dataclass
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.bonds()
+_CFG = get_catalogs().bonds()
 MIN_AMOUNT = _CFG.min_amount
 
 

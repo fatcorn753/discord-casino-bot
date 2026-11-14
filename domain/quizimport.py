@@ -21,9 +21,9 @@ import re
 from typing import Optional
 
 from domain.duration import parse_duration
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_QUIZ_CFG = catalogs.economy().quizpay
+_QUIZ_CFG = get_catalogs().economy().quizpay
 MAX_QUESTIONS = _QUIZ_CFG.max_questions
 MAX_QUESTION_LEN = _QUIZ_CFG.max_question_len
 MAX_CHOICE_LEN = _QUIZ_CFG.max_choice_len

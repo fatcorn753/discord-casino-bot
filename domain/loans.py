@@ -9,9 +9,9 @@
 
 import math
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.economy().loans
+_CFG = get_catalogs().economy().loans
 USER_MIN_PRINCIPAL = _CFG.user_min_principal
 MIN_TERM_DAYS = _CFG.min_term_days
 MAX_TERM_DAYS = _CFG.max_term_days

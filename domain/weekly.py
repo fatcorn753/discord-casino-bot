@@ -6,9 +6,9 @@
 import datetime
 from typing import Optional
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_ECON = catalogs.economy()
+_ECON = get_catalogs().economy()
 MIN_PLAYS = _ECON.weekly.min_plays  # 王者になるのに必要な、その週のゲーム数（1回だけの運で決まらないように）
 ANNOUNCE_TOP = _ECON.weekly.announce_top  # 発表に載せる人数
 MEDALS = dict(_ECON.wallet.medals)

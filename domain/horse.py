@@ -16,9 +16,9 @@ import random
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.horse()
+_CFG = get_catalogs().horse()
 
 STAT_KEYS = tuple(s.key for s in _CFG.stats)
 STAT_NAMES = {s.key: s.name for s in _CFG.stats}

@@ -3,9 +3,9 @@
 import itertools
 import random
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.games().slot
+_CFG = get_catalogs().games().slot
 
 # 出目と重み（重いほど出やすい）
 WEIGHTS = {s.symbol: s.weight for s in _CFG.symbols}

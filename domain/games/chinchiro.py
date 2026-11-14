@@ -12,9 +12,9 @@
 import random
 from dataclasses import dataclass
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.games().chinchiro
+_CFG = get_catalogs().games().chinchiro
 
 PINZORO, ARASHI, SHIGORO, ME, MENASHI, HIFUMI = "pinzoro", "arashi", "shigoro", "me", "menashi", "hifumi"
 

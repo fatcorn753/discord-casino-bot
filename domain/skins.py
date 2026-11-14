@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from domain import shop
-from infra import catalogs
+from domain.ports import get_catalogs
 
 CHINCHIRO, PACHINKO, BLACKJACK = "チンチロ", "パチンコ", "ブラックジャック"
 
@@ -27,7 +27,7 @@ class Skin:
     banner: str = ""  # パチンコ: 大当たり以上のときの見出し（なければ、いつもの見出し）
 
 
-_CFG = catalogs.skins()
+_CFG = get_catalogs().skins()
 SKINS = {
     s.item_id: Skin(
         s.item_id,
@@ -37,8 +37,8 @@ SKINS = {
         s.win_line,
         s.lose_line,
         dice_mark=s.dice_mark,
-        role_win=s.role_win,
-        role_lose=s.role_lose,
+        role_win=dict(s.role_win) if s.role_win is not None else None,
+        role_lose=dict(s.role_lose) if s.role_lose is not None else None,
         roll_comment=s.roll_comment,
         banner=s.banner,
     )

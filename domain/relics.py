@@ -5,9 +5,9 @@
 
 import random
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.relics()
+_CFG = get_catalogs().relics()
 BUFF_RATE = _CFG.buff_rate  # ★なしの発掘品1個ぶんの効果の大きさ
 MERGE_COUNT = _CFG.merge_count  # 同じ発掘品をこの個数集めると、★が1つ増えた1個に合体できる
 STAR_MAX = _CFG.star_max  # ★の最大。★が1つ増えるごとに、効果と目安の価値が MERGE_COUNT 倍（個数ぶんと同じ）

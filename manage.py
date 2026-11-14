@@ -11,9 +11,13 @@ import argparse
 import os
 import sys
 
-from domain import approval
-from infra.db.economy import Economy
-from infra.paths import DB_PATH as _DB_PATH
+from infra.catalogs import bind_catalogs
+
+bind_catalogs()
+
+from domain import approval  # noqa: E402
+from infra.db.economy import Economy  # noqa: E402
+from infra.paths import DB_PATH as _DB_PATH  # noqa: E402
 
 DB_PATH = str(_DB_PATH)
 LABEL = {approval.APPROVED: "許可", approval.PENDING: "承認待ち", approval.DENIED: "断った"}

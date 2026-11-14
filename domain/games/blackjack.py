@@ -3,9 +3,9 @@
 import random
 from dataclasses import dataclass, field
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.games().blackjack
+_CFG = get_catalogs().games().blackjack
 SUITS = list(_CFG.suits)
 RANKS = list(_CFG.ranks)
 

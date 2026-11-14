@@ -15,13 +15,17 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.loader import load_all_cogs as _load_cogs
-from cogs.shared import approval_guard, ui
-from cogs.shared.bot import CasinoBot
-from infra.db.economy import Economy
-from infra.paths import CONFIG_PATH as _CONFIG_PATH
-from infra.paths import DB_PATH as _DB_PATH
-from services.session import Sessions
+from infra.catalogs import bind_catalogs
+
+bind_catalogs()
+
+from cogs.loader import load_all_cogs as _load_cogs  # noqa: E402
+from cogs.shared import approval_guard, ui  # noqa: E402
+from cogs.shared.bot import CasinoBot  # noqa: E402
+from infra.db.economy import Economy  # noqa: E402
+from infra.paths import CONFIG_PATH as _CONFIG_PATH  # noqa: E402
+from infra.paths import DB_PATH as _DB_PATH  # noqa: E402
+from services.session import Sessions  # noqa: E402
 
 CONFIG_PATH = str(_CONFIG_PATH)
 DB_PATH = str(_DB_PATH)

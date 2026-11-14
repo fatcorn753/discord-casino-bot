@@ -10,6 +10,7 @@ import sqlite3
 import time
 from typing import Optional
 
+from domain import labor
 from domain.types import INITIAL_BALANCE
 
 USERS_DDL = """
@@ -798,8 +799,6 @@ def _refund_archaeologists(conn: sqlite3.Connection, now: Optional[float] = None
 
 def _refund_legacy_contracts(conn: sqlite3.Connection, now: Optional[float] = None) -> None:
     """鉱石版より前に雇った作業員の契約料を、いまの値段で返して、契約を解約する（ルール変更の補償）。列を足したときに、1回だけ動く。"""
-    from domain import labor
-
     now = time.time() if now is None else now
     refunds: dict = {}
     for r in conn.execute("SELECT id, guild_id, user_id, kind FROM labor_workers WHERE legacy=1").fetchall():

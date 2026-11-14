@@ -14,9 +14,9 @@ import random
 from dataclasses import dataclass
 from functools import lru_cache
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.games().pachinko
+_CFG = get_catalogs().games().pachinko
 
 REEL_SYMBOLS = list(_CFG.reel_symbols)
 SMALL = list(_CFG.small)

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from domain import labor, relics
-from infra import catalogs
+from domain.ports import get_catalogs
 
 TITLE, CARD_COLOR, CARD_ICON, CONSUMABLE, COLOR_ROLE = "title", "card_color", "card_icon", "consumable", "color_role"
 RACING = "racing"  # 競馬の品（購入券・にんじん）。買うと持ち物に増え、`/競馬 厩舎` で使う（枚数が増える品なので、消耗品と同じ扱い）
@@ -12,7 +12,7 @@ SKIN_DICE, SKIN_TABLE, COLLECTION = "skin_dice", "skin_table", "collection"
 RELIC = "relic"  # 発掘品（作業員が、鉱石を掘るときに、まれに見つける）。買えない。持っているだけで飾りになり、競売の画面で売り買いする
 MARKET = "market"  # 帝愛市の品（裏情報メモなど）。持ち物には増えず、買うと、その場で効果が出る
 
-_CFG = catalogs.shop()
+_CFG = get_catalogs().shop()
 KIND_LABEL = dict(_CFG.kind_labels)
 # 名前の色ロールの名前の接頭辞。この接頭辞のロールだけを Bot が作って付け外しする
 ROLE_PREFIX = _CFG.role_prefix

@@ -2,11 +2,11 @@
 
 from dataclasses import dataclass
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_WALLET = catalogs.economy().wallet
+_WALLET = get_catalogs().economy().wallet
 INITIAL_BALANCE = _WALLET.initial_balance
-INSURANCE_CAP = catalogs.shop().insurance_cap  # 保険券で戻る額の上限（catalogs/shop.yaml と同じ値）
+INSURANCE_CAP = get_catalogs().shop().insurance_cap  # 保険券で戻る額の上限（catalogs/shop.yaml と同じ値）
 DAILY_BASE = _WALLET.daily_base
 DAILY_STREAK_BONUS = _WALLET.daily_streak_bonus  # 連続1日ごとの加算
 DAILY_STREAK_CAP = _WALLET.daily_streak_cap  # 加算は20日分まで（最大 +2,000。1回の額は最大 3,000）

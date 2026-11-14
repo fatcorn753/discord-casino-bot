@@ -5,9 +5,10 @@
 """
 
 import datetime
-from typing import Optional, Self
+from typing import TYPE_CHECKING, Optional, Self
 
-from domain.types import DailyResult, TransferResult
+if TYPE_CHECKING:
+    from domain.types import DailyResult, TransferResult
 
 
 class IGuildScopable:
@@ -86,7 +87,7 @@ class IWalletPort:
     def credit(self, user_id: int, amount: int, reason: str) -> int:
         raise NotImplementedError
 
-    def claim_daily(self, user_id: int, today: datetime.date, slot: Optional[int] = None) -> DailyResult:
+    def claim_daily(self, user_id: int, today: datetime.date, slot: Optional[int] = None) -> "DailyResult":
         raise NotImplementedError
 
     def transfer(
@@ -98,7 +99,7 @@ class IWalletPort:
         daily_limit: int,
         day_start_ts: float,
         min_games: int = 0,
-    ) -> TransferResult:
+    ) -> "TransferResult":
         raise NotImplementedError
 
 

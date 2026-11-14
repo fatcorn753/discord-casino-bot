@@ -8,9 +8,9 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.missions()
+_CFG = get_catalogs().missions()
 BLACKJACK = _CFG.blackjack_game
 GAMES = list(_CFG.games)
 MIN_BET = _CFG.min_bet  # これ未満の賭けは、ミッションの進み具合に数えない（小さい賭けの量産で報酬を稼がせない）

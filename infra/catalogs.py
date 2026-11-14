@@ -7,6 +7,7 @@ from typing import Self, TypeVar
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from domain.ports.catalogs import ICatalogs, configure_catalogs
 from infra.paths import CATALOGS_DIR
 
 CATALOG_DIR = CATALOGS_DIR
@@ -949,3 +950,50 @@ def games() -> GamesCatalog:
 @lru_cache(maxsize=1)
 def help_pages() -> HelpCatalog:
     return load_yaml_model("help.yaml", HelpCatalog)
+
+
+class YamlCatalogs(ICatalogs):
+    """YAML ファイルから読み込み・キャッシュするカタログ実装。"""
+
+    def shop(self) -> ShopCatalog:
+        return shop()
+
+    def skins(self) -> SkinsCatalog:
+        return skins()
+
+    def relics(self) -> RelicsCatalog:
+        return relics()
+
+    def bonds(self) -> BondsCatalog:
+        return bonds()
+
+    def missions(self) -> MissionsCatalog:
+        return missions()
+
+    def events(self) -> EventsCatalog:
+        return events()
+
+    def labor(self) -> LaborCatalog:
+        return labor()
+
+    def horse(self) -> HorseCatalog:
+        return horse()
+
+    def market(self) -> MarketCatalog:
+        return market()
+
+    def teiai(self) -> TeiaiCatalog:
+        return teiai()
+
+    def economy(self) -> EconomyCatalog:
+        return economy()
+
+    def games(self) -> GamesCatalog:
+        return games()
+
+
+def bind_catalogs() -> ICatalogs:
+    """YAML カタログプロバイダをドメイン境界へ登録する。"""
+    provider = YamlCatalogs()
+    configure_catalogs(provider)
+    return provider

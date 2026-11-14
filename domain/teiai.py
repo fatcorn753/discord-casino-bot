@@ -12,9 +12,9 @@
 
 from typing import Optional
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.teiai()
+_CFG = get_catalogs().teiai()
 
 SEED = _CFG.seed  # 帝愛が貸し付ける種銭の枠（手元がこの額になるまで補充する）
 LABOR_SKIM_RATE = _CFG.labor_skim_rate  # 地下作業の稼ぎを受け取るときに、ピンハネされる割合

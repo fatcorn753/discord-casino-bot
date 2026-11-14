@@ -12,11 +12,11 @@ W は「賭けた額あたり、勝ち分が平均いくらか」。スロット
 import itertools
 
 from domain.games import pachinko, slot
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.games().rtplevel
+_CFG = get_catalogs().games().rtplevel
 
-MIN_BET = catalogs.games().common.min_bet
+MIN_BET = get_catalogs().games().common.min_bet
 GAMES = _CFG.games
 LEVELS = _CFG.levels
 DEFAULT_LEVEL = _CFG.default_level

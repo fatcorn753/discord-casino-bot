@@ -9,9 +9,9 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.market().market
+_CFG = get_catalogs().market().market
 
 MIN_PRICE = _CFG.min_price
 MAX_PRICE = _CFG.max_price

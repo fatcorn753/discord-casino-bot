@@ -2,9 +2,9 @@
 
 import random
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.games().roulette
+_CFG = get_catalogs().games().roulette
 
 RED = set(_CFG.red)
 

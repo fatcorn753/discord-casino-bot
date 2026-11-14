@@ -11,9 +11,9 @@
 import math
 import random
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.labor()
+_CFG = get_catalogs().labor()
 
 TOOLS = tuple(t.key for t in _CFG.tools)
 TOOL_NAME = {t.key: t.name for t in _CFG.tools}

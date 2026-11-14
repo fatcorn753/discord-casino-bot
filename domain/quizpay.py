@@ -9,9 +9,9 @@ f は正答率が TARGET_RATE に近いほど大きい係数（ちょうどで 1
 
 import math
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.economy().quizpay
+_CFG = get_catalogs().economy().quizpay
 USER_MIN_MINUTES = _CFG.user_min_minutes  # 出題の有効期間（分）
 USER_MAX_MINUTES = _CFG.user_max_minutes  # 7日
 USER_DEFAULT_MINUTES = _CFG.user_default_minutes

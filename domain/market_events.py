@@ -13,9 +13,9 @@ import random
 from typing import Optional
 
 from domain import market
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.market().events
+_CFG = get_catalogs().market().events
 
 LEAD_MIN = _CFG.lead_min  # 予告から、開始までの分
 DURATION_MIN = _CFG.duration_min  # 続く分

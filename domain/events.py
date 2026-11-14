@@ -9,9 +9,9 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.events()
+_CFG = get_catalogs().events()
 DURATION_MIN = _CFG.duration_min
 EARLIEST_MIN = _CFG.earliest_hour * 60  # 開始の最も早い時刻（12:00）
 LATEST_MIN = 24 * 60 - DURATION_MIN  # 開始の最も遅い時刻（23:30。0時をまたがない）

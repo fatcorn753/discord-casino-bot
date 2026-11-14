@@ -9,9 +9,9 @@
 import math
 
 from domain import shop
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.economy().p2p
+_CFG = get_catalogs().economy().p2p
 FEE_RATE = _CFG.fee_rate  # 売れたとき、売り手の受け取りから引く割合（帝愛銀行の収入）
 MAX_ACTIVE = _CFG.max_active  # 1人が同時に出せる数
 FIXED_DAYS = _CFG.fixed_days  # 定価の出品の有効期間（過ぎると、売れ残りとして戻る）

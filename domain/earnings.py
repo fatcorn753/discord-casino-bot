@@ -8,9 +8,9 @@
 import datetime
 import math
 
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.market().earnings
+_CFG = get_catalogs().market().earnings
 
 SYMBOLS = _CFG.symbols  # 決算の対象になる銘柄
 RELEASE_WEEKDAY, RELEASE_TIME = _CFG.release_weekday, _CFG.release_time  # 火曜 13:30

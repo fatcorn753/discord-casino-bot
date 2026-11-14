@@ -12,9 +12,9 @@ import math
 from typing import Optional
 
 from domain import market, market_events
-from infra import catalogs
+from domain.ports import get_catalogs
 
-_CFG = catalogs.market().options
+_CFG = get_catalogs().market().options
 
 OPTION_HOURS = _CFG.option_hours  # 満期までの時間（固定）
 STRIKE_OTM = (
