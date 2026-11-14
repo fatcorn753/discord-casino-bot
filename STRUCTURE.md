@@ -26,7 +26,7 @@
 | `config.example.json` | 設定ファイルの見本（トークンなどは空）。`config.json` を作るときのひな形 |
 | `config.json` | 実際の設定（Bot のトークンなど）。**秘匿情報なので Git に入れない**（`.gitignore` 済み） |
 | `config.json.migrated-to-server` | 古い設定ファイルの控え。`config.json.*` として Git に入れない |
-| `catalogs/` | YAML の静的カタログ群（ショップ・スキン・遺物・債券・ミッション・イベント・証券・経済・ゲーム・ヘルプ） |
+| `catalogs/` | YAML の静的カタログ群（ショップ・スキン・遺物・債券・ミッション・イベント・地下作業・競馬・証券・帝愛・経済・ゲーム・ヘルプ） |
 | `data/` | 実行時のデータ。`casino.db`（SQLite 本体）と `bot.lock`（二重起動の防止）。**Git に入れない** |
 | `README.md` | 概要・コマンド一覧・導入手順・運用・docs への案内 |
 | `docs/` | 機能ごとの、くわしい仕様（`casino.md`・`stocks.md`・`teiai.md`・`horse.md`・`labor.md`・`shop.md`・`admin.md`） |
@@ -95,9 +95,9 @@
 | ファイル | 内容 |
 |---|---|
 | `economy.py` | `Economy` 本体。残高・デイリー・送金・ランキング。下の `eco_*.py` を部品として混ぜ込んでいる |
-| `eco_base.py` | `EcoDb`（共有DB接続・ロック）と、非干渉の `eco_*.py` が継承する型付き基底クラス `EcoBase` |
+| `eco_base.py` | `EcoDb`（共有DB接続・ロック）と、全 `eco_*.py` が継承する型付き基底クラス `EcoBase` |
 | `bot.py` | `CasinoBot(commands.Bot)` 基底クラス（`config`・`economy`・`sessions` の型付き基盤） |
-| `schema.py` | DB の表の定義（作成）と、古い版への列の追加・データの移行 |
+| `schema.py` | DB の表の定義（作成）と、古い版への列の追加・サーバー別/廃止データの移行 |
 | `eco_types.py` | `Economy` と各部品が共有する定数と、結果を返す入れ物 |
 | `ui.py` | 埋め込みの生成・ペリカの表記・所有者チェックつき View（`OwnerView`） |
 | `clock.py` | タイムゾーン（`config.json` の `utc_offset_hours`）に基づく現在時刻・日付の取得 |
