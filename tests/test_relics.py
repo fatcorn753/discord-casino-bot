@@ -58,14 +58,25 @@ def test_chance_round_keeps_the_average_exact():
 
 
 # ----------------------------- 効果 ----------------------------- #
-def test_fossil_raises_click_pay_by_one_percent_on_average(eco):
+class _NoCrit:  # 鉱脈ヒットを起こさない（random() が 1.0 なら、しきい値を超えない）
+    @staticmethod
+    def random():
+        return 1.0
+
+    @staticmethod
+    def choices(*a, **kw):
+        return random.choices(*a, **kw)
+
+
+def test_fossil_raises_click_pay_by_one_percent_on_average(eco, monkeypatch):
+    monkeypatch.setattr(lab, "COMBO_SIZE", 10**9)  # コンボ（10回ごとの上乗せ）で平均がずれないようにする
     plain = 0
     for k in range(1000):
-        plain += eco.labor_click(U, T0 + k * 2000, DAY)["pay"]  # 疲労が回復するほど、間をあける
+        plain += eco.labor_click(U, T0 + k * 2000, DAY, rng=_NoCrit)["pay"]  # 疲労が回復するほど、間をあける
     other = Economy(eco._db_path, strict=True).for_guild(G)
     give(other, "relic_fossil", uid=2)
     other.credit(2, 1_000, "テスト")
-    buffed = sum(other.labor_click(2, T0 + k * 2000, DAY)["pay"] for k in range(1000))
+    buffed = sum(other.labor_click(2, T0 + k * 2000, DAY, rng=_NoCrit)["pay"] for k in range(1000))
     assert plain == 10 * 1000  # 工具なし・疲労なしで、1回10
     assert 10_020 < buffed < 10_200  # 平均で +1%（確率で切り上げる）
 

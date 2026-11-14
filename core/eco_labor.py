@@ -5,6 +5,7 @@
 """
 
 import json
+import random
 import time
 from typing import Optional
 
@@ -328,6 +329,8 @@ class LaborMixin:
             row["finds"] = self.labor_finds(user_id)
             row["held_relics"] = self.relic_stock(user_id)
             row["donated_all"] = self.labor_donated_total()  # このサーバーの全員の寄付の合計
+            row["terrain"] = labor_mod.terrain_today(day)  # 今日の地層
+            row["crit_chance"] = labor_mod.crit_chance(row["pick"], row["workers"], row["terrain"])
             return row
 
     def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> dict:
@@ -352,23 +355,45 @@ class LaborMixin:
         )
         return {"rows": rows, "me": me}
 
-    def labor_click(self, user_id: int, now: Optional[float] = None, day: str = "") -> dict:
-        """「働く」を1回押す。{ok, reason, pay}。ok=False のときは、何も変わらない。"""
+    def labor_click(self, user_id: int, now: Optional[float] = None, day: str = "", rng=None) -> dict:
+        """「働く」を1回押す。{ok, reason, pay, crit（鉱脈ヒットか）, ore（手掘りの鉱石。無ければ None）}。"""
         now = time.time() if now is None else now
+        rng = rng or random
         with self._lock, self._conn:
             self._ensure(user_id)
             row = self._labor_row(user_id, now, day)
             if now - row["last_click"] < labor_mod.CLICK_INTERVAL:
                 return {"ok": False, "reason": "押すのが早すぎます。", "quiet": True}
-            out = labor_mod.click_outcome(row["pick"], row["glove"], row["fatigue"])
+            terrain = labor_mod.terrain_today(day)
+            gain = labor_mod.fatigue_gain(row["glove"])
+            if terrain == "fatigue":
+                gain *= 1 - labor_mod.TERRAIN_FATIGUE_CUT  # 今日の地層: 疲労の溜まりが軽い
+            out = {
+                "pay": labor_mod.click_pay(row["pick"], row["fatigue"]),
+                "fatigue": min(labor_mod.FATIGUE_MAX, row["fatigue"] + gain),
+            }
             pay = max(1, relics_mod.chance_round(out["pay"] * (1 + self._relic_buffs(user_id).get("click", 0.0))))
             room = labor_mod.MAX_CLICKS_PER_DAY - row["day_click"]  # 今日、あと何回、「働く」を押せるか
-            pay = labor_mod.OVER_CAP_PAY if room <= 0 else pay
+            capped = room <= 0
             hour = int(now // 3600)
             since = now - labor_mod.SUSPECT_HOURS * 3600
             suspected = labor_mod.auto_click_suspected(self.labor_click_hours(user_id, since), hour)
             if suspected:  # 自動操作の疑い: BANではなく、その日はそこで打ち止め（翌日には戻る）
-                pay = labor_mod.OVER_CAP_PAY
+                capped = True
+            crit, ore = False, None
+            if not capped:
+                workers = len(self._workers_of(user_id))
+                crit = rng.random() < labor_mod.crit_chance(row["pick"], workers, terrain)
+                if crit:
+                    pay *= labor_mod.CRIT_MULT
+                    if rng.random() < labor_mod.CRIT_ORE_CHANCE:
+                        ore = labor_mod.roll_crit_ore(rng, terrain)
+                combo = (row["clicks"] + 1) % labor_mod.COMBO_SIZE == 0  # 10回ごとのコンボ
+                if combo:
+                    pay = round(pay * (1 + labor_mod.COMBO_BONUS))
+            pay = labor_mod.OVER_CAP_PAY if capped else pay
+            if capped:
+                crit, ore = False, None
             row["last_click_before"] = row["last_click"]
             row.update(
                 fatigue=out["fatigue"],
@@ -379,9 +404,13 @@ class LaborMixin:
                 day_click=row["day_click"] + 1,
                 earned_total=row["earned_total"] + pay,
             )
+            if ore:
+                found = self._ores_of(row)
+                found[ore] = found.get(ore, 0) + 1
+                row["ores"] = json.dumps(found)
             self._labor_log_click(user_id, now, pay, now - row["last_click_before"])
             self._labor_save(user_id, row)
-            return {"ok": True, "pay": pay}
+            return {"ok": True, "pay": pay, "crit": crit, "ore": ore, "terrain": terrain}
 
     CLICK_LOG_DAYS = 14  # 押した記録（1時間ごと）を残す日数
 

@@ -67,14 +67,14 @@ def test_horse_is_worth_price_plus_retire_value_and_stays_while_listed(eco):
     assert parts(eco, B)["escrow"] == 300  # 入札中のお金は入札した人のもの
 
 
-def test_loans_net_out_between_lender_and_borrower(eco):
+def test_loans_are_split_into_lent_asset_and_owed_liability(eco):
     eco._conn.execute(
         "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, "
         "offer_expires, accepted_at, due, paid) VALUES (?, ?, ?, 1000, 0, 7, 'active', 0, 0, ?, ?, 0)",
         (G, A, B, time.time(), time.time() + 86400),
     )
     eco._conn.commit()
-    assert parts(eco, A)["loans"] == 1000 and parts(eco, B)["loans"] == -1000
+    assert parts(eco, A)["loans_lent"] == 1000 and parts(eco, B)["loans_owed"] == -1000
 
 
 def test_final_ranking_and_breakdown_embeds(eco):
@@ -127,3 +127,27 @@ def test_labor_tool_upgrades_count_toward_assets(eco):
     assert want > 0
     assert parts(eco, A)["tools"] == want
     assert parts(eco, B)["tools"] == 0
+
+
+def test_debt_is_a_separate_liability_from_cash(eco):
+    eco._conn.execute("UPDATE users SET debt=300 WHERE guild_id=? AND user_id=?", (G, A))
+    eco._conn.commit()
+    p = parts(eco, A)
+    assert p["cash"] == 1000 and p["debt"] == -300  # 現金は借金を引かず、借金は別の負債項目になる
+
+
+def test_asset_groups_match_gross_minus_liabilities_equals_net(eco):
+    from core.eco_assets import AssetMixin
+
+    eco._conn.execute("UPDATE users SET debt=400, balance=1000 WHERE guild_id=? AND user_id=?", (G, A))
+    eco._conn.execute(
+        "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, "
+        "offer_expires, accepted_at, due, paid) VALUES (?, ?, ?, 500, 0, 7, 'active', 0, 0, ?, ?, 0)",
+        (G, B, A, time.time(), time.time() + 86400),
+    )
+    eco._conn.commit()
+    p = parts(eco, A)
+    g = AssetMixin.asset_groups(p)
+    assert g["gross"] - g["liabilities"] == g["net"]
+    assert g["liabilities"] == 400 + 500  # 帝愛への借金 + 借りている貸付
+    assert g["net"] == sum(p.values())

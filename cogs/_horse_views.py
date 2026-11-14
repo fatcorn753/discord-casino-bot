@@ -35,7 +35,8 @@ def stat_short(e: dict) -> str:
 
 
 def race_title(eco, race: dict) -> str:
-    return f"🏇 第{eco.race_number(race['id'])}競走" + ("（臨時）" if race["kind"] == "special" else "")
+    tag = "（臨時）" if race["kind"] == "special" else ("🏆重賞" if horse_mod.is_major_race(race) else "")
+    return f"🏇 第{eco.race_number(race['id'])}競走{tag}"
 
 
 async def refresh_entry_card(interaction: discord.Interaction, eco, race_id: int) -> None:
@@ -91,7 +92,8 @@ def card_embed(eco, race: dict, closed: bool = False) -> discord.Embed:
                 f"馬券の発売: **{when(race['bet_close'])}** まで（単勝=1着・複勝=3着以内。**オッズは戦績で決まり、賭けた時点で確定**）",
             ]
         rows = [
-            f"`{e['lane']}` {e['silks']} **{e['name']}** {horse_mod.FORM_MARK[e['form']]}　"
+            f"`{e['lane']}` {e['silks']} **{e['name']}** {horse_mod.FORM_MARK[e['form']]} "
+            f"{horse_mod.STYLE_MARK[horse_mod.style_of({k: e[k] for k in horse_mod.STAT_KEYS})]}　"
             f"単勝 **{e['odds_win']:.1f}** 複勝 **{e['odds_place']:.1f}**\n　└ {record_text(e)}　{stat_short(e)}"
             + (f"　馬主 <@{e['owner_id']}>" if e["owner_id"] else "")
             for e in entries
@@ -562,9 +564,10 @@ class Stable(discord.ui.View):
             note = f"\n🏁 {race_title(eco, registered[0])} に出走予定" if registered else ""
             mark = "▶ " if h["id"] == self.horse_id else ""
             tag = "🎫 本日のレンタル\n" if h["rented_day"] else ""
+            style = horse_mod.style_of({k: h[k] for k in horse_mod.STAT_KEYS})
             e.add_field(
                 name=f"{mark}{h['silks']} {h['name']}（{h['coat']}）",
-                value=f"{tag}{stat_lines(h)}\n戦績 {h['races']}/{horse_mod.MAX_RACES}戦 {h['wins']}勝（3着以内 {h['places']}）　賞金 {ui.pelica(h['earnings'])}{note}",
+                value=f"{tag}{horse_mod.STYLE_MARK[style]} {horse_mod.STYLE_NAMES[style]}\n{stat_lines(h)}\n戦績 {h['races']}/{horse_mod.MAX_RACES}戦 {h['wins']}勝（3着以内 {h['places']}）　賞金 {ui.pelica(h['earnings'])}{note}",
                 inline=False,
             )
         nxt = next((r for r in eco.race_open() if r["status"] == "entry"), None)

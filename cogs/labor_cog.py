@@ -91,6 +91,11 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
         inline=True,
     )
     e.add_field(
+        name="⛏ 鉱脈ヒット率",
+        value=f"**{state['crit_chance']:.0%}**（当たると稼ぎ×{lab.CRIT_MULT}）",
+        inline=True,
+    )
+    e.add_field(
         name="🧰 工具",
         value="　".join(f"{lab.TOOL_MARK[t]} {lab.TOOL_NAME[t]} Lv{state[t]}/{lab.MAX_LEVEL}" for t in lab.TOOLS),
         inline=False,
@@ -109,7 +114,8 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     if state.get("finds"):
         e.add_field(name="📜 最近の掘り出し", value=finds_text(state["finds"]), inline=False)
     e.set_footer(
-        text=f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します。\n"
+        text=f"🪨 今日の地層: {lab.terrain_label(state['terrain'])}\n"
+        f"疲労は時間で回復します。「受け取る」で、貯まった分をまとめて手元に移します。\n"
         f"総寄付金額：{state.get('donated_all', 0):,}ペリカ"
     )
     return e
@@ -316,7 +322,12 @@ class LaborView(discord.ui.View):
         r = self.eco().labor_click(self.user_id, time.time(), today(self.bot))
         if not r["ok"]:
             return await self._show(interaction, "" if r.get("quiet") else f"⚠ {r['reason']}")
-        await self._show(interaction, f"⛏ **+{r['pay']:,}**")
+        note = f"⛏ **+{r['pay']:,}**"
+        if r["crit"]:
+            note = f"💥 鉱脈ヒット！！ {note}"
+            if r["ore"]:
+                note += f"（さらに {lab.ORE_MARK[r['ore']]}{lab.ORE_NAME[r['ore']]} も！）"
+        await self._show(interaction, note)
 
     async def _drink(self, interaction: discord.Interaction):
         ok, reason = self.eco().labor_drink(self.user_id, time.time(), today(self.bot))

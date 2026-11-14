@@ -14,6 +14,7 @@ import itertools
 import math
 import random
 from dataclasses import dataclass
+from typing import Optional
 
 STAT_KEYS = ("speed", "stamina", "power", "guts")
 STAT_NAMES = {"speed": "スピード", "stamina": "スタミナ", "power": "パワー", "guts": "根性"}
@@ -49,16 +50,26 @@ MAX_RACE_STAKE = 150_000  # 1人が1レースに賭けられる合計
 ENTRY_FEE = 1_000  # 出走料（レンタル馬も同じ。帝愛の馬=NPCは払わない）
 PRIZES = (12_000, 5_000, 2_000)  # 1着・2着・3着の賞金（馬主へ）。固定額だが、原資（下記）を超えない
 
+MAJOR_HOUR = 21  # 重賞（看板レース）になる、定時レースの発走時刻
+MAJOR_PRIZES = (24_000, 10_000, 4_000)  # 重賞の賞金（通常の2倍）
+MAJOR_HOUSE_TOPUP = 10_000  # 重賞で、出走料だけでは足りないとき、帝愛の手元現金から補う上限（1レースあたり）
 
-def prize_pool_scale(real_entries: int, placed_prizes: int) -> float:
-    """そのレースで、人間の馬が払った出走料の合計が、賞金（placed_prizes＝人間の馬が獲る分の合計）に足りるか。
+
+def is_major_race(race: dict, tz_hours: float = 9.0) -> bool:
+    """定時レースで、発走が MAJOR_HOUR（21時）なら重賞。"""
+    tz = datetime.timezone(datetime.timedelta(hours=tz_hours))
+    return race["kind"] == "regular" and datetime.datetime.fromtimestamp(race["start_at"], tz).hour == MAJOR_HOUR
+
+
+def prize_pool_scale(real_entries: int, placed_prizes: int, topup: int = 0) -> float:
+    """そのレースで、人間の馬が払った出走料の合計（＋topup）が、賞金（placed_prizes＝人間の馬が獲る分の合計）に足りるか。
 
     足りれば1.0（そのまま払う）。足りなければ、その比率ぶん、3着まで同じ割合で削る。
-    新しいペリカが、レースごとに生まれないようにする（出走料を超えて払わない）。
+    topup は、重賞などで帝愛の手元現金から補った分。出走料だけでは、新しいペリカはレースごとに生まれない。
     """
     if placed_prizes <= 0:
         return 1.0
-    return min(1.0, real_entries * ENTRY_FEE / placed_prizes)
+    return min(1.0, (real_entries * ENTRY_FEE + max(0, topup)) / placed_prizes)
 
 
 TICKS = 60  # 平均的な馬が走り切るティック数
@@ -79,9 +90,14 @@ class Runner:
     races: int = 0  # 戦績（オッズに使う。レースの結果には効かない）
     wins: int = 0
     places: int = 0  # 3着以内（1着を含む）
+    style: Optional[str] = None  # 脚質（未指定なら、ステータスから自然に決める。STYLE_NAMES のキー）
 
     def stat(self, key: str) -> int:
         return getattr(self, key)
+
+    @property
+    def effective_style(self) -> str:
+        return self.style or style_of({k: getattr(self, k) for k in STAT_KEYS})
 
 
 @dataclass(frozen=True)
@@ -92,6 +108,18 @@ class Track:
     @property
     def label(self) -> str:
         return f"{self.distance:,}m・{self.going}"
+
+
+# ---- 脚質（逃げ・先行・差し・追込） ---- #
+STYLE_NAMES = {"nige": "逃げ", "senko": "先行", "sashi": "差し", "oikomi": "追込"}
+STYLE_MARK = {"nige": "🏃", "senko": "🚶", "sashi": "🎯", "oikomi": "💨"}
+STYLE_BY_STAT = {"speed": "nige", "power": "senko", "stamina": "sashi", "guts": "oikomi"}
+
+
+def style_of(stats: dict) -> str:
+    """ステータスの配分から、自然な脚質を決める（いちばん高いステータスで決まる。並んだら speed→power→stamina→guts の順を優先）。"""
+    best = max(STAT_KEYS, key=lambda k: (stats[k], -STAT_KEYS.index(k)))
+    return STYLE_BY_STAT[best]
 
 
 def valid_stats(stats: dict) -> bool:
@@ -178,16 +206,38 @@ FATIGUE_MAX = 0.18  # バテたときの、最大の減速
 NOISE = 0.03  # 毎ティックの運
 LUCK = 0.020  # レース全体の運（展開）
 
+# ---- 脚質による展開（逃げ・先行が多いほどハイペースになり、終盤は差し・追込が伸びる） ---- #
+PACE_FACTOR = 0.05  # 前に行く馬の割合が、平均（50%）からどれだけずれるかで、展開の強さが決まる
+STYLE_EARLY = {"nige": 0.025, "senko": 0.012, "sashi": -0.010, "oikomi": -0.022}  # 序盤（p<0.35）の加減速
+STYLE_LATE = {"nige": -0.015, "senko": 0.0, "sashi": 0.018, "oikomi": 0.030}  # 終盤（p>=0.70）の加減速
 
-def _mult(r: Runner, p: float, track: Track, luck: float, spurt: float) -> float:
+
+def style_curve(style: str, p: float, pace_shift: float) -> float:
+    """脚質による、いまの位置（p）での加減速（率）。ハイペースだと、前寄りの脚質は早めに苦しくなり、後ろの脚質が伸びる。"""
+    if p < 0.35:
+        v = STYLE_EARLY[style]
+        if style in ("nige", "senko"):
+            v -= pace_shift
+        return v
+    if p >= 0.70:
+        v = STYLE_LATE[style]
+        if style in ("sashi", "oikomi"):
+            v += pace_shift
+        return v
+    t = (p - 0.35) / 0.35  # 中間は、序盤と終盤を線形に補間
+    return STYLE_EARLY[style] * (1 - t) + STYLE_LATE[style] * t
+
+
+def _mult(r: Runner, p: float, track: Track, luck: float, spurt: float, style: str, pace_shift: float) -> float:
     dfac = track.distance / 1800
     m = 1 + (r.speed - 50) / 50 * speed_coef(track.distance)
-    m *= 1 + (r.power - 50) / 50 * 0.03 * max(0.0, 1 - p / 0.2)  # 出足
+    m *= 1 + (r.power - 50) / 50 * 0.05 * max(0.0, 1 - p / 0.2)  # 出足（パワー）
     reach = min(1.0, max(0.25, 0.8 * (r.stamina / 50) / dfac))  # ここまでは、バテずに走れる
     if p > reach and reach < 1.0:
         m *= 1 - FATIGUE_MAX * (p - reach) / (1 - reach)
     if p >= 0.75:
-        m *= 1 + spurt  # ラストスパート
+        m *= 1 + spurt  # ラストスパート（根性）
+    m *= 1 + style_curve(style, p, pace_shift)  # 脚質・展開
     m *= 1 - GOING_PENALTY[track.going] * (1 - (r.power - 20) / 60 * 0.7)  # 馬場
     return m * FORM_MULT[r.form] * (1 + luck)
 
@@ -198,13 +248,16 @@ def simulate(runners: list, track: Track, rng: random.Random, keep_frames: bool 
     pos = [0.0] * n
     finish = [None] * n
     luck = [rng.gauss(0, LUCK) for _ in runners]
-    spurt = [max(0.0, (r.guts - 20) / 60 * 0.05 * rng.uniform(0.5, 1.5)) for r in runners]
+    spurt = [max(0.0, (r.guts - 20) / 60 * 0.08 * rng.uniform(0.5, 1.5)) for r in runners]  # ラストスパート（根性）
+    styles = [r.effective_style for r in runners]
+    pace = sum(1 for s in styles if s in ("nige", "senko")) / n if n else 0.5
+    pace_shift = (pace - 0.5) * PACE_FACTOR
     frames = [[0.0] * n] if keep_frames else None
     for t in range(1, MAX_TICKS + 1):
         for i, r in enumerate(runners):
             if finish[i] is not None:
                 continue
-            step = _mult(r, pos[i], track, luck[i], spurt[i]) * (1 + rng.gauss(0, NOISE)) / TICKS
+            step = _mult(r, pos[i], track, luck[i], spurt[i], styles[i], pace_shift) * (1 + rng.gauss(0, NOISE)) / TICKS
             new = pos[i] + max(0.0, step)
             if new >= 1.0:
                 finish[i] = t - 1 + (1.0 - pos[i]) / max(1e-9, new - pos[i])  # ゴールを越えた時刻（ティック内で補間）
