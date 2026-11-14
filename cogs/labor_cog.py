@@ -77,7 +77,11 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     e.add_field(
         name="⛏ 1回の稼ぎ",
         value=f"**{ui.pelica(lab.OVER_CAP_PAY if capped else lab.click_pay(state['pick'], fat))}**"
-        + (f"\n（上限に達しました。{lab.OVER_CAP_PAY}ペリカずつ）" if capped else ""),
+        + (
+            f"\n（上限に達しました。{lab.OVER_CAP_PAY}ペリカずつ）"
+            if capped
+            else f"\n（鉱脈ヒット {state.get('crit_chance', lab.CRIT_BASE_CHANCE):.0%}）"
+        ),
         inline=True,
     )
     e.add_field(
@@ -90,6 +94,9 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
         value=f"{state['workers']}/{state['slots']}人　{state['rate']:,.0f}/時" if state["workers"] else "いません",
         inline=True,
     )
+    st = state.get("stratum")
+    if st and st.get("id") != "normal":
+        e.add_field(name="🪨 今日の地層", value=f"{st['mark']} **{st['name']}**（{st['desc']}）", inline=False)
     e.add_field(
         name="🧰 工具",
         value="　".join(f"{lab.TOOL_MARK[t]} {lab.TOOL_NAME[t]} Lv{state[t]}/{lab.MAX_LEVEL}" for t in lab.TOOLS),
@@ -316,7 +323,17 @@ class LaborView(discord.ui.View):
         r = self.eco().labor_click(self.user_id, time.time(), today(self.bot))
         if not r["ok"]:
             return await self._show(interaction, "" if r.get("quiet") else f"⚠ {r['reason']}")
-        await self._show(interaction, f"⛏ **+{r['pay']:,}**")
+        tags = []
+        if r.get("crit"):
+            tags.append("💎 **鉱脈ヒット！**")
+        if r.get("combo"):
+            tags.append("🔥 **10連コンボ！**")
+        head = " ".join(tags) if tags else "⛏"
+        note = f"{head} **+{r['pay']:,}**"
+        if r.get("ore"):
+            ore_id = r["ore"]
+            note += f"\n✨ 手掘りで **{lab.ORE_MARK[ore_id]}{lab.ORE_NAME[ore_id]}**（+{r['ore_pay']:,}）を掘り当てた！"
+        await self._show(interaction, note)
 
     async def _drink(self, interaction: discord.Interaction):
         ok, reason = self.eco().labor_drink(self.user_id, time.time(), today(self.bot))
