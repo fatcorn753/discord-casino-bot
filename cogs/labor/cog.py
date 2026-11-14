@@ -14,8 +14,6 @@ from discord.ext import commands
 from cogs.shared import ui
 from domain import labor as lab
 from domain import relics, shop
-from infra import catalogs
-from infra.clock import local_today
 
 VIEW_TIMEOUT = 900  # 画面が反応する時間（秒）。過ぎたら、`/地下 作業` で開き直す
 

@@ -29,6 +29,7 @@ def asset_groups(parts: dict) -> dict[str, int]:
         "net": liquid + fixed - liabilities,
     }
 
+
 # 消耗品 → 効果の列。呼び出し側の指定ではなく、ここで対応を固定する
 CONSUMABLE_EFFECTS = dict(_WALLET.consumable_effects)
 
