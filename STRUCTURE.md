@@ -57,7 +57,10 @@
 | `weekly_cog.py` | 週間ランキングの自動発表（毎週月曜 0 時）と限定称号の授与 |
 | `approval_cog.py` | Bot をサーバーへ追加するとき、持ち主が DM で承認する仕組み。`/運営` コマンドもここ |
 | `help_cog.py` | `/help`。カテゴリ別の案内 |
-| `_admin_embeds.py` / `_admin_views.py` / `_admin_purge.py` | `/運営` の部品。埋め込みの組み立て / 確認ボタンと入力フォーム / Bot の発言の一括削除 |
+| `_admin_embeds.py` / `_admin_views.py` / `_admin_purge.py` / `_admin_targets.py` | `/運営` の部品。埋め込みの組み立て / 確認・承認ボタンと入力フォーム / Bot の発言の一括削除 / 対象のサーバー・チャンネル・メンバー補完 |
+| `_shop_embeds.py` / `_shop_views.py` / `_shop_discord.py` | `/ショップ` の部品。棚・所持品・スキンの埋め込み / 操作ボタンとモーダル / Discord ロール・ニックネームの反映 |
+| `_market_embeds.py` / `_market_views.py` | `/証券` の部品。市況・保有・決算の埋め込み / 市況切替と保有決済のボタン・モーダル |
+| `_p2p_embeds.py` / `_bond_embeds.py` | プレイヤー間取引（競り・出品）と債券の表示文・埋め込みの部品（`shop_cog` / `market_cog` からも共有） |
 | `_horse_views.py` | 競馬の画面の部品（出馬表・厩舎・馬券のボタンとモーダル） |
 | `_teiai_panel.py` / `_teiai_escape.py` | `/ペリカ 帝愛` のパネル / 海外逃亡の演出 |
 | `_amount.py` | 金額の入力欄に、自分の残高を見せる部品 |
