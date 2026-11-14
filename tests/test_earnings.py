@@ -176,7 +176,7 @@ def test_post_announces_and_reports_results_to_each_allowed_guild(eco, monkeypat
     cog = make_cog(eco)
     cog.bot.guilds = [guild]
     monkeypatch.setattr(market_cog.approval, "is_allowed", lambda *a: True)
-    monkeypatch.setattr("cogs.weekly_cog.announce_channel", lambda g, e: Chan())
+    monkeypatch.setattr(market_cog, "announce_channel", lambda g, e: Chan())
     now = time.time()
     with eco._lock, eco._conn:
         eco._conn.execute(
