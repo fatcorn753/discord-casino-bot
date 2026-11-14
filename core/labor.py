@@ -29,9 +29,80 @@ UPGRADE_COST = (
     112_000,
 )  # 次のレベルへ上げる値段（レベル0→1, 1→2, …）。ほぼ倍々
 
-MAX_CLICKS_PER_DAY = 1_000  # 「働く」を押せる、1日の回数の上限（作業員の稼ぎ・鉱石は対象外）。超えた分は、1回あたり OVER_CAP_PAY ペリカしか稼げない
-# 回数で区切るので、ツルハシを強化するほど、1日に稼げる額もそのまま増える（ペリカの額で区切ると、上限に届くのが早くなるだけになってしまう）
+MAX_CLICKS_PER_DAY = 350  # 「働く」を押せる、1日の回数の上限（作業員の稼ぎ・鉱石は対象外）。超えた分は、1回あたり OVER_CAP_PAY ペリカしか稼げない
+# 短時間で区切りよく掘り切れるよう上限を設定し、その分ツルハシの鉱脈ヒットやコンボで1回あたりの爽快感を高める
 OVER_CAP_PAY = 1
+
+CRIT_BASE_CHANCE = 0.04  # ツルハシ Lv0 の鉱脈ヒット率
+CRIT_CHANCE_PER_PICK = 0.016  # ツルハシ1段ごとの鉱脈ヒット率加算（Lv10 で 20%）
+CRIT_WORKER_BONUS = 0.004  # 作業員（監督含む）1人ごとの現場シナジー加算
+CRIT_MULT = 2.5  # 鉱脈ヒット時の稼ぎ倍率
+HAND_ORE_CHANCE = 0.15  # 鉱脈ヒット時に、手掘りで鉱石を直接掘り当てる確率
+COMBO_STEP = 10  # 何回「働く」を押すごとにコンボボーナスが入るか
+COMBO_BONUS_RATE = 0.50  # コンボ達成時に加算する基礎稼ぎの割合
+
+STRATA = (
+    {
+        "id": "rich_vein",
+        "name": "富鉱脈",
+        "mark": "🪙",
+        "desc": "手掘りの鉱脈ヒット率 1.5倍",
+        "crit_mult": 1.5,
+        "fatigue_mult": 1.0,
+        "wage_mult": 1.0,
+        "ore_mult": 1.0,
+    },
+    {
+        "id": "soft_rock",
+        "name": "柔らかな岩盤",
+        "mark": "⚡",
+        "desc": "疲労の溜まり 20%軽減",
+        "crit_mult": 1.0,
+        "fatigue_mult": 0.8,
+        "wage_mult": 1.0,
+        "ore_mult": 1.0,
+    },
+    {
+        "id": "silver_vein",
+        "name": "銀脈の層",
+        "mark": "⚪",
+        "desc": "作業員のレア鉱石・発掘品 +25%",
+        "crit_mult": 1.0,
+        "fatigue_mult": 1.0,
+        "wage_mult": 1.0,
+        "ore_mult": 1.25,
+    },
+    {
+        "id": "energetic",
+        "name": "活気の坑道",
+        "mark": "🔥",
+        "desc": "作業員の稼ぎ +15%",
+        "crit_mult": 1.0,
+        "fatigue_mult": 1.0,
+        "wage_mult": 1.15,
+        "ore_mult": 1.0,
+    },
+    {
+        "id": "crystal",
+        "name": "結晶層",
+        "mark": "💎",
+        "desc": "鉱脈ヒット率 1.25倍・手掘り鉱石率 1.5倍",
+        "crit_mult": 1.25,
+        "fatigue_mult": 1.0,
+        "wage_mult": 1.0,
+        "ore_mult": 1.5,
+    },
+)
+NEUTRAL_STRATUM = {
+    "id": "normal",
+    "name": "通常地層",
+    "mark": "🪨",
+    "desc": "安定した岩盤",
+    "crit_mult": 1.0,
+    "fatigue_mult": 1.0,
+    "wage_mult": 1.0,
+    "ore_mult": 1.0,
+}
 
 BASE_PAY = 10  # 工具なしの、1回の稼ぎ
 PAY_PER_LEVEL = 4  # ツルハシ1段ごとの加算（Lv10 で最大 50）
@@ -92,9 +163,51 @@ def bar(fatigue: float, width: int = 10) -> str:
     return "🟥" * n + "⬜" * (width - n)
 
 
-def click_outcome(pick: int, glove: int, fatigue: float) -> dict:
+def click_outcome(pick: int, glove: int, fatigue: float, fatigue_mult: float = 1.0) -> dict:
     """1回押した結果（残高などは見ない）。{pay, fatigue}。fatigue は押したあとの疲労。"""
-    return {"pay": click_pay(pick, fatigue), "fatigue": min(FATIGUE_MAX, fatigue + fatigue_gain(glove))}
+    gain = fatigue_gain(glove) * max(0.0, fatigue_mult)
+    return {"pay": click_pay(pick, fatigue), "fatigue": min(FATIGUE_MAX, fatigue + gain)}
+
+
+def daily_stratum(day: str) -> dict:
+    """日付ごとのサーバー共通地層（空文字なら中立）。"""
+    if not day:
+        return dict(NEUTRAL_STRATUM)
+    rng = random.Random(f"stratum:{day}")
+    return dict(rng.choice(STRATA))
+
+
+def crit_chance(pick: int, workers: int = 0, stratum: dict = None) -> float:
+    """手掘りの鉱脈ヒット率。ツルハシLvと作業員シナジー・今日の地層で決まる。"""
+    base = CRIT_BASE_CHANCE + CRIT_CHANCE_PER_PICK * clamp_level(pick) + CRIT_WORKER_BONUS * max(0, workers)
+    mult = (stratum or NEUTRAL_STRATUM).get("crit_mult", 1.0)
+    return min(0.60, base * mult)
+
+
+def roll_click_bonus(pick: int, workers: int = 0, stratum: dict = None, rng=None) -> dict:
+    """クリック時の鉱脈ヒットと手掘り鉱石の抽選。{"crit": bool, "ore": Optional[str]}。"""
+    rng = rng or random.SystemRandom()
+    st = stratum or NEUTRAL_STRATUM
+    if rng.random() >= crit_chance(pick, workers, st):
+        return {"crit": False, "ore": None}
+    ore = None
+    ore_p = min(0.5, HAND_ORE_CHANCE * (st.get("ore_mult", 1.0) if st.get("id") == "crystal" else 1.0))
+    if rng.random() < ore_p:
+        lv = clamp_level(pick)
+        # ツルハシ Lv が高いほど銅・銀・金がわずかに出やすい
+        weights = [
+            ("gold", 0.02 + 0.004 * lv),
+            ("silver", 0.10 + 0.010 * lv),
+            ("copper", 0.30 + 0.015 * lv),
+            ("coal", 0.58),
+        ]
+        x = rng.random() * sum(w for _, w in weights)
+        for oid, w in weights:
+            x -= w
+            if x < 0:
+                ore = oid
+                break
+    return {"crit": True, "ore": ore}
 
 
 # ---------------------------------------------------------------- #

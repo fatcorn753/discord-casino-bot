@@ -29,7 +29,8 @@ class LaborMixin:
         row["fatigue_at"] = now
         if row["day"] != day:
             row["day"], row["day_earned"], row["day_click"] = day, 0, 0
-        self._idle_settle(user_id, row, now, rng)
+        stratum = labor_mod.daily_stratum(day)
+        self._idle_settle(user_id, row, now, rng, stratum)
         return row
 
     def _relic_buffs(self, user_id: int) -> dict:
@@ -146,10 +147,11 @@ class LaborMixin:
         for k in labor_mod.WORKERS:
             row[k] = sum(1 for w in workers if w["kind"] == k)
 
-    def _idle_settle(self, user_id: int, row: dict, now: float, rng=None) -> None:
+    def _idle_settle(self, user_id: int, row: dict, now: float, rng=None, stratum=None) -> None:
         """作業員の稼ぎを pot に足し、切れた契約を決算する（更新なら契約料を払い、払えなければ退職）。"""
         workers = self._workers_of(user_id)
         if workers:
+            st = stratum or labor_mod.NEUTRAL_STRATUM
             bal = self._conn.execute(
                 "SELECT balance FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
             ).fetchone()
@@ -161,8 +163,8 @@ class LaborMixin:
                 row["pot"],
                 bal["balance"] if bal else 0,
                 rng,
-                wage_bonus=self._relic_buffs(user_id).get("wage", 0.0),
-                luck_bonus=self._relic_buffs(user_id).get("luck", 0.0),
+                wage_bonus=self._relic_buffs(user_id).get("wage", 0.0) + (st["wage_mult"] - 1.0),
+                luck_bonus=self._relic_buffs(user_id).get("luck", 0.0) + (st["ore_mult"] - 1.0),
             )
             if plan["balance_spent"] > 0:
                 self._apply(user_id, -plan["balance_spent"], "地下作業:契約の更新")
@@ -289,6 +291,7 @@ class LaborMixin:
                 "SELECT balance FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
             ).fetchone()
             row["balance"] = bal["balance"] if bal else 0
+            stratum = labor_mod.daily_stratum(day)
             workers = self._workers_of(user_id)
             plan = labor_mod.settle_plan(
                 workers,
@@ -298,8 +301,8 @@ class LaborMixin:
                 row["pot"],
                 row["balance"],
                 _NoRoll,
-                wage_bonus=buffs.get("wage", 0.0),
-                luck_bonus=buffs.get("luck", 0.0),
+                wage_bonus=buffs.get("wage", 0.0) + (stratum["wage_mult"] - 1.0),
+                luck_bonus=buffs.get("luck", 0.0) + (stratum["ore_mult"] - 1.0),
             )
             gone = set(plan["removed"])
             renewed = dict(plan["renewed"])
@@ -308,6 +311,8 @@ class LaborMixin:
             row["workers"] = len(stay)
             row["slots"] = labor_mod.slots(row["dorm"])
             row["rate"] = labor_mod.idle_rate(self._counts(row))
+            row["stratum"] = stratum
+            row["crit_chance"] = labor_mod.crit_chance(row["pick"], row["workers"], stratum)
             row["relics"] = self._relics_of(row)  # 決算ずみの発掘品
             row["ores"] = self._ores_of(row)  # 決算ずみの鉱石（見込みの分は、掘るまで分からない）
             row["idle_pending"] = plan["gain"]  # まだ数えていない、作業員の稼ぎ（見込み）
@@ -353,35 +358,55 @@ class LaborMixin:
         return {"rows": rows, "me": me}
 
     def labor_click(self, user_id: int, now: Optional[float] = None, day: str = "") -> dict:
-        """「働く」を1回押す。{ok, reason, pay}。ok=False のときは、何も変わらない。"""
+        """「働く」を1回押す。{ok, reason, pay, crit, combo, ore, ore_pay}。ok=False のときは、何も変わらない。"""
         now = time.time() if now is None else now
         with self._lock, self._conn:
             self._ensure(user_id)
             row = self._labor_row(user_id, now, day)
             if now - row["last_click"] < labor_mod.CLICK_INTERVAL:
                 return {"ok": False, "reason": "押すのが早すぎます。", "quiet": True}
-            out = labor_mod.click_outcome(row["pick"], row["glove"], row["fatigue"])
-            pay = max(1, relics_mod.chance_round(out["pay"] * (1 + self._relic_buffs(user_id).get("click", 0.0))))
+            stratum = labor_mod.daily_stratum(day)
+            out = labor_mod.click_outcome(row["pick"], row["glove"], row["fatigue"], stratum["fatigue_mult"])
+            base_pay = max(1, relics_mod.chance_round(out["pay"] * (1 + self._relic_buffs(user_id).get("click", 0.0))))
+            pay = base_pay
             room = labor_mod.MAX_CLICKS_PER_DAY - row["day_click"]  # 今日、あと何回、「働く」を押せるか
-            pay = labor_mod.OVER_CAP_PAY if room <= 0 else pay
             hour = int(now // 3600)
             since = now - labor_mod.SUSPECT_HOURS * 3600
             suspected = labor_mod.auto_click_suspected(self.labor_click_hours(user_id, since), hour)
-            if suspected:  # 自動操作の疑い: BANではなく、その日はそこで打ち止め（翌日には戻る）
+            crit = combo = False
+            ore = None
+            ore_pay = 0
+            if room <= 0 or suspected:  # 上限・自動操作の疑い: BANではなく、その日はそこで打ち止め（翌日には戻る）
                 pay = labor_mod.OVER_CAP_PAY
+            else:
+                workers_n = sum(self._counts(row).values())
+                bonus = labor_mod.roll_click_bonus(row["pick"], workers_n, stratum)
+                if bonus["crit"]:
+                    crit = True
+                    pay = round(pay * labor_mod.CRIT_MULT)
+                if labor_mod.COMBO_BONUS_RATE > 0 and (row["day_click"] + 1) % labor_mod.COMBO_STEP == 0:
+                    combo = True
+                    pay += max(1, round(base_pay * labor_mod.COMBO_BONUS_RATE))
+                if bonus["ore"]:
+                    ore = bonus["ore"]
+                    ore_pay = labor_mod.ORE_VALUE[ore]
+                    found = self._ores_of(row)
+                    found[ore] = found.get(ore, 0) + 1
+                    row["ores"] = json.dumps(found)
             row["last_click_before"] = row["last_click"]
+            total_add = pay + ore_pay
             row.update(
                 fatigue=out["fatigue"],
                 last_click=now,
                 clicks=row["clicks"] + 1,
-                pot=row["pot"] + pay,
-                day_earned=row["day_earned"] + pay,
+                pot=row["pot"] + total_add,
+                day_earned=row["day_earned"] + total_add,
                 day_click=row["day_click"] + 1,
-                earned_total=row["earned_total"] + pay,
+                earned_total=row["earned_total"] + total_add,
             )
             self._labor_log_click(user_id, now, pay, now - row["last_click_before"])
             self._labor_save(user_id, row)
-            return {"ok": True, "pay": pay}
+            return {"ok": True, "pay": pay, "crit": crit, "combo": combo, "ore": ore, "ore_pay": ore_pay}
 
     CLICK_LOG_DAYS = 14  # 押した記録（1時間ごと）を残す日数
 
