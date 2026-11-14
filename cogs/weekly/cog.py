@@ -13,7 +13,7 @@ from cogs.shared.cog_ports import IShopCogPort, get_cog_port
 from cogs.shared.messages import format_standings_lines
 from domain import approval, shop, weekly
 from infra import catalogs, logthrottle
-from infra.clock import local_now
+from infra.clock import local_now, utc_offset_hours
 
 CHECK_MINUTES = catalogs.economy().weekly.check_minutes
 KING = shop.BY_ID[shop.WEEKLY_KING]
@@ -24,7 +24,7 @@ class WeeklyCog(commands.Cog):
         self.bot = bot
 
     async def cog_load(self):
-        tz = float(self.bot.config.get("utc_offset_hours", 9))
+        tz = utc_offset_hours(self.bot)
         done = self.bot.economy.backfill_weekly(tz)  # この機能の前に遊んだ分を、台帳から補う（初回だけ）
         if done:
             print(f"週間ランキング: 過去の {done} ゲーム分を台帳から補いました")

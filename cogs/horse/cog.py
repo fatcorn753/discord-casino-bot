@@ -20,6 +20,7 @@ from cogs.shared.announce import announce_channel
 from domain import approval
 from domain import horse as horse_mod
 from infra import logthrottle
+from infra.clock import utc_offset_hours
 
 TRACK_W = 22  # アニメーションのコースの長さ（文字数）
 STEP = 1.4  # メッセージの書き換えの間隔（秒。レート制限に収まる）
@@ -171,7 +172,7 @@ class HorseCog(commands.Cog):
         eco = self.g(interaction)
         races = eco.race_open()
         if not races:
-            slots = eco.race_slots(time.time(), float(self.bot.config.get("utc_offset_hours", 9)))
+            slots = eco.race_slots(time.time(), utc_offset_hours(self.bot))
             return await interaction.response.send_message(
                 embed=ui.embed(
                     "🏇 競馬",
@@ -320,7 +321,7 @@ class HorseCog(commands.Cog):
 
     async def run_once(self) -> None:
         now = time.time()
-        tz = float(self.bot.config.get("utc_offset_hours", 9))
+        tz = utc_offset_hours(self.bot)
         for guild in list(self.bot.guilds):
             if guild.id in self._busy or not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
                 continue

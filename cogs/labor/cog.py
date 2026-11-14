@@ -4,7 +4,6 @@
 数字と計算は core/labor.py、処理は core/eco_labor.py。画面は、チャンネルに公開される（みんなに見えるが、押せるのは開いた本人だけ。再起動すると、画面は開き直す）。
 """
 
-import datetime
 import time
 
 import discord
@@ -15,13 +14,13 @@ from cogs.shared import ui
 from cogs.shared.messages import format_failure
 from domain import labor as lab
 from domain import relics, shop
+from infra.clock import local_today
 
 VIEW_TIMEOUT = 900  # 画面が反応する時間（秒）。過ぎたら、`/地下 作業` で開き直す
 
 
 def today(bot) -> str:
-    tz = datetime.timezone(datetime.timedelta(hours=float(bot.config.get("utc_offset_hours", 9))))
-    return datetime.datetime.now(tz).date().isoformat()
+    return local_today(bot).isoformat()
 
 
 def fatigue_label(fatigue: float) -> str:

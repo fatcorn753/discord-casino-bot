@@ -20,7 +20,7 @@ from domain import approval, shop, teiai
 from domain import missions as missions_mod
 from domain.types import DAILY_BASE, DAILY_STREAK_BONUS, DAILY_STREAK_CAP
 from infra import catalogs, logthrottle
-from infra.clock import local_now
+from infra.clock import local_now, utc_offset_hours
 
 _ECON_CFG = catalogs.economy()
 _TRANSFER_CFG = _ECON_CFG.transfer
@@ -31,18 +31,18 @@ BOARD_INTERVAL_MINUTES = _TRANSFER_CFG.board_interval_minutes  # ランキング
 TRANSFER_MIN_GAMES = _TRANSFER_CFG.min_games  # 送金できるのは、ゲームで3回以上遊んだ人（複数アカウントで稼ぐのを防ぐ）
 
 
+def tz_label(bot) -> str:
+    offset = utc_offset_hours(bot)
+    return "日本時間" if offset == 9 else f"UTC{offset:+g}"
+
+
 def reset_label(bot) -> str:
     """日付が切り替わる（デイリーやミッションがリセットされる）時刻の表示。"""
-    offset = float(bot.config.get("utc_offset_hours", 9))
-    return "日本時間 0:00" if offset == 9 else f"UTC{offset:+g} の 0:00"
+    offset = utc_offset_hours(bot)
+    return f"{tz_label(bot)} 0:00" if offset == 9 else f"{tz_label(bot)} の 0:00"
 
 
 DAILY_SLOT_HOURS = _ECON_CFG.wallet.daily_slot_hours  # デイリーボーナスを受け取れる間隔（0・6・12・18時に切り替わる）
-
-
-def tz_label(bot) -> str:
-    offset = float(bot.config.get("utc_offset_hours", 9))
-    return "日本時間" if offset == 9 else f"UTC{offset:+g}"
 
 
 def slot_of(now: datetime.datetime) -> int:

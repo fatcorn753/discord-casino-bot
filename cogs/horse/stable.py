@@ -10,6 +10,7 @@ from cogs.shared.horse_display import stat_lines
 from cogs.shared.messages import format_failure
 from domain import horse as horse_mod
 from domain import shop
+from infra.clock import utc_offset_hours
 
 
 class GoldCarrotView(discord.ui.View):
@@ -133,7 +134,7 @@ class Stable(ui.OwnerView):
         )
 
     def _tz(self) -> float:
-        return float(self.bot.config.get("utc_offset_hours", 9))
+        return utc_offset_hours(self.bot)
 
     def eco_for(self):
         return self.bot.economy.for_guild(self.guild_id)

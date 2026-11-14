@@ -6,11 +6,15 @@ from typing import Any
 from domain.ports import IClock
 
 
+def offset_hours(config: dict[str, Any]) -> float:
+    return float(config.get("utc_offset_hours", 9))
+
+
 class ConfigClock(IClock):
     """config 辞書の utc_offset_hours を使う時刻プロバイダ。"""
 
     def __init__(self, config: dict[str, Any]) -> None:
-        self._offset = float(config.get("utc_offset_hours", 9))
+        self._offset = offset_hours(config)
 
     def now(self) -> datetime.datetime:
         tz = datetime.timezone(datetime.timedelta(hours=self._offset))
@@ -20,9 +24,13 @@ class ConfigClock(IClock):
         return self.now().date()
 
 
+def utc_offset_hours(bot: Any) -> float:
+    return offset_hours(getattr(bot, "config", {}) or {})
+
+
 def local_now(bot: Any) -> datetime.datetime:
-    return ConfigClock(bot.config).now()
+    return ConfigClock(getattr(bot, "config", {}) or {}).now()
 
 
 def local_today(bot: Any) -> datetime.date:
-    return ConfigClock(bot.config).today()
+    return ConfigClock(getattr(bot, "config", {}) or {}).today()

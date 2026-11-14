@@ -39,6 +39,7 @@ from domain import approval, bonds, earnings, market, market_events
 from domain import options as opt
 from domain.options import name_of
 from infra import catalogs, logthrottle
+from infra.clock import utc_offset_hours
 
 RNG = random.SystemRandom()
 KEEP_DAYS = catalogs.market().market.keep_days  # 価格の履歴を残す日数
@@ -102,7 +103,7 @@ class MarketCog(commands.Cog):
             print(
                 f"ボラティリティ予告: {announced['symbol']} {market_events.LEAD_MIN}分後から{market_events.DURATION_MIN}分"
             )
-        tz = float(self.bot.config.get("utc_offset_hours", 9))
+        tz = utc_offset_hours(self.bot)
         self.bot.economy.earnings_ensure(now, tz)  # 次の決算（毎週火曜13:30）を決めておく
         new_fair, event = market.next_prices(fair, RNG, self.bot.economy.vol_multipliers(now))
         for r in self.bot.economy.earnings_release_due(
