@@ -1,0 +1,162 @@
+# 証券市場・オプション・市場イベント・定期決算の定義とパラメータ
+market:
+  min_price: 20
+  max_price: 50000
+  keep_days: 30
+  confirm_from: 5000
+  event_interval_minutes: 720
+  event_range: [0.015, 0.035]
+  event_scale_max: 1.5
+  unit: 1000
+  fee_rate: 0.0
+  unit_name: "ペリカ"
+  side_name:
+    short: "空売り"
+    long: "信用買い"
+  symbols:
+    - key: cs
+      name: "CSトークン"
+      emoji: "🪙"
+      start: 1000.0
+      sigma: 0.0012
+      drift: 0.008
+    - key: teio
+      name: "TEIO重工"
+      emoji: "🏭"
+      start: 1200.0
+      sigma: 0.0007
+      drift: 0.007
+    - key: numa
+      name: "NUMAバイオ"
+      emoji: "🧪"
+      start: 400.0
+      sigma: 0.0022
+      drift: 0.010
+    - key: gold
+      name: "GOLD地金"
+      emoji: "🥇"
+      start: 3000.0
+      sigma: 0.0004
+      drift: 0.003
+  correlations:
+    - pair: [cs, teio]
+      value: 0.60
+    - pair: [cs, numa]
+      value: 0.05
+    - pair: [teio, numa]
+      value: 0.05
+    - pair: [cs, gold]
+      value: -0.6
+    - pair: [teio, gold]
+      value: -0.5
+    - pair: [numa, gold]
+      value: -0.1
+  drift_band: 8.0
+  daily_limit: 0.30
+  pin_locks:
+    -1: ["sell_spot", "close_long", "sell_call"]
+    1: ["buy_spot", "open_long", "cover_short"]
+  pin_action_text:
+    sell_spot: "現物の売却"
+    close_long: "買い建て（ロング）の決済"
+    sell_call: "コールの売却"
+    buy_spot: "現物の買い"
+    open_long: "買い建て（ロング）の新規"
+    cover_short: "空売りの買い戻し"
+  pin_mark:
+    1: "🚀 ストップ高"
+    -1: "🚨 ストップ安"
+  gains_tax_brackets:
+    - limit: 10000
+      rate: 0.0
+    - limit: 100000
+      rate: 0.03
+    - limit: 1000000
+      rate: 0.07
+    - limit: null
+      rate: 0.12
+  borrow_rate_per_day:
+    long: 0.001
+    short: 0.0005
+  interest_min_charge: 10
+  risk_k: 20.0
+  open_ratio: 1.3
+  losscut_ratio: 1.0
+  collateral_haircut:
+    spot: 0.8
+    normal: 0.95
+    junk: 0.5
+  levels: " ▁▂▃▄▅▆▇█"
+  periods:
+    1h:
+      label: "1時間"
+      seconds: 3600
+    6h:
+      label: "6時間"
+      seconds: 21600
+    24h:
+      label: "24時間"
+      seconds: 86400
+    7d:
+      label: "7日"
+      seconds: 604800
+
+options:
+  option_hours: 6
+  strike_otm: 0.02
+  tick_seconds: 60
+  spread: 0.015
+  payout_cap_mult: 50
+  min_premium: 100
+  max_open_premium: 20000
+  yield_share: 0.04
+  margin_rate: 0.20
+  max_short_margin: 20000
+  kinds:
+    call:
+      name: "爆騰コール"
+      emoji: "🚀"
+      desc: "上がると儲かる"
+    put:
+      name: "暴落プット"
+      emoji: "📉"
+      desc: "下がると儲かる"
+    pair:
+      name: "ペア・ワラント"
+      emoji: "⚖️"
+      desc: "相手の銘柄より上がると儲かる"
+  short_names:
+    call: "コール裸売り"
+    put: "プット裸売り"
+  strike_by_symbol:
+    cs: 0.03
+    teio: 0.02
+    numa: 0.05
+    gold: 0.015
+  max_target_pct: 50
+
+events:
+  lead_min: 15
+  duration_min: 20
+  factor: 2.0
+  announce_interval_minutes: 300
+  cooldown_min: 60
+  priced_at_announce: 1.0
+  keep_days: 7
+  alert_window: 60
+  z_alert: 2.5
+  min_abs_corr: 0.5
+
+earnings:
+  symbols: ["teio", "numa"]
+  release_weekday: 1
+  release_time: [13, 30]
+  announce_weekday: 0
+  announce_time: [9, 0]
+  size_range: [0.08, 0.22]
+  surprise_prob: 0.15
+  surprise_range: [0.35, 0.60]
+  memo_prob: 0.10
+  memo_truth: 0.70
+  shop_truth: 0.80
+  shop_stock: 5

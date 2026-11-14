@@ -1,0 +1,68 @@
+# ゲーム演出の変更品（スキン）の見た目定義
+slot_of_game:
+  チンチロ: skin_dice
+  パチンコ: skin_table
+  ブラックジャック: skin_table
+
+skins:
+  - item_id: skin_kuro
+    games: ["チンチロ"]
+    title_prefix: "🕴️ "
+    start_line: "黒服が、静かに立ち会っている…"
+    win_line: "黒服「…お見事です」"
+    lose_line: "黒服「…残念でしたな」"
+    dice_mark: "⚫"
+    role_win:
+      pinzoro: "黒服「ピンゾロ…。5倍、お支払いします」 場が凍りつく…"
+      arashi: "黒服「嵐…。3倍です」 ざわ…ざわ…"
+      shigoro: "黒服「シゴロ。2倍です」 流れが来ている…"
+    role_lose:
+      pinzoro: "黒服「親のピンゾロ。5倍のお支払いを」 血の気が引いていく…"
+      arashi: "黒服「親の嵐。3倍です」 地下に悲鳴が響く…"
+      hifumi: "黒服「ヒフミ。倍のお支払いを」 地獄だ…"
+    roll_comment: "　黒服「…{hand}」"
+
+  - item_id: skin_gold_dice
+    games: ["チンチロ"]
+    title_prefix: "✨ "
+    start_line: "黄金の賽が、丼の中で鈍く光る…"
+    win_line: "✨ 黄金の賽が、まばゆく輝いた！"
+    lose_line: "黄金の賽は、冷たく転がった…"
+    dice_mark: "🟡"
+    role_win:
+      pinzoro: "✨ 黄金のピンゾロ…ッ！！ 5倍…！ 賽が燃えるように輝く…！"
+      arashi: "✨ 黄金の嵐…ッ！ 3倍…！ 光が丼からあふれる…"
+      shigoro: "✨ 黄金のシゴロ…！ 2倍…。賽が笑っている…"
+    role_lose:
+      pinzoro: "親の黄金の賽がピンゾロ…！ 5倍払い…。金色の絶望…"
+
+  - item_id: skin_glass_dice
+    games: ["チンチロ"]
+    title_prefix: "🩸 "
+    start_line: "赤い爪が、ガラスの賽をそっとつまむ…"
+    win_line: "🩸 ガラスの賽が、高く澄んだ音で鳴いた…"
+    lose_line: "ガラスの賽に、ひびが入った…"
+    dice_mark: "🔴"
+    role_win:
+      pinzoro: "🩸 ガラスの賽が、ピンゾロで砕け散った…ッ！ 5倍…！"
+      arashi: "🩸 嵐の音が、ガラスを震わせる…！ 3倍…！"
+      shigoro: "🩸 シゴロ…。赤い爪が、静かに笑う… 2倍…"
+    role_lose:
+      pinzoro: "🩸 親のピンゾロ…。ガラスが血に染まる… 5倍払い…"
+    roll_comment: "　🩸"
+
+  - item_id: skin_vip
+    games: ["パチンコ", "ブラックジャック"]
+    title_prefix: "🥀 "
+    start_line: "黒薔薇のシートに、深く腰を沈める…"
+    win_line: "🥀 黒薔薇が、静かに祝福している…"
+    lose_line: "🥀 黒薔薇の花びらが、一枚散った…"
+    banner: "# 🥀 黒薔薇の祝福 🥀"
+
+  - item_id: skin_numa
+    games: ["パチンコ"]
+    title_prefix: "🕳️ "
+    start_line: "…第3クギを、玉が抜けていく…"
+    win_line: "🕳️ 沼が、ついに口を開けた！！"
+    lose_line: "🕳️ 沼は、すべてを飲み込んだ…"
+    banner: "# 🕳️ 沼が開いた…！！ 🕳️"

@@ -1,0 +1,177 @@
+# 地下作業（クリッカー・鉱脈ヒット・地層・雇用・鉱石・発掘品・寮）の定義とバランス数値
+tools:
+  - key: pick
+    name: "ツルハシ"
+    mark: "⛏"
+    effect: "稼ぎが増える"
+  - key: glove
+    name: "手袋"
+    mark: "🧤"
+    effect: "疲れにくくなる"
+
+max_level: 10
+upgrade_cost: [150, 400, 900, 1800, 3500, 7000, 14000, 28000, 56000, 112000]
+
+max_clicks_per_day: 1000
+over_cap_pay: 1
+
+base_pay: 10
+pay_per_level: 4
+fatigue_max: 100.0
+fatigue_gain: 3.0
+gain_cut_per_level: 0.4
+late_gain_cut_per_level: 0.1
+early_levels: 5
+min_pay_rate: 0.2
+recover_per_sec: 0.1
+drink_recover: 60.0
+click_interval: 1.0
+
+crit_base: 0.05
+crit_per_level: 0.01
+crit_worker_bonus: 0.002
+crit_max: 0.30
+crit_mult: 5
+crit_ore_chance: 0.15
+crit_ores:
+  - id: coal
+    name: "石炭"
+    mark: "⚫"
+    weight: 45
+    value: 3
+  - id: copper
+    name: "銅"
+    mark: "🟤"
+    weight: 40
+    value: 60
+  - id: silver
+    name: "銀"
+    mark: "⚪"
+    weight: 12
+    value: 240
+  - id: gold
+    name: "金"
+    mark: "🟡"
+    weight: 3
+    value: 1200
+
+combo_size: 10
+combo_bonus: 0.20
+
+terrain_kinds: ["hit", "fatigue", "silver", "none"]
+terrain_hit_bonus: 0.05
+terrain_fatigue_cut: 0.20
+terrain_silver_mult: 2
+
+workers:
+  - key: apprentice
+    name: "見習い"
+    mark: "🧒"
+    rate: 1.8
+    contract_fee: 150
+    ore_power: 0.12
+    relic_power: 0.5
+  - key: miner
+    name: "坑夫"
+    mark: "👷"
+    rate: 10.05
+    contract_fee: 520
+    ore_power: 0.415
+    relic_power: 0.8
+  - key: craftsman
+    name: "職人"
+    mark: "🧑‍🔧"
+    rate: 23.55
+    contract_fee: 1160
+    ore_power: 0.95
+    relic_power: 1.0
+  - key: foreman
+    name: "監督"
+    mark: "🕴️"
+    rate: 0
+    contract_fee: 640
+    ore_power: 0.0
+    relic_power: 0.0
+
+contract_days: 1
+foreman_luck: 0.25
+coal_p: 0.40
+
+ores:
+  - id: copper
+    name: "銅"
+    mark: "🟤"
+    prob: 0.06
+    value: 60
+  - id: silver
+    name: "銀"
+    mark: "⚪"
+    prob: 0.015
+    value: 240
+  - id: gold
+    name: "金"
+    mark: "🟡"
+    prob: 0.003
+    value: 1200
+  - id: diamond
+    name: "ダイヤ"
+    mark: "💎"
+    prob: 0.0004
+    value: 9000
+  - id: legend
+    name: "伝説の鉱石"
+    mark: "🌟"
+    prob: 0.00004
+    value: 90000
+  - id: coal
+    name: "石炭"
+    mark: "⚫"
+    prob: null
+    value: 3
+
+flat_ores: ["coal"]
+ore_big: ["diamond", "legend"]
+
+relics:
+  - id: fossil
+    name: "三葉虫の化石"
+    mark: "🐚"
+    prob: 0.0033
+    value: 1500
+  - id: bone
+    name: "恐竜の骨"
+    mark: "🦴"
+    prob: 0.0017
+    value: 4000
+  - id: meteor
+    name: "隕石の欠片"
+    mark: "☄️"
+    prob: 0.00067
+    value: 10000
+  - id: vase
+    name: "古代文明の壺"
+    mark: "🏺"
+    prob: 0.00027
+    value: 25000
+  - id: crown
+    name: "王家の黄金冠"
+    mark: "👑"
+    prob: 0.000067
+    value: 60000
+  - id: tear
+    name: "竜の涙"
+    mark: "🔮"
+    prob: 0.000017
+    value: 100000
+
+relic_big: ["crown", "tear"]
+
+slots_base: 5
+dorm_cost: [2000, 6000, 15000, 40000, 100000]
+dorm_max: 5
+stock_hours: 24.0
+
+click_gap_max: 600.0
+mech_cv_max: 0.1
+mech_min_clicks: 100
+suspect_hours: 3

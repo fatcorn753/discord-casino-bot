@@ -1,0 +1,24 @@
+# 発掘品の効果（バフ）
+buff_rate: 0.01
+merge_count: 10
+star_max: 3
+
+buffs:
+  relic_fossil:
+    effect: click
+    description: "地下作業の「働く」1回の稼ぎ"
+  relic_bone:
+    effect: wage
+    description: "作業員の稼ぎ"
+  relic_meteor:
+    effect: luck
+    description: "作業員の鉱石・発掘品の出やすさ"
+  relic_vase:
+    effect: recovery
+    description: "地下作業の疲労の回復"
+  relic_crown:
+    effect: daily
+    description: "デイリーボーナスの額"
+  relic_tear:
+    effect: prize
+    description: "競馬の賞金（馬主として受け取る額）"

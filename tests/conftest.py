@@ -7,8 +7,12 @@
 
 import pytest
 
-from core import events, missions
-from core.economy import Economy
+from infra.catalogs import bind_catalogs
+
+bind_catalogs()
+
+from domain import events, missions  # noqa: E402
+from infra.db.economy import Economy  # noqa: E402
 
 
 def pytest_configure(config):

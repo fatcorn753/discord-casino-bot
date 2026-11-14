@@ -1,0 +1,21 @@
+# 債券の種類・金利・期間・上限
+min_amount: 1000
+sale_discount_per_hour: 0.001
+
+kinds:
+  - key: normal
+    name: "通常債"
+    emoji: "🏦"
+    hours: 72
+    rate: 4
+    default_pct: 0
+    max_total: 30000
+    sellable: true
+  - key: junk
+    name: "ジャンク債"
+    emoji: "🗑️"
+    hours: 24
+    rate: 20
+    default_pct: 20
+    max_total: 10000
+    sellable: false

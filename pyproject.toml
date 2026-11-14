@@ -6,10 +6,13 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "discord.py>=2.4.0",
+    "pydantic>=2.14.3",
+    "pyyaml>=6.0.3",
 ]
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.414",
     "pytest>=8.0.0",
     "ruff>=0.8",
 ]
@@ -17,3 +20,23 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pyright]
+include = ["domain", "services", "infra", "cogs", "tests", "main.py", "manage.py"]
+pythonVersion = "3.12"
+executionEnvironments = [
+  { root = "tests", extraPaths = ["."], reportArgumentType = "none", reportAttributeAccessIssue = "none", reportCallIssue = "none", reportFunctionMemberAccess = "none", reportOperatorIssue = "none", reportOptionalMemberAccess = "none", reportOptionalOperand = "none", reportOptionalSubscript = "none", reportPossiblyUnboundVariable = "none", reportRedeclaration = "none", reportUnusedExpression = "none" },
+]
+

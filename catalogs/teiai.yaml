@@ -1,0 +1,112 @@
+# 帝愛ファイナンス・破産・海外逃亡・銀行・CDS・身分の定数
+seed: 3000
+labor_skim_rate: 0.03
+horse_prize_skim_rate: 0.0
+horse_rental_extra_skim_rate: 0.20
+skim_rate: 0.20
+repay_rate: 0.30
+bankrupt_floor: 10000
+blacklist_days: 7
+
+escape_chance: 0.01
+escape_min_debt: 5000
+escape_fine_rate: 0.10
+escape_fine_min: 1000
+escape_max_tries: 2
+escape_cooldown_hours: 24
+
+auction_start: 0.90
+auction_step: 0.10
+auction_floor: 0.70
+auction_yield_share: 0.5
+seize_rate: 0.50
+
+debt_rate_per_day: 0.01
+debt_interest_max_days: 10
+grace_debt: 15000
+grace_hours: 24
+
+bank_min_deposit: 100
+reserve_ratio: 0.20
+loan_recovery_per_hour: 0.02
+lock_debt_rate: 0.05
+loss_share: 0.03
+premium_yield_share: 0.5
+tax_yield_share: 1.0
+skim_yield_share: 0.5
+run_warn_ratio: 0.15
+run_danger_ratio: 0.05
+
+cds_min_stake: 100
+cds_min_odds: 1.2
+cds_max_odds: 15.0
+cds_term_days: 14
+cds_self_cap: 50000
+cds_payout_cap_rate: 0.50
+
+wealthy_assets: 1000000
+
+statuses:
+  katagi:
+    label: "🟢 カタギ"
+  underground:
+    label: "🟤 地下労働者"
+    mark: "🟤"
+    name: "地下労働者"
+  bankrupt:
+    label: "🔴 破産者"
+    mark: "🔴"
+    name: "破産者"
+  wealthy:
+    label: "🟡 富豪"
+    mark: "🟡"
+    name: "富豪"
+
+escape_frame_seconds: 1.4
+escape_ship:
+  - "      |\\"
+  - "      | \\"
+  - " _____|__\\_____"
+  - " \\  o  o  o   /"
+  - "  \\___________/"
+escape_waves:
+  - "~^~^~^~^~^~^~^~^~^~^~^~^~^~^"
+  - "^~^~^~^~^~^~^~^~^~^~^~^~^~^~"
+escape_progress:
+  - "🌃 夜の港から、こっそり出航…"
+  - "🌊 沖へ…灯りが遠ざかる…"
+  - "🌫️ 霧の中を進む…"
+  - "💡 …遠くに、光が見える…？"
+  - "🌅 公海が近い…！"
+  - "⚓ 運命の瞬間…"
+escape_success_art: |2
+
+          \  |  /
+        --  ( )  --      * * *
+          /  |  \
+                |\
+       _________| \________
+       \  o  o  o   /  ===> FREE!
+  ~~~~~~\___________/~~~~~~~~~~~~
+  ^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^
+escape_fail_art: |2
+
+     !!  KEIBI  !!       ___
+    =====[]=====       _|   |_
+     __|_____|__      |  o o |
+    /  KAIJO     \     \_____/
+    \____________/   ~~ CAUGHT! ~~
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  ^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^
+
+panel_level_mark:
+  safe: "🟢"
+  warn: "🟡"
+  danger: "🔴"
+  frozen: "🚨"
+
+panel_level_text:
+  safe: "余裕あり"
+  warn: "取り付け警戒"
+  danger: "取り付け危険水域！"
+  frozen: "支払停止（預金封鎖）"

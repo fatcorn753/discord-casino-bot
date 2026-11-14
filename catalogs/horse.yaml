@@ -1,0 +1,173 @@
+# 競馬（ステータス・コース・馬場・脚質・オッズ・賞金・NPC名）
+stats:
+  - key: speed
+    name: "スピード"
+    default: 50
+    style: nige
+  - key: stamina
+    name: "スタミナ"
+    default: 50
+    style: sashi
+  - key: power
+    name: "パワー"
+    default: 50
+    style: senko
+  - key: guts
+    name: "根性"
+    default: 50
+    style: oikomi
+
+stat_total: 200
+rental_stat_penalty: 10
+stat_min: 20
+stat_max: 80
+carrot_points: 5
+gold_carrot_points: 5
+gold_carrot_max: 1
+
+field_size: 8
+name_max: 12
+max_horses: 3
+
+coats: ["栗毛", "鹿毛", "黒鹿毛", "青毛", "芦毛", "白毛", "栃栗毛", "月毛"]
+silks: ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "⬛", "⬜", "🟫"]
+distances: [1000, 1200, 1600, 1800, 2000, 2400, 3000]
+
+goings:
+  - name: "良"
+    penalty: 0.0
+    weight: 60
+  - name: "稍重"
+    penalty: 0.012
+    weight: 25
+  - name: "重"
+    penalty: 0.03
+    weight: 11
+  - name: "不良"
+    penalty: 0.05
+    weight: 4
+
+forms:
+  - value: 1
+    mark: "◎"
+    mult: 1.015
+    odds_mult: 1.15
+  - value: 0
+    mark: "○"
+    mult: 1.0
+    odds_mult: 1.0
+  - value: -1
+    mark: "△"
+    mult: 0.985
+    odds_mult: 0.85
+
+styles:
+  - key: nige
+    name: "逃げ"
+    mark: "🏃"
+    early: 0.025
+    late: -0.015
+  - key: senko
+    name: "先行"
+    mark: "🚶"
+    early: 0.012
+    late: 0.0
+  - key: sashi
+    name: "差し"
+    mark: "🎯"
+    early: -0.010
+    late: 0.018
+  - key: oikomi
+    name: "追込"
+    mark: "💨"
+    early: -0.022
+    late: 0.030
+
+pace_factor: 0.05
+
+takeout: 0.15
+odds_sims: 8000
+max_odds: 99.9
+min_stake: 100
+max_stake: 50000
+max_race_stake: 150000
+
+entry_fee: 1000
+prizes: [12000, 5000, 2000]
+major_hour: 21
+major_prizes: [24000, 10000, 4000]
+major_house_topup: 10000
+
+ticks: 60
+max_ticks: 140
+fatigue_max: 0.18
+noise: 0.03
+luck: 0.020
+
+weekday_hours: [9, 12, 15, 18, 21]
+weekend_hours: [9, 13, 17, 21]
+entry_open_min: 120
+entry_lead_min: 60
+bet_lead_sec: 120
+
+bet_kinds:
+  win: "単勝"
+  place: "複勝"
+  quinella: "馬連"
+  wide: "ワイド"
+  exacta: "馬単"
+  trio: "三連複"
+
+multi_kinds: ["win", "place"]
+combo_size:
+  quinella: 2
+  wide: 2
+  exacta: 2
+  trio: 3
+combo_takeout: 0.20
+max_combo_odds: 100.0
+
+record_prior_runs: 4
+first_run_factor: 0.75
+place_cap: 0.95
+
+max_races: 32
+retire_win: 5000
+retire_place: 2000
+retire_loss: 2000
+retire_max: 60000
+retire_fee_max: 20000
+
+npc_names:
+  - "ハヤテノツバサ"
+  - "ミッドナイトブルー"
+  - "サクラフブキ"
+  - "ゴールデンキャロット"
+  - "カミナリボルト"
+  - "ダイヤモンドロード"
+  - "ナイトメアランナー"
+  - "ツキノヒカリ"
+  - "アカツキレッド"
+  - "シルバーアロー"
+  - "ドリームチェイサー"
+  - "イナズマライダー"
+  - "ブラックサンダー"
+  - "ハルノオトメ"
+  - "ワイルドハート"
+  - "ロイヤルクラウン"
+  - "キタノカゼ"
+  - "スターライトダッシュ"
+  - "ホワイトファング"
+  - "ユメノツヅキ"
+  - "ライジングサン"
+  - "オオゾラノキセキ"
+  - "ジェットストリーム"
+  - "ミラクルバンブー"
+  - "ブルーコメット"
+  - "アサヒノプリンス"
+  - "テンカイチ"
+  - "ニチダイラグビー"
+  - "アリジゴク"
+  - "トンデミーナ"
+
+banned_name_chars: "@<>`*_~|\\\n\r\t#:/"
