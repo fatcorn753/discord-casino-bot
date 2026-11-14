@@ -117,7 +117,7 @@
 | パス | 内容 |
 |---|---|
 | `paths.py` | ルート・`catalogs/`・`config.json`・`data/casino.db` の基準パス解決 |
-| `catalogs.py` | `catalogs/` 配下の YAML を読み込み・Pydantic 型検証・キャッシュする `YamlCatalogs(ICatalogs)` 実装と `bind_catalogs()` |
+| `catalogs/` | `catalogs/*.yaml` を責務別に読み込み・Pydantic 型検証・キャッシュするパッケージ（`loader.py`・`shop.py`・`economy.py`・`games.py`・`market.py`・`ui.py`、`YamlCatalogs(ICatalogs)`） |
 | `clock.py` | `ConfigClock(IClock)` とタイムゾーンに基づく現在時刻・日付の取得 |
 | `logthrottle.py` | 同じ原因のログを出し続けないための間引き |
 
@@ -126,7 +126,7 @@
 | パス | 内容 |
 |---|---|
 | `base.py` | `EcoDb`（共有 DB 接続・ロック）と全 Mixin が継承する型付き基底クラス `EcoBase` |
-| `schema.py` | DB の表定義（作成）と旧版からの列追加・データ移行 |
+| `schema/` | DB の表定義（`tables.py`）と旧版からの列追加・データ移行（`migrations.py`） |
 | `economy.py` | `Economy(IEconomy)` 本体（残高・デイリー・送金・ランキング） |
 | `assets.py` / `auction.py` / `bank.py` / `bonds.py` / `crypto.py` / `debt.py` / `earnings.py` / `events.py` / `guild.py` / `horse.py` / `labor.py` / `loans.py` / `market_events.py` / `options.py` / `p2p.py` / `pachinko.py` / `quiz.py` / `raffle.py` / `records.py` / `rtp.py` / `shop.py` | 機能別の DB 操作 Mixin 群 |
 
@@ -144,7 +144,7 @@
 
 ## 変更するとき、どこを見るか
 
-- 数字・商品・確率・ヘルプ定義などを調整したい: `catalogs/*.yaml`（型検証は `infra/catalogs.py`）または `domain/`。
+- 数字・商品・確率・ヘルプ定義などを調整したい: `catalogs/*.yaml`（型検証は `infra/catalogs/`）または `domain/`。
 - 画面・文言・Discord 操作を変えたい: `cogs/` 配下の各機能サブパッケージと `cogs/shared/`。
-- DB の表や列を足したい: `infra/db/schema.py` と対応する `infra/db/*.py`。
+- DB の表や列を足したい: `infra/db/schema/` と対応する `infra/db/*.py`。
 - 新しい機能を足す: ルールと契約を `domain/`、永続化を `infra/db/`、コマンドと UI を `cogs/`、テストを `tests/` に置く。
