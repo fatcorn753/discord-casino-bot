@@ -34,8 +34,15 @@ def stat_short(e: dict) -> str:
     return f"速{e['speed']} ス{e['stamina']} パ{e['power']} 根{e['guts']}"
 
 
+def tactic_label(e: dict) -> str:
+    t = e.get("tactic") or "pace"
+    return f"{horse_mod.TACTIC_MARK.get(t, '🐎')}{horse_mod.TACTIC_NAME.get(t, '先行')}"
+
+
 def race_title(eco, race: dict) -> str:
-    return f"🏇 第{eco.race_number(race['id'])}競走" + ("（臨時）" if race["kind"] == "special" else "")
+    grade = " 🏆重賞" if race.get("grade") == "G1" else ""
+    special = "（臨時）" if race["kind"] == "special" else ""
+    return f"🏇 第{eco.race_number(race['id'])}競走{grade}{special}"
 
 
 async def refresh_entry_card(interaction: discord.Interaction, eco, race_id: int) -> None:
@@ -88,17 +95,17 @@ def card_embed(eco, race: dict, closed: bool = False) -> discord.Embed:
         else:
             head = [
                 f"コース: **{track.label}**　発走: {when(race['start_at'])}",
-                f"馬券の発売: **{when(race['bet_close'])}** まで（単勝=1着・複勝=3着以内。**オッズは戦績で決まり、賭けた時点で確定**）",
+                f"馬券の発売: **{when(race['bet_close'])}** まで（単勝=1着・複勝=3着以内。**賭けた時点でオッズ確定**）",
             ]
         rows = [
-            f"`{e['lane']}` {e['silks']} **{e['name']}** {horse_mod.FORM_MARK[e['form']]}　"
+            f"`{e['lane']}` {e['silks']} **{e['name']}** {horse_mod.FORM_MARK[e['form']]} {tactic_label(e)}　"
             f"単勝 **{e['odds_win']:.1f}** 複勝 **{e['odds_place']:.1f}**\n　└ {record_text(e)}　{stat_short(e)}"
             + (f"　馬主 <@{e['owner_id']}>" if e["owner_id"] else "")
             for e in entries
         ]
         e = ui.embed(f"{title}　{'発売終了' if closed else '発売中'}", "\n".join(head + [""] + rows), ui.GOLD)
         e.set_footer(
-            text=f"調子 ◎好調 ○普通 △不調　控除 {horse_mod.TAKEOUT:.0%}　スピードは短距離、スタミナは長距離、パワーは重い馬場に効く"
+            text=f"調子 ◎好調 ○普通 △不調　控除 {horse_mod.TAKEOUT:.0%}　距離・馬場・脚質の噛み合いが勝敗を分けます"
         )
         return e
     order = sorted(entries, key=lambda x: x["finish"])
@@ -253,6 +260,53 @@ class RetireView(discord.ui.View):
         )
 
 
+class TacticView(discord.ui.View):
+    """作戦（脚質）を選ぶ画面。レンタル馬も含め、いつでも無料で切り替えられる。"""
+
+    def __init__(self, stable: "Stable", user_id: int, horse: dict):
+        super().__init__(timeout=300)
+        self.stable, self.user_id, self.horse = stable, user_id, horse
+        current = horse.get("tactic") or "pace"
+        for t in horse_mod.TACTICS:
+            b = discord.ui.Button(
+                label=horse_mod.TACTIC_NAME[t],
+                emoji=horse_mod.TACTIC_MARK[t],
+                style=discord.ButtonStyle.success if t == current else discord.ButtonStyle.secondary,
+            )
+            b.callback = self._make_pick(t)
+            self.add_item(b)
+
+    def embed(self) -> discord.Embed:
+        lines = [
+            f"**{self.horse['silks']} {self.horse['name']}** の作戦を選びます（現在: **{tactic_label(self.horse)}**）。",
+            "",
+        ]
+        for t in horse_mod.TACTICS:
+            lines.append(f"{horse_mod.TACTIC_MARK[t]} **{horse_mod.TACTIC_NAME[t]}**: {horse_mod.TACTIC_DESC[t]}")
+        return ui.embed("🎯 作戦（脚質）", "\n".join(lines), ui.INFO)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return interaction.user.id == self.user_id
+
+    def _make_pick(self, tactic: str):
+        async def callback(interaction: discord.Interaction):
+            ok, res = self.stable.eco(interaction).horse_set_tactic(interaction.user.id, self.horse["id"], tactic)
+            if not ok:
+                return await interaction.response.send_message(
+                    embed=ui.error_embed("変更できません", res), ephemeral=True
+                )
+            self.stop()
+            await interaction.response.edit_message(
+                embed=ui.ok_embed(
+                    "作戦を変更しました",
+                    f"**{self.horse['name']}** の作戦を **{horse_mod.TACTIC_MARK[tactic]}{horse_mod.TACTIC_NAME[tactic]}** にしました（次回 `/競馬 厩舎` を開くと反映されます）。",
+                ),
+                view=None,
+            )
+
+        return callback
+
+
 # ---------------------------------------------------------------- #
 # 馬券を買う
 # ---------------------------------------------------------------- #
@@ -388,9 +442,10 @@ class BetPanel(discord.ui.View):
             discord.SelectOption(
                 label=f"{e['lane']}枠 {e['name']}"[:100],
                 value=str(e["lane"]),
-                description=f"{horse_mod.FORM_MARK[e['form']]} 単勝{e['odds_win']:.1f} 複勝{e['odds_place']:.1f}　{stat_short(e)}"[
-                    :100
-                ],
+                description=(
+                    f"{horse_mod.FORM_MARK[e['form']]} {tactic_label(e)} "
+                    f"単勝{e['odds_win']:.1f} 複勝{e['odds_place']:.1f}　{stat_short(e)}"
+                )[:100],
                 default=e["lane"] in chosen,
             )
             for e in entries
@@ -563,7 +618,7 @@ class Stable(discord.ui.View):
             mark = "▶ " if h["id"] == self.horse_id else ""
             tag = "🎫 本日のレンタル\n" if h["rented_day"] else ""
             e.add_field(
-                name=f"{mark}{h['silks']} {h['name']}（{h['coat']}）",
+                name=f"{mark}{h['silks']} {h['name']}（{h['coat']}・{tactic_label(h)}）",
                 value=f"{tag}{stat_lines(h)}\n戦績 {h['races']}/{horse_mod.MAX_RACES}戦 {h['wins']}勝（3着以内 {h['places']}）　賞金 {ui.pelica(h['earnings'])}{note}",
                 inline=False,
             )
@@ -617,6 +672,7 @@ class Stable(discord.ui.View):
             self.add_item(dst)
         buttons = [
             ("🥕 にんじんで動かす", discord.ButtonStyle.primary, self._on_carrot, not horses or rented, 3),
+            ("🎯 作戦を変える", discord.ButtonStyle.secondary, self._on_tactic, not horses, 3),
             ("🏁 出走を申し込む", discord.ButtonStyle.success, self._on_enter, not horses, 3),
             ("↩️ 申し込みを取り下げる", discord.ButtonStyle.secondary, self._on_withdraw, not horses, 3),
             ("🐴 この馬を買う", discord.ButtonStyle.secondary, self._on_buy_rental, not can_buy, 4),
@@ -660,6 +716,16 @@ class Stable(discord.ui.View):
 
     async def _on_gold(self, interaction: discord.Interaction):
         view = GoldCarrotView(self, interaction.user.id)
+        await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+
+    async def _on_tactic(self, interaction: discord.Interaction):
+        eco = self.eco(interaction)
+        horse = eco.horse_get(self.horse_id)
+        if horse is None or horse["owner_id"] != interaction.user.id:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("変更できません", "自分の馬を選んでください。"), ephemeral=True
+            )
+        view = TacticView(self, interaction.user.id, horse)
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
     async def _on_retire(self, interaction: discord.Interaction):

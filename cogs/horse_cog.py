@@ -86,12 +86,15 @@ def comment(entries: list, positions: list, previous_leader, final: bool, winner
     leader = max(range(len(positions)), key=lambda i: positions[i])
     top = positions[leader]
     name = entries[leader]["name"]
+    tactic = entries[leader].get("tactic", "pace")
     if final:
         w = leader if winner is None else winner
         return f"🏁 **ゴール！！** 1着は **{entries[w]['name']}**！", w
     if top < 0.06:
         return "🔔 ゲートが開いた！ **スタート！**", leader
     if previous_leader is not None and leader != previous_leader:
+        if top >= 0.65 and tactic in ("stalk", "close"):
+            return f"🔥 **{name}** が豪快に差し切って先頭に立った！", leader
         return f"🔥 **{name}** が先頭に立った！", leader
     if top >= 0.85:
         return f"📣 ゴール前の叩き合い！ **{name}** 先頭！", leader
@@ -99,6 +102,8 @@ def comment(entries: list, positions: list, previous_leader, final: bool, winner
         return f"📣 **最後の直線！** 先頭は {name}！", leader
     if top >= 0.4:
         return f"向こう正面。先頭は {name}。", leader
+    if tactic == "front":
+        return f"💨 **{name}** が軽快に逃げる！", leader
     return f"先頭は {name}。", leader
 
 
