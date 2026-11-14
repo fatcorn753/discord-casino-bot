@@ -75,15 +75,27 @@ def build_final_embed(
 
 
 def build_breakdown_embed(eco, user_id: int, name: str) -> discord.Embed:
-    """その人の総資産の、おおまかな内訳。"""
-    from core.eco_assets import PART_LABELS
+    """その人の総資産の、おおまかな内訳（貸借対照表の区分: 流動資産／固定資産／負債／純資産）。"""
+    from core import eco_assets
+    from core.eco_assets import FIXED_KEYS, LIABILITY_KEYS, LIQUID_KEYS, PART_LABELS
 
     found = next(((total, p) for uid, total, p in eco.final_assets() if uid == user_id), None)
     if found is None:
         return ui.embed(f"🧾 {name} の資産の内訳", "まだ口座がありません。", ui.INFO)
-    total, parts = found
-    lines = [f"{label}: **{ui.pelica(parts[key])}**" for key, label in PART_LABELS.items() if parts[key]]
-    lines.append(f"\n**総資産: {ui.pelica(total)}**")
+    _total, parts = found
+    g = eco_assets.AssetMixin.asset_groups(parts)
+
+    def section(keys, negate=False):
+        return [f"{PART_LABELS[k]}: **{ui.pelica(-parts[k] if negate else parts[k])}**" for k in keys if parts.get(k)]
+
+    lines = ["**💧 流動資産**"] + (section(LIQUID_KEYS) or ["（なし）"])
+    lines.append("\n**🏛️ 固定資産**")
+    lines += section(FIXED_KEYS) or ["（なし）"]
+    lines.append(f"\n**総資産（流動＋固定）: {ui.pelica(g['gross'])}**")
+    lines.append("\n**📉 負債**")
+    lines += section(LIABILITY_KEYS, negate=True) or ["（なし）"]
+    lines.append(f"\n**負債合計: {ui.pelica(g['liabilities'])}**")
+    lines.append(f"\n**🧾 純資産（総資産 − 負債）: {ui.pelica(g['net'])}**")
     e = ui.embed(f"🧾 {name} の資産の内訳", "\n".join(lines), ui.GOLD)
     e.set_footer(
         text="着せ替え・コレクションは買値、馬は購入価格＋引退金の見込み、発掘品は目安の価値、地下作業の工具・寮はこれまでの強化費用で数えます"

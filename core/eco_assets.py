@@ -14,19 +14,25 @@ from core import shop
 
 # 内訳の名前（表示順）。キーは asset_parts() の辞書のキー
 PART_LABELS = {
-    "cash": "💴 現金（借金を引く）",
+    "cash": "💴 現金",
     "deposit": "🏦 帝愛への預金",
     "crypto": "📈 株・CS（現物と証拠金）",
     "bonds": "📜 債券",
     "options": "🎯 オプション",
+    "pot": "⛏ 受け取る前の地下作業の稼ぎ",
+    "escrow": "🔒 競りへの入札（預かり中）",
+    "loans_lent": "🤝 貸付（貸した分）",
     "items": "🎁 持ち物（買値）",
     "relics": "🏺 発掘品（目安の価値）",
     "horses": "🐎 競走馬（購入価格＋引退金の見込み）",
-    "pot": "⛏ 受け取る前の地下作業の稼ぎ",
     "tools": "🧰 地下作業の工具・寮（これまでの強化費用）",
-    "escrow": "🔒 競りへの入札（預かり中）",
-    "loans": "🤝 貸し借り（貸した分−借りた分）",
+    "debt": "💳 帝愛への借金",
+    "loans_owed": "📉 貸付（借りた分）",
 }
+# 貸借対照表（B/S）の区分。表示のグループ分けに使う（合計は変えない）
+LIQUID_KEYS = ("cash", "deposit", "crypto", "bonds", "options", "pot", "escrow", "loans_lent")  # 流動資産
+FIXED_KEYS = ("items", "relics", "horses", "tools")  # 固定資産
+LIABILITY_KEYS = ("debt", "loans_owed")  # 負債（parts の値はマイナスで持つ）
 
 
 class AssetMixin:
@@ -55,8 +61,9 @@ class AssetMixin:
                 if uid in parts and value:
                     parts[uid][key] += value
 
-            for r in self._conn.execute("SELECT user_id, balance - debt AS v FROM users WHERE guild_id=?", (g,)):
-                add(r["user_id"], "cash", r["v"])
+            for r in self._conn.execute("SELECT user_id, balance, debt FROM users WHERE guild_id=?", (g,)):
+                add(r["user_id"], "cash", r["balance"])
+                add(r["user_id"], "debt", -r["debt"])
             for uid, v in self.bank_values().items():
                 add(uid, "deposit", v)
             for uid, v in self.crypto_values().items():
@@ -112,9 +119,23 @@ class AssetMixin:
                 "SELECT * FROM loans WHERE guild_id=? AND status IN ('active','overdue')", (g,)
             ):
                 left = self.loan_remaining(dict(r), now)
-                add(r["lender_id"], "loans", left)
-                add(r["borrower_id"], "loans", -left)
+                add(r["lender_id"], "loans_lent", left)
+                add(r["borrower_id"], "loans_owed", -left)
         return parts
+
+    @staticmethod
+    def asset_groups(parts: dict) -> dict:
+        """内訳を、貸借対照表の区分に小計する。{liquid, fixed, gross（liquid+fixed）, liabilities（正の額）, net（=parts の合計）}。"""
+        liquid = sum(parts.get(k, 0) for k in LIQUID_KEYS)
+        fixed = sum(parts.get(k, 0) for k in FIXED_KEYS)
+        liabilities = -sum(parts.get(k, 0) for k in LIABILITY_KEYS)
+        return {
+            "liquid": liquid,
+            "fixed": fixed,
+            "gross": liquid + fixed,
+            "liabilities": liabilities,
+            "net": liquid + fixed - liabilities,
+        }
 
     def final_assets(self, user_ids: Optional[set] = None, now: Optional[float] = None) -> list:
         """[(ユーザーID, ファイナル総資産, 内訳)] を多い順に（同額はユーザーID順）。user_ids を渡すと、その人たちだけ。"""
