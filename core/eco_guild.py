@@ -6,8 +6,10 @@
 import time
 from typing import Optional
 
+from core.eco_base import EcoBase
 
-class GuildMixin:
+
+class GuildMixin(EcoBase):
     """サーバーの承認・ランキング掲示・ニックネーム設定（Economy に混ぜ込む部品）。"""
 
     # ------------------------------------------------------------------ #

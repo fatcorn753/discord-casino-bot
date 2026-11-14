@@ -10,13 +10,14 @@ from typing import Optional
 from core import horse as horse_mod
 from core import p2p, teiai
 from core import shop as shop_mod
+from core.eco_base import EcoBase
 
 GRACE_LOCK_TEXT = (
     "破産猶予中は、取引（出品・買う・入札）ができません（破産の前に、資産を移して、借金を踏み倒すのを防ぐためです）。"
 )
 
 
-class P2PMixin:
+class P2PMixin(EcoBase):
     # ---------------------------------------------------------------- #
     # 持ち数・取引額の確認                                              #
     # ---------------------------------------------------------------- #
@@ -92,7 +93,7 @@ class P2PMixin:
         now = time.time() if now is None else now
         if kind not in ("item", "horse") or mode not in ("fixed", "auction"):
             return False, "出品の指定が正しくありません。"
-        if mode == "auction" and hours not in p2p.AUCTION_HOURS:
+        if mode == "auction" and (hours is None or hours not in p2p.AUCTION_HOURS):
             return False, f"競りの長さは、{'・'.join(map(str, p2p.AUCTION_HOURS))} 時間から選んでください。"
         with self._lock, self._conn:
             self._ensure(user_id)
@@ -104,6 +105,7 @@ class P2PMixin:
             ).fetchone()[0]
             if active >= p2p.MAX_ACTIVE:
                 return False, f"同時に出せるのは {p2p.MAX_ACTIVE} 件までです。"
+            item, have, horse = None, None, None
             if kind == "item":
                 if not p2p.tradable(ref):
                     return False, "その品は、取引できません（称号・コレクション・限定品・帝愛市の品は不可）。"
@@ -132,7 +134,7 @@ class P2PMixin:
                 lo, hi = p2p.price_range("horse")
             if not lo <= price <= hi:
                 return False, f"値段は {lo:,}〜{hi:,}ペリカ にしてください（定価の幅に収めます）。"
-            if kind == "item":
+            if item is not None and have is not None:
                 self._conn.execute(
                     "UPDATE inventory SET qty = qty - ? WHERE guild_id=? AND user_id=? AND item_id=?",
                     (qty, self._g(), user_id, ref),
@@ -144,8 +146,14 @@ class P2PMixin:
                         (self._g(), user_id, ref),
                     )
             else:
+                assert horse is not None
                 self._conn.execute("UPDATE horses SET owner_id=? WHERE id=?", (p2p.ESCROW_OWNER, horse["id"]))
-            end_at = now + (hours * 3600 if mode == "auction" else p2p.FIXED_DAYS * 86400)
+            duration_sec = (
+                (hours if hours is not None else p2p.AUCTION_HOURS[0]) * 3600
+                if mode == "auction"
+                else p2p.FIXED_DAYS * 86400
+            )
+            end_at = now + duration_sec
             cur = self._conn.execute(
                 "INSERT INTO market_listings (guild_id, seller_id, kind, ref, qty, mode, price, created, end_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

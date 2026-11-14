@@ -8,8 +8,10 @@
 import time
 from typing import Optional
 
+from core.eco_base import EcoBase
 
-class PachinkoMixin:
+
+class PachinkoMixin(EcoBase):
     """パチンコの1セットの記録と、集計。"""
 
     def pachinko_record_set(self, user_id: int, bet: int, balls: int, result, now: Optional[float] = None) -> None:

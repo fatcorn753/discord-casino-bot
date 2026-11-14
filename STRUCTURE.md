@@ -95,6 +95,7 @@
 | ファイル | 内容 |
 |---|---|
 | `economy.py` | `Economy` 本体。残高・デイリー・送金・ランキング。下の `eco_*.py` を部品として混ぜ込んでいる |
+| `eco_base.py` | `EcoDb`（共有DB接続・ロック）と、非干渉の `eco_*.py` が継承する型付き基底クラス `EcoBase` |
 | `bot.py` | `CasinoBot(commands.Bot)` 基底クラス（`config`・`economy`・`sessions` の型付き基盤） |
 | `schema.py` | DB の表の定義（作成）と、古い版への列の追加・データの移行 |
 | `eco_types.py` | `Economy` と各部品が共有する定数と、結果を返す入れ物 |

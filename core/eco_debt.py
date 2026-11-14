@@ -10,11 +10,12 @@ from typing import Optional
 from core import market as market_mod
 from core import shop as shop_mod
 from core import teiai
+from core.eco_base import EcoBase
 
 MAX_NOTICES = 5  # たまっている一言の上限（古いものから捨てる）
 
 
-class DebtMixin:
+class DebtMixin(EcoBase):
     """借金・強制執行・種銭・身分・自己破産。"""
 
     # ------------------------------------------------------------------ #

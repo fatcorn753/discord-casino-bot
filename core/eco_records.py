@@ -11,9 +11,10 @@ from core import history as history_mod
 from core import missions as missions_mod
 from core import shop as shop_mod
 from core import weekly as weekly_mod
+from core.eco_base import EcoBase
 
 
-class RecordMixin:
+class RecordMixin(EcoBase):
     """遊びの記録（Economy に混ぜ込む部品）。連勝・デイリーミッション・週間ランキング。"""
 
     # ------------------------------------------------------------------ #

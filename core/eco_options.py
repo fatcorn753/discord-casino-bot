@@ -14,6 +14,7 @@ from typing import Optional
 
 from core import market as market_mod
 from core import options as opt
+from core.eco_base import EcoBase
 
 
 def name_of(row) -> str:
@@ -21,7 +22,7 @@ def name_of(row) -> str:
     return opt.SHORT_NAMES[row["kind"]] if row["side"] == "short" else opt.KINDS[row["kind"]][0]
 
 
-class OptionMixin:
+class OptionMixin(EcoBase):
     """オプションの売買と決済。"""
 
     def _option_events(self, now: float) -> list:
@@ -73,7 +74,7 @@ class OptionMixin:
         now = time.time() if now is None else now
         if kind not in opt.KINDS or symbol not in market_mod.BY_KEY:
             return False, "指定が正しくありません。"
-        if kind == opt.PAIR and (symbol2 not in market_mod.BY_KEY or symbol2 == symbol):
+        if kind == opt.PAIR and (symbol2 is None or symbol2 not in market_mod.BY_KEY or symbol2 == symbol):
             return False, "ペア・ワラントは、ちがう2つの銘柄を選んでください。"
         if strike_pct is not None and not 0 < strike_pct <= opt.MAX_TARGET_PCT / 100:
             return False, f"目標割合は、1〜{opt.MAX_TARGET_PCT}% にしてください。"
@@ -85,11 +86,12 @@ class OptionMixin:
                 return False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、買えません。"
             prices = self.latest_prices()
             spot = prices.get(symbol)
-            spot2 = prices.get(symbol2) if kind == opt.PAIR else None
+            spot2 = prices.get(symbol2) if kind == opt.PAIR and symbol2 is not None else None
             if spot is None or (kind == opt.PAIR and spot2 is None):
                 return False, "まだ価格がありません。"
             seconds, events = opt.OPTION_HOURS * 3600, self._option_events(now)
             if kind == opt.PAIR:
+                assert symbol2 is not None
                 strike = spot
                 rate = opt.pair_ask_rate(symbol, symbol2, seconds, now, events)
                 units = int(amount / rate) if rate > 0 else 0  # 想定元本（ペリカ）
@@ -334,6 +336,7 @@ class OptionMixin:
                 if final is None or (r["kind"] == opt.PAIR and final2 is None):
                     continue
                 if r["kind"] == opt.PAIR:
+                    assert final2 is not None
                     gross = opt.pair_intrinsic(r["units"], r["spot"], r["spot2"], final, final2)
                 else:
                     gross = opt.intrinsic(r["kind"], r["units"], final, r["strike"])

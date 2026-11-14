@@ -6,8 +6,10 @@
 import datetime
 from typing import Optional
 
+from core.eco_base import EcoBase
 
-class EventMixin:
+
+class EventMixin(EcoBase):
     """突発イベントと特別イベントの記録。"""
 
     def event_phase(self, day: datetime.date) -> int:

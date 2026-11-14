@@ -8,9 +8,10 @@ import time
 from typing import Optional
 
 from core import market_events as ev_mod
+from core.eco_base import EcoBase
 
 
-class MarketEventMixin:
+class MarketEventMixin(EcoBase):
     """ボラティリティ予告の抽選・取り出し。"""
 
     def market_events(self, now: Optional[float] = None) -> list:
@@ -40,7 +41,7 @@ class MarketEventMixin:
 
         force を渡すと、抽選なしで、そのイベントを登録する（テスト・持ち主の手動用）。古い記録は消す。
         """
-        rng = rng or random
+        rng = rng or random.SystemRandom()
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM market_events WHERE end_ts<?", (now - ev_mod.KEEP_DAYS * 86400,))
             recent = self._conn.execute(

@@ -6,8 +6,10 @@
 import random
 from typing import Optional
 
+from core.eco_base import EcoBase
 
-class RaffleMixin:
+
+class RaffleMixin(EcoBase):
     """抽選の参加・締切。"""
 
     # ------------------------------------------------------------------ #

@@ -7,12 +7,11 @@ import json
 from typing import Optional
 
 from core import quizpay as quizpay_mod
+from core.eco_base import EcoBase
 from core.schema import new_quiz_order
 
 
-def _quiz_row(row) -> Optional[dict]:
-    if row is None:
-        return None
+def _quiz_dict(row) -> dict:
     d = dict(row)
     d["choices"] = json.loads(d["choices"])
     d["order"] = (
@@ -21,7 +20,11 @@ def _quiz_row(row) -> Optional[dict]:
     return d
 
 
-class QuizMixin:
+def _quiz_row(row) -> Optional[dict]:
+    return None if row is None else _quiz_dict(row)
+
+
+class QuizMixin(EcoBase):
     """クイズの問題・回答・出題者への報酬。"""
 
     # ------------------------------------------------------------------ #
@@ -57,6 +60,7 @@ class QuizMixin:
                     msg_wrong,
                 ),
             )
+            assert cur.lastrowid is not None
             return cur.lastrowid
 
     def quiz_add_many(self, items: list, now: float, creator_name: str = "") -> list:
@@ -91,7 +95,7 @@ class QuizMixin:
                 "SELECT q.*, COUNT(a.user_id) AS answered, COALESCE(SUM(a.correct), 0) AS right_count "
                 "FROM quiz_questions q LEFT JOIN quiz_answers a ON a.question_id = q.id GROUP BY q.id ORDER BY q.id DESC"
             ).fetchall()
-        return [_quiz_row(r) for r in rows]
+        return [_quiz_dict(r) for r in rows]
 
     def quiz_delete(self, quiz_id: int) -> bool:
         with self._lock, self._conn:
@@ -110,7 +114,7 @@ class QuizMixin:
                 "AND NOT EXISTS (SELECT 1 FROM quiz_answers a WHERE a.question_id=q.id AND a.guild_id=? AND a.user_id=?) ORDER BY q.id",
                 (now, self._g(), user_id, self._g(), user_id),
             ).fetchall()
-        return (_quiz_row(rows[0]), len(rows)) if rows else (None, 0)
+        return (_quiz_dict(rows[0]), len(rows)) if rows else (None, 0)
 
     def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> tuple:
         """答えを記録する。(成功か, 理由か結果) を返す。結果は correct / reward（実際に入った額）/ answer / explanation。
@@ -254,7 +258,7 @@ class QuizMixin:
         """このサーバーで自分が出した、終了前の問題（古い順）。取り下げの候補に使う。"""
         with self._lock:
             return [
-                _quiz_row(r)
+                _quiz_dict(r)
                 for r in self._conn.execute(
                     "SELECT * FROM quiz_questions WHERE author_id=? AND guild_id=? AND settled=0 AND expires>? ORDER BY id",
                     (user_id, self._g(), now),
@@ -278,9 +282,8 @@ class QuizMixin:
                     (row["id"], self._g()),
                 ).fetchone()
                 base, bonus, part = quizpay_mod.author_payout(n, c, row["reward"])
-                self._quiz_pay_author(
-                    _quiz_row(row)
-                )  # 回答のたびに払っているので、通常は差がない（念のための最終調整）
+                q = _quiz_dict(row)
+                self._quiz_pay_author(q)  # 回答のたびに払っているので、通常は差がない（念のための最終調整）
                 self._conn.execute("UPDATE quiz_questions SET settled=1 WHERE id=?", (row["id"],))
                 who = self._conn.execute(
                     "SELECT user_id, correct FROM quiz_answers WHERE question_id=? AND guild_id=? ORDER BY ts, rowid",
@@ -288,7 +291,7 @@ class QuizMixin:
                 ).fetchall()
                 out.append(
                     {
-                        **_quiz_row(row),
+                        **q,
                         "participants": n,
                         "correct_count": c,
                         "base": base,

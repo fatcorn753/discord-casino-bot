@@ -8,11 +8,12 @@ from typing import Optional
 
 from core import market as market_mod
 from core import teiai
+from core.eco_base import EcoBase
 from core.eco_types import CryptoResult
 from core.market import DEFAULT
 
 
-class CryptoMixin:
+class CryptoMixin(EcoBase):
     """証券の価格・売買・空売り・チャート掲示。"""
 
     # ------------------------------------------------------------------ #

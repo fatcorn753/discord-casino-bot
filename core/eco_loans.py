@@ -10,13 +10,14 @@ import time
 from typing import Optional
 
 from core import loans as loans_mod
+from core.eco_base import EcoBase
 
 
 def _loan_row(row) -> Optional[dict]:
     return dict(row) if row is not None else None
 
 
-class LoanMixin:
+class LoanMixin(EcoBase):
     """貸し借りの提案・承諾・返済・回収。"""
 
     # ---- 内部 ---- #

@@ -5,10 +5,11 @@
 
 from typing import Optional
 
+from core.eco_base import EcoBase
 from games import rtplevel
 
 
-class RtpMixin:
+class RtpMixin(EcoBase):
     """還元率レベルの保存と取得。"""
 
     def rtp_level_get(self, game: str) -> int:

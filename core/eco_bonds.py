@@ -10,9 +10,10 @@ from typing import Optional
 
 from core import bonds as bonds_mod
 from core import market as market_mod
+from core.eco_base import EcoBase
 
 
-class BondMixin:
+class BondMixin(EcoBase):
     """債券（元本を預かり、満期に利息つきで返す。ジャンク債は倒産することがある）。購入・満期の決着・解約。"""
 
     def bond_buy(self, user_id: int, kind_key: str, amount: int, now: float) -> tuple:

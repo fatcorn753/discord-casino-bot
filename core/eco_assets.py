@@ -11,6 +11,7 @@ from typing import Optional
 from core import horse as horse_mod
 from core import labor as labor_mod
 from core import shop
+from core.eco_base import EcoBase
 
 # 内訳の名前（表示順）。キーは asset_parts() の辞書のキー
 PART_LABELS = {
@@ -29,7 +30,7 @@ PART_LABELS = {
 }
 
 
-class AssetMixin:
+class AssetMixin(EcoBase):
     def _item_worth(self, item_id: str) -> tuple:
         """(持ち物の1個あたりの価値, 発掘品か)。値段のない限定品は 0。"""
         if item_id in shop.RELIC_VALUE:

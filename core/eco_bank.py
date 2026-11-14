@@ -18,9 +18,10 @@ import time
 from typing import Optional
 
 from core import teiai
+from core.eco_base import EcoBase
 
 
-class BankMixin:
+class BankMixin(EcoBase):
     """帝愛銀行・破産猶予・CDS。"""
 
     # ------------------------------------------------------------------ #

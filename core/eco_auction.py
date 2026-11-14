@@ -10,6 +10,7 @@ from typing import Optional
 
 from core import shop as shop_mod
 from core import teiai
+from core.eco_base import EcoBase
 from core.eco_types import PurchaseResult
 
 
@@ -24,7 +25,7 @@ def listable(item_id: str) -> bool:
     )
 
 
-class AuctionMixin:
+class AuctionMixin(EcoBase):
     def _auction_list_locked(self, item_id: str, qty: int, now: float) -> None:
         if qty > 0 and listable(item_id):
             self._conn.execute(

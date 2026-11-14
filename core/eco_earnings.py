@@ -11,9 +11,10 @@ from core import earnings as ea
 from core import market as market_mod
 from core import shop as shop_mod
 from core import teiai
+from core.eco_base import EcoBase
 
 
-class EarningsMixin:
+class EarningsMixin(EcoBase):
     def earnings_ensure(self, now: float, tz_hours: float, rng=None) -> Optional[dict]:
         """発表前の決算が無ければ、次の決算を決めて登録する。登録したら、その行を返す。"""
         rng = rng or random.SystemRandom()
@@ -135,7 +136,7 @@ class EarningsMixin:
             ).fetchone():
                 return False, "この決算の裏情報メモは、もう買っています。"
             stock = self.insider_stock(now)
-            if stock["left"] <= 0:
+            if stock is None or stock["left"] <= 0:
                 return False, "この決算の裏情報メモは、売り切れです（サーバーで5枚まで）。"
             if self._debt(user_id) > 0:
                 return False, f"借金が {self._debt(user_id):,}ペリカ 残っているので、買い物はできません。"

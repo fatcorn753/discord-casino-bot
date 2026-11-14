@@ -13,20 +13,19 @@
 - 残高はマイナスにならない（負けても 0 まで）
 """
 
-import copy
 import datetime
 import math
 import os
 import sqlite3
-import threading
 import time
-from typing import Optional
+from typing import Optional, Self
 
 from core import market as market_mod
 from core import schema, teiai
 from core.eco_assets import AssetMixin
 from core.eco_auction import AuctionMixin
 from core.eco_bank import BankMixin
+from core.eco_base import EcoDb
 from core.eco_bonds import BondMixin
 from core.eco_crypto import CryptoMixin
 from core.eco_debt import DebtMixin
@@ -88,17 +87,8 @@ class Economy(
         """legacy_guild_id: サーバー別になる前の古い記録を引き継ぐサーバー。古い記録があるのに未指定ならエラー。
         strict: True なら、for_guild を通さずに使うとエラーにする（Bot 本体で、指定漏れを防ぐ）。
         """
-        db_dir = os.path.dirname(db_path)
-        if db_dir:
-            os.makedirs(db_dir, exist_ok=True)
-        self._db_path = db_path
-        self._lock = threading.RLock()
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self.guild_id = 0
-        self._strict = strict
-        self._notices = {}  # 結果の画面に出す一言（core/eco_debt.py）。サーバーごとの見え方（for_guild）の間で、共有する
+        db = EcoDb(db_path)
+        self._bind_db(db, 0, strict)
         self._migrate_to_guild_scope(legacy_guild_id)
         self._init_schema()
         self._retire_autoplay()
@@ -110,8 +100,7 @@ class Economy(
                 return
             for row in self._conn.execute("SELECT guild_id, user_id, pot FROM autoplay").fetchall():
                 if row["pot"] > 0:
-                    view = copy.copy(self)
-                    view.guild_id = row["guild_id"]
+                    view = self.for_guild(row["guild_id"])
                     view._ensure(row["user_id"])
                     view._apply(row["user_id"], row["pot"], "自動プレイ精算")
             self._conn.execute("DROP TABLE autoplay")
@@ -119,14 +108,13 @@ class Economy(
     # ------------------------------------------------------------------ #
     # サーバー単位の見え方                                                #
     # ------------------------------------------------------------------ #
-    def for_guild(self, guild_id: int) -> "Economy":
+    def for_guild(self, guild_id: int) -> Self:
         """そのサーバー専用の見え方を返す（接続とロックは共有する）。"""
         gid = int(guild_id)
         if gid <= 0:
             raise ValueError(f"サーバーIDが不正です: {guild_id!r}")
-        view = copy.copy(self)
-        view.guild_id = gid
-        view._strict = False
+        view = type(self).__new__(type(self))
+        view._bind_db(self._db, gid, False)
         return view
 
     def _g(self) -> int:
@@ -682,6 +670,5 @@ class Economy(
             self._apply(receiver, amount, f"送金（受）←{sender}", income=amount)
             return TransferResult(True, received=amount, fee=fee, sender_balance=self._balance(sender))
 
-    def close(self):
-        with self._lock:
-            self._conn.close()
+    def close(self) -> None:
+        self._db.close()

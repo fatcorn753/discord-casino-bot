@@ -8,10 +8,11 @@ from typing import Optional
 
 from core import shop as shop_mod
 from core import teiai
+from core.eco_base import EcoBase
 from core.eco_types import CONSUMABLE_EFFECTS, PurchaseResult
 
 
-class ShopMixin:
+class ShopMixin(EcoBase):
     """ショップの持ち物・装備・消耗品（Economy に混ぜ込む部品）。"""
 
     # ------------------------------------------------------------------ #
