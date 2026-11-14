@@ -90,3 +90,17 @@ def get_cog_port(bot: Any, name: str, _port: type[T]) -> Optional[T]:
     if getter is None:
         return None
     return cast(Optional[T], getter(name))
+
+
+async def require_cog_port(
+    bot: Any, interaction: discord.Interaction, name: str, port: type[T], feature_label: str
+) -> Optional[T]:
+    """ポート取得を試み、未ロード時はエラー応答を返して None を返す。"""
+    cog = get_cog_port(bot, name, port)
+    if cog is None:
+        from cogs.shared import ui
+
+        await interaction.response.send_message(
+            embed=ui.error_embed(f"{feature_label}が読み込まれていません"), ephemeral=True
+        )
+    return cog

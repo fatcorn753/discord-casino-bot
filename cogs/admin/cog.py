@@ -1,28 +1,20 @@
-"""サーバーへの追加を、Bot の持ち主が承認する仕組み（DM のボタン）。
+"""サーバーへの追加を、Bot の持ち主が承認する仕組み（DM のボタン）と `/運営` コマンド入口。
 
 Bot が新しいサーバーに追加されると、持ち主（owner_ids）に DM が届き、【許可する】【断って退出させる】を選べる。
-許可すると、そのサーバーIDが記録に保存され、再起動なしですぐ遊べるようになる。
-ボタンは Bot を再起動しても動く（DynamicItem）。
+コマンドの業務ロジックは approval_ops / economy_ops / content_ops へ分離し、ここはコマンド定義と委譲のみを持つ。
 """
 
-import time
 from typing import Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.admin.embeds import (
-    LEVEL_NAME,
-    approval_request_embed,
-    approved_notice_embed,
-    bulk_preview_lines,  # noqa: F401
-    click_history_embed,
-    pachinko_stats_embed,
-    rtp_table_embed,
-    server_list_embed,
-)
-from cogs.admin.purge import can_read_history
+from cogs.admin import approval_ops, content_ops, economy_ops
+from cogs.admin.embeds import LEVEL_NAME as LEVEL_NAME  # noqa: F401
+from cogs.admin.embeds import bulk_preview_lines as bulk_preview_lines  # noqa: F401
+from cogs.admin.embeds import pachinko_stats_embed as pachinko_stats_embed  # noqa: F401
+from cogs.admin.embeds import rtp_table_embed as rtp_table_embed  # noqa: F401
 from cogs.admin.targets import (
     channel_choices,
     guild_choices,
@@ -30,26 +22,18 @@ from cogs.admin.targets import (
     pick_guild,
     pick_member,
     user_choices,
-    valid_guild_id,
 )
 from cogs.admin.targets import parse_user_id as parse_user_id  # noqa: F401
 from cogs.admin.targets import pick_channel as _pick_channel_impl
 from cogs.admin.targets import postable as postable  # noqa: F401
-from cogs.admin.views import AnnounceModal, ApprovalButton, PurgeConfirm, QuizBulkConfirm
+from cogs.admin.views import AnnounceModal as AnnounceModal  # noqa: F401
+from cogs.admin.views import ApprovalButton
 from cogs.shared import ui
-from cogs.shared.cog_ports import (
-    IEventCogPort,
-    IHorseCogPort,
-    IQuizCogPort,
-    IRaffleCogPort,
-    get_cog_port,
-)
-from domain import approval, events, quizimport
-from domain import labor as labor_mod
+from domain import approval, events
 from domain.games import rtplevel
 
-MAX_IMAGE_BYTES = 8 * 1024 * 1024
-MAX_IMPORT_BYTES = 200 * 1024
+MAX_IMAGE_BYTES = content_ops.MAX_IMAGE_BYTES
+MAX_IMPORT_BYTES = content_ops.MAX_IMPORT_BYTES
 RENOTIFY_AFTER = 3600  # 承認待ちのサーバーで誰かがコマンドを使ったとき、前の通知からこれ以上たっていれば催促する（秒）
 
 
@@ -61,72 +45,37 @@ class ApprovalCog(commands.Cog):
     async def cog_load(self):
         self.bot.add_dynamic_items(ApprovalButton)
 
-    # --------------------------- 依頼の送信 --------------------------- #
+    # --------------------------- 依頼の送信・承認イベント --------------------------- #
     async def request_approval(self, guild: discord.Guild) -> int:
-        """持ち主に承認を依頼する DM を送る。届いた人数を返す（DM を受け取れない人には届かない）。"""
-        self.bot.economy.mark_guild_notified(
-            guild.id
-        )  # 送信（await）の前に記録する。同時に来た別のコマンドが、重ねて依頼しないように
-        embed = approval_request_embed(guild)
-        view = discord.ui.View(timeout=None)
-        view.add_item(ApprovalButton("allow", guild.id))
-        view.add_item(ApprovalButton("deny", guild.id))
-        delivered = 0
-        for uid in approval.owner_ids(self.bot.config):
-            try:
-                user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
-                await user.send(embed=embed, view=view)
-                delivered += 1
-            except discord.HTTPException as exc:
-                print(f"承認の依頼を DM で送れません: owner={uid}: {exc!r}")
-        return delivered
+        return await approval_ops.request_approval(self, guild, RENOTIFY_AFTER)
 
     async def ensure_requested(self, guild: discord.Guild, reset_denied: bool = False) -> None:
-        """承認待ちとして記録し、まだ依頼していなければ依頼する。しばらく前の依頼なら催促する。"""
-        if guild is None or guild.id in approval.preapproved(self.bot.config):
-            return
-        row = self.bot.economy.get_guild_status(guild.id)
-        if row is None or (row["status"] == approval.DENIED and reset_denied):
-            self.bot.economy.set_guild_status(guild.id, approval.PENDING, guild.name)
-            await self.request_approval(guild)
-        elif row["status"] == approval.PENDING:
-            if row["notified_at"] is None or time.time() - row["notified_at"] > RENOTIFY_AFTER:
-                await self.request_approval(guild)
+        await approval_ops.ensure_requested(self, guild, RENOTIFY_AFTER, reset_denied=reset_denied)
 
     async def announce_approved(self, guild: discord.Guild) -> None:
-        """承認されたことを、サーバー側にも知らせる（できなければ何もしない）。"""
-        channel = guild.system_channel
-        if channel is None or not channel.permissions_for(guild.me).send_messages:
-            channel = next((c for c in guild.text_channels if c.permissions_for(guild.me).send_messages), None)
-        if channel is None:
-            return
-        try:
-            await channel.send(embed=approved_notice_embed())
-        except discord.HTTPException:
-            pass
+        await approval_ops.announce_approved(guild)
 
-    # ----------------------------- イベント ----------------------------- #
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
-        if not approval.requires_approval(self.bot.config):
-            return
-        row = self.bot.economy.get_guild_status(guild.id)
-        if row and row["status"] == approval.APPROVED:
-            return  # 承認済みのサーバーに追加し直された
-        await self.ensure_requested(guild, reset_denied=True)
+        await approval_ops.handle_guild_join(self, guild)
 
     @commands.Cog.listener()
     async def on_ready(self):
-        if not approval.requires_approval(self.bot.config):
-            return
-        for guild in self.bot.guilds:  # Bot が止まっている間に追加されたサーバーも拾う
-            await self.ensure_requested(guild)
+        await approval_ops.handle_ready(self)
 
-    # ------------------- 許可の管理（Bot の持ち主だけ・DMでだけ使える） ------------------- #
+    # ------------------- 許可・運営コマンド定義（Bot の持ち主だけ・DMでだけ使える） ------------------- #
     group = app_commands.Group(
         name="運営",
         description="[管理者] Bot を使えるサーバーの管理。Bot とのDMで使えます",
         allowed_contexts=app_commands.AppCommandContext(guild=False, dm_channel=True, private_channel=True),
+    )
+    raffle_group = app_commands.Group(name="抽選", description="[管理者] 抽選の開催・再掲示・中止", parent=group)
+    quiz_group = app_commands.Group(name="クイズ", description="[管理者] クイズの登録・一覧・削除", parent=group)
+    event_group = app_commands.Group(
+        name="イベント", description="[管理者] 特別イベントを開く・終わらせる", parent=group
+    )
+    rtp_group = app_commands.Group(
+        name="還元率", description="[管理者] ゲームごとの還元率のレベル（1〜6。3が標準）を変える", parent=group
     )
 
     async def _owner_only(self, interaction: discord.Interaction) -> bool:
@@ -137,15 +86,11 @@ class ApprovalCog(commands.Cog):
             return False
         return True
 
-    # ------------------- ペリカ・抽選・クイズの管理（これも `/運営` の下。サーバーは持ち主が指定する） ------------------- #
-    raffle_group = app_commands.Group(name="抽選", description="[管理者] 抽選の開催・再掲示・中止", parent=group)
-    quiz_group = app_commands.Group(name="クイズ", description="[管理者] クイズの登録・一覧・削除", parent=group)
-    event_group = app_commands.Group(
-        name="イベント", description="[管理者] 特別イベントを開く・終わらせる", parent=group
-    )
-    rtp_group = app_commands.Group(
-        name="還元率", description="[管理者] ゲームごとの還元率のレベル（1〜6。3が標準）を変える", parent=group
-    )
+    def _allowed_guilds(self) -> list:
+        return [g for g in self.bot.guilds if approval.is_allowed(self.bot.economy, self.bot.config, g.id, 0)]
+
+    def _event_targets(self, guild_id: Optional[str]) -> list:
+        return [self.bot.get_guild(int(guild_id))] if guild_id else self._allowed_guilds()
 
     def _guild_choices(self, current: str) -> list:
         return guild_choices(self.bot, current)
@@ -160,7 +105,6 @@ class ApprovalCog(commands.Cog):
         return namespace_guild(self.bot, interaction)
 
     async def channel_autocomplete(self, interaction: discord.Interaction, current: str):
-        """選んだサーバーの、Bot が投稿できるチャンネルの候補。"""
         guild = self._namespace_guild(interaction)
         if interaction.user.id not in approval.owner_ids(self.bot.config) or guild is None:
             return []
@@ -180,6 +124,7 @@ class ApprovalCog(commands.Cog):
     async def _pick_member(self, interaction: discord.Interaction, guild_id: str, user_id: str, verb: str):
         return await pick_member(self.bot, interaction, guild_id, user_id, verb)
 
+    # ---- 経済・イベント・還元率・統計・履歴 ---- #
     @group.command(name="付与", description="[管理者] 指定したサーバーの指定した人に、ペリカを付与する")
     @app_commands.rename(guild_id="サーバー", user_id="ユーザー", amount="金額", reason="理由")
     @app_commands.describe(
@@ -196,22 +141,8 @@ class ApprovalCog(commands.Cog):
         amount: app_commands.Range[int, 1, 10_000_000],
         reason: str = "",
     ):
-        if not await self._owner_only(interaction):
-            return
-        picked = await self._pick_member(interaction, guild_id, user_id, "付与")
-        if picked is None:
-            return
-        guild, member = picked
-        uid = member.id
-        balance = self.bot.economy.for_guild(guild.id).credit(uid, amount, f"付与（管理）{reason}".strip())
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "付与しました",
-                f"{guild.name} の {member.mention}（{member.display_name}）に **{ui.pelica(amount)}** を付与しました（残高 {ui.pelica(balance)}）。"
-                + (f"\n理由: {reason}" if reason else ""),
-            ),
-            ephemeral=True,
-        )
+        if await self._owner_only(interaction):
+            await economy_ops.grant(self, interaction, guild_id, user_id, amount, reason)
 
     grant.autocomplete("guild_id")(guild_autocomplete)
     grant.autocomplete("user_id")(user_autocomplete)
@@ -232,36 +163,11 @@ class ApprovalCog(commands.Cog):
         amount: app_commands.Range[int, -1_000_000_000, 1_000_000_000],
         reason: str = "",
     ):
-        if not await self._owner_only(interaction):
-            return
-        picked = await self._pick_member(interaction, guild_id, user_id, "設定")
-        if picked is None:
-            return
-        guild, member = picked
-        before, after, debt_before, debt_after = self.bot.economy.for_guild(guild.id).set_balance(
-            member.id, amount, f"残高の設定（管理）{reason}".strip()
-        )
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "残高を設定しました",
-                f"{guild.name} の {member.mention}（{member.display_name}）の残高を "
-                f"**{ui.pelica(before)} → {ui.pelica(after)}** にしました（差額は台帳に残ります）。"
-                + (f"\n帝愛の借金: **{ui.pelica(debt_before)} → {ui.pelica(debt_after)}**" if amount < 0 else "")
-                + (f"\n理由: {reason}" if reason else ""),
-            ),
-            ephemeral=True,
-        )
+        if await self._owner_only(interaction):
+            await economy_ops.set_balance(self, interaction, guild_id, user_id, amount, reason)
 
     set_balance.autocomplete("guild_id")(guild_autocomplete)
     set_balance.autocomplete("user_id")(user_autocomplete)
-
-    # ---- 特別イベント ---- #
-    def _event_targets(self, guild_id: Optional[str]) -> list:
-        return (
-            [self.bot.get_guild(int(guild_id))]
-            if guild_id
-            else [g for g in self.bot.guilds if approval.is_allowed(self.bot.economy, self.bot.config, g.id, 0)]
-        )
 
     @event_group.command(
         name="開始", description="[管理者] 特別イベントを開く。指定したゲームで勝つと、勝ち分に上乗せされる"
@@ -284,30 +190,8 @@ class ApprovalCog(commands.Cog):
         guild_id: Optional[str] = None,
         channel_id: Optional[str] = None,
     ):
-        if not await self._owner_only(interaction):
-            return
-        picked = await self._pick_guild(interaction, guild_id) if guild_id else None
-        if guild_id and picked is None:
-            return
-        ok, channel = await self._pick_channel(interaction, picked, channel_id)
-        if not ok:
-            return
-        targets = self._event_targets(guild_id)
-        if not targets:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("開く先がありません", "許可されているサーバーがありません。"), ephemeral=True
-            )
-        cog = get_cog_port(self.bot, "EventCog", IEventCogPort)
-        if cog is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("イベント機能が読み込まれていません"), ephemeral=True
-            )
-        await interaction.response.defer(ephemeral=True)
-        lines = [(await cog.start_manual(g, game.value, boost, minutes, channel))[1] for g in targets]
-        await interaction.followup.send(
-            embed=ui.ok_embed(f"特別イベントを開きました（{len(targets)}サーバー）", "\n".join(lines)[:3900]),
-            ephemeral=True,
-        )
+        if await self._owner_only(interaction):
+            await economy_ops.event_start(self, interaction, game.value, minutes, boost, guild_id, channel_id)
 
     event_start.autocomplete("guild_id")(guild_autocomplete)
     event_start.autocomplete("channel_id")(channel_autocomplete)
@@ -316,25 +200,11 @@ class ApprovalCog(commands.Cog):
     @app_commands.rename(guild_id="サーバー")
     @app_commands.describe(guild_id="終わらせるサーバー（候補から選ぶ。空なら全サーバー）")
     async def event_stop(self, interaction: discord.Interaction, guild_id: Optional[str] = None):
-        if not await self._owner_only(interaction):
-            return
-        if guild_id and await self._pick_guild(interaction, guild_id) is None:
-            return
-        cog = get_cog_port(self.bot, "EventCog", IEventCogPort)
-        if cog is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("イベント機能が読み込まれていません"), ephemeral=True
-            )
-        await interaction.response.defer(ephemeral=True)
-        lines = [(await cog.stop_manual(g))[1] for g in self._event_targets(guild_id)]
-        await interaction.followup.send(
-            embed=ui.embed("特別イベントを終わらせました", "\n".join(lines)[:3900] or "対象がありません。", ui.INFO),
-            ephemeral=True,
-        )
+        if await self._owner_only(interaction):
+            await economy_ops.event_stop(self, interaction, guild_id)
 
     event_stop.autocomplete("guild_id")(guild_autocomplete)
 
-    # ---- 還元率 ---- #
     @rtp_group.command(name="設定", description="[管理者] ゲームの還元率レベル（1〜6。3が標準）を変える")
     @app_commands.rename(guild_id="サーバー", game="ゲーム", level="レベル")
     @app_commands.describe(
@@ -359,23 +229,8 @@ class ApprovalCog(commands.Cog):
         game: app_commands.Choice[str],
         level: app_commands.Choice[int],
     ):
-        if not await self._owner_only(interaction):
-            return
-        guild = await self._pick_guild(interaction, guild_id)
-        if guild is None:
-            return
-        eco = self.bot.economy.for_guild(guild.id)
-        changed = eco.rtp_level_set(None if game.value == "*" else game.value, level.value)
-        await interaction.response.send_message(
-            embeds=[
-                ui.ok_embed(
-                    "還元率のレベルを変えました",
-                    f"{guild.name}: {'、'.join(changed)} → レベル {level.value}（{LEVEL_NAME[level.value]}）",
-                ),
-                rtp_table_embed(eco.rtp_levels(), f"🎚️ {guild.name} の還元率"),
-            ],
-            ephemeral=True,
-        )
+        if await self._owner_only(interaction):
+            await economy_ops.rtp_set(self, interaction, guild_id, game.value, level.value)
 
     rtp_set.autocomplete("guild_id")(guild_autocomplete)
 
@@ -383,24 +238,11 @@ class ApprovalCog(commands.Cog):
     @app_commands.rename(guild_id="サーバー")
     @app_commands.describe(guild_id="見るサーバー（候補から選ぶ。空なら全サーバー）")
     async def rtp_list(self, interaction: discord.Interaction, guild_id: Optional[str] = None):
-        if not await self._owner_only(interaction):
-            return
-        guild = await self._pick_guild(interaction, guild_id) if guild_id else None
-        if guild_id and guild is None:
-            return
-        targets = (
-            [guild]
-            if guild
-            else [g for g in self.bot.guilds if approval.is_allowed(self.bot.economy, self.bot.config, g.id, 0)]
-        )
-        embeds = [
-            rtp_table_embed(self.bot.economy.for_guild(g.id).rtp_levels(), f"🎚️ {g.name} の還元率") for g in targets[:10]
-        ]
-        await interaction.response.send_message(embeds=embeds or [ui.error_embed("対象がありません")], ephemeral=True)
+        if await self._owner_only(interaction):
+            await economy_ops.rtp_list(self, interaction, guild_id)
 
     rtp_list.autocomplete("guild_id")(guild_autocomplete)
 
-    # ---- パチンコ統計 ---- #
     @group.command(name="パチンコ統計", description="[管理者] パチンコの当たり率を、設計した数字と実際の記録で比べる")
     @app_commands.rename(guild_id="サーバー", days="日数")
     @app_commands.describe(
@@ -412,21 +254,11 @@ class ApprovalCog(commands.Cog):
         guild_id: Optional[str] = None,
         days: Optional[app_commands.Range[int, 1, 365]] = None,
     ):
-        if not await self._owner_only(interaction):
-            return
-        guild = None
-        if guild_id:
-            guild = await self._pick_guild(interaction, guild_id)
-            if guild is None:
-                return
-        since = time.time() - days * 86400 if days else None
-        data = self.bot.economy.pachinko_stats(guild.id if guild else None, since)
-        scope = (guild.name if guild else "全サーバー") + (f"・過去{days}日" if days else "・全期間")
-        await interaction.response.send_message(embed=pachinko_stats_embed(data, scope), ephemeral=True)
+        if await self._owner_only(interaction):
+            await economy_ops.pachinko_stats(self, interaction, guild_id, days)
 
     pachinko_stats.autocomplete("guild_id")(guild_autocomplete)
 
-    # ---- 地下作業の記録 ---- #
     @group.command(
         name="クリック履歴", description="[管理者] 「働く」を押した記録（1時間ごと）を見る。自動操作の疑いの確認用"
     )
@@ -443,23 +275,13 @@ class ApprovalCog(commands.Cog):
         user_id: str,
         hours: app_commands.Range[int, 1, 336] = 24,
     ):
-        if not await self._owner_only(interaction):
-            return
-        picked = await self._pick_member(interaction, guild_id, user_id, "確認")
-        if picked is None:
-            return
-        guild, member = picked
-        eco = self.bot.economy.for_guild(guild.id)
-        report = labor_mod.click_report(eco.labor_click_hours(member.id, time.time() - hours * 3600))
-        tz = float(self.bot.config.get("utc_offset_hours", 9))
-        await interaction.response.send_message(
-            embed=click_history_embed(f"{guild.name} の {member.display_name}", report, tz, hours), ephemeral=True
-        )
+        if await self._owner_only(interaction):
+            await economy_ops.click_history(self, interaction, guild_id, user_id, hours)
 
     click_history.autocomplete("guild_id")(guild_autocomplete)
     click_history.autocomplete("user_id")(user_autocomplete)
 
-    # ---- 競馬 ---- #
+    # ---- コンテンツ・メッセージ操作 ---- #
     @group.command(
         name="競馬開催", description="[管理者] 臨時の競馬レースを開催する（出走の申し込み → 馬券の発売 → 発走）"
     )
@@ -478,32 +300,12 @@ class ApprovalCog(commands.Cog):
         bet_min: app_commands.Range[int, 1, 120] = 5,
         channel_id: Optional[str] = None,
     ):
-        if not await self._owner_only(interaction):
-            return
-        guild = await self._pick_guild(interaction, guild_id)
-        if guild is None:
-            return
-        ok, channel = await self._pick_channel(interaction, guild, channel_id)
-        if not ok:
-            return
-        cog = get_cog_port(self.bot, "HorseCog", IHorseCogPort)
-        if cog is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("競馬が読み込まれていません"), ephemeral=True
-            )
-        race_id = await cog.start_special(guild, entry_min, bet_min, channel)
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "臨時レースを開催しました",
-                f"{guild.name} で、臨時レース（#{race_id}）の申し込みを始めました（掲示は{channel.mention if channel else '告知チャンネル'}）。申し込み {entry_min}分 → 馬券 {bet_min}分 → 発走（2分後）。",
-            ),
-            ephemeral=True,
-        )
+        if await self._owner_only(interaction):
+            await content_ops.special_race(self, interaction, guild_id, entry_min, bet_min, channel_id)
 
     special_race.autocomplete("guild_id")(guild_autocomplete)
     special_race.autocomplete("channel_id")(channel_autocomplete)
 
-    # ---- お知らせ ---- #
     @group.command(name="お知らせ", description="[管理者] Bot から、文字や画像をお知らせとして告知チャンネルに出す")
     @app_commands.rename(guild_id="サーバー", image="画像", title="見出し", channel_id="チャンネル")
     @app_commands.describe(
@@ -520,29 +322,8 @@ class ApprovalCog(commands.Cog):
         title: Optional[str] = None,
         channel_id: Optional[str] = None,
     ):
-        if not await self._owner_only(interaction):
-            return
-        if image is not None and not (
-            (image.content_type or "").startswith("image/") and image.size <= MAX_IMAGE_BYTES
-        ):
-            return await interaction.response.send_message(
-                embed=ui.error_embed("画像を使えません", "画像ファイル（8MBまで）を添付してください。"), ephemeral=True
-            )
-        if guild_id:
-            guild = await self._pick_guild(interaction, guild_id)
-            if guild is None:
-                return
-            guilds = [guild]
-        else:
-            guilds = [g for g in self.bot.guilds if approval.is_allowed(self.bot.economy, self.bot.config, g.id, 0)]
-        ok, channel = await self._pick_channel(interaction, guilds[0] if guild_id else None, channel_id)
-        if not ok:
-            return
-        if not guilds:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("送り先がありません", "許可されているサーバーがありません。"), ephemeral=True
-            )
-        await interaction.response.send_modal(AnnounceModal(self, guilds, (title or "").strip()[:200], image, channel))
+        if await self._owner_only(interaction):
+            await content_ops.announce(self, interaction, guild_id, image, title, channel_id)
 
     announce.autocomplete("guild_id")(guild_autocomplete)
     announce.autocomplete("channel_id")(channel_autocomplete)
@@ -555,37 +336,12 @@ class ApprovalCog(commands.Cog):
         guild_id="消すサーバー（候補から選ぶ）", channel_id="消すチャンネル（サーバーを選んでから、候補から選ぶ）"
     )
     async def purge_own_messages(self, interaction: discord.Interaction, guild_id: str, channel_id: str):
-        if not await self._owner_only(interaction):
-            return
-        guild = await self._pick_guild(interaction, guild_id)
-        if guild is None:
-            return
-        ok, channel = await self._pick_channel(interaction, guild, channel_id)
-        if not ok:
-            return
-        if not can_read_history(channel, guild):
-            return await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "履歴を読めません",
-                    f"Bot は #{channel.name} の「メッセージ履歴を読む」権限がありません。招待URLの権限に足して（README を参照）、もう一度試してください。",
-                ),
-                ephemeral=True,
-            )
-        warning = (
-            f"**{guild.name}** の **#{channel.name}** にある、**Bot 自身の発言を、すべて消します。元に戻せません。**\n"
-            "ランキング掲示板、チャートの自動更新、クイズ・貸付・抽選の投稿（ボタン付き）も消え、ボタンは使えなくなります。"
-            "Bot 以外の人の発言には触れません。件数が多いと、数分かかります。"
-        )
-        await interaction.response.send_message(
-            embeds=[ui.embed("🧹 発言の削除（確認）", warning, ui.WARN)],
-            view=PurgeConfirm(self, interaction.user.id, channel),
-            ephemeral=True,
-        )
+        if await self._owner_only(interaction):
+            await content_ops.purge_own_messages(self, interaction, guild_id, channel_id)
 
     purge_own_messages.autocomplete("guild_id")(guild_autocomplete)
     purge_own_messages.autocomplete("channel_id")(channel_autocomplete)
 
-    # ---- 抽選 ---- #
     @raffle_group.command(
         name="開催", description="[管理者] 抽選を始める。参加費は500ペリカ以上（上限なし）。省略するとランダム"
     )
@@ -604,25 +360,8 @@ class ApprovalCog(commands.Cog):
         minutes: app_commands.Range[int, 1, 1440] = 60,
         channel_id: Optional[str] = None,
     ):
-        if not await self._owner_only(interaction):
-            return
-        guild = await self._pick_guild(interaction, guild_id)
-        if guild is None:
-            return
-        ok, channel = await self._pick_channel(interaction, guild, channel_id)
-        if not ok:
-            return
-        cog = get_cog_port(self.bot, "RaffleCog", IRaffleCogPort)
-        if cog is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("抽選機能が読み込まれていません"), ephemeral=True
-            )
-        await interaction.response.defer(ephemeral=True)
-        ok, text = await cog.host(guild, interaction.user.id, fee, minutes, channel)
-        await interaction.followup.send(
-            embed=ui.ok_embed("抽選を始めました", text) if ok else ui.error_embed("始められません", text),
-            ephemeral=True,
-        )
+        if await self._owner_only(interaction):
+            await content_ops.raffle_start(self, interaction, guild_id, fee, minutes, channel_id)
 
     raffle_start.autocomplete("guild_id")(guild_autocomplete)
     raffle_start.autocomplete("channel_id")(channel_autocomplete)
@@ -636,24 +375,8 @@ class ApprovalCog(commands.Cog):
         channel_id="出し直すチャンネル（候補から選ぶ。空なら告知チャンネル）",
     )
     async def raffle_repost(self, interaction: discord.Interaction, guild_id: str, channel_id: Optional[str] = None):
-        if not await self._owner_only(interaction):
-            return
-        guild = await self._pick_guild(interaction, guild_id)
-        if guild is None:
-            return
-        ok, channel = await self._pick_channel(interaction, guild, channel_id)
-        if not ok:
-            return
-        cog = get_cog_port(self.bot, "RaffleCog", IRaffleCogPort)
-        if cog is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("抽選機能が読み込まれていません"), ephemeral=True
-            )
-        await interaction.response.defer(ephemeral=True)
-        ok, text = await cog.repost(guild, channel)
-        await interaction.followup.send(
-            embed=ui.ok_embed("出し直しました", text) if ok else ui.error_embed("出し直せません", text), ephemeral=True
-        )
+        if await self._owner_only(interaction):
+            await content_ops.raffle_repost(self, interaction, guild_id, channel_id)
 
     raffle_repost.autocomplete("guild_id")(guild_autocomplete)
     raffle_repost.autocomplete("channel_id")(channel_autocomplete)
@@ -662,25 +385,11 @@ class ApprovalCog(commands.Cog):
     @app_commands.rename(guild_id="サーバー")
     @app_commands.describe(guild_id="抽選を開いているサーバー（候補から選ぶ）")
     async def raffle_cancel(self, interaction: discord.Interaction, guild_id: str):
-        if not await self._owner_only(interaction):
-            return
-        guild = await self._pick_guild(interaction, guild_id)
-        if guild is None:
-            return
-        cog = get_cog_port(self.bot, "RaffleCog", IRaffleCogPort)
-        if cog is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("抽選機能が読み込まれていません"), ephemeral=True
-            )
-        await interaction.response.defer(ephemeral=True)
-        ok, text = await cog.cancel(guild)
-        await interaction.followup.send(
-            embed=ui.ok_embed("中止しました", text) if ok else ui.error_embed("中止できません", text), ephemeral=True
-        )
+        if await self._owner_only(interaction):
+            await content_ops.raffle_cancel(self, interaction, guild_id)
 
     raffle_cancel.autocomplete("guild_id")(guild_autocomplete)
 
-    # ---- クイズ ---- #
     @quiz_group.command(
         name="追加", description="[管理者] クイズを登録する。入力フォームが開き、全サーバーに告知もできる"
     )
@@ -700,20 +409,8 @@ class ApprovalCog(commands.Cog):
         guild_id: Optional[str] = None,
         channel_id: Optional[str] = None,
     ):
-        if not await self._owner_only(interaction):
-            return
-        guild = await self._pick_guild(interaction, guild_id) if guild_id else None
-        if guild_id and guild is None:
-            return
-        ok, channel = await self._pick_channel(interaction, guild, channel_id)
-        if not ok:
-            return
-        cog = get_cog_port(self.bot, "QuizCog", IQuizCogPort)
-        if cog is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("クイズ機能が読み込まれていません"), ephemeral=True
-            )
-        await interaction.response.send_modal(cog.add_modal(announce is None or announce.value == 1, guild, channel))
+        if await self._owner_only(interaction):
+            await content_ops.quiz_add(self, interaction, announce is None or announce.value == 1, guild_id, channel_id)
 
     quiz_add.autocomplete("guild_id")(guild_autocomplete)
     quiz_add.autocomplete("channel_id")(channel_autocomplete)
@@ -739,154 +436,45 @@ class ApprovalCog(commands.Cog):
         guild_id: Optional[str] = None,
         channel_id: Optional[str] = None,
     ):
-        if not await self._owner_only(interaction):
-            return
-        guild = await self._pick_guild(interaction, guild_id) if guild_id else None
-        if guild_id and guild is None:
-            return
-        ok, channel = await self._pick_channel(interaction, guild, channel_id)
-        if not ok:
-            return
-        if file.size > MAX_IMPORT_BYTES or not (
-            file.filename.lower().endswith((".txt", ".md", ".text")) or (file.content_type or "").startswith("text/")
-        ):
-            return await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "ファイルを使えません",
-                    f"テキストファイル（.txt、{MAX_IMPORT_BYTES // 1024}KBまで）を添付してください。",
-                ),
-                ephemeral=True,
+        if await self._owner_only(interaction):
+            await content_ops.quiz_bulk(
+                self, interaction, file, announce is not None and announce.value == 1, guild_id, channel_id
             )
-        await interaction.response.defer(ephemeral=True)
-        try:
-            text = (await file.read()).decode("utf-8-sig")
-        except UnicodeDecodeError:
-            return await interaction.followup.send(
-                embed=ui.error_embed("文字コードを読めません", "UTF-8 で保存したテキストファイルを添付してください。"),
-                ephemeral=True,
-            )
-        quizzes, errors = quizimport.parse_bulk(text)
-        if not errors:
-            existing = self.bot.economy.quiz_existing_questions()
-            errors = [
-                f"{i}問目: すでに登録されている問題です（同じ問題文）。"
-                for i, q in enumerate(quizzes, start=1)
-                if q["question"] in existing
-            ]
-        if errors:
-            more = f"\n…ほか{len(errors) - 15}件" if len(errors) > 15 else ""
-            return await interaction.followup.send(
-                embed=ui.error_embed(
-                    f"登録できません（誤り{len(errors)}件・1問も登録していません）", "\n".join(errors[:15]) + more
-                ),
-                ephemeral=True,
-            )
-        view = QuizBulkConfirm(
-            self, interaction.user.id, quizzes, announce is not None and announce.value == 1, guild, channel
-        )
-        head = ui.embed(
-            f"📰 クイズを{len(quizzes)}問登録します",
-            bulk_preview_lines(quizzes)
-            + "\n\n問題なければ「登録する」を押してください。"
-            + (f"\n（告知: {view.target_text()}に出します）" if view.announce else "\n（告知: しません）"),
-            ui.WARN,
-        )
-        await interaction.followup.send(embeds=[head], view=view, ephemeral=True)
 
     quiz_bulk.autocomplete("guild_id")(guild_autocomplete)
     quiz_bulk.autocomplete("channel_id")(channel_autocomplete)
 
     @quiz_group.command(name="一覧", description="[管理者] 登録したクイズを見る")
     async def quiz_list(self, interaction: discord.Interaction):
-        if not await self._owner_only(interaction):
-            return
-        cog = get_cog_port(self.bot, "QuizCog", IQuizCogPort)
-        if cog is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("クイズ機能が読み込まれていません"), ephemeral=True
-            )
-        await interaction.response.send_message(embed=cog.listing_embed(), ephemeral=True)
+        if await self._owner_only(interaction):
+            await content_ops.quiz_list(self, interaction)
 
     @quiz_group.command(name="削除", description="[管理者] クイズを削除する（回答の記録も消える）")
     @app_commands.rename(quiz_id="番号")
     @app_commands.describe(quiz_id="`/運営 クイズ 一覧` の # の番号")
     async def quiz_delete(self, interaction: discord.Interaction, quiz_id: int):
-        if not await self._owner_only(interaction):
-            return
-        cog = get_cog_port(self.bot, "QuizCog", IQuizCogPort)
-        if cog is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("クイズ機能が読み込まれていません"), ephemeral=True
-            )
-        if not cog.remove(quiz_id):
-            return await interaction.response.send_message(
-                embed=ui.error_embed("その番号の問題はありません"), ephemeral=True
-            )
-        await interaction.response.send_message(embed=ui.ok_embed(f"クイズ #{quiz_id} を削除しました"), ephemeral=True)
+        if await self._owner_only(interaction):
+            await content_ops.quiz_delete(self, interaction, quiz_id)
 
+    # ---- サーバー管理 ---- #
     @group.command(name="サーバー一覧", description="[管理者] 許可・承認待ち・断ったサーバーを表示する")
     async def server_list(self, interaction: discord.Interaction):
-        if not await self._owner_only(interaction):
-            return
-        e = server_list_embed(self.bot.guilds, self.bot.economy.list_guild_status(), self.bot.config)
-        await interaction.response.send_message(embed=e, ephemeral=True)
+        if await self._owner_only(interaction):
+            await approval_ops.server_list(self, interaction)
 
     @group.command(name="サーバー許可", description="[管理者] サーバーIDを指定して、利用を許可する")
     @app_commands.rename(guild_id="サーバーid")
     @app_commands.describe(guild_id="許可するサーバーのID（承認待ちの一覧にあるもの）")
     async def server_allow(self, interaction: discord.Interaction, guild_id: str):
-        if not await self._owner_only(interaction):
-            return
-        if not valid_guild_id(guild_id):
-            return await interaction.response.send_message(
-                embed=ui.error_embed("入力エラー", "サーバーidは数字だけで入力してください。"), ephemeral=True
-            )
-        gid = int(guild_id)
-        guild = self.bot.get_guild(gid)
-        self.bot.economy.set_guild_status(gid, approval.APPROVED, guild.name if guild else None, interaction.user.id)
-        if guild is not None:
-            await self.announce_approved(guild)
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "許可しました",
-                f"`{gid}`"
-                + (f"（{guild.name}）" if guild else "（まだ参加していません。追加されたらすぐ遊べます）")
-                + " で遊べます。",
-            ),
-            ephemeral=True,
-        )
+        if await self._owner_only(interaction):
+            await approval_ops.server_allow(self, interaction, guild_id)
 
     @group.command(name="サーバー取消", description="[管理者] 許可を取り消し、Bot をそのサーバーから退出させる")
     @app_commands.rename(guild_id="サーバーid")
     @app_commands.describe(guild_id="取り消すサーバーのID")
     async def server_revoke(self, interaction: discord.Interaction, guild_id: str):
-        if not await self._owner_only(interaction):
-            return
-        if not valid_guild_id(guild_id):
-            return await interaction.response.send_message(
-                embed=ui.error_embed("入力エラー", "サーバーidは数字だけで入力してください。"), ephemeral=True
-            )
-        gid = int(guild_id)
-        if gid in approval.preapproved(self.bot.config):
-            return await interaction.response.send_message(
-                embed=ui.warn_embed(
-                    "取り消せません",
-                    "設定ファイル（allowed_guild_ids）で許可されているサーバーです。設定ファイルから外してください。",
-                ),
-                ephemeral=True,
-            )
-        guild = self.bot.get_guild(gid)
-        self.bot.economy.set_guild_status(gid, approval.DENIED, guild.name if guild else None, interaction.user.id)
-        left = ""
-        if guild is not None:
-            try:
-                await guild.leave()
-                left = "Bot はそのサーバーから退出しました。"
-            except discord.HTTPException:
-                left = "退出はできませんでしたが、コマンドは使えなくなりました。"
-        await interaction.response.send_message(
-            embed=ui.ok_embed("取り消しました", f"`{gid}` の許可を取り消しました。{left}"), ephemeral=True
-        )
+        if await self._owner_only(interaction):
+            await approval_ops.server_revoke(self, interaction, guild_id)
 
 
 async def setup(bot):
