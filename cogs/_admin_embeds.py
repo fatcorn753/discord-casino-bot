@@ -4,8 +4,8 @@ import datetime
 
 import discord
 
+from core import approval, ui
 from core import labor as lab
-from core import ui
 from core.duration import format_minutes
 from games import pachinko, rtplevel
 
@@ -133,4 +133,52 @@ def click_history_embed(name: str, report: dict, tz_hours: float, hours: int) ->
     e.set_footer(
         text="目安です。人間でも、規則的に押す人はいます。24時間ずっと押し続けていないか、時間のあき方を見てください。"
     )
+    return e
+
+
+def approval_request_embed(guild: discord.Guild) -> discord.Embed:
+    """新しいサーバーに追加されたときの、持ち主向け承認依頼。"""
+    embed = ui.embed("🆕 新しいサーバーに追加されました", color=ui.GOLD)
+    embed.add_field(name="サーバー", value=f"{guild.name}\n`{guild.id}`", inline=True)
+    embed.add_field(name="持ち主", value=f"<@{guild.owner_id}>", inline=True)
+    embed.add_field(name="メンバー数", value=f"{guild.member_count or '?'}人", inline=True)
+    embed.set_footer(text="許可するまで、このサーバーではコマンドが使えません")
+    if guild.icon:
+        embed.set_thumbnail(url=guild.icon.url)
+    return embed
+
+
+def approved_notice_embed() -> discord.Embed:
+    """サーバーが承認されたときの、サーバー側への挨拶。"""
+    return ui.ok_embed(
+        "遊べるようになりました",
+        "Bot の持ち主に承認されました。`/help` で遊び方、`/ペリカ デイリー` からどうぞ。",
+    )
+
+
+def server_list_embed(bot_guilds: list, status_rows: list, config: dict) -> discord.Embed:
+    """許可・承認待ち・断ったサーバーの一覧。"""
+    joined = {g.id: g for g in bot_guilds}
+    rows = {r["guild_id"]: r for r in status_rows}
+    pre = approval.preapproved(config)
+    groups = {"✅ 許可": [], "⏳ 承認待ち": [], "🚫 断った": []}
+    for gid in pre:
+        groups["✅ 許可"].append((gid, joined[gid].name if gid in joined else "（設定ファイルで許可）", gid in joined))
+    for gid, r in rows.items():
+        if gid in pre:
+            continue
+        key = {approval.APPROVED: "✅ 許可", approval.PENDING: "⏳ 承認待ち", approval.DENIED: "🚫 断った"}[r["status"]]
+        groups[key].append((gid, joined[gid].name if gid in joined else (r["name"] or "?"), gid in joined))
+    e = ui.embed(
+        "🌐 サーバーの許可状況",
+        f"承認制: **{'ON' if approval.requires_approval(config) else 'OFF'}**　参加中: {len(joined)}サーバー",
+        ui.INFO,
+    )
+    for title, items in groups.items():
+        e.add_field(
+            name=f"{title}（{len(items)}）",
+            value="\n".join(f"{'🟢' if on else '⚪'} {name}　`{gid}`" for gid, name, on in items)[:1024] or "なし",
+            inline=False,
+        )
+    e.set_footer(text="🟢 = いま参加中 / ⚪ = 参加していない")
     return e

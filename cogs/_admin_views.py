@@ -9,10 +9,59 @@ import discord
 from cogs._admin_embeds import announce_embed
 from cogs._admin_purge import PurgeResult, delete_own_messages
 from cogs._shared import announce_channel
-from core import ui
+from core import approval, ui
 
 if TYPE_CHECKING:
     from cogs.approval_cog import ApprovalCog
+
+
+class ApprovalButton(
+    discord.ui.DynamicItem[discord.ui.Button], template=r"guild-approve:(?P<action>allow|deny):(?P<gid>[0-9]+)"
+):
+    def __init__(self, action: str, guild_id: int):
+        allow = action == "allow"
+        super().__init__(
+            discord.ui.Button(
+                label="許可する" if allow else "断って退出させる",
+                style=discord.ButtonStyle.success if allow else discord.ButtonStyle.danger,
+                custom_id=f"guild-approve:{action}:{guild_id}",
+            )
+        )
+        self.action, self.guild_id = action, guild_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match):
+        return cls(match["action"], int(match["gid"]))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id not in approval.owner_ids(interaction.client.config):
+            await interaction.response.send_message("これは Bot の持ち主だけが操作できます。", ephemeral=True)
+            return False
+        return True
+
+    async def callback(self, interaction: discord.Interaction):
+        bot, eco, gid = interaction.client, interaction.client.economy, self.guild_id
+        guild = bot.get_guild(gid)
+        row = eco.get_guild_status(gid) or {}
+        name = guild.name if guild else row.get("name") or str(gid)
+        if self.action == "allow":
+            eco.set_guild_status(gid, approval.APPROVED, name, interaction.user.id)
+            embed = ui.ok_embed("許可しました", f"**{name}**（`{gid}`）で遊べるようになりました。")
+            if guild is not None:
+                cog = bot.get_cog("ApprovalCog")
+                if cog is not None:
+                    await cog.announce_approved(guild)
+        else:
+            eco.set_guild_status(gid, approval.DENIED, name, interaction.user.id)
+            left = ""
+            if guild is not None:
+                try:
+                    await guild.leave()
+                    left = "Bot はそのサーバーから退出しました。"
+                except discord.HTTPException:
+                    left = "退出できませんでした（コマンドは使えないままです）。"
+            embed = ui.warn_embed("断りました", f"**{name}**（`{gid}`）の利用を断りました。{left}")
+        await interaction.response.edit_message(embed=embed, view=None)
 
 
 class AnnounceConfirm(ui.OwnerView):

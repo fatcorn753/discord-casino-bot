@@ -5,7 +5,6 @@ Bot が新しいサーバーに追加されると、持ち主（owner_ids）に 
 ボタンは Bot を再起動しても動く（DynamicItem）。
 """
 
-import re
 import time
 from typing import Optional
 
@@ -15,90 +14,35 @@ from discord.ext import commands
 
 from cogs._admin_embeds import (
     LEVEL_NAME,
-    bulk_preview_lines,
+    approval_request_embed,
+    approved_notice_embed,
+    bulk_preview_lines,  # noqa: F401
     click_history_embed,
     pachinko_stats_embed,
     rtp_table_embed,
+    server_list_embed,
 )
 from cogs._admin_purge import can_read_history
-from cogs._admin_views import AnnounceModal, PurgeConfirm, QuizBulkConfirm
+from cogs._admin_targets import (
+    channel_choices,
+    guild_choices,
+    namespace_guild,
+    pick_guild,
+    pick_member,
+    user_choices,
+    valid_guild_id,
+)
+from cogs._admin_targets import parse_user_id as parse_user_id  # noqa: F401
+from cogs._admin_targets import pick_channel as _pick_channel_impl
+from cogs._admin_targets import postable as postable  # noqa: F401
+from cogs._admin_views import AnnounceModal, ApprovalButton, PurgeConfirm, QuizBulkConfirm
 from core import approval, events, quizimport, ui
 from core import labor as labor_mod
 from games import rtplevel
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_IMPORT_BYTES = 200 * 1024
-
-
-def valid_guild_id(text: str) -> bool:
-    """サーバーIDとして正しい文字列（半角数字で、SQLite の整数に収まる正の値）。"""
-    t = text.strip()
-    return t.isascii() and t.isdigit() and 1 <= int(t) < 2**63
-
-
-def postable(channel, guild: discord.Guild) -> bool:
-    """Bot がそのチャンネルに、埋め込みを投稿できるか。"""
-    perms = channel.permissions_for(guild.me)
-    return bool(perms.view_channel and perms.send_messages and perms.embed_links)
-
-
-def parse_user_id(text: str) -> Optional[int]:
-    """`123`・`<@123>`・`<@!123>` のどれからでもユーザーIDを取り出す。取れなければ None。"""
-    m = re.fullmatch(r"<@!?(\d+)>|(\d+)", text.strip())
-    uid = int(m.group(1) or m.group(2)) if m else None
-    return uid if uid is not None and 1 <= uid < 2**63 else None
-
-
 RENOTIFY_AFTER = 3600  # 承認待ちのサーバーで誰かがコマンドを使ったとき、前の通知からこれ以上たっていれば催促する（秒）
-
-
-class ApprovalButton(
-    discord.ui.DynamicItem[discord.ui.Button], template=r"guild-approve:(?P<action>allow|deny):(?P<gid>[0-9]+)"
-):
-    def __init__(self, action: str, guild_id: int):
-        allow = action == "allow"
-        super().__init__(
-            discord.ui.Button(
-                label="許可する" if allow else "断って退出させる",
-                style=discord.ButtonStyle.success if allow else discord.ButtonStyle.danger,
-                custom_id=f"guild-approve:{action}:{guild_id}",
-            )
-        )
-        self.action, self.guild_id = action, guild_id
-
-    @classmethod
-    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match):
-        return cls(match["action"], int(match["gid"]))
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id not in approval.owner_ids(interaction.client.config):
-            await interaction.response.send_message("これは Bot の持ち主だけが操作できます。", ephemeral=True)
-            return False
-        return True
-
-    async def callback(self, interaction: discord.Interaction):
-        bot, eco, gid = interaction.client, interaction.client.economy, self.guild_id
-        guild = bot.get_guild(gid)
-        row = eco.get_guild_status(gid) or {}
-        name = guild.name if guild else row.get("name") or str(gid)
-        if self.action == "allow":
-            eco.set_guild_status(gid, approval.APPROVED, name, interaction.user.id)
-            embed = ui.ok_embed("許可しました", f"**{name}**（`{gid}`）で遊べるようになりました。")
-            if guild is not None:
-                cog = bot.get_cog("ApprovalCog")
-                if cog is not None:
-                    await cog.announce_approved(guild)
-        else:
-            eco.set_guild_status(gid, approval.DENIED, name, interaction.user.id)
-            left = ""
-            if guild is not None:
-                try:
-                    await guild.leave()
-                    left = "Bot はそのサーバーから退出しました。"
-                except discord.HTTPException:
-                    left = "退出できませんでした（コマンドは使えないままです）。"
-            embed = ui.warn_embed("断りました", f"**{name}**（`{gid}`）の利用を断りました。{left}")
-        await interaction.response.edit_message(embed=embed, view=None)
 
 
 class ApprovalCog(commands.Cog):
@@ -119,13 +63,7 @@ class ApprovalCog(commands.Cog):
         self.eco.mark_guild_notified(
             guild.id
         )  # 送信（await）の前に記録する。同時に来た別のコマンドが、重ねて依頼しないように
-        embed = ui.embed("🆕 新しいサーバーに追加されました", color=ui.GOLD)
-        embed.add_field(name="サーバー", value=f"{guild.name}\n`{guild.id}`", inline=True)
-        embed.add_field(name="持ち主", value=f"<@{guild.owner_id}>", inline=True)
-        embed.add_field(name="メンバー数", value=f"{guild.member_count or '?'}人", inline=True)
-        embed.set_footer(text="許可するまで、このサーバーではコマンドが使えません")
-        if guild.icon:
-            embed.set_thumbnail(url=guild.icon.url)
+        embed = approval_request_embed(guild)
         view = discord.ui.View(timeout=None)
         view.add_item(ApprovalButton("allow", guild.id))
         view.add_item(ApprovalButton("deny", guild.id))
@@ -159,12 +97,7 @@ class ApprovalCog(commands.Cog):
         if channel is None:
             return
         try:
-            await channel.send(
-                embed=ui.ok_embed(
-                    "遊べるようになりました",
-                    "Bot の持ち主に承認されました。`/help` で遊び方、`/ペリカ デイリー` からどうぞ。",
-                )
-            )
+            await channel.send(embed=approved_notice_embed())
         except discord.HTTPException:
             pass
 
@@ -211,111 +144,37 @@ class ApprovalCog(commands.Cog):
     )
 
     def _guild_choices(self, current: str) -> list:
-        cur = current.strip().lower()
-        return [
-            app_commands.Choice(name=g.name[:100], value=str(g.id))
-            for g in self.bot.guilds
-            if not cur or cur in g.name.lower() or cur in str(g.id)
-        ][:25]
+        return guild_choices(self.bot, current)
 
     async def guild_autocomplete(self, interaction: discord.Interaction, current: str):
         return self._guild_choices(current) if interaction.user.id in approval.owner_ids(self.bot.config) else []
 
     async def _pick_guild(self, interaction: discord.Interaction, guild_id: str) -> Optional[discord.Guild]:
-        """入力されたサーバーを探す。見つからなければ理由を返して None。"""
-        guild = self.bot.get_guild(int(guild_id)) if valid_guild_id(guild_id) else None
-        if guild is None:
-            await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "サーバーが見つかりません", "候補から選ぶか、Bot が参加しているサーバーのIDを入れてください。"
-                ),
-                ephemeral=True,
-            )
-        return guild
+        return await pick_guild(self.bot, interaction, guild_id)
 
     def _namespace_guild(self, interaction: discord.Interaction) -> Optional[discord.Guild]:
-        """入力途中の `サーバー` で選ばれているサーバー（候補を絞るため）。"""
-        ns = vars(interaction.namespace)
-        raw = str(ns.get("guild_id") or ns.get("サーバー") or "")
-        return self.bot.get_guild(int(raw)) if valid_guild_id(raw) else None
+        return namespace_guild(self.bot, interaction)
 
     async def channel_autocomplete(self, interaction: discord.Interaction, current: str):
         """選んだサーバーの、Bot が投稿できるチャンネルの候補。"""
         guild = self._namespace_guild(interaction)
         if interaction.user.id not in approval.owner_ids(self.bot.config) or guild is None:
             return []
-        cur = current.strip().lower()
-        return [
-            app_commands.Choice(name=f"#{ch.name}"[:100], value=str(ch.id))
-            for ch in guild.text_channels
-            if postable(ch, guild) and (not cur or cur in ch.name.lower())
-        ][:25]
+        return channel_choices(guild, current)
 
     async def _pick_channel(
         self, interaction: discord.Interaction, guild: Optional[discord.Guild], channel_id: Optional[str]
     ) -> tuple:
-        """指定されたチャンネルを探す。(続けてよいか, チャンネルか None) を返す。続けてはいけないときは、理由を返信済み。"""
-        if not channel_id:
-            return True, None
-        problem = None
-        channel = None
-        if guild is None:
-            problem = "チャンネルを指定するときは、`サーバー` も指定してください。"
-        else:
-            channel = guild.get_channel(int(channel_id)) if channel_id.strip().isdigit() else None
-            if channel is None or not hasattr(channel, "send"):
-                problem = f"{guild.name} にそのチャンネルが見つかりません。候補から選んでください。"
-            elif not postable(channel, guild):
-                problem = f"#{channel.name} には、Bot が投稿する権限（チャンネルを見る・メッセージを送る・埋め込みリンク）がありません。"
-        if problem:
-            await interaction.response.send_message(
-                embed=ui.error_embed("チャンネルを使えません", problem), ephemeral=True
-            )
-            return False, None
-        return True, channel
+        return await _pick_channel_impl(interaction, guild, channel_id)
 
     async def user_autocomplete(self, interaction: discord.Interaction, current: str):
         if interaction.user.id not in approval.owner_ids(self.bot.config):
             return []
         guild = self._namespace_guild(interaction)
-        cur = current.strip().lower()
-        if guild is None or not cur:
-            return []
-        return [
-            app_commands.Choice(name=f"{m.display_name} ({m.name})"[:100], value=str(m.id))
-            for m in guild.members
-            if not m.bot and (cur in m.display_name.lower() or cur in m.name.lower())
-        ][:25]  # キャッシュにいる人だけ。出なければIDを貼る
+        return [] if guild is None else user_choices(guild, current)
 
     async def _pick_member(self, interaction: discord.Interaction, guild_id: str, user_id: str, verb: str):
-        """管理コマンドで、サーバーと相手を確かめる。問題があれば、その場で返信して None（呼び出し側は何もせず戻る）。"""
-        guild = await self._pick_guild(interaction, guild_id)
-        if guild is None:
-            return None
-        uid = parse_user_id(user_id)
-        if uid is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "ユーザーを指定してください", "候補から選ぶか、ユーザーID（数字）を入れてください。"
-                ),
-                ephemeral=True,
-            )
-        try:
-            member = await guild.fetch_member(uid)
-        except discord.NotFound:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("そのサーバーにいません", f"`{uid}` は {guild.name} のメンバーではありません。"),
-                ephemeral=True,
-            )
-        except discord.HTTPException as exc:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("確認できません", f"メンバーを確認できませんでした: {exc}"), ephemeral=True
-            )
-        if member.bot:
-            return await interaction.response.send_message(
-                embed=ui.error_embed(f"Bot には{verb}できません"), ephemeral=True
-            )
-        return guild, member
+        return await pick_member(self.bot, interaction, guild_id, user_id, verb)
 
     @group.command(name="付与", description="[管理者] 指定したサーバーの指定した人に、ペリカを付与する")
     @app_commands.rename(guild_id="サーバー", user_id="ユーザー", amount="金額", reason="理由")
@@ -924,33 +783,7 @@ class ApprovalCog(commands.Cog):
     async def server_list(self, interaction: discord.Interaction):
         if not await self._owner_only(interaction):
             return
-        joined = {g.id: g for g in self.bot.guilds}
-        rows = {r["guild_id"]: r for r in self.eco.list_guild_status()}
-        pre = approval.preapproved(self.bot.config)
-        groups = {"✅ 許可": [], "⏳ 承認待ち": [], "🚫 断った": []}
-        for gid in pre:
-            groups["✅ 許可"].append(
-                (gid, joined[gid].name if gid in joined else "（設定ファイルで許可）", gid in joined)
-            )
-        for gid, r in rows.items():
-            if gid in pre:
-                continue
-            key = {approval.APPROVED: "✅ 許可", approval.PENDING: "⏳ 承認待ち", approval.DENIED: "🚫 断った"}[
-                r["status"]
-            ]
-            groups[key].append((gid, joined[gid].name if gid in joined else (r["name"] or "?"), gid in joined))
-        e = ui.embed(
-            "🌐 サーバーの許可状況",
-            f"承認制: **{'ON' if approval.requires_approval(self.bot.config) else 'OFF'}**　参加中: {len(joined)}サーバー",
-            ui.INFO,
-        )
-        for title, items in groups.items():
-            e.add_field(
-                name=f"{title}（{len(items)}）",
-                value="\n".join(f"{'🟢' if on else '⚪'} {name}　`{gid}`" for gid, name, on in items)[:1024] or "なし",
-                inline=False,
-            )
-        e.set_footer(text="🟢 = いま参加中 / ⚪ = 参加していない")
+        e = server_list_embed(self.bot.guilds, self.eco.list_guild_status(), self.bot.config)
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     @group.command(name="サーバー許可", description="[管理者] サーバーIDを指定して、利用を許可する")
