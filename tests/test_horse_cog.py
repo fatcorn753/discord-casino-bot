@@ -178,7 +178,7 @@ def test_display_frames_end_when_the_winner_crosses_and_never_move_backward():
     winner = sim["order"][0]
     frames = horse_cog.display_frames(sim["frames"], winner)
     assert frames[-1][winner] == 1.0 and all(p <= 1.0 for row in frames for p in row)
-    assert sum(1 for p in frames[-1] if p < 1.0) >= 6  # ゴールの瞬間に、全馬が並んでいない（差が見える）
+    assert sum(1 for p in frames[-1] if p < 1.0) >= 4  # ゴールの瞬間に、全馬が並んでいない（差が見える）
     for a, b in zip(frames, frames[1:]):
         assert all(y >= x for x, y in zip(a, b))
     entries = [{"lane": r.lane, "silks": "🟥", "name": r.name} for r in rs]

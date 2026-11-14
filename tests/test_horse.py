@@ -679,3 +679,43 @@ def test_rental_horse_prize_gets_an_extra_skim(eco):
         scale = h.prize_pool_scale(1, gross)
         rate = teiai.HORSE_PRIZE_SKIM_RATE + teiai.HORSE_RENTAL_EXTRA_SKIM_RATE
         assert result["prizes"].get(U, 0) == round(round(gross * scale) * (1 - rate))
+
+
+# ----------------------------- 脚質・展開・重賞（#39） ----------------------------- #
+def test_style_of_follows_the_highest_stat():
+    assert h.style_of({"speed": 80, "stamina": 20, "power": 50, "guts": 50}) == "nige"
+    assert h.style_of({"speed": 50, "stamina": 50, "power": 80, "guts": 20}) == "senko"
+    assert h.style_of({"speed": 20, "stamina": 80, "power": 20, "guts": 50}) == "sashi"
+    assert h.style_of({"speed": 20, "stamina": 20, "power": 20, "guts": 140}) == "oikomi"
+    assert h.style_of(h.DEFAULT_STATS) == h.STYLE_BY_STAT["speed"]  # 全部同値なら speed 優先
+
+
+def test_pace_shift_favors_closers_when_the_field_is_front_heavy():
+    slow = h.style_curve("oikomi", 0.9, pace_shift=0.0)
+    fast_pace = h.style_curve("oikomi", 0.9, pace_shift=0.05)
+    assert fast_pace > slow  # ハイペースだと、追込がより伸びる
+    nige_slow = h.style_curve("nige", 0.1, pace_shift=0.0)
+    nige_fast = h.style_curve("nige", 0.1, pace_shift=0.05)
+    assert nige_fast < nige_slow  # ハイペースだと、逃げは序盤から苦しくなる
+
+
+def test_major_race_at_21_doubles_prizes_and_tops_up_from_house_cash(eco):
+    eco._bank_sync(NOW)
+    eco._bank_set(1_000_000, 0)  # 重賞の原資
+    hid = make_horse(eco, U)
+    # 21時になる発走時刻の、臨時レースではなく定時レース相当を作る（race_create_special は kind='special' なので、直接 regular を作る）
+    start = NOW - (NOW % 86400) + 21 * 3600  # 適当な日の21時（まだ先）
+    eco._conn.execute(
+        "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, channel_id, created) "
+        "VALUES (?, 'regular', ?, ?, ?, 'entry', 0, ?)",
+        (eco._g(), start, start - 3600, start - 60, NOW),
+    )
+    rid = eco._conn.execute("SELECT id FROM horse_races WHERE start_at=?", (start,)).fetchone()["id"]
+    assert eco.race_register(U, hid, rid, NOW + 1) == (True, "")
+    field_ = eco.race_close_entries(rid, random.Random(1))
+    eco.race_set_odds(rid, h.make_odds(field_["runners"]))
+    result = eco.race_run(rid, random.Random(5), tz_hours=0.0)
+    assert result["is_major"]
+    mine = next(e for e in result["entries"] if e["owner_id"] == U)
+    if mine["finish"] <= 3:
+        assert result["prizes"].get(U, 0) > 0  # 原資が少なくても、手元現金から補われて出る

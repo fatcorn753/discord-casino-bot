@@ -574,7 +574,7 @@ class HorseMixin:
     # ---------------------------------------------------------------- #
     # 発走・精算                                                        #
     # ---------------------------------------------------------------- #
-    def race_run(self, race_id: int, rng: Optional[random.Random] = None) -> Optional[dict]:
+    def race_run(self, race_id: int, rng: Optional[random.Random] = None, tz_hours: float = 9.0) -> Optional[dict]:
         """レースを走らせて、結果を決め、賞金と払い戻しを精算する。すでに終わっていれば None。
 
         結果は、ここで決まる（演出は、返した frames を見せるだけ）。(race, entries, order, frames, bets, prizes) を辞書で返す。
@@ -585,10 +585,15 @@ class HorseMixin:
             if race is None or race["status"] != "betting":
                 return None
             self._conn.execute("UPDATE horse_races SET status='done' WHERE id=?", (race_id,))
+            is_major = horse_mod.is_major_race(race, tz_hours)
+            prizes_table = horse_mod.MAJOR_PRIZES if is_major else horse_mod.PRIZES
             entries = self.race_entries(race_id)
+            styles = [horse_mod.style_of({k: e[k] for k in horse_mod.STAT_KEYS}) for e in entries]
             runners = [
-                horse_mod.Runner(e["lane"], e["name"], e["speed"], e["stamina"], e["power"], e["guts"], e["form"])
-                for e in entries
+                horse_mod.Runner(
+                    e["lane"], e["name"], e["speed"], e["stamina"], e["power"], e["guts"], e["form"], style=s
+                )
+                for e, s in zip(entries, styles)
             ]
             track = horse_mod.Track(race["distance"], race["going"])
             sim = horse_mod.simulate(runners, track, rng, keep_frames=True)
@@ -596,17 +601,27 @@ class HorseMixin:
             # 原資（人間の馬が払った出走料の合計）を超えて、賞金で新しいペリカが生まれないよう、足りなければ3着まで同じ割合で削る
             real_entries = sum(1 for e in entries if e["owner_id"])
             placed_total = sum(
-                horse_mod.PRIZES[p - 1]
+                prizes_table[p - 1]
                 for p, idx in enumerate(order, start=1)
-                if p <= len(horse_mod.PRIZES) and entries[idx]["owner_id"]
+                if p <= len(prizes_table) and entries[idx]["owner_id"]
             )
-            scale = horse_mod.prize_pool_scale(real_entries, placed_total)
+            topup = 0
+            if (
+                is_major
+            ):  # 重賞は、出走料だけで足りなければ、帝愛の手元現金から補う（新しくは作らない。原資が無ければ補わない）
+                shortfall = max(0, placed_total - real_entries * horse_mod.ENTRY_FEE)
+                if shortfall:
+                    state = self._bank_sync(time.time())
+                    topup = min(shortfall, int(state["cash"]), horse_mod.MAJOR_HOUSE_TOPUP)
+                    if topup:
+                        self._bank_set(state["cash"] - topup, state["loaned"])
+            scale = horse_mod.prize_pool_scale(real_entries, placed_total, topup)
             prizes, retired = {}, []
             for place, idx in enumerate(order, start=1):
                 e = entries[idx]
                 e["finish"] = place
                 self._conn.execute("UPDATE horse_entries SET finish=? WHERE id=?", (place, e["id"]))
-                prize = round((horse_mod.PRIZES[place - 1] if place <= len(horse_mod.PRIZES) else 0) * scale)
+                prize = round((prizes_table[place - 1] if place <= len(prizes_table) else 0) * scale)
                 if e["owner_id"]:
                     horse = self.horse_get(e["horse_id"])
                     if prize:
@@ -678,6 +693,8 @@ class HorseMixin:
                 "prizes": prizes,
                 "track": track,
                 "retired": retired,
+                "is_major": is_major,
+                "styles": dict(zip((e["lane"] for e in entries), styles)),
             }
 
     # ---------------------------------------------------------------- #
