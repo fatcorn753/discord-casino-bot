@@ -4,8 +4,9 @@ import random
 
 import pytest
 
+from core import horse as horse_mod
 from core import labor as lab
-from core import p2p, relics, shop
+from core import p2p, relics, shop, teiai
 from core.economy import Economy
 
 pytestmark = pytest.mark.real_scope
@@ -118,15 +119,17 @@ def test_tear_adds_one_percent_to_the_owners_prize(eco):
     rid = eco.race_create_special(T0, 10, 10)
     assert eco.race_register(U, hid, rid, T0 + 1)[0]
     field = eco.race_close_entries(rid, random.Random(2))
-    from core import horse as horse_mod
-
     eco.race_set_odds(rid, horse_mod.make_all_odds(field["runners"]))
     give(eco, "relic_tear")
     before = eco.balance(U)
     result = eco.race_run(rid, random.Random(3))
     prize = result["prizes"].get(U, 0)
-    if prize:  # 入賞したとき: 賞金は、表の額の 1% 増し
-        assert prize in {round(p * 1.01) for p in horse_mod.PRIZES}
+    if prize:  # 入賞したとき: 賞金は、表の額の1%増し（さらに、出走料ぶんの上限とピンハネがかかる）
+        want = {
+            round(round(round(p * horse_mod.prize_pool_scale(1, p)) * 1.01) * (1 - teiai.HORSE_PRIZE_SKIM_RATE))
+            for p in horse_mod.PRIZES
+        }
+        assert prize in want
         assert eco.balance(U) >= before + prize - 1
 
 

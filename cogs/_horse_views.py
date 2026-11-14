@@ -513,89 +513,6 @@ class BetPanel(discord.ui.View):
 # ---------------------------------------------------------------- #
 # 厩舎
 # ---------------------------------------------------------------- #
-class NameModal(discord.ui.Modal):
-    """新しい馬の名前。そのあと、毛色と勝負服の色を選ぶ。"""
-
-    def __init__(self, stable: "Stable"):
-        super().__init__(title="競走馬の名前")
-        self.stable = stable
-        self.name = discord.ui.TextInput(label=f"名前（{horse_mod.NAME_MAX}文字まで）", max_length=horse_mod.NAME_MAX)
-        self.add_item(self.name)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        ok, result = horse_mod.check_name(self.name.value)
-        if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("名前を直してください", result), ephemeral=True
-            )
-        view = AppearanceView(self.stable, result)
-        await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
-
-
-class AppearanceView(discord.ui.View):
-    """毛色と勝負服の色を選んで、馬を迎える（購入券を1枚使う）。"""
-
-    def __init__(self, stable: "Stable", name: str):
-        super().__init__(timeout=300)
-        self.stable, self.name = stable, name
-        self.coat, self.silks = horse_mod.COATS[0], horse_mod.SILKS[0]
-        self._build()
-
-    def embed(self) -> discord.Embed:
-        return ui.embed(
-            "🐴 見た目を決める",
-            f"名前: **{self.name}**\n毛色: **{self.coat}**　勝負服: {self.silks}\n決まったら「迎える」を押します（購入券を1枚使います）。",
-            ui.INFO,
-        )
-
-    def _build(self) -> None:
-        self.clear_items()
-        coat = discord.ui.Select(
-            placeholder="毛色",
-            row=0,
-            options=[discord.SelectOption(label=c, default=c == self.coat) for c in horse_mod.COATS],
-        )
-        coat.callback = self._on_coat
-        self.add_item(coat)
-        silks = discord.ui.Select(
-            placeholder="勝負服の色",
-            row=1,
-            options=[discord.SelectOption(label=s, value=s, emoji=s, default=s == self.silks) for s in horse_mod.SILKS],
-        )
-        silks.callback = self._on_silks
-        self.add_item(silks)
-        go = discord.ui.Button(label="迎える", style=discord.ButtonStyle.success, row=2)
-        go.callback = self._on_go
-        self.add_item(go)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return await self.stable.interaction_check(interaction)
-
-    async def _on_coat(self, interaction: discord.Interaction):
-        self.coat = interaction.data["values"][0]
-        self._build()
-        await interaction.response.edit_message(embed=self.embed(), view=self)
-
-    async def _on_silks(self, interaction: discord.Interaction):
-        self.silks = interaction.data["values"][0]
-        self._build()
-        await interaction.response.edit_message(embed=self.embed(), view=self)
-
-    async def _on_go(self, interaction: discord.Interaction):
-        eco = self.stable.eco(interaction)
-        ok, result = eco.horse_create(interaction.user.id, self.name, self.coat, self.silks)
-        if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("迎えられません", result), ephemeral=True
-            )
-        self.stop()
-        await interaction.response.edit_message(
-            embed=ui.ok_embed(
-                "🐴 競走馬を迎えました",
-                f"{self.silks} **{self.name}**（{self.coat}）\n`/競馬 厩舎` で、にんじんでステータスを配分し、レースに申し込めます。",
-            ),
-            view=None,
-        )
 
 
 class Stable(discord.ui.View):
@@ -607,10 +524,14 @@ class Stable(discord.ui.View):
         self.horse_id = None
         self.src, self.dst = "speed", "guts"
         eco = self.eco_for()
+        eco.rental_ensure(user_id, time.time(), self._tz())
         horses = eco.horse_list(user_id)
         if horses:
             self.horse_id = horses[0]["id"]
         self._build()
+
+    def _tz(self) -> float:
+        return float(self.bot.config.get("utc_offset_hours", 9))
 
     def eco_for(self):
         return self.bot.economy.for_guild(self.guild_id)
@@ -620,14 +541,17 @@ class Stable(discord.ui.View):
 
     def embed(self) -> discord.Embed:
         eco = self.eco_for()
+        eco.rental_ensure(self.user_id, time.time(), self._tz())
         inv = eco.inventory(self.user_id)
         horses = eco.horse_list(self.user_id)
         e = ui.embed(
             "🐴 厩舎",
             f"購入券 **{inv.get(shop.HORSE_VOUCHER, 0)}枚**　🥕 にんじん **{inv.get(shop.CARROT, 0)}本**　"
-            f"🥇 金にんじん **{inv.get(shop.GOLD_CARROT, 0)}本**　（ショップで買えます。馬は {horse_mod.MAX_HORSES} 頭まで）\n"
+            f"🥇 金にんじん **{inv.get(shop.GOLD_CARROT, 0)}本**　（ショップで買えます。持ち馬は {horse_mod.MAX_HORSES} 頭まで）\n"
             f"ステータスの合計は **{horse_mod.STAT_TOTAL}**。にんじん1本で、{horse_mod.CARROT_POINTS}点を別のステータスへ動かせます。"
-            f"金にんじん1本で、合計が {2 * horse_mod.GOLD_CARROT_POINTS} 点増えます（5点ずつ好きなところへ。1頭に {horse_mod.GOLD_CARROT_MAX} 本まで）。",
+            f"金にんじん1本で、合計が {2 * horse_mod.GOLD_CARROT_POINTS} 点増えます（5点ずつ好きなところへ。1頭に {horse_mod.GOLD_CARROT_MAX} 本まで）。\n"
+            "🎫 帝愛から、毎日1頭ランダムな馬をレンタルできます（出走料はかかりますが、レンタル自体は無料。調整不可。"
+            "購入券があれば、その日のうちに買って自分の馬にできます。これが馬を増やす唯一の方法です）。",
             ui.INFO,
         )
         open_races = {r["id"]: r for r in eco.race_open()}
@@ -637,15 +561,10 @@ class Stable(discord.ui.View):
             ]
             note = f"\n🏁 {race_title(eco, registered[0])} に出走予定" if registered else ""
             mark = "▶ " if h["id"] == self.horse_id else ""
+            tag = "🎫 本日のレンタル\n" if h["rented_day"] else ""
             e.add_field(
                 name=f"{mark}{h['silks']} {h['name']}（{h['coat']}）",
-                value=f"{stat_lines(h)}\n戦績 {h['races']}戦 {h['wins']}勝（3着以内 {h['places']}）　賞金 {ui.pelica(h['earnings'])}{note}",
-                inline=False,
-            )
-        if not horses:
-            e.add_field(
-                name="まだ馬がいません",
-                value="ショップで「競走馬（購入券）」を買って、「🐴 迎える」を押します。",
+                value=f"{tag}{stat_lines(h)}\n戦績 {h['races']}/{horse_mod.MAX_RACES}戦 {h['wins']}勝（3着以内 {h['places']}）　賞金 {ui.pelica(h['earnings'])}{note}",
                 inline=False,
             )
         nxt = next((r for r in eco.race_open() if r["status"] == "entry"), None)
@@ -659,6 +578,11 @@ class Stable(discord.ui.View):
         self.clear_items()
         eco = self.eco_for()
         horses = eco.horse_list(self.user_id)
+        picked = next((h for h in horses if h["id"] == self.horse_id), None)
+        rented = bool(picked and picked["rented_day"])
+        inv = eco.inventory(self.user_id)
+        owned_count = sum(1 for h in horses if not h["rented_day"])
+        can_buy = rented and inv.get(shop.HORSE_VOUCHER, 0) > 0 and owned_count < horse_mod.MAX_HORSES
         if horses:
             pick = discord.ui.Select(
                 placeholder="馬を選ぶ",
@@ -692,12 +616,12 @@ class Stable(discord.ui.View):
             dst.callback = self._on_dst
             self.add_item(dst)
         buttons = [
-            ("🥕 にんじんで動かす", discord.ButtonStyle.primary, self._on_carrot, not horses, 3),
+            ("🥕 にんじんで動かす", discord.ButtonStyle.primary, self._on_carrot, not horses or rented, 3),
             ("🏁 出走を申し込む", discord.ButtonStyle.success, self._on_enter, not horses, 3),
             ("↩️ 申し込みを取り下げる", discord.ButtonStyle.secondary, self._on_withdraw, not horses, 3),
-            ("🐴 新しい馬を迎える", discord.ButtonStyle.secondary, self._on_new, False, 4),
-            ("🥇 金にんじんを使う", discord.ButtonStyle.primary, self._on_gold, not horses, 4),
-            ("🎌 引退させる", discord.ButtonStyle.danger, self._on_retire, not horses, 4),
+            ("🐴 この馬を買う", discord.ButtonStyle.secondary, self._on_buy_rental, not can_buy, 4),
+            ("🥇 金にんじんを使う", discord.ButtonStyle.primary, self._on_gold, not horses or rented, 4),
+            ("🎌 引退させる", discord.ButtonStyle.danger, self._on_retire, not horses or rented, 4),
         ]
         for label, style, cb, disabled, row in buttons:
             b = discord.ui.Button(label=label, style=style, disabled=disabled, row=row)
@@ -783,5 +707,18 @@ class Stable(discord.ui.View):
         await self._redraw(interaction)
         await refresh_entry_card(interaction, eco, race["id"])
 
-    async def _on_new(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(NameModal(self))
+    async def _on_buy_rental(self, interaction: discord.Interaction):
+        eco = self.eco(interaction)
+        ok, result = eco.horse_buy_rental(interaction.user.id, time.time(), self._tz())
+        if not ok:
+            return await interaction.response.send_message(embed=ui.error_embed("買えません", result), ephemeral=True)
+        horse = eco.horse_get(result)
+        await self._redraw(interaction)
+        await interaction.followup.send(
+            embed=ui.ok_embed(
+                "🐴 競走馬を買いました",
+                f"{horse['silks']} **{horse['name']}**（{horse['coat']}）\n"
+                "`/競馬 厩舎` で、にんじんでステータスを配分し、レースに申し込めます。",
+            ),
+            ephemeral=True,
+        )

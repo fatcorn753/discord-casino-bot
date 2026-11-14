@@ -144,20 +144,30 @@ def test_favorite_and_longshot_spread_is_reasonable():
     assert 0.2 < sum(tops) / len(tops) < 0.6 and sum(bottoms) / len(bottoms) < 0.05
 
 
-def test_race_slots_are_four_a_day_between_9_and_midnight_in_local_time():
+def test_race_slots_are_five_a_day_on_weekdays_between_9_and_midnight_in_local_time():
     tz = 9.0
+    # 2026-11-9は月曜（平日）: 9時から3時間おき
     base = datetime.datetime(2026, 11, 9, 11, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=tz))).timestamp()
     slots = Economy.race_slots(base, tz)
     local = [datetime.datetime.fromtimestamp(s, datetime.timezone(datetime.timedelta(hours=tz))) for s in slots[:3]]
-    assert [(x.day, x.hour) for x in local] == [(9, 13), (9, 17), (9, 21)]
+    assert [(x.day, x.hour) for x in local] == [(9, 12), (9, 15), (9, 18)]
     day = [
         s
         for s in slots
         if datetime.datetime.fromtimestamp(s, datetime.timezone(datetime.timedelta(hours=tz))).day == 10
     ]
-    assert len(day) == 4
+    assert len(day) == 5  # 2026-11-10も火曜（平日）
     hours = {datetime.datetime.fromtimestamp(s, datetime.timezone(datetime.timedelta(hours=tz))).hour for s in day}
-    assert hours == {9, 13, 17, 21} and all(9 <= x < 24 for x in hours)  # 9時から0時までの間だけ
+    assert hours == {9, 12, 15, 18, 21} and all(9 <= x < 24 for x in hours)  # 9時から0時までの間だけ
+
+
+def test_race_slots_are_four_a_day_on_weekends():
+    tz = 9.0
+    # 2026-11-14は土曜（休日）: 9時から4時間おき
+    base = datetime.datetime(2026, 11, 14, 0, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=tz))).timestamp()
+    slots = Economy.race_slots(base, tz, days=0)
+    hours = {datetime.datetime.fromtimestamp(s, datetime.timezone(datetime.timedelta(hours=tz))).hour for s in slots}
+    assert hours == {9, 13, 17, 21} and len(slots) == 4
 
 
 # ----------------------------- 馬 ----------------------------- #
@@ -220,7 +230,7 @@ def test_gold_carrot_cannot_push_one_stat_over_the_max(eco):
 
 def test_retire_value_rewards_a_good_record_and_charges_for_a_bad_one():
     assert h.retire_value(0, 0, 0) == 0
-    assert h.retire_value(10, 5, 8) > h.retire_value(10, 1, 3) > 0 > h.retire_value(10, 0, 1)
+    assert h.retire_value(10, 5, 8) > h.retire_value(10, 2, 4) > 0 > h.retire_value(10, 0, 1)
     assert h.retire_value(100, 100, 100) == h.RETIRE_MAX and h.retire_value(100, 0, 0) == -h.RETIRE_FEE_MAX
 
 
@@ -295,7 +305,9 @@ def test_full_race_flow_pays_bettors_and_owners_and_is_settled_once(eco):
     assert len(winners) == 1 and winners[0]["lane"] == result["entries"][result["order"][0]]["lane"]
     assert eco.race_get(rid)["status"] == "done" and all(b["payout"] >= 0 for b in result["bets"])
     mine = next(e for e in result["entries"] if e["owner_id"] == U)
-    prize = h.PRIZES[mine["finish"] - 1] if mine["finish"] <= 3 else 0
+    gross = h.PRIZES[mine["finish"] - 1] if mine["finish"] <= 3 else 0
+    scale = h.prize_pool_scale(1, gross)  # 人間の馬は1頭だけなので、出走料ぶんしか払えない
+    prize = round(round(gross * scale) * (1 - teiai.HORSE_PRIZE_SKIM_RATE)) if gross else 0
     assert result["prizes"].get(U, 0) == prize
     stats = eco.horse_get(hid)
     assert stats["races"] == 1 and stats["wins"] == (1 if mine["finish"] == 1 else 0) and stats["earnings"] == prize
@@ -575,3 +587,80 @@ def test_npc_silks_avoid_the_colors_players_already_use(tmp_path):
     rows = eco.race_entries(rid)
     npc = [e["silks"] for e in rows if e["owner_id"] == 0]
     assert len(npc) == 5 and len(set(npc)) == 5 and not ({"🟥", "🟦"} & set(npc))
+
+
+def test_horse_at_max_races_cannot_enter_and_auto_retires_on_the_final_race(eco):
+    hid = make_horse(eco, U)
+    eco._conn.execute("UPDATE horses SET races=? WHERE id=?", (h.MAX_RACES, hid))
+    eco._conn.commit()
+    rid = open_race(eco)
+    assert "定年" in eco.race_register(U, hid, rid, NOW + 1)[1]
+
+    eco._conn.execute("UPDATE horses SET races=? WHERE id=?", (h.MAX_RACES - 1, hid))
+    eco._conn.commit()
+    rid2 = open_race(eco)
+    assert eco.race_register(U, hid, rid2, NOW + 1) == (True, "")
+    field_ = eco.race_close_entries(rid2, random.Random(1))
+    eco.race_set_odds(rid2, h.make_odds(field_["runners"]))
+    result = eco.race_run(rid2, random.Random(5))
+    retired = [r for r in result["retired"] if r["id"] == hid]
+    assert len(retired) == 1
+    assert eco.horse_get(hid)["owner_id"] == -2  # 持ち馬から消える
+    rid3 = open_race(eco)
+    assert "自分の馬" in eco.race_register(U, hid, rid3, NOW + 1)[1]  # もう自分の馬ではない（引退済み）
+
+
+# ----------------------------- レンタル ----------------------------- #
+def test_rental_is_free_random_and_one_per_day(eco):
+    before = eco.balance(U)
+    row = eco.rental_ensure(U, NOW, 9.0)
+    assert row["owner_id"] == U and row["rented_day"]
+    assert sum(row[k] for k in h.STAT_KEYS) == h.STAT_TOTAL
+    same = eco.rental_ensure(U, NOW + 1, 9.0)
+    assert same["id"] == row["id"]  # 同じ日なら、同じ馬
+    assert eco.horse_list(U) == [row]
+    assert eco.balance(U) == before  # レンタル自体は無料
+
+
+def test_rental_does_not_count_toward_max_horses(eco):
+    eco.rental_ensure(U, NOW, 9.0)
+    for i in range(h.MAX_HORSES):
+        make_horse(eco, U, f"馬{i}")  # レンタルがあっても、3頭まで買える
+    ok, reason = eco.horse_create(U, "もう1頭", "栗毛", "🟥")
+    assert not ok and "持てる馬" in reason
+
+
+def test_buying_the_rental_needs_a_voucher_and_keeps_its_stats(eco):
+    rental = eco.rental_ensure(U, NOW, 9.0)
+    ok, reason = eco.horse_buy_rental(U, NOW, 9.0)
+    assert not ok and "購入券" in reason
+    give(eco, U, shop.HORSE_VOUCHER)
+    ok, hid = eco.horse_buy_rental(U, NOW, 9.0)
+    assert ok and hid == rental["id"]
+    bought = eco.horse_get(hid)
+    assert bought["rented_day"] is None and all(bought[k] == rental[k] for k in h.STAT_KEYS)
+    assert eco.horse_buy_rental(U, NOW, 9.0)[0] is False  # もうレンタル馬がいない
+
+
+def test_rental_horse_cannot_be_adjusted_or_retired_or_listed(eco):
+    rental = eco.rental_ensure(U, NOW, 9.0)
+    assert not eco.horse_carrot(U, rental["id"], "speed", "guts")[0]
+    assert not eco.horse_gold_carrot(U, rental["id"], "speed", "guts")[0]
+    assert not eco.horse_retire(U, rental["id"])[0]
+    ok, reason = eco.p2p_list(U, "horse", str(rental["id"]), 1, "fixed", 30_000, None, NOW)
+    assert not ok and "レンタル" in reason
+
+
+def test_unbought_rental_is_replaced_the_next_day(eco):
+    rental = eco.rental_ensure(U, NOW, 9.0)
+    tomorrow = eco.rental_ensure(U, NOW + 86400, 9.0)
+    assert tomorrow["id"] != rental["id"]
+    assert eco.horse_get(rental["id"]) is None  # 買わなかった分は消える
+
+
+# ----------------------------- 賞金の原資（新しいペリカを生まない） ----------------------------- #
+def test_prize_pool_scale_caps_at_the_entry_fees_collected():
+    assert h.prize_pool_scale(0, 0) == 1.0
+    assert h.prize_pool_scale(5, 0) == 1.0  # 誰も入賞しなければ、削る必要がない
+    assert h.prize_pool_scale(1, h.PRIZES[0]) == h.ENTRY_FEE / h.PRIZES[0]
+    assert h.prize_pool_scale(100, h.PRIZES[0]) == 1.0  # 出走料が十分あれば、そのまま

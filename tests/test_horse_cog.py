@@ -468,4 +468,6 @@ def test_retire_view_charges_or_pays_and_updates_the_stable(setup):
     it = _It(U)
     asyncio.run(view._on_ok(it))
     assert eco.balance(U) == before + value and "引退しました" in it.edited[0]["embed"].title
-    assert eco.horse_list(U) == [] and stable.horse_id is None
+    remaining = eco.horse_list(U)
+    assert [h for h in remaining if not h["rented_day"]] == []  # 持ち馬はもういない（レンタルだけ残る）
+    assert stable.horse_id == remaining[0]["id"]

@@ -122,6 +122,17 @@ def result_embed(eco, result: dict) -> discord.Embed:
             value="\n".join(f"🏆 <@{u}> +{ui.pelica(p)}" for u, p in result["prizes"].items()),
             inline=False,
         )
+    if result.get("retired"):
+        lines = [
+            f"🎌 **{h['silks']} {h['name']}** が定年（{horse_mod.MAX_RACES}戦）で名誉引退"
+            + (
+                f"（<@{h['owner_id']}> に引退{'金' if h['value'] >= 0 else '費用'} {abs(h['value']):,}）"
+                if h["value"]
+                else ""
+            )
+            for h in result["retired"]
+        ]
+        e.add_field(name="🐴 定年引退", value="\n".join(lines), inline=False)
     return e
 
 

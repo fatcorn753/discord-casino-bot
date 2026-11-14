@@ -23,7 +23,7 @@ class P2PMixin:
     def _horse_count(self, user_id: int) -> int:
         """持っている馬の数。出品中（預かり中）の馬も数える（出品しておけば3頭を超えて持てる、を防ぐ）。"""
         owned = self._conn.execute(
-            "SELECT COUNT(*) FROM horses WHERE guild_id=? AND owner_id=?", (self._g(), user_id)
+            "SELECT COUNT(*) FROM horses WHERE guild_id=? AND owner_id=? AND rented_day IS NULL", (self._g(), user_id)
         ).fetchone()[0]
         listed = self._conn.execute(
             "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND seller_id=? AND kind='horse' AND status='active'",
@@ -121,6 +121,8 @@ class P2PMixin:
                 horse = self.horse_get(int(ref)) if str(ref).isdigit() else None
                 if horse is None or horse["owner_id"] != user_id:
                     return False, "自分の馬を選んでください。"
+                if horse["rented_day"] is not None:
+                    return False, "レンタル馬は出品できません。"
                 if self._conn.execute(
                     "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
                     "WHERE e.horse_id=? AND r.status IN ('entry','betting')",

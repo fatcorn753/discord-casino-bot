@@ -29,7 +29,10 @@ class HorseMixin:
         return bool(cur.rowcount)
 
     def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> tuple:
-        """購入券を1枚使って、競走馬を迎える。(成功か, 理由か馬の番号)。ステータスは、全部 50 から始まる。"""
+        """購入券を1枚使って、競走馬を迎える。(成功か, 理由か馬の番号)。ステータスは、全部 50 から始まる。
+
+        いまはプレイヤー向けの入口ではない（`/競馬 厩舎` は horse_buy_rental に一本化）。テスト・管理用に残す。
+        """
         ok, name = horse_mod.check_name(name)
         if not ok:
             return False, name
@@ -49,6 +52,59 @@ class HorseMixin:
                 (self._g(), user_id, name, coat, silks, s["speed"], s["stamina"], s["power"], s["guts"], time.time()),
             )
             return True, cur.lastrowid
+
+    @staticmethod
+    def _today(now: float, tz_hours: float) -> str:
+        tz = datetime.timezone(datetime.timedelta(hours=tz_hours))
+        return datetime.datetime.fromtimestamp(now, tz).date().isoformat()
+
+    def rental_ensure(self, user_id: int, now: float, tz_hours: float, rng=None) -> dict:
+        """今日のレンタル馬（帝愛から、その日だけ借りる馬）。無ければランダムなステータスで1頭作る。
+
+        古い日のレンタル（買わなかった分）は消す（出走予定で未精算のものは残す）。誰でも、1日1頭まで。
+        """
+        rng = rng or random.SystemRandom()
+        day = self._today(now, tz_hours)
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            cur = self._conn.execute(
+                "SELECT * FROM horses WHERE guild_id=? AND owner_id=? AND rented_day=?", (self._g(), user_id, day)
+            ).fetchone()
+            if cur:
+                return dict(cur)
+            self._conn.execute(
+                "DELETE FROM horses WHERE guild_id=? AND owner_id=? AND rented_day IS NOT NULL AND rented_day!=? "
+                "AND id NOT IN (SELECT e.horse_id FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
+                "WHERE r.status IN ('entry','betting'))",
+                (self._g(), user_id, day),
+            )
+            s = horse_mod.random_stats(rng)
+            name = rng.choice(horse_mod.NPC_NAMES)
+            coat, silks = rng.choice(horse_mod.COATS), rng.choice(horse_mod.SILKS)
+            ins = self._conn.execute(
+                "INSERT INTO horses (guild_id, owner_id, name, coat, silks, speed, stamina, power, guts, created, rented_day) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (self._g(), user_id, name, coat, silks, s["speed"], s["stamina"], s["power"], s["guts"], now, day),
+            )
+            return dict(self._conn.execute("SELECT * FROM horses WHERE id=?", (ins.lastrowid,)).fetchone())
+
+    def horse_buy_rental(self, user_id: int, now: float, tz_hours: float) -> tuple:
+        """いまレンタルしている馬を、購入券1枚で自分の馬にする（ステータス・名前・戦績はそのまま）。馬を増やす唯一の方法。"""
+        day = self._today(now, tz_hours)
+        with self._lock, self._conn:
+            self._ensure(user_id)
+            row = self._conn.execute(
+                "SELECT * FROM horses WHERE guild_id=? AND owner_id=? AND rented_day=?", (self._g(), user_id, day)
+            ).fetchone()
+            if row is None:
+                return False, "いまレンタルしている馬がいません。"
+            owned = self._horse_count(user_id)
+            if owned >= horse_mod.MAX_HORSES:
+                return False, f"持てる馬は {horse_mod.MAX_HORSES} 頭までです。"
+            if not self._consume(user_id, HORSE_VOUCHER):
+                return False, "「競走馬（購入券）」を持っていません。ショップで買えます。"
+            self._conn.execute("UPDATE horses SET rented_day=NULL WHERE id=?", (row["id"],))
+            return True, row["id"]
 
     def horse_list(self, user_id: int) -> list:
         with self._lock:
@@ -70,6 +126,8 @@ class HorseMixin:
             h = self.horse_get(horse_id)
             if h is None or h["owner_id"] != user_id:
                 return False, "自分の馬を選んでください。"
+            if h["rented_day"] is not None:
+                return False, "レンタル馬は、ステータスを調整できません（買うと調整できます）。"
             ok, result = horse_mod.move_points({k: h[k] for k in horse_mod.STAT_KEYS}, src, dst)
             if not ok:
                 return False, result
@@ -90,6 +148,8 @@ class HorseMixin:
             h = self.horse_get(horse_id)
             if h is None or h["owner_id"] != user_id:
                 return False, "自分の馬を選んでください。"
+            if h["rented_day"] is not None:
+                return False, "レンタル馬は引退できません（買わなければ、日が替わると自然に消えます）。"
             busy = self._conn.execute(
                 "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
                 "WHERE e.horse_id=? AND r.status IN ('entry','betting')",
@@ -117,6 +177,8 @@ class HorseMixin:
             h = self.horse_get(horse_id)
             if h is None or h["owner_id"] != user_id:
                 return False, "自分の馬を選んでください。"
+            if h["rented_day"] is not None:
+                return False, "レンタル馬は、ステータスを調整できません（買うと調整できます）。"
             if h["bonus"] >= horse_mod.GOLD_CARROT_MAX * 2 * horse_mod.GOLD_CARROT_POINTS:
                 return False, f"この馬には、金にんじんをもう使えません（1頭に {horse_mod.GOLD_CARROT_MAX} 本まで）。"
             ok, result = horse_mod.add_points({k: h[k] for k in horse_mod.STAT_KEYS}, first, second)
@@ -172,7 +234,7 @@ class HorseMixin:
         today = datetime.datetime.fromtimestamp(now, tz).date()
         out = []
         for d in range(days + 1):
-            for hour, minute in horse_mod.SCHEDULE:
+            for hour, minute in horse_mod.schedule_for(today + datetime.timedelta(days=d)):
                 t = datetime.datetime.combine(
                     today + datetime.timedelta(days=d), datetime.time(hour, minute), tzinfo=tz
                 ).timestamp()
@@ -246,6 +308,11 @@ class HorseMixin:
             h = self.horse_get(horse_id)
             if h is None or h["owner_id"] != user_id:
                 return False, "自分の馬を選んでください。"
+            if h["races"] >= horse_mod.MAX_RACES:
+                return (
+                    False,
+                    f"この馬は定年（{horse_mod.MAX_RACES}戦）に達したので、出走できません（引退済みのはずです）。",
+                )
             rows = self.race_entries(race_id, registered_only=True)
             if any(e["owner_id"] == user_id for e in rows):
                 return False, "1人が1つのレースに出せる馬は、1頭までです。"
@@ -526,23 +593,47 @@ class HorseMixin:
             track = horse_mod.Track(race["distance"], race["going"])
             sim = horse_mod.simulate(runners, track, rng, keep_frames=True)
             order = sim["order"]  # entries の添字の並び（着順）
-            prizes = {}
+            # 原資（人間の馬が払った出走料の合計）を超えて、賞金で新しいペリカが生まれないよう、足りなければ3着まで同じ割合で削る
+            real_entries = sum(1 for e in entries if e["owner_id"])
+            placed_total = sum(
+                horse_mod.PRIZES[p - 1]
+                for p, idx in enumerate(order, start=1)
+                if p <= len(horse_mod.PRIZES) and entries[idx]["owner_id"]
+            )
+            scale = horse_mod.prize_pool_scale(real_entries, placed_total)
+            prizes, retired = {}, []
             for place, idx in enumerate(order, start=1):
                 e = entries[idx]
                 e["finish"] = place
                 self._conn.execute("UPDATE horse_entries SET finish=? WHERE id=?", (place, e["id"]))
-                prize = horse_mod.PRIZES[place - 1] if place <= len(horse_mod.PRIZES) else 0
+                prize = round((horse_mod.PRIZES[place - 1] if place <= len(horse_mod.PRIZES) else 0) * scale)
                 if e["owner_id"]:
                     if prize:
                         prize = round(
                             prize * (1 + self._relic_buffs(e["owner_id"]).get("prize", 0.0))
                         )  # 発掘品（竜の涙）の効果
-                        self._apply(e["owner_id"], prize, f"競馬賞金:{e['name']}（{place}着）", income=prize)
-                        prizes[e["owner_id"]] = prizes.get(e["owner_id"], 0) + prize
+                        skim = round(prize * teiai.HORSE_PRIZE_SKIM_RATE)
+                        net = prize - skim
+                        self._apply(e["owner_id"], net, f"競馬賞金:{e['name']}（{place}着）", income=net)
+                        prizes[e["owner_id"]] = prizes.get(e["owner_id"], 0) + net
+                        prize = net  # 戦績・earnings には、手取り（ピンハネ後）を残す
                     self._conn.execute(
                         "UPDATE horses SET races=races+1, wins=wins+?, places=places+?, earnings=earnings+? WHERE id=?",
                         (1 if place == 1 else 0, 1 if place <= 3 else 0, prize, e["horse_id"]),
                     )
+                    horse = self.horse_get(e["horse_id"])
+                    if horse is not None and horse["races"] >= horse_mod.MAX_RACES:  # 定年：自動で名誉引退
+                        value = horse_mod.retire_value(horse["races"], horse["wins"], horse["places"])
+                        self._ensure(e["owner_id"])
+                        if value:
+                            self._apply(
+                                e["owner_id"],
+                                value,
+                                f"競馬:定年引退{'金' if value > 0 else '費用'}（{horse['name']}）",
+                                income=max(0, value),
+                            )
+                        self._conn.execute("UPDATE horses SET owner_id=-2 WHERE id=?", (horse["id"],))
+                        retired.append({**horse, "value": value})
             order_lanes = [entries[i]["lane"] for i in order]
             top_lane, top3 = order_lanes[0], set(order_lanes[:3])
             bets, lost = [], 0
@@ -582,6 +673,7 @@ class HorseMixin:
                 "bets": bets,
                 "prizes": prizes,
                 "track": track,
+                "retired": retired,
             }
 
     # ---------------------------------------------------------------- #
@@ -595,7 +687,7 @@ class HorseMixin:
         出走の申し込み中の馬は取り下げ（出走料は戻らない）。すでに出走馬に決まっている馬は、帝愛の馬（NPC）に替わる。
         """
         rows = self._conn.execute(
-            "SELECT id FROM horses WHERE guild_id=? AND owner_id=?", (self._g(), user_id)
+            "SELECT id FROM horses WHERE guild_id=? AND owner_id=? AND rented_day IS NULL", (self._g(), user_id)
         ).fetchall()
         for r in rows:
             self._conn.execute("UPDATE horses SET owner_id=-1, listed_at=? WHERE id=?", (now, r["id"]))

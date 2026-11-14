@@ -107,7 +107,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
             earnings  INTEGER NOT NULL DEFAULT 0,   -- 賞金の合計
             bonus     INTEGER NOT NULL DEFAULT 0,   -- 金にんじんで増えた、ステータス合計の増加分
             created   REAL NOT NULL,
-            listed_at REAL                          -- 破産で差し押さえられて、帝愛の競売に出た時刻（owner_id=-1 のとき）
+            listed_at REAL,                         -- 破産で差し押さえられて、帝愛の競売に出た時刻（owner_id=-1 のとき）
+            rented_day TEXT                          -- 帝愛からの、その日だけのレンタル馬なら、その日付。買うと NULL に戻る
         );
         CREATE INDEX IF NOT EXISTS horses_owner ON horses (guild_id, owner_id);
         CREATE TABLE IF NOT EXISTS horse_races (     -- レース（定時と臨時）
@@ -617,6 +618,8 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     hs = {r["name"] for r in conn.execute("PRAGMA table_info(horses)")}
     if "bonus" not in hs:
         conn.execute("ALTER TABLE horses ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0")
+    if "rented_day" not in hs:
+        conn.execute("ALTER TABLE horses ADD COLUMN rented_day TEXT")
     he = {r["name"] for r in conn.execute("PRAGMA table_info(horse_entries)")}
     for col in ("races", "wins", "places"):
         if col not in he:

@@ -92,7 +92,8 @@ class AssetMixin:
                 for item_id, qty in waiting.items():
                     item(r["user_id"], item_id, int(qty))
             for r in self._conn.execute(
-                "SELECT owner_id, races, wins, places FROM horses WHERE guild_id=? AND owner_id>0", (g,)
+                "SELECT owner_id, races, wins, places FROM horses WHERE guild_id=? AND owner_id>0 AND rented_day IS NULL",
+                (g,),
             ):
                 add(r["owner_id"], "horses", self.horse_worth(r["races"], r["wins"], r["places"]))
             # 競りに出している品・馬は、まだ持ち主のもの。入札中のお金は、預かり中でも入札した人のもの

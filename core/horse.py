@@ -9,6 +9,7 @@
   レースの結果は、ステータスのシミュレーションで決まる（estimate は、その本当の確率を調べる検証用）。
 """
 
+import datetime
 import itertools
 import math
 import random
@@ -44,8 +45,20 @@ MAX_ODDS = 99.9
 MIN_STAKE, MAX_STAKE = 100, 50_000  # 1回の賭け金
 MAX_RACE_STAKE = 150_000  # 1人が1レースに賭けられる合計
 
-ENTRY_FEE = 1_000  # 出走料
-PRIZES = (12_000, 5_000, 2_000)  # 1着・2着・3着の賞金（馬主へ）
+ENTRY_FEE = 1_000  # 出走料（レンタル馬も同じ。帝愛の馬=NPCは払わない）
+PRIZES = (12_000, 5_000, 2_000)  # 1着・2着・3着の賞金（馬主へ）。固定額だが、原資（下記）を超えない
+
+
+def prize_pool_scale(real_entries: int, placed_prizes: int) -> float:
+    """そのレースで、人間の馬が払った出走料の合計が、賞金（placed_prizes＝人間の馬が獲る分の合計）に足りるか。
+
+    足りれば1.0（そのまま払う）。足りなければ、その比率ぶん、3着まで同じ割合で削る。
+    新しいペリカが、レースごとに生まれないようにする（出走料を超えて払わない）。
+    """
+    if placed_prizes <= 0:
+        return 1.0
+    return min(1.0, real_entries * ENTRY_FEE / placed_prizes)
+
 
 TICKS = 60  # 平均的な馬が走り切るティック数
 MAX_TICKS = 140
@@ -89,10 +102,11 @@ def valid_stats(stats: dict) -> bool:
     )
 
 
-RETIRE_WIN = 8_000  # 引退金: 1勝ごと
-RETIRE_PLACE = 3_000  # 3着以内（勝ちを除く）1回ごと
-RETIRE_LOSS = 1_500  # 3着に入れなかった1回ごとの、引退費用
-RETIRE_MAX, RETIRE_FEE_MAX = 100_000, 20_000  # 引退金の上限・引退費用の上限
+MAX_RACES = 32  # 定年（約8日間の現役生活）。これに達すると、次からは出走できず、自動で引退する
+RETIRE_WIN = 5_000  # 引退金: 1勝ごと
+RETIRE_PLACE = 2_000  # 3着以内（勝ちを除く）1回ごと
+RETIRE_LOSS = 2_000  # 3着に入れなかった1回ごとの、引退費用
+RETIRE_MAX, RETIRE_FEE_MAX = 60_000, 20_000  # 引退金の上限・引退費用の上限
 
 
 def retire_value(races: int, wins: int, places: int) -> int:
@@ -350,12 +364,16 @@ def payout(stake: int, odds: float) -> int:
 
 
 # ---- 開催の時刻と馬券の種類 ----
-SCHEDULE = (
-    (9, 0),
-    (13, 0),
-    (17, 0),
-    (21, 0),
-)  # 定時レースの発走時刻（現地時間の時・分）。9時から0時までの間に、4時間おきで1日4回
+WEEKDAY_HOURS = (9, 12, 15, 18, 21)  # 平日（月〜金）: 9時から3時間おき
+WEEKEND_HOURS = (9, 13, 17, 21)  # 休日（土日）: 9時から4時間おき
+
+
+def schedule_for(d: datetime.date) -> tuple:
+    """その日の、定時レースの発走時刻（現地時間の時・分）。0〜9時は開催しない。"""
+    hours = WEEKEND_HOURS if d.weekday() >= 5 else WEEKDAY_HOURS
+    return tuple((h, 0) for h in hours)
+
+
 ENTRY_OPEN_MIN = 120  # 発走の何分前に、出走の申し込みを始めるか
 ENTRY_LEAD_MIN = 60  # 発走の何分前に、出走の申し込みを締め切るか（そのあと出馬表とオッズが出る）
 # 1回のレースは4時間の周期: 申し込み1時間（発走の2〜1時間前）→ 出馬表・馬券1時間（発走の1時間前〜）→ 発走・結果（次の申し込みまで2時間）
