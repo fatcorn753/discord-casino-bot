@@ -2,6 +2,8 @@
 market:
   min_price: 20
   max_price: 50000
+  keep_days: 30
+  confirm_from: 5000
   event_interval_minutes: 720
   event_range: [0.015, 0.035]
   event_scale_max: 1.5

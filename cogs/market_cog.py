@@ -34,13 +34,13 @@ from cogs._market_embeds import alert_lines as _alert_lines
 from cogs._market_views import HoldingsView, MarketView
 from cogs._market_views import OptionAmountModal as OptionAmountModal  # noqa: F401
 from cogs._shared import announce_channel
-from core import approval, bonds, earnings, logthrottle, market, market_events, ui
+from core import approval, bonds, catalogs, earnings, logthrottle, market, market_events, ui
 from core import options as opt
 from core.eco_options import name_of
 from core.economy import Economy
 
 RNG = random.SystemRandom()
-KEEP_DAYS = 30  # 価格の履歴を残す日数
+KEEP_DAYS = catalogs.market().market.keep_days  # 価格の履歴を残す日数
 CONFIRM_FROM = orders.CONFIRM_FROM
 PERIOD_CHOICES = [app_commands.Choice(name=label, value=key) for key, (label, _) in market.PERIODS.items()]
 SYMBOL_CHOICES = [app_commands.Choice(name=f"{s.emoji} {s.name}", value=s.key) for s in market.SYMBOLS]

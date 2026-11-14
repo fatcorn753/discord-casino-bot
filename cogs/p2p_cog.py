@@ -23,11 +23,11 @@ from cogs._p2p_embeds import (  # noqa: F401
     when,
 )
 from cogs._shared import announce_channel
-from core import approval, logthrottle, p2p, ui
+from core import approval, catalogs, logthrottle, p2p, ui
 from core import shop as shop_mod
 from core.confirm import confirm_action, confirmed_reply, user_session
 
-CONFIRM_FROM = 10_000  # この金額以上の購入・入札は、確認ボタンを挟む
+CONFIRM_FROM = catalogs.economy().p2p.confirm_from  # この金額以上の購入・入札は、確認ボタンを挟む
 SHOWN = 25
 NONE = discord.AllowedMentions.none()
 

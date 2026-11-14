@@ -33,12 +33,15 @@ from cogs._shop_embeds import (  # noqa: F401
     tab_items,
 )
 from cogs._shop_views import ShopView
-from core import approval, logthrottle, relics, shop, teiai, ui
+from core import approval, catalogs, logthrottle, relics, shop, teiai, ui
 from core.confirm import confirm_action, confirmed_reply, user_session
 
-CONFIRM_FROM = 10_000  # この金額以上の購入は、確認ボタンを挟む
-STATUS_NICK_MINUTES = 2  # 身分のニックネームを付け外しする確認の間隔
-STATUS_NICK_PER_GUILD = 200  # 1回の確認で、1サーバーあたり扱う人数の上限（API を使いすぎない）
+_SHOP_CFG = catalogs.shop()
+CONFIRM_FROM = _SHOP_CFG.confirm_from  # この金額以上の購入は、確認ボタンを挟む
+STATUS_NICK_MINUTES = _SHOP_CFG.status_nick_minutes  # 身分のニックネームを付け外しする確認の間隔
+STATUS_NICK_PER_GUILD = (
+    _SHOP_CFG.status_nick_per_guild
+)  # 1回の確認で、1サーバーあたり扱う人数の上限（API を使いすぎない）
 
 
 class ShopCog(commands.Cog):

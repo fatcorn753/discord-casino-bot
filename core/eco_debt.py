@@ -7,12 +7,12 @@ import random
 import time
 from typing import Optional
 
+from core import catalogs, teiai
 from core import market as market_mod
 from core import shop as shop_mod
-from core import teiai
 from core.eco_base import EcoBase
 
-MAX_NOTICES = 5  # たまっている一言の上限（古いものから捨てる）
+MAX_NOTICES = catalogs.economy().wallet.max_notices  # たまっている一言の上限（古いものから捨てる）
 
 
 class DebtMixin(EcoBase):

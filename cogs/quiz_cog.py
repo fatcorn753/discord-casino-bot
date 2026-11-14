@@ -20,14 +20,15 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs._shared import announce_channel
-from core import approval, logthrottle, quizpay, ui
+from core import approval, catalogs, logthrottle, quizpay, ui
 from core.duration import format_minutes, parse_duration
 
-MAX_CHOICE_LEN = 80
-MAX_VERDICT_LEN = 20  # 正解・不正解の見出しの文言の最大文字数
-DEFAULT_RIGHT, DEFAULT_WRONG = "正解！", "不正解…"
-DEFAULT_REWARD = 100
-LETTERS = "ABCD"
+_QUIZ_CFG = catalogs.economy().quizpay
+MAX_CHOICE_LEN = _QUIZ_CFG.max_choice_len
+MAX_VERDICT_LEN = _QUIZ_CFG.max_verdict_len  # 正解・不正解の見出しの文言の最大文字数
+DEFAULT_RIGHT, DEFAULT_WRONG = _QUIZ_CFG.default_right, _QUIZ_CFG.default_wrong
+DEFAULT_REWARD = _QUIZ_CFG.default_reward
+LETTERS = _QUIZ_CFG.letters
 
 
 def parse_choices(text: str) -> list:

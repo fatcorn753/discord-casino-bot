@@ -9,7 +9,7 @@ from typing import Optional
 
 import discord
 
-from core import ui
+from core import catalogs, ui
 from games import chinchiro as rules
 from play.common import (
     GameContext,
@@ -22,25 +22,13 @@ from play.common import (
     start_game,
 )
 
+_CH_CFG = catalogs.games().chinchiro
 RNG = random.SystemRandom()
-TITLE = "🎲 地下チンチロ"
-STEP = 0.9
+TITLE = _CH_CFG.title
+STEP = _CH_CFG.step_seconds
 
-WIN_LINE = {
-    rules.PINZORO: "ピンゾロ…ッ！ 5倍…！ 場の空気が凍りつく…",
-    rules.ARASHI: "嵐…ッ！ 3倍…！ ざわ…ざわ…",
-    rules.SHIGORO: "シゴロ…！ 2倍…。流れが来ている…",
-    rules.ME: "目で押し切った…！ 静かな勝利…",
-    rules.MENASHI: "相手のヒフミに救われた…！",
-}
-LOSE_LINE = {
-    rules.PINZORO: "親のピンゾロ…！ 5倍払い…。血の気が引いていく…",
-    rules.ARASHI: "親の嵐…！ 3倍払い…。地下に悲鳴が響く…",
-    rules.SHIGORO: "親のシゴロ…2倍払い…。",
-    rules.ME: "親の目が上だった…。",
-    rules.MENASHI: "目なし同士は親の勝ち…。それが地下のルール…",
-    rules.HIFUMI: "ヒフミ…ッ！ 倍払い…！ 地獄だ…",
-}
+WIN_LINE = dict(_CH_CFG.win_lines)
+LOSE_LINE = dict(_CH_CFG.lose_lines)
 
 
 def _rolls_text(rolls: list, who: str, skin=None) -> str:

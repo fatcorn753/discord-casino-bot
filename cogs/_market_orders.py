@@ -20,13 +20,13 @@ from cogs._market_embeds import (
     spot_position_text,
     tax_line,
 )
-from core import bonds, market, ui
+from core import bonds, catalogs, market, ui
 from core import options as opt
 from core.confirm import confirm_action, confirmed_reply, user_session
 from core.economy import Economy
 
 RNG = random.SystemRandom()
-CONFIRM_FROM = 5_000  # この額以上の売買は確認ボタンを挟む
+CONFIRM_FROM = catalogs.market().market.confirm_from  # この額以上の売買は確認ボタンを挟む
 
 
 async def default_confirmed_reply(interaction: discord.Interaction, needed: bool, title: str, text: str, label: str):

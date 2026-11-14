@@ -3,8 +3,10 @@
 import discord
 
 from cogs._horse_views import stat_lines
-from core import p2p, ui
+from core import catalogs, p2p, ui
 from core import shop as shop_mod
+
+ENDED_TEXT = {k: (v.title, v.body) for k, v in catalogs.economy().p2p.ended_text.items()}
 
 
 def when(ts: float) -> str:

@@ -3,14 +3,16 @@
 from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
-from cogs import help_cog
+from cogs import _admin_embeds, _shop_embeds, help_cog, quiz_cog, raffle_cog
 from core import (
     bonds,
     catalogs,
     earnings,
     eco_types,
+    economy,
     events,
     loans,
     market,
@@ -18,6 +20,7 @@ from core import (
     missions,
     options,
     p2p,
+    quizimport,
     quizpay,
     ranking,
     relics,
@@ -25,7 +28,8 @@ from core import (
     skins,
     weekly,
 )
-from games import pachinko, roulette, rtplevel, slot
+from games import blackjack, chinchiro, pachinko, roulette, rtplevel, slot
+from play import pachinko as play_pachinko
 
 
 def test_all_yaml_catalogs_load_and_validate() -> None:
@@ -43,6 +47,9 @@ def test_all_yaml_catalogs_load_and_validate() -> None:
 
 def test_cross_catalog_consistency() -> None:
     assert len({i.id for i in shop.CATALOG}) == len(shop.CATALOG)
+    assert shop.LABOR_DRINK in shop.STOCK_RULES
+    assert p2p.SLOT_OF_KIND.items() <= _shop_embeds.SLOT_OF_KIND.items()
+    assert _shop_embeds.EFFECT_OF_ITEM == eco_types.CONSUMABLE_EFFECTS
     assert skins.check_catalog() == []
     assert sum(p for _, _, p in pachinko.ROUNDS) == pytest.approx(1.0)
     assert 0.95 < pachinko.rtp() < 1.0
@@ -51,12 +58,18 @@ def test_cross_catalog_consistency() -> None:
     assert market.EVENT_PROB == pytest.approx(1 / 720)
     assert market_events.ANNOUNCE_PROB == pytest.approx(1 / 300)
     assert earnings.RELEASE_WEEKDAY == 1
+    assert economy.Economy.DAILY_BASE > 0
     assert loans.USER_MIN_PRINCIPAL > 0
     assert quizpay.BASE_REWARD > 0
+    assert quizimport.MAX_CHOICE_LEN == quiz_cog.MAX_CHOICE_LEN
+    assert quizimport.DEFAULT_REWARD == quiz_cog.DEFAULT_REWARD
+    assert raffle_cog.MIN_FEE > 0
     assert weekly.ANNOUNCE_TOP > 0
     assert p2p.FEE_RATE == pytest.approx(0.05)
     assert options.OPTION_HOURS > 0
     assert relics.BUFF_RATE > 0
+    assert len(blackjack.SUITS) == 4 and len(blackjack.RANKS) == 13
+    assert chinchiro.MAX_ROLLS == 3
 
 
 def test_python_runtime_types_preserved() -> None:
@@ -65,6 +78,14 @@ def test_python_runtime_types_preserved() -> None:
     assert isinstance(market.GAINS_TAX_BRACKETS, tuple)
     assert isinstance(ranking.MEDALS, dict)
     assert all(isinstance(k, int) for k in ranking.MEDALS)
+    assert isinstance(chinchiro.DICE_FACES, dict)
+    assert all(isinstance(k, int) for k in chinchiro.DICE_FACES)
+    assert isinstance(play_pachinko.BANNER, dict)
+    assert all(isinstance(k, int) for k in play_pachinko.BANNER)
+    assert isinstance(_admin_embeds.LEVEL_NAME, dict)
+    assert all(isinstance(k, int) for k in _admin_embeds.LEVEL_NAME)
+    assert isinstance(_shop_embeds.TABS, dict)
+    assert all(isinstance(kinds, tuple) for _, kinds in _shop_embeds.TABS.values())
     assert isinstance(rtplevel.GAMES, tuple)
     assert isinstance(rtplevel.LEVELS, tuple)
     assert all(isinstance(title, str) and isinstance(lines, list) for title, lines in help_cog.PAGES.values())
@@ -81,26 +102,14 @@ def test_strict_model_rejects_unknown_keys(tmp_path: Path) -> None:
 
 
 def test_shop_rejects_duplicate_item_id(tmp_path: Path) -> None:
-    (tmp_path / "shop.yaml").write_text(
-        """
-kind_labels:
-  title: 称号
-role_prefix: "P:"
-insurance_cap: 1000
-auto_used: []
-stock_rules: {}
-items:
-  - id: dup_item
-    name: A
-    kind: title
-    price: 100
-  - id: dup_item
-    name: B
-    kind: title
-    price: 200
-""",
-        encoding="utf-8",
-    )
+    data = yaml.safe_load((catalogs.CATALOG_DIR / "shop.yaml").read_text(encoding="utf-8"))
+    data["auto_used"] = []
+    data["stock_rules"] = {}
+    data["items"] = [
+        {"id": "dup_item", "name": "A", "kind": "title", "price": 100},
+        {"id": "dup_item", "name": "B", "kind": "title", "price": 200},
+    ]
+    (tmp_path / "shop.yaml").write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
     with pytest.raises(ValidationError, match="duplicate item id"):
         catalogs.load_yaml_model("shop.yaml", catalogs.ShopCatalog, root=tmp_path)
 

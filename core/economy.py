@@ -20,8 +20,8 @@ import sqlite3
 import time
 from typing import Optional, Self
 
+from core import catalogs, schema, teiai
 from core import market as market_mod
-from core import schema, teiai
 from core.eco_assets import AssetMixin
 from core.eco_auction import AuctionMixin
 from core.eco_bank import BankMixin
@@ -55,6 +55,8 @@ from core.eco_types import (  # noqa: F401  (他のモジュールが core.econo
 )
 from core.shop import STREAK_GUARD
 
+_WALLET_CFG = catalogs.economy().wallet
+
 
 class Economy(
     AssetMixin,
@@ -79,9 +81,9 @@ class Economy(
     EarningsMixin,
     P2PMixin,
 ):
-    DAILY_BASE = 1000
-    DAILY_STREAK_BONUS = 100  # 連続1日ごとの加算
-    DAILY_STREAK_CAP = 20  # 加算は20日分まで（最大 +2,000。1回の額は最大 3,000）
+    DAILY_BASE = _WALLET_CFG.daily_base
+    DAILY_STREAK_BONUS = _WALLET_CFG.daily_streak_bonus  # 連続1日ごとの加算
+    DAILY_STREAK_CAP = _WALLET_CFG.daily_streak_cap  # 加算は20日分まで（最大 +2,000。1回の額は最大 3,000）
 
     def __init__(self, db_path: str, legacy_guild_id: Optional[int] = None, strict: bool = False):
         """legacy_guild_id: サーバー別になる前の古い記録を引き継ぐサーバー。古い記録があるのに未指定ならエラー。

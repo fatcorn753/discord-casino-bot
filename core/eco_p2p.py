@@ -7,14 +7,12 @@
 import time
 from typing import Optional
 
+from core import catalogs, p2p, teiai
 from core import horse as horse_mod
-from core import p2p, teiai
 from core import shop as shop_mod
 from core.eco_base import EcoBase
 
-GRACE_LOCK_TEXT = (
-    "破産猶予中は、取引（出品・買う・入札）ができません（破産の前に、資産を移して、借金を踏み倒すのを防ぐためです）。"
-)
+GRACE_LOCK_TEXT = catalogs.economy().wallet.grace_lock_text
 
 
 class P2PMixin(EcoBase):

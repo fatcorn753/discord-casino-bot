@@ -4,7 +4,7 @@ import random
 
 import discord
 
-from core import ui
+from core import catalogs, ui
 from core.confirm import confirm_action
 from games import blackjack as rules
 from play.common import (
@@ -18,26 +18,23 @@ from play.common import (
     start_game,
 )
 
-RNG = random.SystemRandom()
-TITLE = "🃏 ブラックジャック"
+_BJ_CFG = catalogs.games().blackjack
+_COLORS = {"ok": ui.OK, "info": ui.INFO, "warn": ui.WARN, "error": ui.ERROR, "gold": ui.GOLD, "dark": ui.DARK}
 
-RESULT_TEXT = {
-    "blackjack": ("ブラックジャック！ 3:2 で払い戻し🎉", ui.GOLD),
-    "win": ("勝ち🎉", ui.OK),
-    "push": ("引き分け（賭け金が戻る）", ui.INFO),
-    "lose": ("負け…", ui.ERROR),
-    "bust": ("バースト…（21を超えた）", ui.ERROR),
-}
+RNG = random.SystemRandom()
+TITLE = _BJ_CFG.title
+
+RESULT_TEXT = {k: (v.text, _COLORS[v.color]) for k, v in _BJ_CFG.result_text.items()}
 
 
 def flair(res: str, g) -> str:
     """ブラックジャックの勝ち方に応じた一言（大勝ちの演出は倍率で決まるので、ここでは勝ち方を祝う）。"""
     if res == "blackjack":
-        return "🃏✨ **ナチュラルブラックジャック！** 最初の2枚で21！"
+        return _BJ_CFG.flair.blackjack
     if res == "win" and g.doubled:
-        return "💥 **ダブルダウン成功！** 倍賭けが当たった！"
+        return _BJ_CFG.flair.doubled
     if res == "win" and rules.value(g.player) == 21 and len(g.player) >= 3:
-        return "🎯 **21ぴったり！**"
+        return _BJ_CFG.flair.twenty_one
     return ""
 
 

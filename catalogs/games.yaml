@@ -1,4 +1,8 @@
-# カジノゲームの確率表・配当表・RTPレベル設定
+# カジノゲームの確率表・配当表・演出スクリプト・RTPレベル設定
+common:
+  min_bet: 10
+  simple_step_seconds: 0.9
+
 slot:
   symbols:
     - symbol: "🍒"
@@ -60,6 +64,76 @@ roulette:
     赤: "🔴"
     黒: "⚫"
 
+blackjack:
+  suits: ["♠", "♥", "♦", "♣"]
+  ranks: ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+  title: "🃏 ブラックジャック"
+  result_text:
+    blackjack:
+      text: "ブラックジャック！ 3:2 で払い戻し🎉"
+      color: "gold"
+    win:
+      text: "勝ち🎉"
+      color: "ok"
+    push:
+      text: "引き分け（賭け金が戻る）"
+      color: "info"
+    lose:
+      text: "負け…"
+      color: "error"
+    bust:
+      text: "バースト…（21を超えた）"
+      color: "error"
+  flair:
+    blackjack: "🃏✨ **ナチュラルブラックジャック！** 最初の2枚で21！"
+    doubled: "💥 **ダブルダウン成功！** 倍賭けが当たった！"
+    twenty_one: "🎯 **21ぴったり！**"
+
+chinchiro:
+  max_rolls: 3
+  dice_faces:
+    1: "⚀"
+    2: "⚁"
+    3: "⚂"
+    4: "⚃"
+    5: "⚄"
+    6: "⚅"
+  roles:
+    pinzoro:
+      name: "ピンゾロ"
+      mult: 5
+    arashi:
+      name: "嵐（アラシ）"
+      mult: 3
+    shigoro:
+      name: "シゴロ"
+      mult: 2
+    me:
+      name: "目"
+      mult: 1
+    menashi:
+      name: "目なし"
+      mult: 1
+    hifumi:
+      name: "ヒフミ"
+      mult: 1
+  hifumi_factor: 2
+  title: "🎲 地下チンチロ"
+  step_seconds: 0.9
+  win_lines:
+    pinzoro: "ピンゾロ…ッ！ 5倍…！ 場の空気が凍りつく…"
+    arashi: "嵐…ッ！ 3倍…！ ざわ…ざわ…"
+    shigoro: "シゴロ…！ 2倍…。流れが来ている…"
+    me: "目で押し切った…！ 静かな勝利…"
+    menashi: "相手のヒフミに救われた…！"
+  lose_lines:
+    pinzoro: "親のピンゾロ…！ 5倍払い…。血の気が引いていく…"
+    arashi: "親の嵐…！ 3倍払い…。地下に悲鳴が響く…"
+    shigoro: "親のシゴロ…2倍払い…。"
+    me: "親の目が上だった…。"
+    menashi: "目なし同士は親の勝ち…。それが地下のルール…"
+    hifumi: "ヒフミ…ッ！ 倍払い…！ 地獄だ…"
+
 pachinko:
   reel_symbols: ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "🔥"]
   small: ["1️⃣", "2️⃣", "3️⃣"]
@@ -110,6 +184,88 @@ pachinko:
     blue: "（青）ざわ…"
     red: "（赤）ゾワッ…！ 予告だ…！"
     gold: "（金）⚡ 激アツ予告 ⚡ これは来る…！"
+  title: "🎰 地下パチンコ"
+  step_seconds: 1.1
+  frame_budget: 60
+  shown_rounds: 6
+  extra_sets: [5, 10]
+  banner:
+    2: ""
+    10: "# 🎊 大当たり！！ 🎊"
+    30: "# 🔥🔥 激アツ確変！！！ 🔥🔥"
+  ranks:
+    - floor: 100
+      label: "👑 伝説級"
+    - floor: 30
+      label: "🏆 大勝利"
+    - floor: 10
+      label: "🎊 好調"
+    - floor: 0
+      label: "✨ 小当たり"
+  spinning: "🌀"
+  step_text: ["ざわ…", "ゾワッ…！", "⚡ 激アツ ⚡"]
+  step_icon: ["🔵", "🔴", "🟡"]
+  steps_of:
+    blue: 1
+    red: 2
+    gold: 3
+  cutin:
+    super: ["「チャンスだ！！」", "「いけるぞ！！」", "「ここからが本番だ！」", "「見せてやる！！」"]
+    premium: ["「これで終わりだ！！」", "「全部まとめて持っていけ！！」", "「運命を変えろ！！」", "「勝負だ！！」"]
+  stories:
+    normal:
+      - title: "🌊 **波の予告**"
+        sub: "画面が揺れている…"
+      - title: "🐟 **魚群が横切った**"
+        sub: "なにか起きる…？"
+      - title: "🎞️ **ロングリーチ**"
+        sub: "ゆっくり回っている…"
+    super:
+      - title: "🎬 **ストーリーリーチ**"
+        sub: "主人公が立ち上がる…！"
+      - title: "🚄 **ダッシュリーチ**"
+        sub: "絵柄が走り出した…！"
+      - title: "⚡ **スーパーリーチ**"
+        sub: "背景が変わった…！"
+    premium:
+      - title: "🐉 **龍が現れた**"
+        sub: "地鳴りがする…！！"
+      - title: "🌠 **流星群**"
+        sub: "夜空が光る…！"
+      - title: "🔥 **プレミアムリーチ**"
+        sub: "画面が燃えている…！！"
+  normal_whispers: ["ざわ… ざわ…", "じわ… じわ…", "…どっちだ…"]
+  revive_chance:
+    normal: 0.10
+    super: 0.25
+    premium: 0.30
+  revive_text:
+    - line: "それでも!!!"
+      sub: "…諦めない…！！"
+    - line: "と、思っていたのか"
+      sub: "…画面が震えている…！！"
+    - line: "まだ終わっていない…！"
+      sub: "…リールが動き出す…！"
+    - line: "ここからだ…！！"
+      sub: "…運命が書き換わる…！"
+  pseudo_counts:
+    super: [0, 0, 1, 2]
+    premium: [2, 3, 3, 4]
+  flavor:
+    ハズレ: "…沈黙。ペリカが静かに溶けていく…"
+    小当たり: "ッ…！ 拾った…少しだけ…"
+    大当たり: "ざわ…ざわ…ざわ…！ 大当たり…！ 見ろ、この出玉…！"
+    激アツ確変: "どよめき…！ 確変突入…！ 地下が揺れる…！！"
+  omen_names:
+    "": "なし"
+    blue: "🔵 青"
+    red: "🔴 赤"
+    gold: "🟡 金"
+  tier_names:
+    "": "なし"
+    normal: "ノーマル"
+    super: "スーパー"
+    premium: "プレミアム"
 
 rtplevel:
   games: ["スロット", "ルーレット", "パチンコ", "チンチロ", "ブラックジャック"]
@@ -121,3 +277,10 @@ rtplevel:
   blackjack_rtp: 0.918
   blackjack_w: 0.412
   roulette_default_kind: "red"
+  level_names:
+    1: "かなり渋い"
+    2: "渋い"
+    3: "標準"
+    4: "甘い"
+    5: "かなり甘い"
+    6: "大盤振る舞い"

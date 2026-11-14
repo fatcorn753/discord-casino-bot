@@ -27,6 +27,97 @@ stock_rules:
     max: 10
     per_hour: 2.0
 
+confirm_from: 10000
+status_nick_minutes: 2
+status_nick_per_guild: 200
+
+ui:
+  slot_of_kind:
+    title: title
+    card_color: card_color
+    card_icon: card_icon
+    skin_dice: skin_dice
+    skin_table: skin_table
+  unequip_names:
+    title: "称号"
+    card_color: "カードの色"
+    card_icon: "カードのアイコン"
+    role: "名前の色（ロール）"
+    skin_dice: "演出（チンチロ用）"
+    skin_table: "演出（パチンコ・ブラックジャック用）"
+  tabs:
+    home:
+      label: "🏠 トップ"
+      kinds: []
+    title:
+      label: "🏷️ 称号"
+      kinds: [title]
+    card:
+      label: "🎴 カード"
+      kinds: [card_color, card_icon]
+    item:
+      label: "🎟️ 消耗品"
+      kinds: [consumable]
+    horse:
+      label: "🐎 競馬"
+      kinds: [racing]
+    market:
+      label: "🕴️ 帝愛市"
+      kinds: [market]
+    style:
+      label: "✨ 演出・名前の色"
+      kinds: [skin_dice, skin_table, color_role]
+    collection:
+      label: "🏆 コレクション"
+      kinds: [collection]
+  tab_notes:
+    title: "名前の横に出る称号です（1つだけ装備できます）。"
+    card: "`/ペリカ 残高` のカードの、色とアイコンです。"
+    item: "使うと減る品です。デイリー2倍券・保険券は「🎒 持ち物」で使い、連続守り券は持っているだけで自動で使われます。栄養ドリンコは、`/地下 作業` の画面で飲みます。"
+    horse: "競走馬を迎える購入券と、ステータスを動かすにんじんです。どちらも `/競馬 厩舎` で使います。馬そのものは、使うと減る品ではありません。"
+    market: "帝愛が、情報を売る市です。決算の裏情報メモ（確度 80%・2割はガセ）が買えます。持ち物には増えず、買うとその場で、本人にだけ見えます。"
+    style: "ゲーム画面の演出と、名前の色（ロール）です。勝率と配当は変わりません。"
+    collection: "持っているだけで、`/ペリカ 残高` に飾られる自慢の品です。"
+  tiers:
+    - max_price: 10000
+      label: "🌱 入門"
+    - max_price: 100000
+      label: "🥉 中堅"
+    - max_price: 1000000
+      label: "🥈 大物"
+    - max_price: null
+      label: "🥇 頂点"
+  section_names:
+    card_color: "🎨 色"
+    card_icon: "🖼️ アイコン"
+    consumable: "品ぞろえ（安い順）"
+    racing: "品ぞろえ（安い順）"
+    skin_dice: "🎲 チンチロの演出"
+    skin_table: "🃏 パチンコ・ブラックジャックの演出"
+    color_role: "🌈 名前の色（ロール）"
+  p2p_filters:
+    all:
+      label: "すべて"
+      kind: null
+      mode: null
+    horse:
+      label: "🐴 馬"
+      kind: horse
+      mode: null
+    item:
+      label: "📦 品物"
+      kind: item
+      mode: null
+    auction:
+      label: "🔨 競りだけ"
+      kind: null
+      mode: auction
+  p2p_orders:
+    end: "締切が近い順"
+    price_asc: "安い順"
+    price_desc: "高い順"
+    new: "新しい順"
+
 items:
   # 称号: 残高カードとランキングの名前の横に表示される
   - id: title_rookie

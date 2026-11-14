@@ -8,10 +8,10 @@ import discord
 from discord.ext import commands, tasks
 
 from cogs._shared import announce_channel
-from core import approval, logthrottle, shop, ui, weekly
+from core import approval, catalogs, logthrottle, shop, ui, weekly
 from core.clock import local_now
 
-CHECK_MINUTES = 5
+CHECK_MINUTES = catalogs.economy().weekly.check_minutes
 KING = shop.BY_ID[shop.WEEKLY_KING]
 
 

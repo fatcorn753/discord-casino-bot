@@ -8,26 +8,13 @@ import json
 import time
 from typing import Optional
 
+from core import catalogs, shop
 from core import horse as horse_mod
 from core import labor as labor_mod
-from core import shop
 from core.eco_base import EcoBase
 
 # 内訳の名前（表示順）。キーは asset_parts() の辞書のキー
-PART_LABELS = {
-    "cash": "💴 現金（借金を引く）",
-    "deposit": "🏦 帝愛への預金",
-    "crypto": "📈 株・CS（現物と証拠金）",
-    "bonds": "📜 債券",
-    "options": "🎯 オプション",
-    "items": "🎁 持ち物（買値）",
-    "relics": "🏺 発掘品（目安の価値）",
-    "horses": "🐎 競走馬（購入価格＋引退金の見込み）",
-    "pot": "⛏ 受け取る前の地下作業の稼ぎ",
-    "tools": "🧰 地下作業の工具・寮（これまでの強化費用）",
-    "escrow": "🔒 競りへの入札（預かり中）",
-    "loans": "🤝 貸し借り（貸した分−借りた分）",
-}
+PART_LABELS = dict(catalogs.economy().wallet.part_labels)
 
 
 class AssetMixin(EcoBase):

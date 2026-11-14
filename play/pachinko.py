@@ -9,15 +9,16 @@ import random
 
 import discord
 
-from core import ui
+from core import catalogs, ui
 from games import pachinko, rtplevel
 from play.common import ReplayView, game_title, log_display_failure, result_lines, signed, start_game
 
+_PK_CFG = catalogs.games().pachinko
 RNG = random.SystemRandom()
-TITLE = "🎰 地下パチンコ"
-STEP = 1.1  # メッセージ編集のレート制限に収まる間隔（秒）
+TITLE = _PK_CFG.title
+STEP = _PK_CFG.step_seconds  # メッセージ編集のレート制限に収まる間隔（秒）
 MOOD_COLOR = {"normal": ui.DARK, "blue": ui.INFO, "red": ui.ERROR, "gold": ui.GOLD}  # 演出の色合い → 色
-BANNER = {2: "", 10: "# 🎊 大当たり！！ 🎊", 30: "# 🔥🔥 激アツ確変！！！ 🔥🔥"}
+BANNER = dict(_PK_CFG.banner)
 
 
 def banner_for(top: int, skin=None) -> str:
@@ -28,16 +29,16 @@ def banner_for(top: int, skin=None) -> str:
 
 
 NUMBER = "①②③④⑤⑥⑦⑧⑨⑩"
-EXTRA_SETS = (5, 10)  # 「×5連続」「×10連続」ボタンのセット数
+EXTRA_SETS = _PK_CFG.extra_sets  # 「×5連続」「×10連続」ボタンのセット数
 
 
 def round_text(rounds: tuple) -> str:
     return "・".join(f"{pachinko.ROUND_NAME[r]}{r}倍" for r in rounds)
 
 
-FRAME_BUDGET = 60  # 1回の演出で見せるコマの上限（1.1秒 × 60 ≒ 66秒）。当たりの演出を優先して使う
-SHOWN_ROUNDS = 6  # ラウンドごとに見せる連チャンの数。超えた分は「N連突破」でまとめる
-RANKS = ((100, "👑 伝説級"), (30, "🏆 大勝利"), (10, "🎊 好調"), (0, "✨ 小当たり"))
+FRAME_BUDGET = _PK_CFG.frame_budget  # 1回の演出で見せるコマの上限（1.1秒 × 60 ≒ 66秒）。当たりの演出を優先して使う
+SHOWN_ROUNDS = _PK_CFG.shown_rounds  # ラウンドごとに見せる連チャンの数。超えた分は「N連突破」でまとめる
+RANKS = tuple((r.floor, r.label) for r in _PK_CFG.ranks)
 
 
 def rank_of(mult: int) -> str:

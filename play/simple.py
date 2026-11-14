@@ -9,12 +9,12 @@ import random
 
 import discord
 
-from core import ui
+from core import catalogs, ui
 from games import roulette, slot
 from play.common import ReplayView, game_title, log_display_failure, result_color, result_lines, signed, start_game
 
 RNG = random.SystemRandom()  # OS の乱数。結果を予測・再現できない
-STEP = 0.9  # 演出のコマ送り間隔（秒）
+STEP = catalogs.games().common.simple_step_seconds  # 演出のコマ送り間隔（秒）
 
 
 async def show(

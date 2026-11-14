@@ -4,7 +4,7 @@ import datetime
 
 import discord
 
-from core import approval, ui
+from core import approval, catalogs, ui
 from core import labor as lab
 from core.duration import format_minutes
 from games import pachinko, rtplevel
@@ -32,8 +32,9 @@ def bulk_preview_lines(quizzes: list) -> str:
     return "\n".join(lines)
 
 
-OMEN_NAME = {"": "なし", "blue": "🔵 青", "red": "🔴 赤", "gold": "🟡 金"}
-TIER_NAME = {"": "なし", pachinko.NORMAL: "ノーマル", pachinko.SUPER: "スーパー", pachinko.PREMIUM: "プレミアム"}
+_PK_CFG = catalogs.games().pachinko
+OMEN_NAME = dict(_PK_CFG.omen_names)
+TIER_NAME = dict(_PK_CFG.tier_names)
 SMALL_SAMPLE = 100  # これより少ない回転数の行には「参考」を付ける（当たり率がまだ安定しないため）
 
 
@@ -80,7 +81,7 @@ def pachinko_stats_embed(data: dict, scope: str) -> discord.Embed:
     return e
 
 
-LEVEL_NAME = {1: "かなり渋い", 2: "渋い", 3: "標準", 4: "甘い", 5: "かなり甘い", 6: "大盤振る舞い"}
+LEVEL_NAME = dict(catalogs.games().rtplevel.level_names)
 
 
 def rtp_table_embed(levels: dict, title: str) -> discord.Embed:

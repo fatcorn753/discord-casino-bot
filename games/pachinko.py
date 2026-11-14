@@ -230,10 +230,10 @@ def reel_line(a: str, b: str, c: str) -> str:
     return f"┃ {a} ┃ {b} ┃ {c} ┃"
 
 
-STEP_TEXT = ["ざわ…", "ゾワッ…！", "⚡ 激アツ ⚡"]  # 予告のステップアップ（1段目→2段目→3段目）
-STEP_ICON = ["🔵", "🔴", "🟡"]
-STEPS_OF = {"blue": 1, "red": 2, "gold": 3}  # 予告の色ごとの、ステップの数（色が高いほど長い）
-SPINNING = "🌀"  # 回っているリール
+STEP_TEXT = list(_CFG.step_text)  # 予告のステップアップ（1段目→2段目→3段目）
+STEP_ICON = list(_CFG.step_icon)
+STEPS_OF = dict(_CFG.steps_of)  # 予告の色ごとの、ステップの数（色が高いほど長い）
+SPINNING = _CFG.spinning  # 回っているリール
 
 
 def hold_row(icon: str) -> str:
@@ -248,37 +248,15 @@ def hold_row(icon: str) -> str:
 #   ③ 途中のコマの絵柄は乱数で出さない（たまたま揃って見えるのを防ぐ）。例外は、擬似連の「止まったように見えるコマ」で、
 #      3つとも違う絵柄にする（リーチにも揃いにも見えない）
 #   ④ 左右が戻るのは、再回転する演出（擬似連・全回転）のときだけ
-CUTIN = {
-    SUPER: ["「チャンスだ！！」", "「いけるぞ！！」", "「ここからが本番だ！」", "「見せてやる！！」"],
-    PREMIUM: ["「これで終わりだ！！」", "「全部まとめて持っていけ！！」", "「運命を変えろ！！」", "「勝負だ！！」"],
-}
+CUTIN = {k: list(v) for k, v in _CFG.cutin.items()}
 # 発展の演出の種類。1回の当たりで、この中から1つだけ選ぶ（毎回、全部が流れるわけではない）
-STORIES = {
-    NORMAL: [
-        ("🌊 **波の予告**", "画面が揺れている…"),
-        ("🐟 **魚群が横切った**", "なにか起きる…？"),
-        ("🎞️ **ロングリーチ**", "ゆっくり回っている…"),
-    ],
-    SUPER: [
-        ("🎬 **ストーリーリーチ**", "主人公が立ち上がる…！"),
-        ("🚃 **ダッシュリーチ**", "絵柄が走り出した…！"),
-        ("⚡ **スーパーリーチ**", "背景が変わった…！"),
-    ],
-    PREMIUM: [
-        ("🐉 **龍が現れた**", "地鳴りがする…！！"),
-        ("🌠 **流星群**", "夜空が光る…！"),
-        ("🔥 **プレミアムリーチ**", "画面が燃えている…！！"),
-    ],
-}
+STORIES = {k: [(s.title, s.sub) for s in v] for k, v in _CFG.stories.items()}
 # 復活演出: いったん「外れた」ように見せて、そこから当たりに変わる（当たったときだけの演出。当落には関係しない）。格が高いほど出やすい
-REVIVE_CHANCE = {NORMAL: 0.10, SUPER: 0.25, PREMIUM: 0.30}
-REVIVE_TEXT = [
-    ("それでも!!!", "…諦めない…！！"),
-    ("と、思っていたのか", "…画面が震えている…！！"),
-    ("まだ終わっていない…！", "…リールが動き出す…！"),
-    ("ここからだ…！！", "…運命が書き換わる…！"),
-]
-PSEUDO_COUNTS = {SUPER: [0, 0, 1, 2], PREMIUM: [2, 3, 3, 4]}  # 擬似連の回数の候補（格ごと。当たり外れとは無関係に選ぶ）
+REVIVE_CHANCE = dict(_CFG.revive_chance)
+REVIVE_TEXT = [(r.line, r.sub) for r in _CFG.revive_text]
+PSEUDO_COUNTS = {
+    k: list(v) for k, v in _CFG.pseudo_counts.items()
+}  # 擬似連の回数の候補（格ごと。当たり外れとは無関係に選ぶ）
 
 
 def _text_frame(head: str, reels: tuple, text: str = "", mood: str = "normal") -> Frame:
@@ -345,9 +323,7 @@ def spin_frames(rng: random.Random, spin: SpinInfo, label: str = "") -> list:
     if tier == NORMAL:
         frames.append(_text_frame(f"{title}\n", (sym, sym, SPINNING), sub, mood))
         if rng.random() < 0.5:
-            frames.append(
-                _text_frame("", (sym, sym, SPINNING), rng.choice(["ざわ… ざわ…", "じわ… じわ…", "…どっちだ…"]), mood)
-            )
+            frames.append(_text_frame("", (sym, sym, SPINNING), rng.choice(list(_CFG.normal_whispers)), mood))
         if revive:
             frames += _revive_frames(rng, sym)
     else:
@@ -374,9 +350,4 @@ def hit_spins(spins) -> list:
     return [(i, s) for i, s in enumerate(spins, start=1) if s.hit]
 
 
-FLAVOR = {
-    "ハズレ": "…沈黙。ペリカが静かに溶けていく…",
-    "小当たり": "ッ…！ 拾った…少しだけ…",
-    "大当たり": "ざわ…ざわ…ざわ…！ 大当たり…！ 見ろ、この出玉…！",
-    "激アツ確変": "どよめき…！ 確変突入…！ 地下が揺れる…！！",
-}
+FLAVOR = dict(_CFG.flavor)

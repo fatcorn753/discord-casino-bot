@@ -12,18 +12,20 @@ from discord.ext import commands, tasks
 
 from cogs._amount import balance_choices
 from cogs._teiai_panel import TeiaiPanel, panel_embed
-from core import approval, logthrottle, ranking, shop, teiai, ui
+from core import approval, catalogs, logthrottle, ranking, shop, teiai, ui
 from core import history as history_mod
 from core import missions as missions_mod
 from core.clock import local_now
 from core.confirm import confirm_action, confirmed_reply, user_session
 from core.economy import Economy
 
-TRANSFER_FEE_RATE = 0.10  # 送る側が、送金額の10%を手数料として払う
-TRANSFER_DAILY_LIMIT = 20_000  # 1日に送れる合計（送る金額だけで数える。手数料は含まない）
-TRANSFER_CONFIRM_FROM = 5_000  # この額以上は確認ボタンを挟む
-BOARD_INTERVAL_MINUTES = 1  # ランキング掲示板を更新する間隔
-TRANSFER_MIN_GAMES = 3  # 送金できるのは、ゲームで3回以上遊んだ人（複数アカウントで稼ぐのを防ぐ）
+_ECON_CFG = catalogs.economy()
+_TRANSFER_CFG = _ECON_CFG.transfer
+TRANSFER_FEE_RATE = _TRANSFER_CFG.fee_rate  # 送る側が、送金額の10%を手数料として払う
+TRANSFER_DAILY_LIMIT = _TRANSFER_CFG.daily_limit  # 1日に送れる合計（送る金額だけで数える。手数料は含まない）
+TRANSFER_CONFIRM_FROM = _TRANSFER_CFG.confirm_from  # この額以上は確認ボタンを挟む
+BOARD_INTERVAL_MINUTES = _TRANSFER_CFG.board_interval_minutes  # ランキング掲示板を更新する間隔
+TRANSFER_MIN_GAMES = _TRANSFER_CFG.min_games  # 送金できるのは、ゲームで3回以上遊んだ人（複数アカウントで稼ぐのを防ぐ）
 
 
 def reset_label(bot) -> str:
@@ -32,7 +34,7 @@ def reset_label(bot) -> str:
     return "日本時間 0:00" if offset == 9 else f"UTC{offset:+g} の 0:00"
 
 
-DAILY_SLOT_HOURS = 6  # デイリーボーナスを受け取れる間隔（0・6・12・18時に切り替わる）
+DAILY_SLOT_HOURS = _ECON_CFG.wallet.daily_slot_hours  # デイリーボーナスを受け取れる間隔（0・6・12・18時に切り替わる）
 
 
 def tz_label(bot) -> str:

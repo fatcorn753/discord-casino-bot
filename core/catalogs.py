@@ -46,6 +46,33 @@ class StockRuleConfig(StrictModel):
     per_hour: float = Field(gt=0)
 
 
+class ShopTabConfig(StrictModel):
+    label: str = Field(min_length=1)
+    kinds: tuple[str, ...] = ()
+
+
+class ShopTierConfig(StrictModel):
+    max_price: int | None = None
+    label: str = Field(min_length=1)
+
+
+class P2pFilterConfig(StrictModel):
+    label: str = Field(min_length=1)
+    kind: str | None = None
+    mode: str | None = None
+
+
+class ShopUiConfig(StrictModel):
+    slot_of_kind: dict[str, str]
+    unequip_names: dict[str, str]
+    tabs: dict[str, ShopTabConfig]
+    tab_notes: dict[str, str]
+    tiers: tuple[ShopTierConfig, ...] = Field(min_length=1)
+    section_names: dict[str, str]
+    p2p_filters: dict[str, P2pFilterConfig]
+    p2p_orders: dict[str, str]
+
+
 class ShopCatalog(StrictModel):
     kind_labels: dict[str, str]
     role_prefix: str = Field(min_length=1)
@@ -53,6 +80,10 @@ class ShopCatalog(StrictModel):
     auto_used: tuple[str, ...]
     items: tuple[ShopItemConfig, ...]
     stock_rules: dict[str, StockRuleConfig]
+    confirm_from: int = Field(ge=0)
+    status_nick_minutes: int = Field(gt=0)
+    status_nick_per_guild: int = Field(gt=0)
+    ui: ShopUiConfig
 
     @model_validator(mode="after")
     def _validate_items(self) -> Self:
@@ -211,6 +242,8 @@ class PeriodConfig(StrictModel):
 class MarketSection(StrictModel):
     min_price: int = Field(gt=0)
     max_price: int = Field(gt=0)
+    keep_days: int = Field(gt=0)
+    confirm_from: int = Field(ge=0)
     event_interval_minutes: int = Field(gt=0)
     event_range: tuple[float, float]
     event_scale_max: float = Field(gt=0)
@@ -299,8 +332,23 @@ class MarketCatalog(StrictModel):
 # ------------------------------------------------------------------ #
 class WalletSection(StrictModel):
     initial_balance: int = Field(ge=0)
+    daily_base: int = Field(gt=0)
+    daily_streak_bonus: int = Field(ge=0)
+    daily_streak_cap: int = Field(ge=0)
+    daily_slot_hours: int = Field(gt=0)
+    max_notices: int = Field(gt=0)
     consumable_effects: dict[str, str]
     medals: dict[int, str]
+    part_labels: dict[str, str]
+    grace_lock_text: str = Field(min_length=1)
+
+
+class TransferSection(StrictModel):
+    fee_rate: float = Field(ge=0, lt=1)
+    daily_limit: int = Field(gt=0)
+    confirm_from: int = Field(ge=0)
+    min_games: int = Field(ge=0)
+    board_interval_minutes: int = Field(gt=0)
 
 
 class LoansSection(StrictModel):
@@ -329,11 +377,35 @@ class QuizpaySection(StrictModel):
     target_rate: float = Field(gt=0, lt=1)
     reward_scale_base: int = Field(gt=0)
     participation_rate: float = Field(ge=0)
+    max_questions: int = Field(gt=0)
+    max_question_len: int = Field(gt=0)
+    max_choice_len: int = Field(gt=0)
+    max_explanation_len: int = Field(gt=0)
+    max_verdict_len: int = Field(gt=0)
+    max_minutes: int = Field(gt=0)
+    default_reward: int = Field(gt=0)
+    default_right: str = Field(min_length=1)
+    default_wrong: str = Field(min_length=1)
+    letters: str = Field(min_length=4)
+
+
+class RaffleSection(StrictModel):
+    min_fee: int = Field(gt=0)
+    random_fee_range: tuple[int, int]
+    default_minutes: int = Field(gt=0)
+    max_minutes: int = Field(gt=0)
+    shown_entrants: int = Field(gt=0)
 
 
 class WeeklySection(StrictModel):
     min_plays: int = Field(gt=0)
     announce_top: int = Field(gt=0)
+    check_minutes: int = Field(gt=0)
+
+
+class P2pEndedTextConfig(StrictModel):
+    title: str = Field(min_length=1)
+    body: str = Field(min_length=1)
 
 
 class P2pSection(StrictModel):
@@ -349,14 +421,18 @@ class P2pSection(StrictModel):
     item_price_range: tuple[float, float]
     horse_price_range: tuple[int, int]
     escrow_owner: int
+    confirm_from: int = Field(ge=0)
     tradable_kinds: tuple[str, ...] = Field(min_length=1)
     slot_of_kind: dict[str, str]
+    ended_text: dict[str, P2pEndedTextConfig]
 
 
 class EconomyCatalog(StrictModel):
     wallet: WalletSection
+    transfer: TransferSection
     loans: LoansSection
     quizpay: QuizpaySection
+    raffle: RaffleSection
     weekly: WeeklySection
     p2p: P2pSection
 
@@ -364,6 +440,11 @@ class EconomyCatalog(StrictModel):
 # ------------------------------------------------------------------ #
 # games.yaml
 # ------------------------------------------------------------------ #
+class GamesCommonSection(StrictModel):
+    min_bet: int = Field(gt=0)
+    simple_step_seconds: float = Field(gt=0)
+
+
 class SlotSymbolConfig(StrictModel):
     symbol: str = Field(min_length=1)
     weight: int = Field(gt=0)
@@ -387,6 +468,41 @@ class RouletteSection(StrictModel):
     color_emoji: dict[str, str]
 
 
+class BlackjackResultConfig(StrictModel):
+    text: str = Field(min_length=1)
+    color: str = Field(min_length=1)
+
+
+class BlackjackFlairConfig(StrictModel):
+    blackjack: str = Field(min_length=1)
+    doubled: str = Field(min_length=1)
+    twenty_one: str = Field(min_length=1)
+
+
+class BlackjackSection(StrictModel):
+    suits: list[str] = Field(min_length=1)
+    ranks: list[str] = Field(min_length=1)
+    title: str = Field(min_length=1)
+    result_text: dict[str, BlackjackResultConfig]
+    flair: BlackjackFlairConfig
+
+
+class ChinchiroRoleConfig(StrictModel):
+    name: str = Field(min_length=1)
+    mult: int = Field(gt=0)
+
+
+class ChinchiroSection(StrictModel):
+    max_rolls: int = Field(gt=0)
+    dice_faces: dict[int, str]
+    roles: dict[str, ChinchiroRoleConfig]
+    hifumi_factor: int = Field(gt=0)
+    title: str = Field(min_length=1)
+    step_seconds: float = Field(gt=0)
+    win_lines: dict[str, str]
+    lose_lines: dict[str, str]
+
+
 class PachinkoRoundConfig(StrictModel):
     name: str = Field(min_length=1)
     mult: int = Field(gt=0)
@@ -396,6 +512,21 @@ class PachinkoRoundConfig(StrictModel):
 class ProbBonusConfig(StrictModel):
     prob: float = Field(ge=0, le=1)
     bonus: float = Field(ge=0)
+
+
+class PachinkoRankConfig(StrictModel):
+    floor: int = Field(ge=0)
+    label: str = Field(min_length=1)
+
+
+class PachinkoStoryConfig(StrictModel):
+    title: str = Field(min_length=1)
+    sub: str = Field(min_length=1)
+
+
+class PachinkoReviveConfig(StrictModel):
+    line: str = Field(min_length=1)
+    sub: str = Field(min_length=1)
 
 
 class PachinkoSection(StrictModel):
@@ -412,6 +543,26 @@ class PachinkoSection(StrictModel):
     tier_table: dict[str, ProbBonusConfig]
     hit_target: float = Field(gt=0, lt=1)
     omen_text: dict[str, str]
+    title: str = Field(min_length=1)
+    step_seconds: float = Field(gt=0)
+    frame_budget: int = Field(gt=0)
+    shown_rounds: int = Field(gt=0)
+    extra_sets: tuple[int, ...] = Field(min_length=1)
+    banner: dict[int, str]
+    ranks: tuple[PachinkoRankConfig, ...] = Field(min_length=1)
+    spinning: str = Field(min_length=1)
+    step_text: list[str] = Field(min_length=1)
+    step_icon: list[str] = Field(min_length=1)
+    steps_of: dict[str, int]
+    cutin: dict[str, list[str]]
+    stories: dict[str, list[PachinkoStoryConfig]]
+    normal_whispers: list[str] = Field(min_length=1)
+    revive_chance: dict[str, float]
+    revive_text: list[PachinkoReviveConfig] = Field(min_length=1)
+    pseudo_counts: dict[str, list[int]]
+    flavor: dict[str, str]
+    omen_names: dict[str, str]
+    tier_names: dict[str, str]
 
     @model_validator(mode="after")
     def _validate_probabilities(self) -> Self:
@@ -434,11 +585,15 @@ class RtplevelSection(StrictModel):
     blackjack_rtp: float = Field(gt=0)
     blackjack_w: float = Field(gt=0)
     roulette_default_kind: str = Field(min_length=1)
+    level_names: dict[int, str]
 
 
 class GamesCatalog(StrictModel):
+    common: GamesCommonSection
     slot: SlotSection
     roulette: RouletteSection
+    blackjack: BlackjackSection
+    chinchiro: ChinchiroSection
     pachinko: PachinkoSection
     rtplevel: RtplevelSection
 

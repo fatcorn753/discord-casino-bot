@@ -12,22 +12,19 @@
 import random
 from dataclasses import dataclass
 
+from core import catalogs
+
+_CFG = catalogs.games().chinchiro
+
 PINZORO, ARASHI, SHIGORO, ME, MENASHI, HIFUMI = "pinzoro", "arashi", "shigoro", "me", "menashi", "hifumi"
 
-MAX_ROLLS = 3
-DICE_FACES = {1: "⚀", 2: "⚁", 3: "⚂", 4: "⚃", 5: "⚄", 6: "⚅"}
+MAX_ROLLS = _CFG.max_rolls
+DICE_FACES = dict(_CFG.dice_faces)
 
 # 役ごとの表示名と、役の倍率
-ROLE_NAME = {
-    PINZORO: "ピンゾロ",
-    ARASHI: "嵐（アラシ）",
-    SHIGORO: "シゴロ",
-    ME: "目",
-    MENASHI: "目なし",
-    HIFUMI: "ヒフミ",
-}
-ROLE_MULT = {PINZORO: 5, ARASHI: 3, SHIGORO: 2, ME: 1, MENASHI: 1, HIFUMI: 1}
-HIFUMI_FACTOR = 2  # ヒフミが負けたとき、相手の役の倍率にかかる倍率
+ROLE_NAME = {k: v.name for k, v in _CFG.roles.items()}
+ROLE_MULT = {k: v.mult for k, v in _CFG.roles.items()}
+HIFUMI_FACTOR = _CFG.hifumi_factor  # ヒフミが負けたとき、相手の役の倍率にかかる倍率
 MAX_MULT = ROLE_MULT[PINZORO] * HIFUMI_FACTOR  # 1回で負ける最大の倍率（ピンゾロ対ヒフミ）
 
 

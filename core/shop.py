@@ -141,7 +141,9 @@ class Stock:
     per_hour: float  # 1時間に補充される数
 
 
-STOCK_RULES = {LABOR_DRINK: Stock(max=10, per_hour=2.0)}  # 栄養ドリンコ: 10本まで、30分に1本ずつ補充
+STOCK_RULES = {
+    k: Stock(max=v.max, per_hour=v.per_hour) for k, v in _CFG.stock_rules.items()
+}  # 栄養ドリンコ: 10本まで、30分に1本ずつ補充
 
 
 def stock_now(rule: Stock, stock: float, updated: float, now: float) -> float:

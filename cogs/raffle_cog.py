@@ -14,14 +14,15 @@ import discord
 from discord.ext import commands, tasks
 
 from cogs._shared import announce_channel
-from core import approval, logthrottle, ui
+from core import approval, catalogs, logthrottle, ui
 
-MIN_FEE = 500  # 参加費の最小。上限はない
-RANDOM_FEE_RANGE = (500, 3_000)  # 参加費を省略したときの、ランダムの範囲
-DEFAULT_MINUTES = 60
-MAX_MINUTES = 24 * 60
+_RAFFLE_CFG = catalogs.economy().raffle
+MIN_FEE = _RAFFLE_CFG.min_fee  # 参加費の最小。上限はない
+RANDOM_FEE_RANGE = _RAFFLE_CFG.random_fee_range  # 参加費を省略したときの、ランダムの範囲
+DEFAULT_MINUTES = _RAFFLE_CFG.default_minutes
+MAX_MINUTES = _RAFFLE_CFG.max_minutes
 JOIN_ID = "raffle:join"
-SHOWN_ENTRANTS = 20  # 掲示に並べる参加者の数（それ以上は人数だけ）
+SHOWN_ENTRANTS = _RAFFLE_CFG.shown_entrants  # 掲示に並べる参加者の数（それ以上は人数だけ）
 
 
 def raffle_embed(raffle: dict, now: Optional[float] = None) -> discord.Embed:

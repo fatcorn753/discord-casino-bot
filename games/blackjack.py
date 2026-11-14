@@ -3,8 +3,11 @@
 import random
 from dataclasses import dataclass, field
 
-SUITS = ["♠", "♥", "♦", "♣"]
-RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
+from core import catalogs
+
+_CFG = catalogs.games().blackjack
+SUITS = list(_CFG.suits)
+RANKS = list(_CFG.ranks)
 
 
 def new_deck(rng: random.Random) -> list:

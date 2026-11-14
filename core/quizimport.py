@@ -20,14 +20,16 @@
 import re
 from typing import Optional
 
+from core import catalogs
 from core.duration import parse_duration
 
-MAX_QUESTIONS = 30
-MAX_QUESTION_LEN = 500
-MAX_CHOICE_LEN = 80
-MAX_EXPLANATION_LEN = 800
-MAX_MINUTES = 365 * 1440  # 有効期間の上限（1年）
-DEFAULT_REWARD = 100
+_QUIZ_CFG = catalogs.economy().quizpay
+MAX_QUESTIONS = _QUIZ_CFG.max_questions
+MAX_QUESTION_LEN = _QUIZ_CFG.max_question_len
+MAX_CHOICE_LEN = _QUIZ_CFG.max_choice_len
+MAX_EXPLANATION_LEN = _QUIZ_CFG.max_explanation_len
+MAX_MINUTES = _QUIZ_CFG.max_minutes  # 有効期間の上限（1年）
+DEFAULT_REWARD = _QUIZ_CFG.default_reward
 
 KEYS = {
     "問題": "question",

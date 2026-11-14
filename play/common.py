@@ -5,11 +5,11 @@ from typing import Any
 
 import discord
 
-from core import approval, events, missions, skins, teiai, ui
+from core import approval, catalogs, events, missions, skins, teiai, ui
 from core.clock import local_now
 from games import rtplevel
 
-MIN_BET = 10
+MIN_BET = catalogs.games().common.min_bet
 
 
 def local_today(bot: Any):
