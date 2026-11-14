@@ -52,10 +52,6 @@ class ShopCog(commands.Cog):
         """このサーバーのペリカの記録（ペリカはサーバーごとに別々）。"""
         return self.bot.economy.for_guild(interaction.guild.id)
 
-    @property
-    def eco(self):
-        return self.bot.economy
-
     def _equipped_title(self, guild_id: int, user_id: int):
         """そのサーバーで装備している称号（景品はサーバーごとに別々）。"""
         item = shop.BY_ID.get(self.bot.economy.for_guild(guild_id).get_profile(user_id)["title"])
@@ -95,7 +91,7 @@ class ShopCog(commands.Cog):
         """
         async with self._nick_locks.setdefault(user_id, asyncio.Lock()):
             problem, others_failed = "", 0
-            for gid in self.eco.nick_pref_guilds(user_id):
+            for gid in self.bot.economy.nick_pref_guilds(user_id):
                 guild = self.bot.get_guild(gid)
                 if guild is None or (here is not None and gid != here.id):
                     continue
@@ -103,7 +99,7 @@ class ShopCog(commands.Cog):
                 is_here = here is not None and gid == here.id
                 try:
                     m = member if is_here else (guild.get_member(user_id) or await guild.fetch_member(user_id))
-                    await apply_title_nick(guild, m, title, self.eco)
+                    await apply_title_nick(guild, m, title, self.bot.economy)
                 except discord.NotFound:
                     continue  # そのサーバーからもういない
                 except ShopError as exc:
@@ -171,7 +167,7 @@ class ShopCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
-        self.eco.delete_guild_nick_prefs(
+        self.bot.economy.delete_guild_nick_prefs(
             guild.id
         )  # Bot が外れたら、そのサーバーの設定は消す（再参加で勝手に復活しない）
 
@@ -459,7 +455,7 @@ class ShopCog(commands.Cog):
             problem, others = await self._sync_title_nick(uid, interaction.guild, interaction.user)
             if problem:
                 note = f"\n⚠️ ニックネームには反映できませんでした: {problem}"
-            elif self.eco.nick_pref(interaction.guild.id, uid):
+            elif self.bot.economy.nick_pref(interaction.guild.id, uid):
                 note = "\nニックネームにも反映しました。"
             if others:
                 note += f"\n※ 他のサーバー {others} 件では反映できませんでした。"
@@ -503,20 +499,20 @@ class ShopCog(commands.Cog):
     async def set_title_display(self, interaction: discord.Interaction, mode: str):
         """称号をニックネームに付ける（mode="on"）／付けない（"off"）。"""
         uid, guild = interaction.user.id, interaction.guild
-        was_on = self.eco.nick_pref(guild.id, uid)
+        was_on = self.bot.economy.nick_pref(guild.id, uid)
         if mode == "on":
             reason = nick_blocker(guild, interaction.user)
             if reason:  # 付けられない人・サーバーでは、設定自体を有効にしない
                 return await interaction.response.send_message(
                     embed=ui.error_embed("ニックネームに付けられません", reason), ephemeral=True
                 )
-            self.eco.set_nick_pref(guild.id, uid, True)
+            self.bot.economy.set_nick_pref(guild.id, uid, True)
             await interaction.response.defer(ephemeral=True)
             problem, others = await self._sync_title_nick(uid, guild, interaction.user)
             title = self._equipped_title(guild.id, uid)
             if problem:
                 if not was_on:  # もともとONだった人の設定は、失敗しても消さない
-                    self.eco.set_nick_pref(guild.id, uid, False)
+                    self.bot.economy.set_nick_pref(guild.id, uid, False)
                 return await interaction.followup.send(
                     embed=ui.error_embed("ニックネームに付けられません", problem), ephemeral=True
                 )
@@ -537,10 +533,10 @@ class ShopCog(commands.Cog):
         problem = ""
         if was_on:  # ONにしていた人だけ、元のニックネームに戻す（ONにしたことがない人の名前には触らない）
             try:
-                await apply_title_nick(guild, interaction.user, None, self.eco)
+                await apply_title_nick(guild, interaction.user, None, self.bot.economy)
             except ShopError as exc:
                 problem = f"\n⚠️ ニックネームを元に戻せませんでした（手動で直してください）: {exc}"
-            self.eco.set_nick_pref(guild.id, uid, False)
+            self.bot.economy.set_nick_pref(guild.id, uid, False)
         await interaction.followup.send(
             embed=ui.ok_embed(
                 "ニックネームには付けません",

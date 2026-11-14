@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cogs.market_cog import MarketCog
+from cogs.market_cog import MarketCog, _units_from
 from core import market
 from core.economy import INITIAL_BALANCE, Economy
 from core.session import Sessions
@@ -397,11 +397,11 @@ def test_settle_by_percent_sells_that_share_of_a_spot_position(eco):
 
 
 def test_percent_units_are_at_least_one_unit_and_both_options_are_refused(eco):
-    assert MarketCog._units_from(1_000, None, choice(1)) == 10
-    assert MarketCog._units_from(50, None, choice(1)) == 1  # 端数でも、最低1口
-    assert MarketCog._units_from(1_000, None, choice("half")) == 500
-    assert MarketCog._units_from(1_000, None, choice(100)) is None
-    assert MarketCog._units_from(1_000, None, None) is None
+    assert _units_from(1_000, None, choice(1)) == 10
+    assert _units_from(50, None, choice(1)) == 1  # 端数でも、最低1口
+    assert _units_from(1_000, None, choice("half")) == 500
+    assert _units_from(1_000, None, choice(100)) is None
+    assert _units_from(1_000, None, None) is None
     from tests.test_market import It
 
     cog = make_cog(eco)

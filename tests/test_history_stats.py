@@ -167,16 +167,16 @@ def test_sell_half_then_all_and_both_options_are_refused(cog):
     from discord import app_commands
 
     run(cog._buy(It(), "cs", 2_000))
-    have = cog.eco.for_guild(G).crypto_holding(U)[0]
+    have = cog.bot.economy.for_guild(G).crypto_holding(U)[0]
     half = app_commands.Choice(name="半分", value="half")
     allc = app_commands.Choice(name="全部", value="all")
     it = It()
     run(cog._sell(it, "cs", 1.0, half))
-    assert "どちらか1つ" in it.sent[-1]["embed"].title and cog.eco.for_guild(G).crypto_holding(U)[0] == have
+    assert "どちらか1つ" in it.sent[-1]["embed"].title and cog.bot.economy.for_guild(G).crypto_holding(U)[0] == have
     run(cog._sell(It(), "cs", None, half))
-    assert cog.eco.for_guild(G).crypto_holding(U)[0] == have - have // 2
+    assert cog.bot.economy.for_guild(G).crypto_holding(U)[0] == have - have // 2
     run(cog._sell(It(), "cs", None, allc))
-    assert cog.eco.for_guild(G).crypto_holding(U) == (0, 0)
+    assert cog.bot.economy.for_guild(G).crypto_holding(U) == (0, 0)
 
 
 # ----------------------------- 総資産ランキング ----------------------------- #

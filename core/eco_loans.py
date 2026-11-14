@@ -12,13 +12,14 @@ from typing import Optional
 from core import loans as loans_mod
 
 
+def _loan_row(row) -> Optional[dict]:
+    return dict(row) if row is not None else None
+
+
 class LoanMixin:
     """貸し借りの提案・承諾・返済・回収。"""
 
     # ---- 内部 ---- #
-    @staticmethod
-    def _loan_row(row) -> Optional[dict]:
-        return dict(row) if row is not None else None
 
     def _loan_owed(self, loan: dict, now: float) -> int:
         """いまの返済総額（利息つき）。承諾前は 0。"""
@@ -146,7 +147,7 @@ class LoanMixin:
     def loan_lend(self, loan_id: int, lender_id: int, now: float) -> tuple:
         """募集に応じて貸す（早い者勝ち）。貸す人の残高から借りる人へ、その場でお金が移る。(成功か, 理由) を返す。"""
         with self._lock, self._conn:
-            loan = self._loan_row(
+            loan = _loan_row(
                 self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone()
             )
             if loan is None or loan["status"] != "request":
@@ -237,14 +238,14 @@ class LoanMixin:
 
     def loan_get(self, loan_id: int) -> Optional[dict]:
         with self._lock:
-            return self._loan_row(
+            return _loan_row(
                 self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone()
             )
 
     def loan_accept(self, loan_id: int, user_id: int, now: float) -> tuple:
         """借りる人が承諾して、お金を受け取る。(成功か, 理由) を返す。"""
         with self._lock, self._conn:
-            loan = self._loan_row(
+            loan = _loan_row(
                 self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone()
             )
             if loan is None or loan["status"] != "offer":
@@ -273,7 +274,7 @@ class LoanMixin:
     def loan_decline(self, loan_id: int, user_id: int) -> tuple:
         """借りる人が断る。"""
         with self._lock, self._conn:
-            loan = self._loan_row(
+            loan = _loan_row(
                 self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone()
             )
             if loan is None or loan["status"] != "offer":
@@ -286,7 +287,7 @@ class LoanMixin:
     def loan_cancel(self, loan_id: int, user_id: int) -> tuple:
         """貸す側が提案を取り下げる。"""
         with self._lock, self._conn:
-            loan = self._loan_row(
+            loan = _loan_row(
                 self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone()
             )
             if loan is None or loan["status"] not in ("offer", "request"):
@@ -303,7 +304,7 @@ class LoanMixin:
     def loan_repay(self, loan_id: int, user_id: int, amount: Optional[int], now: float) -> tuple:
         """借りた人が返す。amount が None なら全額（残高の範囲で）。(成功か, 理由か返した額) を返す。"""
         with self._lock, self._conn:
-            loan = self._loan_row(
+            loan = _loan_row(
                 self._conn.execute("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g())).fetchone()
             )
             if loan is None or loan["status"] not in ("active", "overdue"):

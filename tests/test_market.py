@@ -249,7 +249,7 @@ def test_trading_is_refused_during_a_game(cog):
     it = It()
     run(cog._buy(it, "cs", 1_000))
     assert "取引できません" in it.sent[-1]["embed"].title
-    assert cog.eco.for_guild(G).crypto_holding(U) == (0, 0)
+    assert cog.bot.economy.for_guild(G).crypto_holding(U) == (0, 0)
 
 
 def test_price_chart_and_step(cog):
@@ -282,8 +282,8 @@ def test_holders_are_per_server_sorted_and_limited(eco):
 
 
 def test_chart_lists_holders_with_cost_price_and_percent(cog):
-    cog.eco.for_guild(G).crypto_buy(U, 1_000, cog._price())
-    cog.eco.market_set(time_now() + 1, int(cog._price() * 1.1), 0)
+    cog.bot.economy.for_guild(G).crypto_buy(U, 1_000, cog._price())
+    cog.bot.economy.market_set(time_now() + 1, int(cog._price() * 1.1), 0)
     e = cog.chart_embed("24h", guild_id=G)
     field = next(f for f in e.fields if "保有者" in f.name)
     assert "保有者" in field.name and f"<@{U}>" in field.value and "+" in field.value and "取得" in field.value
@@ -301,8 +301,8 @@ def time_now():
 
 def test_sell_shows_position_change_and_remaining(cog):
     run(cog._buy(It(), "cs", 2_000))
-    have, _ = cog.eco.for_guild(G).crypto_holding(U)
-    cog.eco.market_set(time_now() + 1, int(cog._price() * 1.2), 0)
+    have, _ = cog.bot.economy.for_guild(G).crypto_holding(U)
+    cog.bot.economy.market_set(time_now() + 1, int(cog._price() * 1.2), 0)
     it = It()
     run(cog._sell(it, "cs", have / 2000, None))  # 半分売る
     text = it.sent[-1]["embed"].description
@@ -409,14 +409,16 @@ def test_chart_command_registers_a_live_chart_that_updates_then_ends(cog):
     run(MarketCog.board.callback(cog, it, SimpleNamespace(value="cs"), None))
     first = it.sent[-1]["embed"]
     assert "自動で更新（あと" in first.footer.text
-    post = cog.eco.live_chart_posts()[0]
+    post = cog.bot.economy.live_chart_posts()[0]
     assert post["channel_id"] == 5 and post["guild_id"] == G and post["period"] == "24h"
     now = post["ts"] + 120
     run(cog._refresh_post(post, now, {}))  # 2分後: 更新される（まだ続く）
-    assert len(ch.edits) == 1 and "自動で更新（あと" in ch.edits[0][1].footer.text and cog.eco.live_chart_posts()
+    assert (
+        len(ch.edits) == 1 and "自動で更新（あと" in ch.edits[0][1].footer.text and cog.bot.economy.live_chart_posts()
+    )
     end = post["ts"] + market_cog.LIVE_MINUTES * 60
     run(cog._refresh_post(post, end, {}))  # 60分後: 最後に1回書き換えて、終わる
-    assert "更新は終了しました" in ch.edits[-1][1].footer.text and cog.eco.live_chart_posts() == []
+    assert "更新は終了しました" in ch.edits[-1][1].footer.text and cog.bot.economy.live_chart_posts() == []
     assert len(ch.edits) == 2  # 終わったあとは、もう更新しない
 
 
@@ -426,14 +428,14 @@ def test_tick_updates_only_live_posts_and_shares_one_embed_per_view(cog, monkeyp
     cog.bot.get_guild = lambda gid: SimpleNamespace(id=gid)
     now = time.time()
     for cid in (5, 6):
-        cog.eco.swap_chart_post(cid, 100 + cid, G, "24h", now - 60)  # 更新中の2つ（同じサーバー・同じ期間）
-    cog.eco.swap_chart_post(7, 107, G, "24h", now - 60)
-    cog.eco.end_chart_post(7)  # 終わったもの
+        cog.bot.economy.swap_chart_post(cid, 100 + cid, G, "24h", now - 60)  # 更新中の2つ（同じサーバー・同じ期間）
+    cog.bot.economy.swap_chart_post(7, 107, G, "24h", now - 60)
+    cog.bot.economy.end_chart_post(7)  # 終わったもの
     built = []
     orig = cog.chart_embed
     monkeypatch.setattr(cog, "chart_embed", lambda *a, **kw: built.append(1) or orig(*a, **kw))
     cache = {}
-    for post in cog.eco.live_chart_posts():
+    for post in cog.bot.economy.live_chart_posts():
         run(cog._refresh_post(post, now, cache))
     assert len(chans[5].edits) == 1 and len(chans[6].edits) == 1 and chans[7].edits == []
     assert len(built) == 1  # 同じ表示は、1回だけ作って使い回す
@@ -442,25 +444,25 @@ def test_tick_updates_only_live_posts_and_shares_one_embed_per_view(cog, monkeyp
 def test_deleted_chart_stops_being_updated_and_errors_do_not_stop_others(cog):
     ch = EditChan(5)
     live_env(cog, ch)
-    cog.eco.swap_chart_post(5, 105, G, "24h", time.time())
-    post = cog.eco.live_chart_posts()[0]
+    cog.bot.economy.swap_chart_post(5, 105, G, "24h", time.time())
+    post = cog.bot.economy.live_chart_posts()[0]
     ch.error = discord.NotFound(SimpleNamespace(status=404, reason="x"), "gone")  # 誰かがチャートを消した
     run(cog._refresh_post(post, time.time(), {}))
-    assert cog.eco.live_chart_posts() == []
-    cog.eco.swap_chart_post(5, 106, G, "24h", time.time())
+    assert cog.bot.economy.live_chart_posts() == []
+    cog.bot.economy.swap_chart_post(5, 106, G, "24h", time.time())
     ch.error = discord.Forbidden(
         SimpleNamespace(status=403, reason="x"), "no"
     )  # 権限が無い: 例外にせず、次の周期で再試行
-    run(cog._refresh_post(cog.eco.live_chart_posts()[0], time.time(), {}))
-    assert cog.eco.live_chart_posts()
+    run(cog._refresh_post(cog.bot.economy.live_chart_posts()[0], time.time(), {}))
+    assert cog.bot.economy.live_chart_posts()
 
 
 def test_legacy_or_unknown_rows_end_without_crashing(cog):
     ch = EditChan(5)
     live_env(cog, ch)
-    cog.eco.swap_chart_post(5, 105, 0, "24h", 0)  # 古い版で作られた行（サーバーが分からない）
-    run(cog._refresh_post(cog.eco.live_chart_posts()[0], time.time(), {}))
-    assert ch.edits == [] and cog.eco.live_chart_posts() == []
+    cog.bot.economy.swap_chart_post(5, 105, 0, "24h", 0)  # 古い版で作られた行（サーバーが分からない）
+    run(cog._refresh_post(cog.bot.economy.live_chart_posts()[0], time.time(), {}))
+    assert ch.edits == [] and cog.bot.economy.live_chart_posts() == []
 
 
 def test_new_chart_in_the_same_channel_replaces_the_live_one(cog):
@@ -469,7 +471,7 @@ def test_new_chart_in_the_same_channel_replaces_the_live_one(cog):
     a, b = It(), It()
     run(MarketCog.board.callback(cog, a, SimpleNamespace(value="cs"), None))
     run(MarketCog.board.callback(cog, b, SimpleNamespace(value="cs"), None))
-    live = cog.eco.live_chart_posts()
+    live = cog.bot.economy.live_chart_posts()
     assert len(live) == 1 and live[0]["message_id"] == b._next_id  # 更新の対象は、新しいチャートだけ
     assert FakeChannel.shared[5] == [a._next_id]  # 前のチャートは消える
 
@@ -477,10 +479,12 @@ def test_new_chart_in_the_same_channel_replaces_the_live_one(cog):
 def test_old_chart_board_is_removed_once(cog):
     ch = EditChan(5)
     live_env(cog, ch)
-    cog.eco._conn.execute("INSERT INTO chart_boards (guild_id, channel_id, message_id) VALUES (?, 5, 777)", (G,))
-    cog.eco._conn.commit()
+    cog.bot.economy._conn.execute(
+        "INSERT INTO chart_boards (guild_id, channel_id, message_id) VALUES (?, 5, 777)", (G,)
+    )
+    cog.bot.economy._conn.commit()
     run(cog._retire_old_boards())
-    assert ch.deleted == [777] and cog.eco.list_chart_boards() == []  # 掲示のメッセージを消し、設定も捨てる
+    assert ch.deleted == [777] and cog.bot.economy.list_chart_boards() == []  # 掲示のメッセージを消し、設定も捨てる
     run(cog._retire_old_boards())
     assert ch.deleted == [777]  # 2回目は何もしない
 
@@ -570,13 +574,13 @@ def test_short_commands(cog):
     it = It()
     run(cog._short(it, "cs", 1.0, None, 2))
     assert "空売りしました" in it.sent[-1]["embed"].title
-    assert cog.eco.for_guild(G).short_position(U)[0] == 1_000
+    assert cog.bot.economy.for_guild(G).short_position(U)[0] == 1_000
     it = It()
     run(MarketCog.holdings.callback(cog, it))
     assert "空売り" in it.sent[-1]["embed"].description and "維持率" in it.sent[-1]["embed"].description
     it = It()
     run(cog._cover(it, "cs", None, None))
-    assert "買い戻しました" in it.sent[-1]["embed"].title and cog.eco.for_guild(G).short_position(U)[0] == 0
+    assert "買い戻しました" in it.sent[-1]["embed"].title and cog.bot.economy.for_guild(G).short_position(U)[0] == 0
     it = It()
     run(cog._cover(it, "cs", None, None))
     assert "買い戻せません" in it.sent[-1]["embed"].title  # 建てていない
@@ -587,8 +591,8 @@ def test_short_commands(cog):
 
 def test_chart_lists_short_sellers_with_profit_when_price_falls(cog):
     price = cog._price()
-    cog.eco.for_guild(G).short_open(U, 2_000, price, 2)
-    cog.eco.market_set(time_now() + 1, round(price * 0.9, 2), 0)  # 10%下がった: 空売りは利益
+    cog.bot.economy.for_guild(G).short_open(U, 2_000, price, 2)
+    cog.bot.economy.market_set(time_now() + 1, round(price * 0.9, 2), 0)  # 10%下がった: 空売りは利益
     e = cog.chart_embed("24h", guild_id=G)
     field = next(f for f in e.fields if "空売り" in f.name)
     assert f"<@{U}>" in field.value and "2.000枚" in field.value and "+10.0%" in field.value and "建値" in field.value
@@ -599,7 +603,7 @@ def test_short_can_be_sized_by_amount_or_lots_but_not_both(cog):
     price = cog._price()
     it = It()
     run(cog._short(it, "cs", None, 1_000, 2))  # 金額1,000ペリカ分
-    units = cog.eco.for_guild(G).short_position(U)[0]
+    units = cog.bot.economy.for_guild(G).short_position(U)[0]
     assert "空売りしました" in it.sent[-1]["embed"].title and units == int(1_000 * 1_000 // price)
     it = It()
     run(cog._short(it, "cs", 1.0, 1_000, None))

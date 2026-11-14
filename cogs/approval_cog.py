@@ -53,14 +53,10 @@ class ApprovalCog(commands.Cog):
     async def cog_load(self):
         self.bot.add_dynamic_items(ApprovalButton)
 
-    @property
-    def eco(self):
-        return self.bot.economy
-
     # --------------------------- 依頼の送信 --------------------------- #
     async def request_approval(self, guild: discord.Guild) -> int:
         """持ち主に承認を依頼する DM を送る。届いた人数を返す（DM を受け取れない人には届かない）。"""
-        self.eco.mark_guild_notified(
+        self.bot.economy.mark_guild_notified(
             guild.id
         )  # 送信（await）の前に記録する。同時に来た別のコマンドが、重ねて依頼しないように
         embed = approval_request_embed(guild)
@@ -81,9 +77,9 @@ class ApprovalCog(commands.Cog):
         """承認待ちとして記録し、まだ依頼していなければ依頼する。しばらく前の依頼なら催促する。"""
         if guild is None or guild.id in approval.preapproved(self.bot.config):
             return
-        row = self.eco.get_guild_status(guild.id)
+        row = self.bot.economy.get_guild_status(guild.id)
         if row is None or (row["status"] == approval.DENIED and reset_denied):
-            self.eco.set_guild_status(guild.id, approval.PENDING, guild.name)
+            self.bot.economy.set_guild_status(guild.id, approval.PENDING, guild.name)
             await self.request_approval(guild)
         elif row["status"] == approval.PENDING:
             if row["notified_at"] is None or time.time() - row["notified_at"] > RENOTIFY_AFTER:
@@ -106,7 +102,7 @@ class ApprovalCog(commands.Cog):
     async def on_guild_join(self, guild: discord.Guild):
         if not approval.requires_approval(self.bot.config):
             return
-        row = self.eco.get_guild_status(guild.id)
+        row = self.bot.economy.get_guild_status(guild.id)
         if row and row["status"] == approval.APPROVED:
             return  # 承認済みのサーバーに追加し直された
         await self.ensure_requested(guild, reset_denied=True)
@@ -783,7 +779,7 @@ class ApprovalCog(commands.Cog):
     async def server_list(self, interaction: discord.Interaction):
         if not await self._owner_only(interaction):
             return
-        e = server_list_embed(self.bot.guilds, self.eco.list_guild_status(), self.bot.config)
+        e = server_list_embed(self.bot.guilds, self.bot.economy.list_guild_status(), self.bot.config)
         await interaction.response.send_message(embed=e, ephemeral=True)
 
     @group.command(name="サーバー許可", description="[管理者] サーバーIDを指定して、利用を許可する")
@@ -798,7 +794,7 @@ class ApprovalCog(commands.Cog):
             )
         gid = int(guild_id)
         guild = self.bot.get_guild(gid)
-        self.eco.set_guild_status(gid, approval.APPROVED, guild.name if guild else None, interaction.user.id)
+        self.bot.economy.set_guild_status(gid, approval.APPROVED, guild.name if guild else None, interaction.user.id)
         if guild is not None:
             await self.announce_approved(guild)
         await interaction.response.send_message(
@@ -831,7 +827,7 @@ class ApprovalCog(commands.Cog):
                 ephemeral=True,
             )
         guild = self.bot.get_guild(gid)
-        self.eco.set_guild_status(gid, approval.DENIED, guild.name if guild else None, interaction.user.id)
+        self.bot.economy.set_guild_status(gid, approval.DENIED, guild.name if guild else None, interaction.user.id)
         left = ""
         if guild is not None:
             try:

@@ -137,10 +137,6 @@ class EconomyCog(commands.Cog):
         """このサーバーのペリカの記録（ペリカはサーバーごとに別々）。"""
         return self.bot.economy.for_guild(interaction.guild.id)
 
-    @property
-    def eco(self) -> Economy:
-        return self.bot.economy
-
     group = app_commands.Group(name="ペリカ", description="💴 残高・デイリー・ランキング・送金")
 
     @group.command(name="残高", description="ペリカの残高と成績を表示")
@@ -395,7 +391,7 @@ class EconomyCog(commands.Cog):
             return  # 一時的に見えないだけかもしれないので、記録は残す
         channel = guild.get_channel(board["channel_id"])
         if channel is None:
-            self.eco.delete_leaderboard(guild.id)  # チャンネルが消えた
+            self.bot.economy.delete_leaderboard(guild.id)  # チャンネルが消えた
             return
         embed = self._board_embed(guild.id)
         try:
@@ -404,7 +400,7 @@ class EconomyCog(commands.Cog):
         except discord.NotFound:
             try:  # メッセージが消された: 投稿し直して、新しいIDを記録する
                 new = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
-                self.eco.set_leaderboard(guild.id, channel.id, new.id)
+                self.bot.economy.set_leaderboard(guild.id, channel.id, new.id)
             except discord.HTTPException as exc:
                 logthrottle.warn(
                     ("board-repost", guild.id), f"ランキング掲示板を投稿し直せません: guild={guild.id}: {exc!r}"
@@ -422,7 +418,7 @@ class EconomyCog(commands.Cog):
 
     @tasks.loop(minutes=BOARD_INTERVAL_MINUTES)
     async def refresh_boards(self):
-        for board in self.eco.list_leaderboards():
+        for board in self.bot.economy.list_leaderboards():
             try:
                 await self._refresh_board(board)
             except Exception as exc:  # 1つのサーバーの失敗で、他のサーバーの更新を止めない
@@ -434,7 +430,7 @@ class EconomyCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
-        self.eco.delete_leaderboard(guild.id)
+        self.bot.economy.delete_leaderboard(guild.id)
 
     async def _delete_board_message(self, guild: discord.Guild, board: Optional[dict]) -> None:
         if not board:
@@ -478,11 +474,11 @@ class EconomyCog(commands.Cog):
                 ephemeral=True,
             )
         await interaction.response.defer(ephemeral=True)
-        old = self.eco.get_leaderboard(interaction.guild.id)
+        old = self.bot.economy.get_leaderboard(interaction.guild.id)
         message = await channel.send(
             embed=self._board_embed(interaction.guild.id), allowed_mentions=discord.AllowedMentions.none()
         )
-        self.eco.set_leaderboard(interaction.guild.id, channel.id, message.id)
+        self.bot.economy.set_leaderboard(interaction.guild.id, channel.id, message.id)
         await self._delete_board_message(interaction.guild, old)  # 前の掲示板があれば、新しいものと入れ替える
         await interaction.followup.send(
             embed=ui.ok_embed(
@@ -493,7 +489,7 @@ class EconomyCog(commands.Cog):
         )
 
     async def _board_unset(self, interaction: discord.Interaction):
-        board = self.eco.get_leaderboard(interaction.guild.id)
+        board = self.bot.economy.get_leaderboard(interaction.guild.id)
         if board is None:
             return await interaction.response.send_message(
                 embed=ui.warn_embed("掲示していません", "このサーバーには、ランキングの掲示がありません。"),
@@ -501,7 +497,7 @@ class EconomyCog(commands.Cog):
             )
         await interaction.response.defer(ephemeral=True)
         await self._delete_board_message(interaction.guild, board)
-        self.eco.delete_leaderboard(interaction.guild.id)
+        self.bot.economy.delete_leaderboard(interaction.guild.id)
         await interaction.followup.send(
             embed=ui.ok_embed("掲示を止めました", "自動の更新をやめて、ランキングの投稿を削除しました。"),
             ephemeral=True,

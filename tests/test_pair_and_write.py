@@ -270,10 +270,11 @@ def test_order_pair_needs_a_counterpart_and_shows_the_condition(cog):
     embed = it.sent[-1]["embed"]
     assert "ペア・ワラント" in embed.title and "CSトークン vs TEIO重工" in embed.title
     assert "上昇率" in embed.description and "想定リターン" in embed.description
-    assert cog.eco.for_guild(G).option_list(U)["active"][0]["symbol2"] == "teio"
+    assert cog.bot.economy.for_guild(G).option_list(U)["active"][0]["symbol2"] == "teio"
 
 
 def test_order_naked_sell_asks_for_confirmation_and_creates_the_position(cog, monkeypatch):
+    from cogs import market_cog
     from tests.test_market import It
 
     asked = []
@@ -282,24 +283,25 @@ def test_order_naked_sell_asks_for_confirmation_and_creates_the_position(cog, mo
         asked.append((needed, title, text))
         return interaction.response.send_message
 
-    monkeypatch.setattr(MarketCog, "_confirmed_reply", staticmethod(agree))  # 確認ダイアログは、内容だけを記録して通す
+    monkeypatch.setattr(market_cog, "_confirmed_reply", agree)  # 確認ダイアログは、内容だけを記録して通す
     it = It()
     asyncio.run(MarketCog.order.callback(cog, it, choice("cs"), 2_000, choice("scall"), None, None))
     assert (
         asked and asked[0][0] is True and "借金になります" in asked[0][2]
     )  # 裸売りは、必ず確認を挟み、借金になりうることを伝える
     assert "コール裸売り" in it.sent[-1]["embed"].title
-    row = cog.eco.for_guild(G).option_list(U)["active"][0]
+    row = cog.bot.economy.for_guild(G).option_list(U)["active"][0]
     assert row["side"] == "short" and row["kind"] == "call"
 
 
 def test_holdings_and_settle_for_a_naked_sell_and_a_pair(cog, monkeypatch):
+    from cogs import market_cog
     from tests.test_market import It
 
     async def agree(interaction, needed, title, text, label):
         return interaction.response.send_message
 
-    monkeypatch.setattr(MarketCog, "_confirmed_reply", staticmethod(agree))
+    monkeypatch.setattr(market_cog, "_confirmed_reply", agree)
     asyncio.run(MarketCog.order.callback(cog, It(), choice("cs"), 2_000, choice("sput"), None, None))
     asyncio.run(MarketCog.order.callback(cog, It(), choice("cs"), 1_000, choice("pair"), None, choice("numa")))
     it = It()
@@ -324,5 +326,5 @@ def test_leverage_is_refused_for_pair_and_naked_sell(cog):
         it = It()
         asyncio.run(MarketCog.order.callback(cog, it, choice("cs"), 1_000, choice(kind), choice(3), choice("teio")))
         assert it.sent[-1]["ephemeral"] and "❌" in it.sent[-1]["embed"].title
-    assert cog.eco.for_guild(G).option_list(U)["active"] == []
+    assert cog.bot.economy.for_guild(G).option_list(U)["active"] == []
     assert market_events and INITIAL_BALANCE  # 読み込みの確認

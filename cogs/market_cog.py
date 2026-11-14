@@ -24,7 +24,6 @@ from cogs._market_embeds import (
     correlation_lines,
     correlation_table,
     cut_lines,
-    describe_option_done,
     earnings_announce_embed,
     earnings_lines,
     earnings_result_embed,
@@ -61,6 +60,41 @@ ORDER_CHOICES = SYMBOL_CHOICES + [
 ]
 
 
+async def _confirmed_reply(interaction: discord.Interaction, needed: bool, title: str, text: str, label: str):
+    """大きな取引は、確認ボタンを出す。進んでよければ「返信に使う関数」を返し、やめたなら None を返す。
+    確認を挟んだときは、最初の返信がすでに確認画面に使われているので、あとの返信は followup になる。"""
+    return await confirmed_reply(interaction, needed, title, text, label, confirm_fn=confirm_action)
+
+
+async def _reject_lots_and_ratio(interaction: discord.Interaction, lots, ratio) -> bool:
+    """「枚数」と「割合」を両方指定していたら、エラーを返して True を返す。"""
+    if lots is None or ratio is None:
+        return False
+    await interaction.response.send_message(
+        embed=ui.error_embed("どちらか1つにしてください", "「枚数」と「割合」は、どちらか一方だけ指定できます。"),
+        ephemeral=True,
+    )
+    return True
+
+
+def _units_from(have: int, lots, ratio) -> Optional[int]:
+    """売る・買い戻す口数。枚数の指定ならその口数、割合（1〜100の数値。「半分」は50）ならその割合、どちらも省略（または100%）なら None（全部）。"""
+    if lots is not None:
+        return int(round(lots * market.UNIT))
+    if ratio is not None:
+        value = ratio.value
+        if value == "half":
+            value = 50
+        if isinstance(value, int) and 0 < value < 100:
+            return max(1, have * value // 100)
+    return None
+
+
+def _worth(have: int, units: Optional[int], price: float) -> float:
+    """売買する分（units が None なら全部）の、いまの価格での金額。確認を挟むかの判定に使う。"""
+    return (have if units is None else min(units, have)) * price // market.UNIT
+
+
 class MarketCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -69,26 +103,22 @@ class MarketCog(commands.Cog):
     def g(self, interaction: discord.Interaction):
         return self.bot.economy.for_guild(interaction.guild.id)
 
-    @property
-    def eco(self):
-        return self.bot.economy
-
     group = app_commands.Group(
         name="証券", description="📈 注文・保有・市況・決済（4銘柄と債券。ゲーム内の通貨・現実のお金とは無関係）"
     )
 
     # ------------------------------ 価格の更新 ------------------------------ #
     def _price(self, symbol: str = market.DEFAULT) -> float:
-        return latest_price(self.eco, symbol)
+        return latest_price(self.bot.economy, symbol)
 
     def _prices(self) -> dict:
-        return all_prices(self.eco)
+        return all_prices(self.bot.economy)
 
     def _day_reference(self, now: float) -> dict:
         """値幅制限の基準になる、約24時間前の価格 {銘柄: 価格}。履歴がまだ無い銘柄は含めない。"""
         out = {}
         for sym in market.SYMBOLS:
-            hist = self.eco.market_history(now - 86400, sym.key)
+            hist = self.bot.economy.market_history(now - 86400, sym.key)
             if hist:
                 out[sym.key] = hist[0][1]
         return out
@@ -96,18 +126,20 @@ class MarketCog(commands.Cog):
     def step_prices(self) -> tuple:
         """全銘柄の価格を1つ進めて、(新しい価格 {銘柄: 価格}, 有事の出来事) を返す。"""
         prices = self._prices()  # 画面に出ている価格（値幅制限のかかったもの）
-        fair = {k: self.eco.market_fair_get(k) or p for k, p in prices.items()}  # 裏の理論価格（制限なしで動く）
-        last_ts = max((self.eco.market_latest(k) or (0,))[0] for k in prices)
+        fair = {
+            k: self.bot.economy.market_fair_get(k) or p for k, p in prices.items()
+        }  # 裏の理論価格（制限なしで動く）
+        last_ts = max((self.bot.economy.market_latest(k) or (0,))[0] for k in prices)
         now = time.time()
-        announced = self.eco.event_step(now, RNG)  # ボラティリティ予告の抽選
+        announced = self.bot.economy.event_step(now, RNG)  # ボラティリティ予告の抽選
         if announced is not None:
             print(
                 f"ボラティリティ予告: {announced['symbol']} {market_events.LEAD_MIN}分後から{market_events.DURATION_MIN}分"
             )
         tz = float(self.bot.config.get("utc_offset_hours", 9))
-        self.eco.earnings_ensure(now, tz)  # 次の決算（毎週火曜13:30）を決めておく
-        new_fair, event = market.next_prices(fair, RNG, self.eco.vol_multipliers(now))
-        for r in self.eco.earnings_release_due(
+        self.bot.economy.earnings_ensure(now, tz)  # 次の決算（毎週火曜13:30）を決めておく
+        new_fair, event = market.next_prices(fair, RNG, self.bot.economy.vol_multipliers(now))
+        for r in self.bot.economy.earnings_release_due(
             now
         ):  # 決算の発表: 理論価格が、一気に動く（値幅制限は、画面の価格にだけかかる）
             hit = new_fair[r["symbol"]] * earnings.factor(r["direction"], r["size"])
@@ -122,8 +154,8 @@ class MarketCog(commands.Cog):
         )  # 理論価格が値幅の外なら、張り付き（翌日も、次の値幅の端に張り付く＝2連ストップ）
         ts = max(time.time(), last_ts + 0.001)  # 時計が戻っても、記録の順序を崩さない
         for key, price in new.items():
-            self.eco.market_set(ts, price, event, key)
-            self.eco.market_fair_set(key, new_fair[key], pins.get(key, 0), ts)
+            self.bot.economy.market_set(ts, price, event, key)
+            self.bot.economy.market_fair_set(key, new_fair[key], pins.get(key, 0), ts)
         return new, event
 
     async def cog_load(self):
@@ -137,11 +169,11 @@ class MarketCog(commands.Cog):
     async def tick(self):
         try:
             prices, _event = self.step_prices()
-            self.eco.margin_interest(time.time())  # 信用金利を、担保から引く（そのあとで、維持率を調べる）
-            for guild_id, user_id, symbol, side, loss in self.eco.margin_losscut(prices):
+            self.bot.economy.margin_interest(time.time())  # 信用金利を、担保から引く（そのあとで、維持率を調べる）
+            for guild_id, user_id, symbol, side, loss in self.bot.economy.margin_losscut(prices):
                 print(f"{Economy.SIDE_NAME[side]}をロスカット: guild={guild_id} user={user_id} {symbol} 損失={loss:,}")
-            self.eco.market_prune(time.time() - KEEP_DAYS * 86400)
-            self.eco.prune_chart_posts(time.time() - KEEP_DAYS * 86400)
+            self.bot.economy.market_prune(time.time() - KEEP_DAYS * 86400)
+            self.bot.economy.prune_chart_posts(time.time() - KEEP_DAYS * 86400)
         except Exception as exc:
             print(f"価格の更新に失敗: {exc!r}")
             return
@@ -150,7 +182,7 @@ class MarketCog(commands.Cog):
         except Exception as exc:
             print(f"決算の告知に失敗: {exc!r}")
         now, cache = time.time(), {}
-        for post in self.eco.live_chart_posts():
+        for post in self.bot.economy.live_chart_posts():
             try:
                 await self._refresh_post(post, now, cache)
             except Exception as exc:  # 1つのチャンネルの失敗で、他の更新を止めない
@@ -159,16 +191,16 @@ class MarketCog(commands.Cog):
     async def _earnings_posts(self) -> None:
         """決算の予告（月曜9:00）と発表の結果を、各サーバーの告知チャンネルに投稿する。"""
         now = time.time()
-        embeds = [earnings_announce_embed(r) for r in self.eco.earnings_to_announce(now)]
+        embeds = [earnings_announce_embed(r) for r in self.bot.economy.earnings_to_announce(now)]
         results, self._earnings_results = self._earnings_results, []
         for r in results:
-            embeds.append(earnings_result_embed(r, self.eco.market_pin(r["symbol"])))
+            embeds.append(earnings_result_embed(r, self.bot.economy.market_pin(r["symbol"])))
         if not embeds:
             return
         for guild in list(self.bot.guilds):
-            if not approval.is_allowed(self.eco, self.bot.config, guild.id, 0):
+            if not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
                 continue
-            channel = announce_channel(guild, self.eco.for_guild(guild.id))
+            channel = announce_channel(guild, self.bot.economy.for_guild(guild.id))
             if channel is None:
                 continue
             for embed in embeds:
@@ -187,7 +219,7 @@ class MarketCog(commands.Cog):
 
     # ------------------------------ 表示 ------------------------------ #
     def correlation_lines(self, symbol: str) -> str:
-        return correlation_lines(self.eco, symbol)
+        return correlation_lines(self.bot.economy, symbol)
 
     def chart_embed(
         self,
@@ -199,7 +231,7 @@ class MarketCog(commands.Cog):
         symbol: str = market.DEFAULT,
     ) -> discord.Embed:
         return chart_embed(
-            self.eco,
+            self.bot.economy,
             period=period,
             title_prefix=title_prefix,
             guild_id=guild_id,
@@ -209,25 +241,25 @@ class MarketCog(commands.Cog):
         )
 
     def pin_lines(self, symbol: str) -> str:
-        return pin_lines(self.eco, symbol)
+        return pin_lines(self.bot.economy, symbol)
 
     def correlation_table(self) -> str:
-        return correlation_table(self.eco)
+        return correlation_table(self.bot.economy)
 
     def event_lines(self) -> str:
-        return event_lines(self.eco)
+        return event_lines(self.bot.economy)
 
     def earnings_lines(self) -> str:
-        return earnings_lines(self.eco)
+        return earnings_lines(self.bot.economy)
 
     def alert_lines(self) -> str:
-        return _alert_lines(self.eco)
+        return _alert_lines(self.bot.economy)
 
     def cut_lines(self, guild_id: int) -> str:
-        return cut_lines(self.eco, guild_id)
+        return cut_lines(self.bot.economy, guild_id)
 
     def summary_embed(self, guild_id: Optional[int] = None) -> discord.Embed:
-        return summary_embed(self.eco, guild_id=guild_id)
+        return summary_embed(self.bot.economy, guild_id=guild_id)
 
     @group.command(
         name="市況", description=f"価格・連動・チャート。銘柄を選ぶと、{LIVE_MINUTES}分間、自動で更新するチャートを出す"
@@ -259,7 +291,7 @@ class MarketCog(commands.Cog):
         # チャートは1チャンネルに1つだけ。前に出したチャートは消し、新しいものを、一定時間だけ自動で更新する
         try:
             message = await interaction.original_response()
-            prev = self.eco.swap_chart_post(message.channel.id, message.id, interaction.guild.id, key, now, sym)
+            prev = self.bot.economy.swap_chart_post(message.channel.id, message.id, interaction.guild.id, key, now, sym)
             if prev is not None and prev != message.id:
                 await message.channel.get_partial_message(prev).delete()
         except discord.HTTPException as exc:  # 前のチャートがすでに無い・消せないときは、そのままにする（記録だけ残す）
@@ -273,41 +305,6 @@ class MarketCog(commands.Cog):
         async with user_session(self.bot, interaction, "いまは取引できません") as ok:
             if ok:
                 await action(interaction.user.id)
-
-    @staticmethod
-    async def _confirmed_reply(interaction: discord.Interaction, needed: bool, title: str, text: str, label: str):
-        """大きな取引は、確認ボタンを出す。進んでよければ「返信に使う関数」を返し、やめたなら None を返す。
-        確認を挟んだときは、最初の返信がすでに確認画面に使われているので、あとの返信は followup になる。"""
-        return await confirmed_reply(interaction, needed, title, text, label, confirm_fn=confirm_action)
-
-    @staticmethod
-    async def _reject_lots_and_ratio(interaction: discord.Interaction, lots, ratio) -> bool:
-        """「枚数」と「割合」を両方指定していたら、エラーを返して True を返す。"""
-        if lots is None or ratio is None:
-            return False
-        await interaction.response.send_message(
-            embed=ui.error_embed("どちらか1つにしてください", "「枚数」と「割合」は、どちらか一方だけ指定できます。"),
-            ephemeral=True,
-        )
-        return True
-
-    @staticmethod
-    def _units_from(have: int, lots, ratio) -> Optional[int]:
-        """売る・買い戻す口数。枚数の指定ならその口数、割合（1〜100の数値。「半分」は50）ならその割合、どちらも省略（または100%）なら None（全部）。"""
-        if lots is not None:
-            return int(round(lots * market.UNIT))
-        if ratio is not None:
-            value = ratio.value
-            if value == "half":
-                value = 50
-            if isinstance(value, int) and 0 < value < 100:
-                return max(1, have * value // 100)
-        return None
-
-    @staticmethod
-    def _worth(have: int, units: Optional[int], price: float) -> float:
-        """売買する分（units が None なら全部）の、いまの価格での金額。確認を挟むかの判定に使う。"""
-        return (have if units is None else min(units, have)) * price // market.UNIT
 
     async def _buy_amount_autocomplete(self, interaction: discord.Interaction, current: str):
         """買うのに使う金額の欄に、残高を見せる。何も打っていない（数字でない）ときは、残高の25・50・75・100%の候補も出す。"""
@@ -335,7 +332,7 @@ class MarketCog(commands.Cog):
                     ephemeral=True,
                 )
             units = market.buy_quote(amount, price)[0]
-            reply = await self._confirmed_reply(
+            reply = await _confirmed_reply(
                 interaction,
                 amount >= CONFIRM_FROM,
                 "買いますか？",
@@ -363,7 +360,7 @@ class MarketCog(commands.Cog):
 
     async def _margin_close(self, interaction, side: str, symbol: str, lots, ratio) -> None:
         """信用取引の決済（空売りは買い戻し、信用買いは売り戻し）。枚数か割合で指定する。どちらも省略すると全部。"""
-        if await self._reject_lots_and_ratio(interaction, lots, ratio):
+        if await _reject_lots_and_ratio(interaction, lots, ratio):
             return
 
         sym, label = market.BY_KEY[symbol], Economy.SIDE_NAME[side]
@@ -377,14 +374,14 @@ class MarketCog(commands.Cog):
                     embed=ui.error_embed(cannot, f"{sym.name}の{label}を建てていません。`/証券 注文` で建てられます。"),
                     ephemeral=True,
                 )
-            units = self._units_from(have, lots, ratio)
+            units = _units_from(have, lots, ratio)
             price = self._price(sym.key)
             shown = market.lots(have if units is None else units)
-            reply = await self._confirmed_reply(
+            reply = await _confirmed_reply(
                 interaction,
-                self._worth(have, units, price) >= CONFIRM_FROM,
+                _worth(have, units, price) >= CONFIRM_FROM,
                 f"{verb}ますか？",
-                f"**{shown}** を{verb}て、{label}を閉じます。\n\n{self._margin_position(side, have, entry_value, margin, price)}",
+                f"**{shown}** を{verb}て、{label}を閉じます。\n\n{margin_position_text(side, have, entry_value, margin, price)}",
                 f"{verb}る",
             )
             if reply is None:
@@ -395,7 +392,7 @@ class MarketCog(commands.Cog):
                 return await reply(embed=ui.error_embed(f"{cannot[:-2]}ませんでした", res.reason), ephemeral=True)
             left, left_entry, left_margin = self.g(interaction).margin_position(uid, sym.key, side)
             rest = (
-                f"\n\n残りの建玉\n{self._margin_position(side, left, left_entry, left_margin, price)}"
+                f"\n\n残りの建玉\n{margin_position_text(side, left, left_entry, left_margin, price)}"
                 if left > 0
                 else f"\n{label}を全部閉じました。"
             )
@@ -416,21 +413,9 @@ class MarketCog(commands.Cog):
 
         await self._trade(interaction, run)
 
-    @staticmethod
-    def _margin_position(side: str, units: int, entry_value: float, margin: int, price: float) -> str:
-        return margin_position_text(side, units, entry_value, margin, price)
-
-    @staticmethod
-    def margin_ratio_text(status: dict) -> str:
-        return margin_ratio_text(status)
-
-    @staticmethod
-    def _position(units: int, cost: int, price: int) -> str:
-        return spot_position_text(units, cost, price)
-
     async def _sell(self, interaction: discord.Interaction, symbol: str, lots, ratio) -> None:
         """現物の売却。枚数か割合（半分・全部）で指定する。どちらも省略すると全部。"""
-        if await self._reject_lots_and_ratio(interaction, lots, ratio):
+        if await _reject_lots_and_ratio(interaction, lots, ratio):
             return
         sym = market.BY_KEY[symbol]
 
@@ -441,14 +426,14 @@ class MarketCog(commands.Cog):
                     embed=ui.error_embed("売れません", f"{sym.name}を持っていません。`/証券 注文` で買えます。"),
                     ephemeral=True,
                 )
-            units = self._units_from(have, lots, ratio)
+            units = _units_from(have, lots, ratio)
             price = self._price(sym.key)
             shown = market.lots(have if units is None else units)
-            reply = await self._confirmed_reply(
+            reply = await _confirmed_reply(
                 interaction,
-                self._worth(have, units, price) >= CONFIRM_FROM,
+                _worth(have, units, price) >= CONFIRM_FROM,
                 "売りますか？",
-                f"**{shown}** を売ります。\n\n{self._position(have, cost, price)}",
+                f"**{shown}** を売ります。\n\n{spot_position_text(have, cost, price)}",
                 "売る",
             )
             if reply is None:
@@ -459,7 +444,9 @@ class MarketCog(commands.Cog):
                 return await reply(embed=ui.error_embed("売れませんでした", res.reason), ephemeral=True)
             left, left_cost = self.g(interaction).crypto_holding(uid, sym.key)
             pct = market.pnl_percent(price, have, cost)  # 売った分の、取得価格に対する増減
-            rest = f"\n\n残りの持ち分\n{self._position(left, left_cost, price)}" if left > 0 else "\n全部売りました。"
+            rest = (
+                f"\n\n残りの持ち分\n{spot_position_text(left, left_cost, price)}" if left > 0 else "\n全部売りました。"
+            )
             await reply(
                 embed=ui.embed(
                     f"{sym.name}を売りました",
@@ -517,7 +504,7 @@ class MarketCog(commands.Cog):
             margin = math.ceil(round(notional / leverage, 6))
             direction = "売り建て" if side == "short" else "買い建て"
             gain = "下がると利益、上がると損失" if side == "short" else "上がると利益、下がると損失"
-            reply = await self._confirmed_reply(
+            reply = await _confirmed_reply(
                 interaction,
                 notional >= CONFIRM_FROM,
                 f"{label}しますか？",
@@ -539,8 +526,8 @@ class MarketCog(commands.Cog):
                 embed=ui.ok_embed(
                     f"{sym.name}を{label}しました",
                     f"**{market.lots(res.units)}**（価格 {market.pel(price)}・{leverage}倍）\n"
-                    f"預けた担保: {ui.pelica(res.money)}\n残高: **{ui.pelica(res.balance)}**\n\n{self._margin_position(side, have, entry_value, margin_all, price)}\n\n"
-                    f"{self.margin_ratio_text(eco.margin_status(uid, self._prices()))}\n"
+                    f"預けた担保: {ui.pelica(res.money)}\n残高: **{ui.pelica(res.balance)}**\n\n{margin_position_text(side, have, entry_value, margin_all, price)}\n\n"
+                    f"{margin_ratio_text(eco.margin_status(uid, self._prices()))}\n"
                     "閉じるには `/証券 保有` のボタンか、`/証券 決済` を使います。",
                 )
             )
@@ -576,7 +563,7 @@ class MarketCog(commands.Cog):
 
         def quote(price: float) -> tuple:
             now = time.time()
-            events = self.eco.market_events(now)
+            events = self.bot.economy.market_events(now)
             if pair:
                 rate = opt.pair_ask_rate(sym.key, symbol2, seconds, now, events)
                 units = int(amount / rate) if rate > 0 else 0
@@ -599,7 +586,7 @@ class MarketCog(commands.Cog):
                     ),
                     ephemeral=True,
                 )
-            reply = await self._confirmed_reply(
+            reply = await _confirmed_reply(
                 interaction,
                 cost >= CONFIRM_FROM,
                 f"{name}を買いますか？",
@@ -639,7 +626,7 @@ class MarketCog(commands.Cog):
             now = time.time()
             strike = opt.strike_for(kind, price, strike_pct)
             units = int(amount / opt.margin_per_unit(strike))
-            bid = opt.bid_per_unit(kind, sym.key, price, strike, seconds, now, self.eco.market_events(now))
+            bid = opt.bid_per_unit(kind, sym.key, price, strike, seconds, now, self.bot.economy.market_events(now))
             return strike, units, math.ceil(round(units * opt.margin_per_unit(strike), 6)), int(bid * units)
 
         async def run(uid):
@@ -655,7 +642,7 @@ class MarketCog(commands.Cog):
             loss10 = opt.intrinsic(kind, units, price * (1 + sign * 0.10), strike)
             loss20 = opt.intrinsic(kind, units, price * (1 + sign * 0.20), strike)
             cond = "上がる" if kind == opt.CALL else "下がる"
-            reply = await self._confirmed_reply(
+            reply = await _confirmed_reply(
                 interaction,
                 True,
                 f"{label}しますか？（損失が証拠金を超えると借金になります）",
@@ -697,7 +684,7 @@ class MarketCog(commands.Cog):
         if short:
             cost = eco.option_close_cost(row, now, prices)
             text = (
-                f"{self._option_line(row, prices)}\n買い戻しの費用 **{ui.pelica(cost)}**（預けた証拠金 {ui.pelica(row['margin'])}）。"
+                f"{option_line(row, prices)}\n買い戻しの費用 **{ui.pelica(cost)}**（預けた証拠金 {ui.pelica(row['margin'])}）。"
                 + (
                     f"\n⚠️ 費用が証拠金を **{cost - row['margin']:,}ペリカ** 超えるので、その分は借金になります。"
                     if cost > row["margin"]
@@ -707,9 +694,9 @@ class MarketCog(commands.Cog):
             needs = cost >= CONFIRM_FROM or cost > row["margin"]
         else:
             value = eco.option_value(row, now, prices)
-            text = f"{self._option_line(row, prices)}\nいま売ると **{ui.pelica(value)}** です（掛け金 {ui.pelica(row['premium'])}）。"
+            text = f"{option_line(row, prices)}\nいま売ると **{ui.pelica(value)}** です（掛け金 {ui.pelica(row['premium'])}）。"
             needs = value >= CONFIRM_FROM
-        reply = await self._confirmed_reply(
+        reply = await _confirmed_reply(
             interaction,
             needs,
             "オプションを買い戻しますか？" if short else "オプションを売りますか？",
@@ -735,14 +722,6 @@ class MarketCog(commands.Cog):
         await reply(
             embed=ui.embed("買い戻しました" if short else "オプションを売りました", body, ui.OK if good else ui.ERROR)
         )
-
-    @staticmethod
-    def _describe_option_done(row: dict) -> str:
-        return describe_option_done(row)
-
-    @staticmethod
-    def _option_line(row: dict, prices: dict) -> str:
-        return option_line(row, prices)
 
     # ------------------------------ 注文 ------------------------------ #
     @group.command(name="注文", description="買う・信用買い・空売り・債券を買う（銘柄と金額を選ぶだけ）")
@@ -871,7 +850,7 @@ class MarketCog(commands.Cog):
         )
 
     def holdings_embed(self, uid: int, guild_id: int) -> discord.Embed:
-        return holdings_embed(self.eco, uid, guild_id, RNG)
+        return holdings_embed(self.bot.economy, uid, guild_id, RNG)
 
     @group.command(name="保有", description="現物・信用取引・債券をまとめて見る（ボタンで、すぐ決済できる）")
     async def holdings(self, interaction: discord.Interaction):
@@ -950,7 +929,7 @@ class MarketCog(commands.Cog):
         channel = self.bot.get_channel(post["channel_id"])
         if channel is None:
             if expired or self.bot.get_guild(post["guild_id"]) is None:
-                self.eco.end_chart_post(post["channel_id"])
+                self.bot.economy.end_chart_post(post["channel_id"])
             return
         if post["guild_id"] > 0:
             key = (post["guild_id"], post["period"], post["symbol"], expired, int(ends // 60))
@@ -965,18 +944,18 @@ class MarketCog(commands.Cog):
             try:  # 履歴を読む権限が要らないよう、投稿を取得せずに直接書き換える
                 await channel.get_partial_message(post["message_id"]).edit(embed=cache[key])
             except discord.NotFound:
-                self.eco.delete_chart_post(post["channel_id"])  # 消されたチャートは、もう更新しない
+                self.bot.economy.delete_chart_post(post["channel_id"])  # 消されたチャートは、もう更新しない
                 return
             except discord.HTTPException as exc:
                 logthrottle.warn(
                     ("chart", post["channel_id"]), f"チャートを更新できません: channel={post['channel_id']}: {exc!r}"
                 )
         if expired:
-            self.eco.end_chart_post(post["channel_id"])
+            self.bot.economy.end_chart_post(post["channel_id"])
 
     async def _retire_old_boards(self) -> None:
         """廃止した「チャート掲示」が残っていれば、メッセージを消して、設定も捨てる（1回だけ）。"""
-        for board in self.eco.list_chart_boards():
+        for board in self.bot.economy.list_chart_boards():
             channel = self.bot.get_channel(board["channel_id"])
             if channel is not None:
                 try:
@@ -986,11 +965,11 @@ class MarketCog(commands.Cog):
                         ("chart-board", board["guild_id"]),
                         f"廃止したチャート掲示を消せません: guild={board['guild_id']}: {exc!r}",
                     )
-            self.eco.delete_chart_board(board["guild_id"])
+            self.bot.economy.delete_chart_board(board["guild_id"])
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
-        self.eco.delete_guild_chart_posts(guild.id)
+        self.bot.economy.delete_guild_chart_posts(guild.id)
 
 
 async def setup(bot):

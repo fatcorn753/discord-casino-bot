@@ -191,20 +191,20 @@ class AnnounceModal(discord.ui.Modal, title="お知らせの本文"):
         await interaction.followup.send(embeds=[head, preview], files=files, view=view, ephemeral=True)
 
 
+def purge_report_embed(result: PurgeResult, done: bool) -> discord.Embed:
+    head = "🧹 発言を消しました" if done else "🧹 消しています…"
+    lines = [f"消せた発言: **{result.deleted}件**（見た発言: {result.scanned}件）"]
+    if result.failed:
+        lines.append(f"⚠️ 消せなかった発言: {result.failed}件（権限や通信のエラー。ログに記録しています）")
+    return ui.ok_embed(head, "\n".join(lines)) if done else ui.embed(head, "\n".join(lines), ui.INFO)
+
+
 class PurgeConfirm(ui.OwnerView):
     """Bot の発言を消す前の確認。持ち主本人だけが押せる。元に戻せないので、押すまで何も消さない。"""
 
     def __init__(self, cog: "ApprovalCog", owner_id: int, channel):
         super().__init__(owner_id, timeout=300)
         self.cog, self.channel = cog, channel
-
-    @staticmethod
-    def report(result: PurgeResult, done: bool) -> discord.Embed:
-        head = "🧹 発言を消しました" if done else "🧹 消しています…"
-        lines = [f"消せた発言: **{result.deleted}件**（見た発言: {result.scanned}件）"]
-        if result.failed:
-            lines.append(f"⚠️ 消せなかった発言: {result.failed}件（権限や通信のエラー。ログに記録しています）")
-        return ui.ok_embed(head, "\n".join(lines)) if done else ui.embed(head, "\n".join(lines), ui.INFO)
 
     @discord.ui.button(label="すべて消す", style=discord.ButtonStyle.danger)
     async def purge(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -215,17 +215,17 @@ class PurgeConfirm(ui.OwnerView):
                 embeds=[ui.error_embed("実行中です", "このチャンネルは、いま消している最中です。")], view=None
             )
         self.cog.purging.add(key)
-        await interaction.response.edit_message(embeds=[self.report(PurgeResult(), False)], view=None)
+        await interaction.response.edit_message(embeds=[purge_report_embed(PurgeResult(), False)], view=None)
 
         async def progress(result: PurgeResult) -> None:
             try:
-                await interaction.edit_original_response(embeds=[self.report(result, False)])
+                await interaction.edit_original_response(embeds=[purge_report_embed(result, False)])
             except discord.HTTPException:
                 pass  # 画面が更新できなくても、削除は続ける
 
         try:
             result = await delete_own_messages(self.channel, self.cog.bot.user.id, progress)
-            final = self.report(result, True)
+            final = purge_report_embed(result, True)
         except discord.Forbidden:
             final = ui.error_embed(
                 "履歴を読めません", "Bot に「メッセージ履歴を読む」権限がありません。招待URLの権限を確認してください。"

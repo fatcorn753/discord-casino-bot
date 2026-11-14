@@ -227,17 +227,6 @@ class CryptoMixin:
     _MARGIN_TABLE = {"short": "crypto_short", "long": "crypto_long"}  # 表の名前は固定の文字列だけ（SQL に埋め込むため）
     SIDE_NAME = {"short": "空売り", "long": "信用買い"}
 
-    @staticmethod
-    def margin_pnl(side: str, units: int, entry_value: float, price: float) -> int:
-        """建玉の含み損益。空売りは価格が下がるとプラス、信用買いは上がるとプラス。"""
-        now = units * price / market_mod.UNIT
-        return round(entry_value - now) if side == "short" else round(now - entry_value)
-
-    @staticmethod
-    def short_pnl(units: int, entry_value: float, price: float) -> int:
-        """空売りの含み損益（価格が下がるとプラス）。"""
-        return CryptoMixin.margin_pnl("short", units, entry_value, price)
-
     def margin_position(self, user_id: int, symbol: str, side: str) -> tuple:
         """(口数, 建てた総額, 担保)。建てていなければ (0, 0.0, 0)。"""
         with self._lock:
@@ -299,7 +288,7 @@ class CryptoMixin:
                     f"SELECT user_id, symbol, units, entry_value, margin FROM {table} WHERE guild_id=?", (self._g(),)
                 ):
                     if r["symbol"] in prices:
-                        pnl = self.margin_pnl(side, r["units"], r["entry_value"], prices[r["symbol"]])
+                        pnl = market_mod.margin_pnl(side, r["units"], r["entry_value"], prices[r["symbol"]])
                         out[r["user_id"]] = out.get(r["user_id"], 0) + max(0, r["margin"] + pnl)
             return out
 
@@ -332,7 +321,7 @@ class CryptoMixin:
                 continue
             now = units * prices[symbol] / market_mod.UNIT
             exposure[symbol] = exposure.get(symbol, 0.0) + (now if side == "long" else -now)
-            equity += margin + self.margin_pnl(side, units, entry, prices[symbol])
+            equity += margin + market_mod.margin_pnl(side, units, entry, prices[symbol])
         if add is not None:
             side, symbol, notional, margin = add
             exposure[symbol] = exposure.get(symbol, 0.0) + (notional if side == "long" else -notional)
@@ -445,7 +434,7 @@ class CryptoMixin:
         whole = units == have
         part_margin = margin if whole else round(margin * units / have)
         part_entry = entry_value if whole else entry_value * units / have
-        pnl = self.margin_pnl(side, units, part_entry, price)
+        pnl = market_mod.margin_pnl(side, units, part_entry, price)
         payout = max(0, part_margin + pnl)
         tax = self._gains_tax(user_id, pnl, taxable, self.SIDE_NAME[side] + "決済")
         payout -= tax
@@ -508,7 +497,7 @@ class CryptoMixin:
             if not rows:
                 break
             side, symbol, units, entry, _margin = min(
-                rows, key=lambda r: (self.margin_pnl(r[0], r[2], r[3], prices[r[1]]), r[1], r[0])
+                rows, key=lambda r: (market_mod.margin_pnl(r[0], r[2], r[3], prices[r[1]]), r[1], r[0])
             )
             res = self._margin_close_locked(
                 user_id, side, None, prices[symbol], f"{self.SIDE_NAME[side]}ロスカット", symbol, owe=True

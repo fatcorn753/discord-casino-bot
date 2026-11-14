@@ -15,6 +15,11 @@ from core import approval, events, logthrottle, ui
 from core.clock import local_now
 
 
+def _event_channel(guild: discord.Guild, m: dict):
+    """特別イベントの開始を告知したチャンネル（消えていれば None → 告知チャンネルに出す）。"""
+    return guild.get_channel(m["channel_id"]) if m.get("channel_id") else None
+
+
 class EventCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -73,7 +78,7 @@ class EventCog(commands.Cog):
         m = eco.manual_event_stop(time.time())
         if m is None:
             return False, f"{guild.name}: 開催中の特別イベントはありません"
-        await self._post(guild, eco, self.manual_embed(m, True), self._event_channel(guild, m))
+        await self._post(guild, eco, self.manual_embed(m, True), _event_channel(guild, m))
         return True, f"{guild.name}: {events.GAMES.get(m['game'], (m['game'],))[0]}を終わらせました"
 
     async def run_once(self) -> None:
@@ -91,7 +96,7 @@ class EventCog(commands.Cog):
         eco = self.bot.economy.for_guild(guild.id)
         done = eco.manual_event_finish_due(time.time())  # 時間が来た特別イベントの終了を、1回だけ告知する
         if done is not None:
-            await self._post(guild, eco, self.manual_embed(done, True), self._event_channel(guild, done))
+            await self._post(guild, eco, self.manual_embed(done, True), _event_channel(guild, done))
         ev = events.schedule(guild.id, now.date())
         phase = eco.event_phase(now.date())
         if phase == 0 and ev.start_min <= minutes < ev.end_min:
@@ -101,11 +106,6 @@ class EventCog(commands.Cog):
             eco.set_event_phase(now.date(), 2)
             if phase == 1:  # 開始を告知した分だけ、終了も告知する
                 await self._post(guild, eco, self.build_embed(ev, True))
-
-    @staticmethod
-    def _event_channel(guild: discord.Guild, m: dict):
-        """特別イベントの開始を告知したチャンネル（消えていれば None → 告知チャンネルに出す）。"""
-        return guild.get_channel(m["channel_id"]) if m.get("channel_id") else None
 
     async def _post(self, guild: discord.Guild, eco, embed: discord.Embed, channel=None) -> None:
         channel = channel or announce_channel(guild, eco)

@@ -265,6 +265,17 @@ def pnl_percent(price: float, units: int, cost: int) -> float:
     return (price - avg) / avg * 100 if avg else 0.0
 
 
+def margin_pnl(side: str, units: int, entry_value: float, price: float) -> int:
+    """建玉の含み損益。空売りは価格が下がるとプラス、信用買いは上がるとプラス。"""
+    now = units * price / UNIT
+    return round(entry_value - now) if side == "short" else round(now - entry_value)
+
+
+def short_pnl(units: int, entry_value: float, price: float) -> int:
+    """空売りの含み損益（価格が下がるとプラス）。"""
+    return margin_pnl("short", units, entry_value, price)
+
+
 def pel(price: float) -> str:
     return f"{fmt(price)}{UNIT_NAME}"
 

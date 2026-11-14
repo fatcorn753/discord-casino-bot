@@ -209,12 +209,12 @@ def cog(root):
 
 def test_summary_shows_event_alert_and_cut_zones(cog):
     now = time.time()
-    cog.eco.event_step(now, force=event(announce=now))
+    cog.bot.economy.event_step(now, force=event(announce=now))
     for s in market.SYMBOLS:  # 直近の履歴: CS だけ急騰（相関崩壊）
         for i in range(61):
             price = START[s.key] * ((1.10 if s.key == "cs" else 1.0) ** (i / 60))
-            cog.eco.market_set(now - (60 - i) * 60, price, 0, s.key)
-    cog.eco.for_guild(G).long_open(U, 20_000, cog._price("cs"), 5, "cs")
+            cog.bot.economy.market_set(now - (60 - i) * 60, price, 0, s.key)
+    cog.bot.economy.for_guild(G).long_open(U, 20_000, cog._price("cs"), 5, "cs")
     embed = cog.summary_embed(G)
     names = [f.name for f in embed.fields]
     assert any("市場イベント" in n for n in names) and any("相関崩壊" in n for n in names)
@@ -230,7 +230,7 @@ def test_view_offers_quick_buy_buttons_only_while_an_event_exists(cog):
     plain = MarketView(cog, U, G)
     assert len(plain.children) == 2
     now = time.time()
-    cog.eco.event_step(now, force=event(announce=now))
+    cog.bot.economy.event_step(now, force=event(announce=now))
     view = MarketView(cog, U, G)
     labels = [c.label for c in view.children if getattr(c, "label", None)]
     assert any("NUMAバイオの爆騰コール" in x for x in labels) and any("NUMAバイオの暴落プット" in x for x in labels)
@@ -244,7 +244,7 @@ def test_quick_buy_modal_buys_the_option(cog):
     it = It()
     asyncio.run(modal.on_submit(it))
     assert "爆騰コール" in it.sent[-1]["embed"].title
-    assert cog.eco.for_guild(G).option_list(U)["active"][0]["symbol"] == "numa"
+    assert cog.bot.economy.for_guild(G).option_list(U)["active"][0]["symbol"] == "numa"
     bad = OptionAmountModal(cog, opt.PUT, "numa")
     bad.amount = SimpleNamespace(value="abc")
     it = It()
@@ -255,7 +255,7 @@ def test_quick_buy_modal_buys_the_option(cog):
 def test_tick_announces_and_applies_events(cog):
     """価格の更新（step_prices）が、予告の抽選と倍率の適用を呼ぶ。"""
     now = time.time()
-    cog.eco.event_step(now - 20 * 60, force=event(announce=now - 20 * 60))  # 5分前に始まった（発生中）
+    cog.bot.economy.event_step(now - 20 * 60, force=event(announce=now - 20 * 60))  # 5分前に始まった（発生中）
     new, _ = cog.step_prices()
     assert set(new) == {s.key for s in market.SYMBOLS}
-    assert cog.eco.vol_multipliers(time.time()) == {"numa": 3.0}
+    assert cog.bot.economy.vol_multipliers(time.time()) == {"numa": 3.0}

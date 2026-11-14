@@ -228,7 +228,7 @@ def test_order_call_shows_condition_returns_and_holdings_and_settle_sells_it(cog
     embed = it.sent[-1]["embed"]
     assert "爆騰コール" in embed.title and "最大損失はこの掛け金のみ" in embed.description
     assert "勝利条件" in embed.description and "想定リターン" in embed.description
-    eco = cog.eco.for_guild(G)
+    eco = cog.bot.economy.for_guild(G)
     oid = eco.option_list(U)["active"][0]["id"]
     it = It()
     asyncio.run(MarketCog.holdings.callback(cog, it))

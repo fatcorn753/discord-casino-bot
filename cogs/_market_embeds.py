@@ -42,7 +42,7 @@ def all_prices(eco) -> dict:
 def margin_position_text(side: str, units: int, entry_value: float, margin: int, price: float) -> str:
     """信用取引の建玉の状態（建値・いまの価格・損益・担保）。強制決済は口座ぜんたいの維持率で決まる。"""
     avg = entry_value * market.UNIT / units
-    pnl = Economy.margin_pnl(side, units, entry_value, price)
+    pnl = market.margin_pnl(side, units, entry_value, price)
     pct = (avg - price) / avg * 100 if side == "short" else (price - avg) / avg * 100
     hint = "下がると利益" if side == "short" else "上がると利益"
     return (
@@ -332,7 +332,7 @@ def holdings_embed(eco, uid: int, guild_id: int, rng) -> discord.Embed:
                 lines.append(
                     f"{icon} **{Economy.SIDE_NAME[side]}**\n{margin_position_text(side, units, entry, margin, price)}"
                 )
-                total += Economy.margin_pnl(side, units, entry, price)
+                total += market.margin_pnl(side, units, entry, price)
         parts.append("\n".join(lines))
     if options["active"]:
         prices, now = all_prices(eco), time.time()

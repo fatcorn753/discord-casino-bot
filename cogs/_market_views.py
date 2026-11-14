@@ -71,7 +71,7 @@ class MarketView(ui.OwnerView):
         self.add_item(self.symbol_select)
         self.add_item(self.period_select)
         now = time.time()
-        ev = market_events.current(cog.eco.market_events(now), now)
+        ev = market_events.current(cog.bot.economy.market_events(now), now)
         if ev is not None:  # イベントがあるとき、その銘柄のコール・プットを、すぐ買えるボタンを出す
             for kind in (opt.CALL, opt.PUT):
                 name, emoji, _ = opt.KINDS[kind]

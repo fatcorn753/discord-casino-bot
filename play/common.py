@@ -28,6 +28,7 @@ class GameContext:
 
     def __init__(self, bot, user_id: int, escrow_id: int, game: str, bet: int, guild_id: int, name: str = ""):
         self.bot = bot
+        self.economy = bot.economy.for_guild(guild_id)  # ペリカはサーバーごとに別々
         self.name = name  # 遊んでいる人の表示名（タイトルに付けて、誰のゲームか分かるようにする）
         self.guild_id = guild_id
         self.user_id = user_id
@@ -42,10 +43,6 @@ class GameContext:
         self.events = {}  # 連勝・ミッションの結果（演出の表示に使う）
         self.skin = None  # 装備中の、演出の変更品（core/skins.py）。見た目だけが変わる
         self.notices = []  # 精算で起きた、強制執行・種銭などの一言（core/eco_debt.py）
-
-    @property
-    def economy(self):
-        return self.bot.economy.for_guild(self.guild_id)  # ペリカはサーバーごとに別々
 
     def settle(
         self,

@@ -10,22 +10,23 @@ from core import quizpay as quizpay_mod
 from core.schema import new_quiz_order
 
 
+def _quiz_row(row) -> Optional[dict]:
+    if row is None:
+        return None
+    d = dict(row)
+    d["choices"] = json.loads(d["choices"])
+    d["order"] = (
+        [d["choices"][i] for i in json.loads(d["shown_order"])] if d.get("shown_order") else d["choices"][:]
+    )  # 表示する選択肢の並び
+    return d
+
+
 class QuizMixin:
     """クイズの問題・回答・出題者への報酬。"""
 
     # ------------------------------------------------------------------ #
     # クイズ（持ち主が作った4択。1問につき1人1回、正解で報酬）            #
     # ------------------------------------------------------------------ #
-    @staticmethod
-    def _quiz_row(row) -> Optional[dict]:
-        if row is None:
-            return None
-        d = dict(row)
-        d["choices"] = json.loads(d["choices"])
-        d["order"] = (
-            [d["choices"][i] for i in json.loads(d["shown_order"])] if d.get("shown_order") else d["choices"][:]
-        )  # 表示する選択肢の並び
-        return d
 
     def quiz_add(
         self,
@@ -81,7 +82,7 @@ class QuizMixin:
 
     def quiz_get(self, quiz_id: int) -> Optional[dict]:
         with self._lock:
-            return self._quiz_row(self._conn.execute("SELECT * FROM quiz_questions WHERE id=?", (quiz_id,)).fetchone())
+            return _quiz_row(self._conn.execute("SELECT * FROM quiz_questions WHERE id=?", (quiz_id,)).fetchone())
 
     def quiz_list(self) -> list:
         """全問題（新しい順）。回答数と正解数つき。"""
@@ -90,7 +91,7 @@ class QuizMixin:
                 "SELECT q.*, COUNT(a.user_id) AS answered, COALESCE(SUM(a.correct), 0) AS right_count "
                 "FROM quiz_questions q LEFT JOIN quiz_answers a ON a.question_id = q.id GROUP BY q.id ORDER BY q.id DESC"
             ).fetchall()
-        return [self._quiz_row(r) for r in rows]
+        return [_quiz_row(r) for r in rows]
 
     def quiz_delete(self, quiz_id: int) -> bool:
         with self._lock, self._conn:
@@ -109,7 +110,7 @@ class QuizMixin:
                 "AND NOT EXISTS (SELECT 1 FROM quiz_answers a WHERE a.question_id=q.id AND a.guild_id=? AND a.user_id=?) ORDER BY q.id",
                 (now, self._g(), user_id, self._g(), user_id),
             ).fetchall()
-        return (self._quiz_row(rows[0]), len(rows)) if rows else (None, 0)
+        return (_quiz_row(rows[0]), len(rows)) if rows else (None, 0)
 
     def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> tuple:
         """答えを記録する。(成功か, 理由か結果) を返す。結果は correct / reward（実際に入った額）/ answer / explanation。
@@ -118,7 +119,7 @@ class QuizMixin:
         回答者には報酬を全額払う（借金は、出題者に入るお金から、先に自動で返済される）。結果の author_debt_added が、増えた借金。
         """
         with self._lock, self._conn:
-            q = self._quiz_row(self._conn.execute("SELECT * FROM quiz_questions WHERE id=?", (quiz_id,)).fetchone())
+            q = _quiz_row(self._conn.execute("SELECT * FROM quiz_questions WHERE id=?", (quiz_id,)).fetchone())
             if q is None or (q["expires"] is not None and now >= q["expires"]):
                 return False, "この問題は終了しました。"
             author = q["author_id"]
@@ -253,7 +254,7 @@ class QuizMixin:
         """このサーバーで自分が出した、終了前の問題（古い順）。取り下げの候補に使う。"""
         with self._lock:
             return [
-                self._quiz_row(r)
+                _quiz_row(r)
                 for r in self._conn.execute(
                     "SELECT * FROM quiz_questions WHERE author_id=? AND guild_id=? AND settled=0 AND expires>? ORDER BY id",
                     (user_id, self._g(), now),
@@ -278,7 +279,7 @@ class QuizMixin:
                 ).fetchone()
                 base, bonus, part = quizpay_mod.author_payout(n, c, row["reward"])
                 self._quiz_pay_author(
-                    self._quiz_row(row)
+                    _quiz_row(row)
                 )  # 回答のたびに払っているので、通常は差がない（念のための最終調整）
                 self._conn.execute("UPDATE quiz_questions SET settled=1 WHERE id=?", (row["id"],))
                 who = self._conn.execute(
@@ -287,7 +288,7 @@ class QuizMixin:
                 ).fetchall()
                 out.append(
                     {
-                        **self._quiz_row(row),
+                        **_quiz_row(row),
                         "participants": n,
                         "correct_count": c,
                         "base": base,

@@ -159,6 +159,13 @@ def page_embed(key: str) -> discord.Embed:
     return ui.embed(title, "\n".join(lines), ui.GOLD)
 
 
+def _make_callback(key: str):
+    async def callback(interaction: discord.Interaction):
+        await interaction.response.edit_message(embed=page_embed(key), view=HelpView(key))
+
+    return callback
+
+
 class HelpView(discord.ui.View):
     def __init__(self, current: str = HOME, timeout: float = 180):
         super().__init__(timeout=timeout)
@@ -166,15 +173,8 @@ class HelpView(discord.ui.View):
             button = discord.ui.Button(
                 label=label, style=discord.ButtonStyle.primary if key == current else discord.ButtonStyle.secondary
             )
-            button.callback = self._make_callback(key)
+            button.callback = _make_callback(key)
             self.add_item(button)
-
-    @staticmethod
-    def _make_callback(key: str):
-        async def callback(interaction: discord.Interaction):
-            await interaction.response.edit_message(embed=page_embed(key), view=HelpView(key))
-
-        return callback
 
 
 class Help(commands.Cog):
