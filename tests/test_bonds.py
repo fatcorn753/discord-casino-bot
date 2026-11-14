@@ -28,7 +28,10 @@ class Always:
 
 @pytest.fixture
 def eco(tmp_path):
-    return Economy(str(tmp_path / "t.db"))
+    e = Economy(str(tmp_path / "t.db"))
+    e._bank_sync(NOW)  # 行を作る
+    e._bank_set(1_000_000, 0)  # 利息の原資。手元現金を十分に積んでおく（原資が足りない場合は別のテストで確かめる）
+    return e
 
 
 def test_normal_bond_pays_principal_plus_interest_at_maturity(eco):
@@ -207,3 +210,19 @@ def test_ranking_total_and_display_include_the_bond_principal(eco):
     eco.bond_settle(NOW + 3 * DAY, Always(0.99))  # 満期で残高に戻れば、内訳は消える
     assert "債券" not in ranking.build_embed(eco, None, "ランキング").description
     assert eco.bond_values() == {}
+
+
+def test_interest_is_capped_by_the_house_cash_but_principal_is_always_paid_in_full(eco):
+    """利息は帝愛の手元現金から払う（新しく作らない）。足りなければ利息だけ減り、元本は必ず全額返る。"""
+    eco._bank_set(30, 0)  # 利息の原資がほとんどない
+    eco.bond_buy(1, "normal", 2000, NOW)  # +4%で、本来の利息は80
+    done = eco.bond_settle(NOW + 3 * DAY)
+    assert [(d["status"], d["paid"]) for d in done] == [("paid", 2000 + 30)]  # 利息は、残っていた30だけ
+    assert eco.balance(1) == INITIAL_BALANCE - 2000 + 2030
+
+
+def test_no_interest_at_all_when_the_house_has_no_cash(eco):
+    eco._bank_set(0, 0)
+    eco.bond_buy(1, "normal", 2000, NOW)
+    done = eco.bond_settle(NOW + 3 * DAY)
+    assert done[0]["paid"] == 2000  # 元本だけ。預金者からは一切引かない

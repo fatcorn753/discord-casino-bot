@@ -489,6 +489,8 @@ def test_old_users_table_without_the_new_columns_is_upgraded(tmp_path):
 # ----------------------------- 債券の満期と借金 ----------------------------- #
 def test_junk_bond_principal_goes_to_the_debt_when_it_matures_while_indebted(eco):
     eco.balance(U)
+    eco._bank_sync(1.0)
+    eco._bank_set(1_000_000, 0)  # 利息の原資
     assert eco.bond_buy(U, "junk", 1_000, 1.0)[0]  # 元本1,000・利息+20%
     eco._conn.execute("UPDATE users SET debt=5_000, balance=0 WHERE user_id=?", (U,))
     eco._conn.commit()
@@ -504,6 +506,8 @@ def test_junk_bond_principal_goes_to_the_debt_when_it_matures_while_indebted(eco
 
 def test_bond_maturity_without_debt_pays_out_whole(eco):
     eco.balance(U)
+    eco._bank_sync(1.0)
+    eco._bank_set(1_000_000, 0)  # 利息の原資
     assert eco.bond_buy(U, "junk", 1_000, 1.0)[0]
     before = eco.balance(U)
 

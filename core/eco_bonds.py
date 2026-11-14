@@ -1,6 +1,7 @@
 """債券の記録（Economy に混ぜ込む部品）。購入・満期の決着・倒産抽選・売却。
 
 表の定義は core/economy.py の _init_schema にある。利率などの数字は core/bonds.py。
+満期の利息は、帝愛の手元現金から払う（新しく作らない。現金が足りなければ利息が減る。元本は必ず全額返す）。
 """
 
 import random
@@ -90,9 +91,17 @@ class BondMixin:
                     self._conn.execute("UPDATE bonds SET checked=? WHERE id=?", (until, row["id"]))
                 if row["due"] > now:
                     continue
-                paid = bonds_mod.maturity_payout(kind, row["principal"])
+                # 利息は、帝愛の手元現金から払う（新しく作らない。預金者には手を付けない。現金が足りなければ、利息が減る）
+                interest = max(0, bonds_mod.maturity_payout(kind, row["principal"]) - row["principal"])
+                got_interest = 0
+                if interest:
+                    state = self._bank_sync(now)
+                    got_interest = int(min(interest, state["cash"]))
+                    if got_interest:
+                        self._bank_set(state["cash"] - got_interest, state["loaned"])
+                paid = row["principal"] + got_interest
                 self._ensure(row["user_id"])
-                self._apply(row["user_id"], paid, f"債券償還:{kind.name}", income=max(0, paid - row["principal"]))
+                self._apply(row["user_id"], paid, f"債券償還:{kind.name}", income=got_interest)
                 self._repay_all_of(row["user_id"], row["principal"], f"帝愛への返済（債券の元本:{kind.name}）")
                 self._conn.execute("UPDATE bonds SET status='paid', paid=? WHERE id=?", (paid, row["id"]))
                 out.append({**dict(row), "status": "paid", "paid": paid})
