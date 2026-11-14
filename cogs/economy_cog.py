@@ -4,7 +4,7 @@ import datetime
 import logging
 import math
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import discord
 from discord import app_commands
@@ -66,7 +66,7 @@ def manage_guild_or_owner():
     """サーバー管理権限を持つ人、または Bot の持ち主（owner_ids）だけが使える。"""
 
     def predicate(interaction: discord.Interaction) -> bool:
-        if interaction.user.id in approval.owner_ids(interaction.client.config):
+        if interaction.user.id in approval.owner_ids(ui.bot_of(interaction).config):
             return True
         perms = interaction.permissions
         if perms.manage_guild:
@@ -135,38 +135,38 @@ class EconomyCog(commands.Cog):
 
     def g(self, interaction: discord.Interaction):
         """このサーバーのペリカの記録（ペリカはサーバーごとに別々）。"""
-        return self.bot.economy.for_guild(interaction.guild.id)
+        return self.bot.economy.for_guild(ui.guild_id_of(interaction))
 
     group = app_commands.Group(name="ペリカ", description="💴 残高・デイリー・ランキング・送金")
 
     @group.command(name="残高", description="ペリカの残高と成績を表示")
     @app_commands.rename(member="対象")
     @app_commands.describe(member="見たい人（省略時: 自分）")
-    async def balance(self, interaction: discord.Interaction, member: discord.Member = None):
-        member = member or interaction.user
+    async def balance(self, interaction: discord.Interaction, member: Optional[discord.Member] = None):
+        target = member or interaction.user
         # 他の人を見るだけで、その人の口座（初期支給つき）が作られないよう、読み取り専用で調べる
         s = (
-            self.g(interaction).stats(member.id)
-            if member.id == interaction.user.id
-            else self.g(interaction).peek_stats(member.id)
+            self.g(interaction).stats(target.id)
+            if target.id == interaction.user.id
+            else self.g(interaction).peek_stats(target.id)
         )
         if s is None:
             return await interaction.response.send_message(
-                embed=ui.embed(f"💴 {member.display_name} の残高", "まだ遊んでいません（口座がありません）。", ui.INFO)
+                embed=ui.embed(f"💴 {target.display_name} の残高", "まだ遊んでいません（口座がありません）。", ui.INFO)
             )
-        rank = self.g(interaction).rank_of(member.id)
+        rank = self.g(interaction).rank_of(target.id)
         # ショップで買ったカードの色・アイコン・称号を反映する
-        prof = self.g(interaction).get_profile(member.id)  # カタギでないときは、装備が差し押さえ中で、空になって返る
+        prof = self.g(interaction).get_profile(target.id)  # カタギでないときは、装備が差し押さえ中で、空になって返る
         color_item, icon_item, title_item = (shop.BY_ID.get(prof[k]) for k in ("card_color", "card_icon", "title"))
         icon = icon_item.value if icon_item else "💴"
         title_line = f"## 🏷️ {title_item.name}\n" if title_item else ""
         e = ui.embed(
-            f"{icon} {member.display_name} の残高",
+            f"{icon} {target.display_name} の残高",
             f"{title_line}# {ui.pelica(s['balance'])}",
             color_item.value if color_item else ui.GOLD,
         )
-        e.set_thumbnail(url=member.display_avatar.url)
-        e.add_field(name="身分", value=teiai.STATUS_LABEL[self.g(interaction).display_status(member.id)], inline=True)
+        e.set_thumbnail(url=target.display_avatar.url)
+        e.add_field(name="身分", value=teiai.STATUS_LABEL[self.g(interaction).display_status(target.id)], inline=True)
         if s.get("debt"):
             e.add_field(
                 name="帝愛への借金",
@@ -176,7 +176,7 @@ class EconomyCog(commands.Cog):
             )
         if rank:
             e.add_field(name="このサーバーでの順位（純資産）", value=f"{rank[0]}位 / {rank[2]}人", inline=True)
-        owned, collection_total = shop.collection_value(self.g(interaction).inventory(member.id))
+        owned, collection_total = shop.collection_value(self.g(interaction).inventory(target.id))
         if (
             owned and prof["frozen"]
         ):  # 借金中・延滞中・破産者は、ショップの品が差し押さえ中（完済してカタギに戻ると返る）
@@ -191,17 +191,17 @@ class EconomyCog(commands.Cog):
                 value=" ".join(i.value for i in owned),
                 inline=False,
             )
-        raw = self.g(interaction).get_profile(member.id, raw=True)
+        raw = self.g(interaction).get_profile(target.id, raw=True)
         if prof["frozen"] and any(raw[slot] for slot in self.g(interaction).SLOTS):
             e.add_field(
                 name="🔒 称号・カード・演出",
                 value="差し押さえ中です（借金を完済して、カタギに戻ると使えます）",
                 inline=False,
             )
-        held = self.g(interaction).crypto_values().get(member.id, 0)
+        held = self.g(interaction).crypto_values().get(target.id, 0)
         if held:
             e.add_field(name="証券（現物）の評価額", value=ui.pelica(held), inline=True)
-        bonds = self.g(interaction).bond_values().get(member.id, 0)
+        bonds = self.g(interaction).bond_values().get(target.id, 0)
         if bonds:
             e.add_field(name="債券（預けている元本）", value=ui.pelica(bonds), inline=True)
         e.add_field(name="遊んだ回数", value=f"{s['games_played']:,}回", inline=True)
@@ -211,7 +211,7 @@ class EconomyCog(commands.Cog):
             value=f"{s['daily_streak']}日" if s["daily_streak"] else "まだ受け取っていません",
             inline=True,
         )
-        play = self.g(interaction).play_summary(member.id)
+        play = self.g(interaction).play_summary(target.id)
         if play["plays"]:
             e.add_field(
                 name="勝率", value=f"{play['wins'] * 100 // play['plays']}%（{play['plays']:,}戦）", inline=True
@@ -263,7 +263,7 @@ class EconomyCog(commands.Cog):
     @group.command(name="返済", description="帝愛への借金を、手元のペリカから返す（金額を省くと、返せる限り全額）")
     @app_commands.rename(amount="金額")
     @app_commands.describe(amount="返す額（省略で全額）")
-    async def repay(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1] = None):
+    async def repay(self, interaction: discord.Interaction, amount: Optional[app_commands.Range[int, 1]] = None):
         ok, result = self.g(interaction).repay_debt(interaction.user.id, amount)
         if not ok:
             return await interaction.response.send_message(embed=ui.error_embed("返せません", result), ephemeral=True)
@@ -326,10 +326,12 @@ class EconomyCog(commands.Cog):
             embed=ui.embed(f"🔴 {interaction.user.display_name} が自己破産しました", "\n".join(lines), ui.ERROR)
         )
         eco.take_notices(uid)
-        shop_cog = interaction.client.get_cog("ShopCog")
-        member = interaction.guild.get_member(uid) or interaction.user
-        if shop_cog is not None and isinstance(member, discord.Member):
-            await shop_cog.after_bankruptcy(interaction.guild, member)  # 色ロールとニックネームを、すぐに反映する
+        shop_cog: Any = ui.bot_of(interaction).get_cog("ShopCog")
+        guild = interaction.guild
+        if shop_cog is not None and guild is not None:
+            member = guild.get_member(uid) or interaction.user
+            if isinstance(member, discord.Member):
+                await shop_cog.after_bankruptcy(guild, member)  # 色ロールとニックネームを、すぐに反映する
 
     @group.command(name="ミッション", description="今日のミッションと進み具合を見る")
     async def missions(self, interaction: discord.Interaction):
@@ -413,7 +415,7 @@ class EconomyCog(commands.Cog):
     async def cog_load(self):
         self.refresh_boards.start()
 
-    def cog_unload(self):
+    async def cog_unload(self) -> None:
         self.refresh_boards.cancel()
 
     @tasks.loop(minutes=BOARD_INTERVAL_MINUTES)
@@ -438,7 +440,7 @@ class EconomyCog(commands.Cog):
         channel = guild.get_channel(board["channel_id"])
         if channel is not None:
             try:
-                await channel.get_partial_message(board["message_id"]).delete()
+                await ui.partial_message(channel, board["message_id"]).delete()
             except discord.HTTPException:
                 pass
 
@@ -452,7 +454,7 @@ class EconomyCog(commands.Cog):
     )
     @manage_guild_or_owner()
     async def board_set(
-        self, interaction: discord.Interaction, channel: discord.TextChannel = None, stop: bool = False
+        self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None, stop: bool = False
     ):
         if stop:
             return await self._board_unset(interaction)
@@ -464,7 +466,10 @@ class EconomyCog(commands.Cog):
                 ),
                 ephemeral=True,
             )
-        perms = channel.permissions_for(interaction.guild.me)
+        guild = interaction.guild
+        if guild is None:
+            return
+        perms = channel.permissions_for(guild.me)
         if not (perms.view_channel and perms.send_messages and perms.embed_links):
             return await interaction.response.send_message(
                 embed=ui.error_embed(
@@ -474,12 +479,10 @@ class EconomyCog(commands.Cog):
                 ephemeral=True,
             )
         await interaction.response.defer(ephemeral=True)
-        old = self.bot.economy.get_leaderboard(interaction.guild.id)
-        message = await channel.send(
-            embed=self._board_embed(interaction.guild.id), allowed_mentions=discord.AllowedMentions.none()
-        )
-        self.bot.economy.set_leaderboard(interaction.guild.id, channel.id, message.id)
-        await self._delete_board_message(interaction.guild, old)  # 前の掲示板があれば、新しいものと入れ替える
+        old = self.bot.economy.get_leaderboard(guild.id)
+        message = await channel.send(embed=self._board_embed(guild.id), allowed_mentions=discord.AllowedMentions.none())
+        self.bot.economy.set_leaderboard(guild.id, channel.id, message.id)
+        await self._delete_board_message(guild, old)  # 前の掲示板があれば、新しいものと入れ替える
         await interaction.followup.send(
             embed=ui.ok_embed(
                 "ランキングを掲示しました",
@@ -489,15 +492,18 @@ class EconomyCog(commands.Cog):
         )
 
     async def _board_unset(self, interaction: discord.Interaction):
-        board = self.bot.economy.get_leaderboard(interaction.guild.id)
+        guild = interaction.guild
+        if guild is None:
+            return
+        board = self.bot.economy.get_leaderboard(guild.id)
         if board is None:
             return await interaction.response.send_message(
                 embed=ui.warn_embed("掲示していません", "このサーバーには、ランキングの掲示がありません。"),
                 ephemeral=True,
             )
         await interaction.response.defer(ephemeral=True)
-        await self._delete_board_message(interaction.guild, board)
-        self.bot.economy.delete_leaderboard(interaction.guild.id)
+        await self._delete_board_message(guild, board)
+        self.bot.economy.delete_leaderboard(guild.id)
         await interaction.followup.send(
             embed=ui.ok_embed("掲示を止めました", "自動の更新をやめて、ランキングの投稿を削除しました。"),
             ephemeral=True,

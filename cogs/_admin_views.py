@@ -2,7 +2,7 @@
 
 import io
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import discord
 
@@ -30,17 +30,18 @@ class ApprovalButton(
         self.action, self.guild_id = action, guild_id
 
     @classmethod
-    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match):
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Item[Any], match):
         return cls(match["action"], int(match["gid"]))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id not in approval.owner_ids(interaction.client.config):
+        if interaction.user.id not in approval.owner_ids(ui.bot_of(interaction).config):
             await interaction.response.send_message("これは Bot の持ち主だけが操作できます。", ephemeral=True)
             return False
         return True
 
     async def callback(self, interaction: discord.Interaction):
-        bot, eco, gid = interaction.client, interaction.client.economy, self.guild_id
+        bot = ui.bot_of(interaction)
+        eco, gid = bot.economy, self.guild_id
         guild = bot.get_guild(gid)
         row = eco.get_guild_status(gid) or {}
         name = guild.name if guild else row.get("name") or str(gid)
@@ -48,7 +49,7 @@ class ApprovalButton(
             eco.set_guild_status(gid, approval.APPROVED, name, interaction.user.id)
             embed = ui.ok_embed("許可しました", f"**{name}**（`{gid}`）で遊べるようになりました。")
             if guild is not None:
-                cog = bot.get_cog("ApprovalCog")
+                cog = cast("ApprovalCog | None", bot.get_cog("ApprovalCog"))
                 if cog is not None:
                     await cog.announce_approved(guild)
         else:
@@ -100,7 +101,8 @@ class AnnounceConfirm(ui.OwnerView):
                 file = (
                     discord.File(io.BytesIO(self.data), filename=self.filename) if self.data else discord.utils.MISSING
                 )
-                await channel.send(
+                await ui.send_channel(
+                    channel,
                     embed=announce_embed(self.title, self.body, self.filename if self.data else ""),
                     file=file,
                     allowed_mentions=discord.AllowedMentions.none(),

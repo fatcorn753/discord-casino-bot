@@ -8,6 +8,7 @@
 """
 
 import re
+from typing import Any, cast
 
 import discord
 from discord.ext import commands, tasks
@@ -43,11 +44,11 @@ class ListingButton(discord.ui.DynamicItem[discord.ui.Button], template=r"p2p:op
         self.listing_id = listing_id
 
     @classmethod
-    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match):
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Item[Any], match: re.Match):
         return cls(int(match["id"]))
 
     async def callback(self, interaction: discord.Interaction):
-        cog = interaction.client.get_cog("P2PCog")
+        cog = cast("P2PCog | None", ui.bot_of(interaction).get_cog("P2PCog"))
         if cog is None:
             return await interaction.response.send_message(
                 embed=ui.error_embed("いまは使えません", "しばらくしてから、もう一度試してください。"), ephemeral=True
@@ -72,9 +73,10 @@ class BidModal(discord.ui.Modal):
         try:
             amount = int(self.amount.value.replace(",", "").strip())
         except ValueError:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed("入札できません", "数字で入れてください。"), ephemeral=True
             )
+            return
         await self.view.cog.do_bid(interaction, self.view.listing_id, amount)
 
 
@@ -107,6 +109,7 @@ class SellModal(discord.ui.Modal):
     def __init__(self, view: "SellView", mode: str):
         super().__init__(title="定価で出す" if mode == "fixed" else "競りに出す")
         self.view, self.mode = view, mode
+        assert view.target is not None
         kind, _, ref = view.target.partition(":")
         lo, hi = p2p.price_range("horse") if kind == "horse" else p2p.price_range("item", ref, 1)
         self.price = discord.ui.TextInput(
@@ -136,23 +139,25 @@ class SellModal(discord.ui.Modal):
         try:
             price, qty, hours = num(self.price), num(self.qty, 1), num(self.hours)
         except ValueError:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed("出品できません", "数字で入れてください。"), ephemeral=True
             )
+            return
+        assert self.view.target is not None
         kind, _, ref = self.view.target.partition(":")
         eco = self.view.cog.eco_of(interaction)
         ok, result = eco.p2p_list(interaction.user.id, kind, ref, qty or 1, self.mode, price, hours)
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("出品できません", result), ephemeral=True
-            )
+            await interaction.response.send_message(embed=ui.error_embed("出品できません", result), ephemeral=True)
+            return
         row = eco.p2p_get(result)
+        assert row is not None
         self.view.stop()
         posted = await self.view.cog.announce(getattr(interaction, "guild", None), result)  # 告知チャンネルに投稿する
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "出品しました",
-                f"{line_of(eco, row)}\n売れる（落札される）と、{p2p.FEE_RATE:.0%} の手数料を引いた額が入ります。"
+                f"{line_of(row, eco.p2p_label(row))}\n売れる（落札される）と、{p2p.FEE_RATE:.0%} の手数料を引いた額が入ります。"
                 "取り消しは、競売の画面の「📋 自分の取引」から。"
                 + ("\n📣 告知チャンネルに、出品を投稿しました。" if posted else ""),
             ),
@@ -165,7 +170,8 @@ class SellView(ui.OwnerView):
 
     def __init__(self, cog: "P2PCog", user_id: int, guild_id: int):
         super().__init__(user_id, timeout=300)
-        self.cog, self.user_id, self.target = cog, user_id, None
+        self.cog, self.user_id = cog, user_id
+        self.target: str | None = None
         eco = cog.bot.economy.for_guild(guild_id)
         self.options = []
         for item_id, qty in eco.inventory(user_id).items():
@@ -197,7 +203,7 @@ class SellView(ui.OwnerView):
         )
 
     async def _on_pick(self, interaction: discord.Interaction):
-        self.target = interaction.data["values"][0]
+        self.target = ui.selected_values(interaction)[0]
         for option in self.options:  # 選んだものを、選択肢に残して見せる
             option.default = option.value == self.target
         await interaction.response.edit_message(view=self)
@@ -236,8 +242,8 @@ class MineView(ui.OwnerView):
 
     def embed(self) -> discord.Embed:
         eco = self.cog.bot.economy.for_guild(self.guild_id)
-        sell = "\n".join(line_of(eco, r) for r in self.data["selling"]) or "出していません。"
-        bid = "\n".join(line_of(eco, r) for r in self.data["bidding"]) or "入札中のものは、ありません。"
+        sell = "\n".join(line_of(r, eco.p2p_label(r)) for r in self.data["selling"]) or "出していません。"
+        bid = "\n".join(line_of(r, eco.p2p_label(r)) for r in self.data["bidding"]) or "入札中のものは、ありません。"
         e = ui.embed("📋 自分の取引", "", ui.INFO)
         e.add_field(name="出している（入札が入った競りは、取り消せません）", value=sell[:1024], inline=False)
         e.add_field(name="入札中（あなたが最高入札者）", value=bid[:1024], inline=False)
@@ -245,11 +251,13 @@ class MineView(ui.OwnerView):
 
     async def _on_cancel(self, interaction: discord.Interaction):
         eco = self.cog.bot.economy.for_guild(self.guild_id)
-        ok, why = eco.p2p_cancel(self.user_id, int(interaction.data["values"][0]))
+        listing_id = int(ui.selected_values(interaction)[0])
+        ok, why = eco.p2p_cancel(self.user_id, listing_id)
         if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("取り消せません", why), ephemeral=True)
+            await interaction.response.send_message(embed=ui.error_embed("取り消せません", why), ephemeral=True)
+            return
         self.stop()
-        await self.cog.refresh_post(getattr(interaction, "guild", None), int(interaction.data["values"][0]))
+        await self.cog.refresh_post(getattr(interaction, "guild", None), listing_id)
         await interaction.response.send_message(
             embed=ui.ok_embed("取り消しました", "出品を取り消して、品・馬を戻しました。"), ephemeral=True
         )
@@ -263,11 +271,15 @@ class P2PCog(commands.Cog):
         self.bot.add_dynamic_items(ListingButton)
         self.tick.start()
 
-    def cog_unload(self):
+    async def cog_unload(self) -> None:
         self.tick.cancel()
 
     def eco_of(self, interaction: discord.Interaction):
-        return self.bot.economy.for_guild(interaction.guild_id)
+        return self.bot.economy.for_guild(ui.guild_id_of(interaction))
+
+    def _post_args(self, eco, row: dict) -> tuple[str, dict | None]:
+        horse = eco.horse_get(int(row["ref"])) if row["kind"] == "horse" else None
+        return eco.p2p_label(row), horse
 
     # ------------------------------ 出品の告知（チャンネルへの投稿） ------------------------------ #
     async def announce(self, guild, listing_id: int) -> bool:
@@ -277,10 +289,13 @@ class P2PCog(commands.Cog):
         eco = self.bot.economy.for_guild(guild.id)
         row = eco.p2p_get(listing_id)
         channel = announce_channel(guild, eco) if row else None
-        if channel is None:
+        if row is None or channel is None:
             return False
         try:
-            msg = await channel.send(embed=post_embed(eco, row), view=listing_view(listing_id), allowed_mentions=NONE)
+            label, horse = self._post_args(eco, row)
+            msg = await ui.send_channel(
+                channel, embed=post_embed(row, label, horse), view=listing_view(listing_id), allowed_mentions=NONE
+            )
         except discord.HTTPException as exc:
             logthrottle.warn(("p2p-announce", guild.id), f"出品の告知に失敗: guild={guild.id}: {exc!r}")
             return False
@@ -299,10 +314,11 @@ class P2PCog(commands.Cog):
         channel = guild.get_channel(row["channel_id"])
         if channel is not None:
             try:
-                kwargs = {"embed": post_embed(eco, row)}
+                label, horse = self._post_args(eco, row)
+                kwargs: dict[str, Any] = {"embed": post_embed(row, label, horse)}
                 if ended:
                     kwargs["view"] = None
-                await channel.get_partial_message(row["message_id"]).edit(**kwargs)
+                await ui.partial_message(channel, row["message_id"]).edit(**kwargs)
             except discord.HTTPException as exc:  # 消されていても、取引には関係ない
                 logthrottle.warn(
                     ("p2p-refresh", guild.id), f"出品の告知を書き換えられません: guild={guild.id}: {exc!r}"
@@ -317,9 +333,10 @@ class P2PCog(commands.Cog):
         eco = self.eco_of(interaction)
         row = eco.p2p_get(listing_id)
         if row is None or row["status"] != "active":
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed("買えません", "その出品は、もうありません。"), ephemeral=True
             )
+            return
         async with user_session(self.bot, interaction, "いまは買えません") as ok:
             if not ok:
                 return
@@ -336,7 +353,8 @@ class P2PCog(commands.Cog):
                 return
             done, result = eco.p2p_buy(uid, listing_id)
             if not done:
-                return await reply(embed=ui.error_embed("買えませんでした", result), ephemeral=True)
+                await reply(embed=ui.error_embed("買えませんでした", result), ephemeral=True)
+                return
             await reply(
                 embed=ui.ok_embed(
                     "購入しました",
@@ -350,9 +368,10 @@ class P2PCog(commands.Cog):
         eco = self.eco_of(interaction)
         row = eco.p2p_get(listing_id)
         if row is None or row["status"] != "active":
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed("入札できません", "その出品は、もうありません。"), ephemeral=True
             )
+            return
         async with user_session(self.bot, interaction, "いまは入札できません") as ok:
             if not ok:
                 return
@@ -369,7 +388,8 @@ class P2PCog(commands.Cog):
                 return
             done, result = eco.p2p_bid(uid, listing_id, amount)
             if not done:
-                return await reply(embed=ui.error_embed("入札できませんでした", result), ephemeral=True)
+                await reply(embed=ui.error_embed("入札できませんでした", result), ephemeral=True)
+                return
             await reply(
                 embed=ui.ok_embed(
                     "入札しました",
@@ -385,31 +405,36 @@ class P2PCog(commands.Cog):
         eco = self.eco_of(interaction)
         row = eco.p2p_get(listing_id)
         if row is None or row["status"] != "active":
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed("もうありません", "その出品は、終わりました。"), ephemeral=True
             )
+            return
         view = DetailView(self, interaction.user.id, row["id"], row["mode"])
         if row["seller_id"] == interaction.user.id:
             view.clear_items()  # 自分の出品は、買えない
-        await interaction.response.send_message(embed=detail_embed(eco, row), view=view, ephemeral=True)
+        label, horse = self._post_args(eco, row)
+        await interaction.response.send_message(embed=detail_embed(row, label, horse), view=view, ephemeral=True)
 
     async def open_sell(self, interaction: discord.Interaction) -> None:
         """出品の画面（品・馬を選んで、定価か競りで出す）。"""
-        view = SellView(self, interaction.user.id, interaction.guild_id)
+        view = SellView(self, interaction.user.id, ui.guild_id_of(interaction))
         if not view.options:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed(
                     "出せるものがありません", "売れる品（消耗品・カードの色など・発掘品）か、馬を、持っていません。"
                 ),
                 ephemeral=True,
             )
+            return
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
     async def open_mine(self, interaction: discord.Interaction) -> None:
         """自分の出品と入札中のものを見せる（出品は、ここから取り消せる）。"""
-        view = MineView(self, interaction.user.id, interaction.guild_id)
-        kwargs = {"view": view} if view.children else {}
-        await interaction.response.send_message(embed=view.embed(), ephemeral=True, **kwargs)
+        view = MineView(self, interaction.user.id, ui.guild_id_of(interaction))
+        if view.children:
+            await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=view.embed(), ephemeral=True)
 
     # ------------------------------ 締切の精算 ------------------------------ #
     @tasks.loop(seconds=30)
@@ -442,8 +467,11 @@ class P2PCog(commands.Cog):
             if res != "sold" or row["mode"] != "auction" or channel is None:
                 continue  # 落札だけ、告知チャンネルに知らせる
             done = eco.p2p_get(row["id"])
+            if done is None:
+                continue
             try:
-                await channel.send(
+                await ui.send_channel(
+                    channel,
                     embed=ui.embed(
                         "🔨 競りの落札",
                         f"**{eco.p2p_label(row)}** を、<@{done['buyer_id']}> が **{ui.pelica(done['sold_price'])}** で落札しました（出品者 <@{row['seller_id']}>）。",

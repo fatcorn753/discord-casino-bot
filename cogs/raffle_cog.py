@@ -8,6 +8,7 @@
 
 import random
 import time
+from typing import Optional
 
 import discord
 from discord.ext import commands, tasks
@@ -23,7 +24,7 @@ JOIN_ID = "raffle:join"
 SHOWN_ENTRANTS = 20  # 掲示に並べる参加者の数（それ以上は人数だけ）
 
 
-def raffle_embed(raffle: dict, now: float = None) -> discord.Embed:
+def raffle_embed(raffle: dict, now: Optional[float] = None) -> discord.Embed:
     entries = raffle["entries"]
     prize = raffle["fee"] * len(entries)
     shown = " ".join(f"<@{u}>" for u in entries[:SHOWN_ENTRANTS]) + (
@@ -75,7 +76,7 @@ class RaffleCog(commands.Cog):
         self.bot.add_view(JoinView(self))
         self.tick.start()
 
-    def cog_unload(self):
+    async def cog_unload(self) -> None:
         self.tick.cancel()
 
     def g(self, interaction: discord.Interaction):
@@ -83,7 +84,12 @@ class RaffleCog(commands.Cog):
 
     # ------------------------------ 運営の操作（`/運営 抽選 …` から呼ぶ。サーバーは持ち主が指定する） ------------------------------ #
     async def host(
-        self, guild: discord.Guild, host_id: int, fee: int = None, minutes: int = DEFAULT_MINUTES, channel=None
+        self,
+        guild: discord.Guild,
+        host_id: int,
+        fee: Optional[int] = None,
+        minutes: int = DEFAULT_MINUTES,
+        channel=None,
     ) -> tuple:
         """そのサーバーの告知チャンネル（channel を渡せば、そのチャンネル）に、抽選の募集を出す。(成功か, 説明) を返す。"""
         eco = self.bot.economy.for_guild(guild.id)
@@ -99,13 +105,17 @@ class RaffleCog(commands.Cog):
             return False, reason
         raffle = eco.raffle_get()
         try:
-            message = await channel.send(
-                embed=raffle_embed(raffle), view=JoinView(self), allowed_mentions=discord.AllowedMentions.none()
+            message = await ui.send_channel(
+                channel,
+                embed=raffle_embed(raffle),
+                view=JoinView(self),
+                allowed_mentions=discord.AllowedMentions.none(),
             )
         except discord.HTTPException as exc:
             eco.raffle_close(cancel=True)  # 投稿できなかったので、募集はなかったことにする
             return False, f"投稿できませんでした: {exc}"
-        eco.raffle_set_message(raffle["id"], message.id)
+        if message is not None:
+            eco.raffle_set_message(raffle["id"], message.id)
         return True, f"{guild.name} の {channel.mention} に投稿しました（参加費 {ui.pelica(fee)}・{minutes}分）。"
 
     async def repost(self, guild: discord.Guild, channel=None) -> tuple:
@@ -119,15 +129,21 @@ class RaffleCog(commands.Cog):
             return False, "投稿できるチャンネルがありません。"
         old_channel, old_id = guild.get_channel(raffle["channel_id"]), raffle["message_id"]
         try:
-            message = await channel.send(
-                embed=raffle_embed(raffle), view=JoinView(self), allowed_mentions=discord.AllowedMentions.none()
+            message = await ui.send_channel(
+                channel,
+                embed=raffle_embed(raffle),
+                view=JoinView(self),
+                allowed_mentions=discord.AllowedMentions.none(),
             )
         except discord.HTTPException as exc:
             return False, f"投稿できませんでした: {exc}"
-        eco.raffle_set_message(raffle["id"], message.id, channel.id)  # 古い投稿のボタンは、これで無効になる
+        if message is not None:
+            eco.raffle_set_message(raffle["id"], message.id, channel.id)  # 古い投稿のボタンは、これで無効になる
         if old_channel is not None and old_id:
             try:
-                await old_channel.get_partial_message(old_id).delete()
+                old_msg = ui.partial_message(old_channel, old_id)
+                if old_msg is not None:
+                    await old_msg.delete()
             except discord.HTTPException:
                 pass  # すでに消えている・消せない場合は、そのままにする
         return True, f"{guild.name} の {channel.mention} に出し直しました。"
@@ -156,7 +172,7 @@ class RaffleCog(commands.Cog):
             return await interaction.response.send_message(embed=ui.error_embed("利用できません"), ephemeral=True)
         eco = self.g(interaction)
         raffle = eco.raffle_get()
-        if raffle is None or raffle["message_id"] != interaction.message.id:
+        if raffle is None or interaction.message is None or raffle["message_id"] != interaction.message.id:
             return await interaction.response.send_message(embed=ui.error_embed("募集は終わりました"), ephemeral=True)
         ok, reason = eco.raffle_join(interaction.user.id, time.time())
         if not ok:
@@ -214,8 +230,15 @@ class RaffleCog(commands.Cog):
             if raffle["message_id"]:
                 closed = raffle_embed(raffle)
                 closed.title = "🎟️ 抽選（募集終了）"
-                await channel.get_partial_message(raffle["message_id"]).edit(embed=closed, view=None)
-            await channel.send(content=f"🎉 <@{winner}>" if winner else None, embed=embed, allowed_mentions=mentions)
+                msg = ui.partial_message(channel, raffle["message_id"])
+                if msg is not None:
+                    await msg.edit(embed=closed, view=None)
+            await ui.send_channel(
+                channel,
+                content=f"🎉 <@{winner}>" if winner else None,
+                embed=embed,
+                allowed_mentions=mentions,
+            )
         except discord.HTTPException as exc:
             logthrottle.warn(("raffle", guild.id), f"抽選の結果を投稿できません: guild={guild.id}: {exc!r}")
 

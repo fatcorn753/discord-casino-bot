@@ -99,30 +99,34 @@ async def pick_channel(
     return True, channel
 
 
-async def pick_member(bot, interaction: discord.Interaction, guild_id: str, user_id: str, verb: str):
+async def pick_member(
+    bot, interaction: discord.Interaction, guild_id: str, user_id: str, verb: str
+) -> Optional[tuple[discord.Guild, discord.Member]]:
     """管理コマンドで、サーバーと相手を確かめる。問題があれば、その場で返信して None（呼び出し側は何もせず戻る）。"""
     guild = await pick_guild(bot, interaction, guild_id)
     if guild is None:
         return None
     uid = parse_user_id(user_id)
     if uid is None:
-        return await interaction.response.send_message(
+        await interaction.response.send_message(
             embed=ui.error_embed("ユーザーを指定してください", "候補から選ぶか、ユーザーID（数字）を入れてください。"),
             ephemeral=True,
         )
+        return None
     try:
         member = await guild.fetch_member(uid)
     except discord.NotFound:
-        return await interaction.response.send_message(
+        await interaction.response.send_message(
             embed=ui.error_embed("そのサーバーにいません", f"`{uid}` は {guild.name} のメンバーではありません。"),
             ephemeral=True,
         )
+        return None
     except discord.HTTPException as exc:
-        return await interaction.response.send_message(
+        await interaction.response.send_message(
             embed=ui.error_embed("確認できません", f"メンバーを確認できませんでした: {exc}"), ephemeral=True
         )
+        return None
     if member.bot:
-        return await interaction.response.send_message(
-            embed=ui.error_embed(f"Bot には{verb}できません"), ephemeral=True
-        )
+        await interaction.response.send_message(embed=ui.error_embed(f"Bot には{verb}できません"), ephemeral=True)
+        return None
     return guild, member

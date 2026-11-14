@@ -87,7 +87,7 @@ def nick_blocker(guild: discord.Guild, member: discord.Member) -> str:
     return ""
 
 
-async def apply_title_nick(guild: discord.Guild, member: discord.Member, title: str, eco) -> None:
+async def apply_title_nick(guild: discord.Guild, member: discord.Member, title: str | None, eco) -> None:
     """ニックネームの後ろに称号を付ける（title=None なら外して元に戻す）。付ける前の名前を記録しておく。"""
     reason = nick_blocker(guild, member)
     if reason:

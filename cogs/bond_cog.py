@@ -24,7 +24,7 @@ class BondCog(commands.Cog):
     async def cog_load(self):
         self.tick.start()
 
-    def cog_unload(self):
+    async def cog_unload(self) -> None:
         self.tick.cancel()
 
     # ------------------------------ 満期の入金 ------------------------------ #

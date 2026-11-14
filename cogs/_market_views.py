@@ -38,15 +38,16 @@ class OptionAmountModal(discord.ui.Modal):
         )
         self.add_item(self.amount)
 
-    async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction) -> None:
         raw = self.amount.value.replace(",", "").strip()
         if not raw.isdigit() or int(raw) < opt.MIN_PREMIUM:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed(
                     "掛け金が正しくありません", f"{opt.MIN_PREMIUM:,}ペリカ以上の数字で入れてください。"
                 ),
                 ephemeral=True,
             )
+            return
         await self.cog._option_buy(interaction, self.kind, self.symbol, int(raw))
 
 

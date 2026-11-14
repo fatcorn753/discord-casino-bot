@@ -1,8 +1,7 @@
 """`/証券` の埋め込み・表示文の組み立て。"""
 
 import math
-import time
-from typing import Optional
+from typing import Any, Optional, Sequence
 
 import discord
 
@@ -10,7 +9,6 @@ from cogs._bond_embeds import describe_done, due_text
 from core import bonds, market, market_events, ui
 from core import options as opt
 from core.eco_options import name_of
-from core.economy import Economy
 
 TICK_MINUTES = 1
 HOLDER_ROWS = 10  # チャートに載せる保有者の数
@@ -19,24 +17,11 @@ CORRELATION_MINUTES = 24 * 60  # 銘柄どうしの連動を調べる、直近�
 EVENT_TEXT = {1: "📈 急騰！", -1: "📉 急落！"}
 
 
-def tax_line(res) -> str:
+def tax_line(res: Any) -> str:
     """利益にかかった税（キャピタルゲイン税）の一行。税がなければ空。"""
     if not getattr(res, "tax", 0):
         return ""
     return f"🕴️ 帝愛の税（利益の累進課税）: **−{res.tax:,}ペリカ**（預金者の利回りになります）\n"
-
-
-def latest_price(eco, symbol: str = market.DEFAULT) -> float:
-    latest = eco.market_latest(symbol)
-    if latest is None:
-        start = market.BY_KEY[symbol].start
-        eco.market_set(time.time(), start, 0, symbol)
-        return start
-    return latest[1]
-
-
-def all_prices(eco) -> dict:
-    return {s.key: latest_price(eco, s.key) for s in market.SYMBOLS}
 
 
 def margin_position_text(side: str, units: int, entry_value: float, margin: int, price: float) -> str:
@@ -63,7 +48,7 @@ def margin_ratio_text(status: dict) -> str:
     )
 
 
-def spot_position_text(units: int, cost: int, price: int) -> str:
+def spot_position_text(units: int, cost: int, price: float) -> str:
     """持ち分の状態（保有・取得価格・いまの価格と％・評価損益）。"""
     pct = market.pnl_percent(price, units, cost)
     value, _fee = market.sell_quote(units, price)
@@ -128,69 +113,61 @@ def option_line(row: dict, prices: dict) -> str:
     )
 
 
-def correlation_lines(eco, symbol: str) -> str:
+def correlation_lines(symbol: str, hist_by_symbol: dict[str, list]) -> str:
     """その銘柄と、ほかの銘柄の連動（直近24時間の1分ごとの値動きの相関）。"""
-    since = time.time() - CORRELATION_MINUTES * 60
-    hist = eco.market_history(since, symbol)
+    hist = hist_by_symbol[symbol]
     lines = []
     for other in market.SYMBOLS:
         if other.key != symbol:
-            value = market.correlation_from_history(hist, eco.market_history(since, other.key))
+            value = market.correlation_from_history(hist, hist_by_symbol[other.key])
             lines.append(f"{other.emoji} {other.name}: {market.describe_correlation(value)}")
     return "\n".join(lines)
 
 
-def pin_lines(eco, symbol: str) -> str:
+def pin_lines(pin: int) -> str:
     """ストップ高・ストップ安に張り付き中なら、その表示と、約定しない売買。"""
-    pin = eco.market_pin(symbol)
     if not pin:
         return ""
     locked = "・".join(market.PIN_ACTION_TEXT[a] for a in market.PIN_LOCKS[pin])
     return f"\n**{market.PIN_MARK[pin]}に張り付き中**　約定しない売買: {locked}"
 
 
-def correlation_table(eco) -> str:
+def correlation_table(hist_by_symbol: dict[str, list]) -> str:
     """4銘柄どうしの連動を、行列の表にする（直近24時間。まだデータが少ないところは —）。"""
-    since = time.time() - CORRELATION_MINUTES * 60
-    hist = {s.key: eco.market_history(since, s.key) for s in market.SYMBOLS}
     head = " " * 8 + " ".join(f"{s.emoji:^5}" for s in market.SYMBOLS)
     rows = [head]
     for a in market.SYMBOLS:
         cells = []
         for b in market.SYMBOLS:
-            value = 1.0 if a.key == b.key else market.correlation_from_history(hist[a.key], hist[b.key])
+            value = (
+                1.0 if a.key == b.key else market.correlation_from_history(hist_by_symbol[a.key], hist_by_symbol[b.key])
+            )
             cells.append(f"{value:+.2f}" if value is not None else "  — ")
         rows.append(f"{a.emoji} {a.key:<5} " + " ".join(f"{c:^5}" for c in cells))
     return "```\n" + "\n".join(rows) + "\n```"
 
 
-def event_lines(eco) -> str:
+def event_lines(events_rows: list, now: float) -> str:
     """市場イベント（ボラティリティ予告）。なければ空文字。"""
-    now = time.time()
-    ev = market_events.current(eco.market_events(now), now)
+    ev = market_events.current(events_rows, now)
     return market_events.event_text(ev, now) if ev else ""
 
 
-def earnings_lines(eco) -> str:
+def earnings_lines(ev: Optional[dict]) -> str:
     """今週の決算発表の予告（月曜9:00から、発表まで）。なければ空文字。"""
-    ev = eco.earnings_upcoming(time.time())
     if ev is None:
         return ""
     sym = market.BY_KEY[ev["symbol"]]
     return f"📢 {sym.emoji} **{sym.name}** の決算発表: <t:{int(ev['release_at'])}:F>（<t:{int(ev['release_at'])}:R>）\n好決算なら急騰、悪決算なら急落。サプライズなら、値幅制限を突き抜ける。"
 
 
-def alert_lines(eco) -> str:
+def alert_lines(price_histories: dict[str, list[float]]) -> str:
     """相関崩壊の警報（連動する2銘柄の値動きの差が開いたもの）。なければ空文字。"""
-    since = time.time() - (market_events.ALERT_WINDOW + 5) * 60
-    history = {s.key: [p for _, p, _ in eco.market_history(since, s.key)] for s in market.SYMBOLS}
-    return "\n".join(f"⚠️ {market_events.describe_alert(a)}" for a in market_events.spread_alerts(history)[:3])
+    return "\n".join(f"⚠️ {market_events.describe_alert(a)}" for a in market_events.spread_alerts(price_histories)[:3])
 
 
-def cut_lines(eco, guild_id: int) -> str:
+def cut_lines(prices: dict[str, float], rows: list) -> str:
     """ロスカット水準の密集（サーバー内の信用建玉が、ほぼ同じ価格帯で強制決済されるところ）。なければ空文字。"""
-    prices = all_prices(eco)
-    rows = eco.for_guild(guild_id).margin_cut_map(prices)
     lines = []
     for sym in market.SYMBOLS:
         for side, label, sign in (("long", "信用買い", -1), ("short", "空売り", 1)):
@@ -211,21 +188,26 @@ def cut_lines(eco, guild_id: int) -> str:
 
 
 def chart_embed(
-    eco,
-    period: str = "24h",
+    symbol: str,
+    period: str,
+    hist: list,
+    pin: int,
+    hist_24h: dict[str, list],
+    holders: Sequence = (),
+    shorts: Sequence = (),
     title_prefix: str = "",
-    guild_id: Optional[int] = None,
     live_until: Optional[float] = None,
     ended: bool = False,
-    symbol: str = market.DEFAULT,
+    now: float = 0.0,
 ) -> discord.Embed:
     sym = market.BY_KEY[symbol]
-    label, seconds = market.PERIODS[period]
-    hist = eco.market_history(time.time() - seconds, symbol)
+    label, _seconds = market.PERIODS[period]
     prices = [p for _, p, _ in hist]
     if not prices:
         return ui.embed(f"📈 {sym.name}", "まだ価格のデータがありません。", ui.INFO)
     s = market.summary(prices)
+    if s is None:
+        return ui.embed(f"📈 {sym.name}", "まだ価格のデータがありません。", ui.INFO)
     last_event = next((e for _, _, e in reversed(hist[-5:]) if e), 0)
     color = ui.OK if s["change"] >= 0 else ui.ERROR
     arrow = "▲" if s["change"] >= 0 else "▼"
@@ -234,79 +216,85 @@ def chart_embed(
         f"現在 **{market.pel(s['last'])}**　{arrow} **{s['change']:+.1f}%**（{label}）\n"
         f"高値 {market.fmt(s['high'])}　安値 {market.fmt(s['low'])}"
         + (f"\n**{EVENT_TEXT[last_event]}**" if last_event else "")
-        + pin_lines(eco, symbol)
+        + pin_lines(pin)
     )
     e = ui.embed(f"{sym.emoji} {title_prefix}{sym.name}（{label}）", body, color)
-    e.add_field(name="🔗 ほかの銘柄との連動（直近24時間）", value=correlation_lines(eco, symbol), inline=False)
-    if guild_id is not None:
-        holders = eco.for_guild(guild_id).crypto_holders(HOLDER_ROWS, symbol)
-        if holders:
-            lines = []
-            for uid, units, cost in holders:
-                pct = market.pnl_percent(s["last"], units, cost)
-                lines.append(
-                    f"<@{uid}> {market.lots(units)}　取得 {market.fmt(market.avg_price(units, cost))} → {'🔺' if pct >= 0 else '🔻'}**{pct:+.1f}%**"
-                )
-            e.add_field(name=f"👥 保有者（このサーバー・上位{HOLDER_ROWS}人）", value="\n".join(lines), inline=False)
-        shorts = eco.for_guild(guild_id).short_holders(HOLDER_ROWS, symbol)
-        if shorts:
-            lines = []
-            for uid, units, entry_value in shorts:
-                avg = entry_value * market.UNIT / units
-                pct = (avg - s["last"]) / avg * 100  # 下がると利益
-                lines.append(
-                    f"<@{uid}> {market.lots(units)}　建値 {market.fmt(avg)} → {'🔺' if pct >= 0 else '🔻'}**{pct:+.1f}%**"
-                )
-            e.add_field(name=f"📉 空売り中（このサーバー・上位{HOLDER_ROWS}人）", value="\n".join(lines), inline=False)
+    e.add_field(name="🔗 ほかの銘柄との連動（直近24時間）", value=correlation_lines(symbol, hist_24h), inline=False)
+    if holders:
+        lines = []
+        for uid, units, cost in holders:
+            pct = market.pnl_percent(s["last"], units, cost)
+            lines.append(
+                f"<@{uid}> {market.lots(units)}　取得 {market.fmt(market.avg_price(units, cost))} → {'🔺' if pct >= 0 else '🔻'}**{pct:+.1f}%**"
+            )
+        e.add_field(name=f"👥 保有者（このサーバー・上位{HOLDER_ROWS}人）", value="\n".join(lines), inline=False)
+    if shorts:
+        lines = []
+        for uid, units, entry_value in shorts:
+            avg = entry_value * market.UNIT / units
+            pct = (avg - s["last"]) / avg * 100  # 下がると利益
+            lines.append(
+                f"<@{uid}> {market.lots(units)}　建値 {market.fmt(avg)} → {'🔺' if pct >= 0 else '🔻'}**{pct:+.1f}%**"
+            )
+        e.add_field(name=f"📉 空売り中（このサーバー・上位{HOLDER_ROWS}人）", value="\n".join(lines), inline=False)
     if ended:
         note = "更新は終了しました。最新は /証券 市況 で"
     elif live_until is not None:
-        note = f"{TICK_MINUTES}分ごとに自動で更新（あと{max(1, int((live_until - time.time()) // 60))}分）"
+        note = f"{TICK_MINUTES}分ごとに自動で更新（あと{max(1, int((live_until - now) // 60))}分）"
     else:
         note = f"{TICK_MINUTES}分ごとに値が動きます"
     e.set_footer(text=f"{note} ｜ 売買の手数料はありません ｜ ゲーム内の通貨です")
     return e
 
 
-def summary_embed(eco, guild_id: Optional[int] = None) -> discord.Embed:
+def summary_embed(
+    hist_24h: dict[str, list],
+    latest: dict[str, float],
+    upcoming_earnings: Optional[dict],
+    event_rows: list,
+    alert_histories: dict[str, list[float]],
+    cut_rows: list,
+    now: float,
+) -> discord.Embed:
     """全銘柄のいまの価格と、銘柄どうしの連動、市場イベント・警報・ロスカット水準。"""
     lines = []
     for sym in market.SYMBOLS:
-        hist = eco.market_history(time.time() - 86400, sym.key)
-        prices = [p for _, p, _ in hist] or [latest_price(eco, sym.key)]
+        prices = [p for _, p, _ in hist_24h[sym.key]] or [latest[sym.key]]
         s = market.summary(prices)
+        if s is None:
+            continue
         arrow = "▲" if s["change"] >= 0 else "▼"
         lines.append(
             f"{sym.emoji} **{sym.name}**　**{market.pel(s['last'])}**（1枚）　{arrow} {s['change']:+.1f}%（24時間）　高値 {market.fmt(s['high'])} 安値 {market.fmt(s['low'])}"
         )
-    body = "\n".join(lines) + "\n\n**銘柄どうしの連動（直近24時間の1分ごとの値動き）**\n" + correlation_table(eco)
+    body = "\n".join(lines) + "\n\n**銘柄どうしの連動（直近24時間の1分ごとの値動き）**\n" + correlation_table(hist_24h)
     e = ui.embed("📈 市況（全銘柄）", body + "\n下のメニューで、銘柄と期間のチャートを見られます。", ui.GOLD)
     for name, text in (
-        ("📢 決算発表", earnings_lines(eco)),
-        ("⚡ 市場イベント", event_lines(eco)),
-        ("🔀 相関崩壊の警報", alert_lines(eco)),
-        ("🎯 ロスカットが密集しているところ", cut_lines(eco, guild_id) if guild_id else ""),
+        ("📢 決算発表", earnings_lines(upcoming_earnings)),
+        ("⚡ 市場イベント", event_lines(event_rows, now)),
+        ("🔀 相関崩壊の警報", alert_lines(alert_histories)),
+        ("🎯 ロスカットが密集しているところ", cut_lines(latest, cut_rows) if cut_rows else ""),
     ):
         if text:
             e.add_field(name=name, value=text[:1024], inline=False)
     return e
 
 
-def holdings_embed(eco, uid: int, guild_id: int, rng) -> discord.Embed:
-    guild_eco = eco.for_guild(guild_id)
-    guild_eco.bond_settle(time.time(), rng)  # 満期の分を先に入金する
-    guild_eco.option_settle(time.time())
-    options = guild_eco.option_list(uid)
-    spots = {symbol: (units, cost) for symbol, units, cost in guild_eco.holdings(uid)}
-    margins = {
-        (side, symbol): (units, entry, margin) for side, symbol, units, entry, margin in guild_eco.margin_positions(uid)
-    }
-    data = guild_eco.bond_list(uid)
+def holdings_embed(
+    prices: dict[str, float],
+    spots: dict[str, tuple[int, int]],
+    margins: dict[tuple[str, str], tuple[int, float, int]],
+    options: dict[str, list[dict]],
+    bond_data: dict[str, list[dict]],
+    option_quotes: dict[int, int],
+    bond_quotes: dict[int, int],
+    margin_status: Optional[dict],
+) -> discord.Embed:
     if (
         not spots
         and not margins
-        and not data["active"]
-        and not data["done"]
+        and not bond_data["active"]
+        and not bond_data["done"]
         and not options["active"]
         and not options["done"]
     ):
@@ -315,7 +303,7 @@ def holdings_embed(eco, uid: int, guild_id: int, rng) -> discord.Embed:
     for sym in market.SYMBOLS:
         if sym.key not in spots and (("long", sym.key) not in margins) and (("short", sym.key) not in margins):
             continue
-        price = latest_price(eco, sym.key)
+        price = prices[sym.key]
         lines = [f"{sym.emoji} **{sym.name}**　価格 {market.pel(price)}"]
         if sym.key in spots:
             units, cost = spots[sym.key]
@@ -330,18 +318,17 @@ def holdings_embed(eco, uid: int, guild_id: int, rng) -> discord.Embed:
             if (side, sym.key) in margins:
                 units, entry, margin = margins[(side, sym.key)]
                 lines.append(
-                    f"{icon} **{Economy.SIDE_NAME[side]}**\n{margin_position_text(side, units, entry, margin, price)}"
+                    f"{icon} **{market.SIDE_NAME[side]}**\n{margin_position_text(side, units, entry, margin, price)}"
                 )
                 total += market.margin_pnl(side, units, entry, price)
         parts.append("\n".join(lines))
     if options["active"]:
-        prices, now = all_prices(eco), time.time()
         lines = [
             f"{option_line(r, prices)}\n　"
             + (
-                f"いま買い戻すと **{ui.pelica(guild_eco.option_close_cost(r, now, prices))}**"
+                f"いま買い戻すと **{ui.pelica(option_quotes[r['id']])}**"
                 if r["side"] == "short"
-                else f"いま売ると **{ui.pelica(guild_eco.option_value(r, now, prices))}**"
+                else f"いま売ると **{ui.pelica(option_quotes[r['id']])}**"
             )
             for r in options["active"]
         ]
@@ -349,20 +336,16 @@ def holdings_embed(eco, uid: int, guild_id: int, rng) -> discord.Embed:
             "🎫 **オプション**（満期の価格で自動決済。買いの損失は掛け金だけ・🎰裸売りの損失は借金になりうる）\n"
             + "\n".join(lines)
         )
-    if data["active"]:
+    if bond_data["active"]:
         lines = []
-        for r in data["active"]:
+        for r in bond_data["active"]:
             k = bonds.KINDS[r["kind"]]
             lines.append(
                 f"`#{r['id']}` {k.emoji} {k.name} 元本 {ui.pelica(r['principal'])} → 満期 {due_text(r['due'])}（受取 {ui.pelica(bonds.maturity_payout(k, r['principal']))}）"
-                + (
-                    f"　いま売ると {ui.pelica(guild_eco.bond_price(r, time.time()))}"
-                    if k.sellable
-                    else "　⚠️ 倒産しうる・売れない"
-                )
+                + (f"　いま売ると {ui.pelica(bond_quotes[r['id']])}" if k.sellable else "　⚠️ 倒産しうる・売れない")
             )
         parts.append("🏦 **債券**\n" + "\n".join(lines))
-    ratio_text = margin_ratio_text(guild_eco.margin_status(uid, all_prices(eco))) if margins else ""
+    ratio_text = margin_ratio_text(margin_status) if margins and margin_status is not None else ""
     if ratio_text:
         parts.append(ratio_text)
     e = ui.embed("💼 証券", "\n\n".join(parts) or "いま持っている銘柄はありません。", ui.OK if total >= 0 else ui.ERROR)
@@ -372,8 +355,8 @@ def holdings_embed(eco, uid: int, guild_id: int, rng) -> discord.Embed:
             value="\n".join(describe_option_done(r) for r in options["done"]),
             inline=False,
         )
-    if data["done"]:
-        e.add_field(name="債券の最近の決着", value="\n".join(describe_done(r) for r in data["done"]), inline=False)
+    if bond_data["done"]:
+        e.add_field(name="債券の最近の決着", value="\n".join(describe_done(r) for r in bond_data["done"]), inline=False)
     e.set_footer(
         text="下のボタンで、その持ち物を全部決済します（一部だけなら /証券 決済）。ランキングの総資産には債券の元本も含まれます"
     )

@@ -5,6 +5,7 @@
 """
 
 import asyncio
+from typing import cast
 
 import discord
 from discord import app_commands
@@ -14,6 +15,7 @@ from cogs._shop_discord import ShopError, apply_title_nick, nick_blocker, set_co
 from cogs._shop_embeds import (  # noqa: F401
     EFFECT_OF_ITEM,
     MAX_QTY,
+    P2P_FILTERS,
     SECTION_NAME,
     SHOWN,
     SLOT_OF_KIND,
@@ -50,14 +52,14 @@ class ShopCog(commands.Cog):
 
     def g(self, interaction: discord.Interaction):
         """このサーバーのペリカの記録（ペリカはサーバーごとに別々）。"""
-        return self.bot.economy.for_guild(interaction.guild.id)
+        return self.bot.economy.for_guild(ui.guild_id_of(interaction))
 
-    def _equipped_title(self, guild_id: int, user_id: int):
+    def _equipped_title(self, guild_id: int, user_id: int) -> str | None:
         """そのサーバーで装備している称号（景品はサーバーごとに別々）。"""
         item = shop.BY_ID.get(self.bot.economy.for_guild(guild_id).get_profile(user_id)["title"])
         return item.name if item else None
 
-    def _nick_tag(self, guild_id: int, user_id: int):
+    def _nick_tag(self, guild_id: int, user_id: int) -> str | None:
         """ニックネームの末尾に付ける名前。カタギでなければ身分（装備は差し押さえ中）、カタギで称号の表示を選んでいれば装備中の称号、
         それ以外の富豪（総資産100万以上）は【富豪】。"""
         eco = self.bot.economy.for_guild(guild_id)
@@ -82,7 +84,9 @@ class ShopCog(commands.Cog):
         async with self._nick_locks.setdefault(member.id, asyncio.Lock()):
             await apply_title_nick(guild, member, self._nick_tag(guild.id, member.id), eco)
 
-    async def _sync_title_nick(self, user_id: int, here: discord.Guild = None, member: discord.Member = None) -> tuple:
+    async def _sync_title_nick(
+        self, user_id: int, here: discord.Guild | None = None, member: discord.Member | None = None
+    ) -> tuple[str, int]:
         """称号の変更を、ニックネーム表示をONにしているサーバーへ反映する。
 
         称号はサーバーごとに別なので、here を渡したときはそのサーバーだけ反映する（here なしは全サーバー）。
@@ -98,7 +102,11 @@ class ShopCog(commands.Cog):
                 title = self._nick_tag(gid, user_id)  # そのサーバーで、鍵の中で最新の装備と身分を読む
                 is_here = here is not None and gid == here.id
                 try:
-                    m = member if is_here else (guild.get_member(user_id) or await guild.fetch_member(user_id))
+                    m = (
+                        member
+                        if is_here and member is not None
+                        else (guild.get_member(user_id) or await guild.fetch_member(user_id))
+                    )
                     await apply_title_nick(guild, m, title, self.bot.economy)
                 except discord.NotFound:
                     continue  # そのサーバーからもういない
@@ -118,7 +126,7 @@ class ShopCog(commands.Cog):
     async def cog_load(self):
         self.status_nick_tick.start()
 
-    def cog_unload(self):
+    async def cog_unload(self) -> None:
         self.status_nick_tick.cancel()
 
     @tasks.loop(minutes=STATUS_NICK_MINUTES)
@@ -174,17 +182,46 @@ class ShopCog(commands.Cog):
     @app_commands.command(name="ショップ", description="🛍️ 景品を見る・買う・身につける（ボタンで操作）")
     @app_commands.guild_only()
     async def shop_panel(self, interaction: discord.Interaction):
-        view = ShopView(self, interaction.user.id, interaction.guild.id)
+        view = ShopView(self, interaction.user.id, ui.guild_id_of(interaction))
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
     def _catalog_embed(self, guild_id: int, user_id: int, tab: str = "home") -> discord.Embed:
-        return catalog_embed(self.bot.economy.for_guild(guild_id), user_id, tab)
+        eco = self.bot.economy.for_guild(guild_id)
+        inv = eco.inventory(user_id)
+        me = eco.peek_stats(user_id)
+        balance = me["balance"] if me else 0
+        waiting = len(eco.auction_list()) + len(eco.auction_horses()) if tab == "home" else 0
+        stocks = (
+            {i.id: eco.shop_stock(user_id, i.id) for i in tab_items(tab) if i.id in shop.STOCK_RULES}
+            if tab != "home"
+            else None
+        )
+        return catalog_embed(inv, balance, tab=tab, waiting=waiting, stocks=stocks)
 
     def _auction_embed(
         self, guild_id: int, user_id: int, tab: str = "teiai", p2p_filter: str = "all", p2p_order: str = "end"
     ) -> discord.Embed:
+        eco = self.bot.economy.for_guild(guild_id)
+        me = eco.peek_stats(user_id)
+        balance = me["balance"] if me else 0
+        if tab == "players":
+            _label, kind, mode = P2P_FILTERS[p2p_filter]
+            rows = eco.p2p_active(kind, limit=SHOWN, mode=mode, order=p2p_order)
+            p2p_rows = [(r, eco.p2p_label(r)) for r in rows]
+            return auction_embed(
+                balance,
+                tab=tab,
+                p2p_filter=p2p_filter,
+                p2p_order=p2p_order,
+                p2p_rows=p2p_rows,
+            )
         return auction_embed(
-            self.bot.economy.for_guild(guild_id), user_id, tab=tab, p2p_filter=p2p_filter, p2p_order=p2p_order
+            balance,
+            tab=tab,
+            p2p_filter=p2p_filter,
+            p2p_order=p2p_order,
+            listed=eco.auction_list(),
+            horses=eco.auction_horses(),
         )
 
     async def buy_auction_horse(self, interaction: discord.Interaction, horse_id: int):
@@ -354,7 +391,8 @@ class ShopCog(commands.Cog):
                     if stock is None
                     else "この決算の裏情報メモは、売り切れです（サーバーで5枚まで）。"
                 )
-                return await interaction.response.send_message(embed=ui.error_embed("買えません", why), ephemeral=True)
+                await interaction.response.send_message(embed=ui.error_embed("買えません", why), ephemeral=True)
+                return
             reply = await confirmed_reply(
                 interaction,
                 True,
@@ -368,12 +406,14 @@ class ShopCog(commands.Cog):
                 return
             done, text = eco.insider_buy(uid)
             if not done:
-                return await reply(embed=ui.error_embed("買えませんでした", text), ephemeral=True)
+                await reply(embed=ui.error_embed("買えませんでした", text), ephemeral=True)
+                return
             await reply(embed=ui.embed("🕴️ 裏情報メモ（帝愛市）", text, ui.DARK), ephemeral=True)
 
     # ------------------------------ 持ち物 ------------------------------ #
     def _inventory_embed(self, guild_id: int, user_id: int) -> discord.Embed:
-        return inventory_embed(self.bot.economy.for_guild(guild_id), user_id)
+        eco = self.bot.economy.for_guild(guild_id)
+        return inventory_embed(eco.inventory(user_id), eco.get_profile(user_id))
 
     # ------------------------------ 使う ------------------------------ #
     async def use_item(self, interaction: discord.Interaction, item: str):
@@ -434,9 +474,11 @@ class ShopCog(commands.Cog):
             )
         if it.kind == shop.COLOR_ROLE:
             await interaction.response.defer(ephemeral=True)
+            guild = cast(discord.Guild, interaction.guild)
+            member = cast(discord.Member, interaction.user)
             try:
-                async with self._role_lock(interaction.guild.id):
-                    await set_color_role(interaction.guild, interaction.user, it)
+                async with self._role_lock(ui.guild_id_of(interaction)):
+                    await set_color_role(guild, member, it)
             except ShopError as exc:
                 return await interaction.followup.send(
                     embed=ui.error_embed("名前の色を変えられません", str(exc)), ephemeral=True
@@ -452,10 +494,13 @@ class ShopCog(commands.Cog):
         note = ""
         if it.kind == shop.TITLE:
             await interaction.response.defer(ephemeral=True)
-            problem, others = await self._sync_title_nick(uid, interaction.guild, interaction.user)
+            guild = cast(discord.Guild, interaction.guild)
+            member = cast(discord.Member, interaction.user)
+            gid = ui.guild_id_of(interaction)
+            problem, others = await self._sync_title_nick(uid, guild, member)
             if problem:
                 note = f"\n⚠️ ニックネームには反映できませんでした: {problem}"
-            elif self.bot.economy.nick_pref(interaction.guild.id, uid):
+            elif self.bot.economy.nick_pref(gid, uid):
                 note = "\nニックネームにも反映しました。"
             if others:
                 note += f"\n※ 他のサーバー {others} 件では反映できませんでした。"
@@ -471,11 +516,13 @@ class ShopCog(commands.Cog):
     async def unequip_item(self, interaction: discord.Interaction, slot: str):
         """slot（UNEQUIP_NAMES のキー）の装備を外す。"""
         name = UNEQUIP_NAMES[slot]
+        guild = cast(discord.Guild, interaction.guild)
+        member = cast(discord.Member, interaction.user)
         if slot == "role":
             await interaction.response.defer(ephemeral=True)
             try:
-                async with self._role_lock(interaction.guild.id):
-                    await set_color_role(interaction.guild, interaction.user, None)
+                async with self._role_lock(ui.guild_id_of(interaction)):
+                    await set_color_role(guild, member, None)
             except ShopError as exc:
                 return await interaction.followup.send(embed=ui.error_embed("外せません", str(exc)), ephemeral=True)
             return await interaction.followup.send(
@@ -484,7 +531,7 @@ class ShopCog(commands.Cog):
         self.g(interaction).equip(interaction.user.id, slot, None)
         if slot == "title":
             await interaction.response.defer(ephemeral=True)
-            problem, others = await self._sync_title_nick(interaction.user.id, interaction.guild, interaction.user)
+            problem, others = await self._sync_title_nick(interaction.user.id, guild, member)
             note = f"\n⚠️ ニックネームを戻せませんでした: {problem}" if problem else ""
             if others:
                 note += f"\n※ 他のサーバー {others} 件では戻せませんでした。"
@@ -498,21 +545,24 @@ class ShopCog(commands.Cog):
     # ------------------------- 称号をニックネームに ------------------------- #
     async def set_title_display(self, interaction: discord.Interaction, mode: str):
         """称号をニックネームに付ける（mode="on"）／付けない（"off"）。"""
-        uid, guild = interaction.user.id, interaction.guild
-        was_on = self.bot.economy.nick_pref(guild.id, uid)
+        uid = interaction.user.id
+        guild = cast(discord.Guild, interaction.guild)
+        member = cast(discord.Member, interaction.user)
+        gid = ui.guild_id_of(interaction)
+        was_on = self.bot.economy.nick_pref(gid, uid)
         if mode == "on":
-            reason = nick_blocker(guild, interaction.user)
+            reason = nick_blocker(guild, member)
             if reason:  # 付けられない人・サーバーでは、設定自体を有効にしない
                 return await interaction.response.send_message(
                     embed=ui.error_embed("ニックネームに付けられません", reason), ephemeral=True
                 )
-            self.bot.economy.set_nick_pref(guild.id, uid, True)
+            self.bot.economy.set_nick_pref(gid, uid, True)
             await interaction.response.defer(ephemeral=True)
-            problem, others = await self._sync_title_nick(uid, guild, interaction.user)
-            title = self._equipped_title(guild.id, uid)
+            problem, others = await self._sync_title_nick(uid, guild, member)
+            title = self._equipped_title(gid, uid)
             if problem:
                 if not was_on:  # もともとONだった人の設定は、失敗しても消さない
-                    self.bot.economy.set_nick_pref(guild.id, uid, False)
+                    self.bot.economy.set_nick_pref(gid, uid, False)
                 return await interaction.followup.send(
                     embed=ui.error_embed("ニックネームに付けられません", problem), ephemeral=True
                 )
@@ -533,10 +583,10 @@ class ShopCog(commands.Cog):
         problem = ""
         if was_on:  # ONにしていた人だけ、元のニックネームに戻す（ONにしたことがない人の名前には触らない）
             try:
-                await apply_title_nick(guild, interaction.user, None, self.bot.economy)
+                await apply_title_nick(guild, member, None, self.bot.economy)
             except ShopError as exc:
                 problem = f"\n⚠️ ニックネームを元に戻せませんでした（手動で直してください）: {exc}"
-            self.bot.economy.set_nick_pref(guild.id, uid, False)
+            self.bot.economy.set_nick_pref(gid, uid, False)
         await interaction.followup.send(
             embed=ui.ok_embed(
                 "ニックネームには付けません",

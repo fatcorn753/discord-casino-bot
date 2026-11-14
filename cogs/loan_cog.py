@@ -9,6 +9,7 @@
 
 import re
 import time
+from typing import Any, Optional
 
 import discord
 from discord import app_commands
@@ -100,7 +101,7 @@ class LoanButton(
         self.act, self.loan_id = act, loan_id
 
     @classmethod
-    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Button, match: re.Match):
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Item[Any], match: re.Match):
         return cls(match["act"], int(match["id"]))
 
     async def callback(self, interaction: discord.Interaction):
@@ -126,13 +127,15 @@ async def handle_lend(bot, interaction: discord.Interaction, loan_id: int) -> No
     eco = bot.economy.for_guild(interaction.guild_id)
     loan = eco.loan_get(loan_id)
     if loan is None or loan["status"] != "request":
-        return await interaction.response.send_message(
+        await interaction.response.send_message(
             embed=ui.error_embed("できません", "この募集はもう終わっています。"), ephemeral=True
         )
+        return
     if interaction.user.id == loan["borrower_id"]:
-        return await interaction.response.send_message(
+        await interaction.response.send_message(
             embed=ui.error_embed("できません", "自分の募集には、貸せません。"), ephemeral=True
         )
+        return
     ok = await confirm_action(
         interaction,
         "この募集に貸しますか？",
@@ -152,10 +155,11 @@ async def handle_lend(bot, interaction: discord.Interaction, loan_id: int) -> No
         f"<t:{int(loan['due'])}:R>が返済の期限です。`/貸付 返済` で返せます。期限には自動で回収します。",
         ui.OK,
     )
-    try:
-        await interaction.message.edit(embed=embed, view=None)
-    except discord.HTTPException:
-        pass
+    if interaction.message is not None:
+        try:
+            await interaction.message.edit(embed=embed, view=None)
+        except discord.HTTPException:
+            pass
     await interaction.followup.send(
         f"🤝 {who(loan['lender_id'])} が {who(loan['borrower_id'])} の募集に応じて、{ui.pelica(loan['principal'])}を貸しました。",
         allowed_mentions=discord.AllowedMentions(
@@ -165,9 +169,11 @@ async def handle_lend(bot, interaction: discord.Interaction, loan_id: int) -> No
 
 
 async def handle_button(bot, interaction: discord.Interaction, act: str, loan_id: int) -> None:
-    eco = bot.economy.for_guild(interaction.guild_id)
-    if not approval.is_allowed(bot.economy, bot.config, interaction.guild_id, interaction.user.id):
-        return await interaction.response.send_message(embed=ui.error_embed("利用できません"), ephemeral=True)
+    guild_id = interaction.guild_id
+    if guild_id is None or not approval.is_allowed(bot.economy, bot.config, guild_id, interaction.user.id):
+        await interaction.response.send_message(embed=ui.error_embed("利用できません"), ephemeral=True)
+        return
+    eco = bot.economy.for_guild(guild_id)
     now = time.time()
     if act == "lend":
         return await handle_lend(bot, interaction, loan_id)
@@ -178,7 +184,8 @@ async def handle_button(bot, interaction: discord.Interaction, act: str, loan_id
     else:
         ok, reason = eco.loan_cancel(loan_id, interaction.user.id)
     if not ok:
-        return await interaction.response.send_message(embed=ui.error_embed("できません", reason), ephemeral=True)
+        await interaction.response.send_message(embed=ui.error_embed("できません", reason), ephemeral=True)
+        return
     loan = eco.loan_get(loan_id)
     if act == "accept":
         embed = state_embed(
@@ -200,7 +207,7 @@ class LoanCog(commands.Cog):
         self.bot.add_dynamic_items(LoanButton)
         self.tick.start()
 
-    def cog_unload(self):
+    async def cog_unload(self) -> None:
         self.tick.cancel()
 
     group = app_commands.Group(name="貸付", description="🤝 ペリカの貸し借り（日割りの利息つき）", guild_only=True)
@@ -294,7 +301,10 @@ class LoanCog(commands.Cog):
     @app_commands.rename(loan_id="貸付", amount="金額")
     @app_commands.describe(loan_id="返す貸付（自分が借りているものだけ候補に出ます）", amount="返す額（省略で全額）")
     async def repay(
-        self, interaction: discord.Interaction, loan_id: int, amount: app_commands.Range[int, 1, 10_000_000] = None
+        self,
+        interaction: discord.Interaction,
+        loan_id: int,
+        amount: Optional[app_commands.Range[int, 1, 10_000_000]] = None,
     ):
         ok, result = self.g(interaction).loan_repay(loan_id, interaction.user.id, amount, time.time())
         if not ok:
@@ -417,8 +427,11 @@ class LoanCog(commands.Cog):
         channel = guild.get_channel(loan["channel_id"]) if loan["channel_id"] else None
         if channel is None or not loan["message_id"]:
             return
+        msg = ui.partial_message(channel, loan["message_id"])
+        if msg is None:
+            return
         try:
-            await channel.get_partial_message(loan["message_id"]).edit(embed=embed, view=None)
+            await msg.edit(embed=embed, view=None)
         except discord.HTTPException:
             pass
 
@@ -430,7 +443,11 @@ class LoanCog(commands.Cog):
             return
         users = [discord.Object(id=u) for u in {loan["borrower_id"], loan["lender_id"]} if u]
         try:
-            await channel.send(text, allowed_mentions=discord.AllowedMentions(users=users, roles=False, everyone=False))
+            await ui.send_channel(
+                channel,
+                content=text,
+                allowed_mentions=discord.AllowedMentions(users=users, roles=False, everyone=False),
+            )
         except discord.HTTPException as exc:
             logthrottle.warn(("loan", guild.id), f"貸付の知らせを投稿できません: guild={guild.id}: {exc!r}")
 

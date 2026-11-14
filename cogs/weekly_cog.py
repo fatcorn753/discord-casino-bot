@@ -7,7 +7,7 @@ Bot が止まっていて月曜0時を逃しても、次に起動したときに
 import discord
 from discord.ext import commands, tasks
 
-from cogs._shared import announce_channel  # 互換性のため公開名を残す
+from cogs._shared import announce_channel
 from core import approval, logthrottle, shop, ui, weekly
 from core.clock import local_now
 
@@ -26,7 +26,7 @@ class WeeklyCog(commands.Cog):
             print(f"週間ランキング: 過去の {done} ゲーム分を台帳から補いました")
         self.check_weeks.start()
 
-    def cog_unload(self):
+    async def cog_unload(self) -> None:
         self.check_weeks.cancel()
 
     @tasks.loop(minutes=CHECK_MINUTES)
@@ -92,7 +92,8 @@ class WeeklyCog(commands.Cog):
                 users=[discord.Object(id=champ[0])] if champ else [], roles=False, everyone=False
             )
             try:
-                await channel.send(
+                await ui.send_channel(
+                    channel,
                     content=f"🎉 <@{champ[0]}>" if champ else None,
                     embed=self.build_embed(week, result),
                     allowed_mentions=mentions,

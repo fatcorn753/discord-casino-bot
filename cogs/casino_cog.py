@@ -88,7 +88,7 @@ class Casino(commands.Cog):
         interaction: discord.Interaction,
         bet: app_commands.Range[int, MIN_BET],
         kind: app_commands.Choice[str],
-        number: app_commands.Range[int, 0, 36] = None,
+        number: app_commands.Range[int, 0, 36] | None = None,
     ):
         await play_roulette(interaction, self.bot, bet, kind.value, number)
 

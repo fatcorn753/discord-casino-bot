@@ -27,7 +27,7 @@ class EventCog(commands.Cog):
     async def cog_load(self):
         self.tick.start()
 
-    def cog_unload(self):
+    async def cog_unload(self) -> None:
         self.tick.cancel()
 
     @tasks.loop(minutes=1)
@@ -112,7 +112,7 @@ class EventCog(commands.Cog):
         if channel is None:
             return
         try:
-            await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+            await ui.send_channel(channel, embed=embed, allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException as exc:
             logthrottle.warn(("event", guild.id), f"突発イベントを投稿できません: guild={guild.id}: {exc!r}")
 

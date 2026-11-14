@@ -13,12 +13,11 @@ from discord.ext import commands, tasks
 from cogs._amount import balance_choices, own_balance, typed_amount
 from cogs._bond_embeds import KIND_CHOICES, due_text
 from cogs._market_embeds import (
-    CORRELATION_MINUTES,  # noqa: F401
+    CORRELATION_MINUTES,
     EVENT_TEXT,  # noqa: F401
-    HOLDER_ROWS,  # noqa: F401
+    HOLDER_ROWS,
     LIVE_MINUTES,
     TICK_MINUTES,
-    all_prices,
     bond_buy_embed,
     chart_embed,
     correlation_lines,
@@ -29,7 +28,6 @@ from cogs._market_embeds import (
     earnings_result_embed,
     event_lines,
     holdings_embed,
-    latest_price,
     margin_position_text,
     margin_ratio_text,
     option_line,
@@ -101,7 +99,7 @@ class MarketCog(commands.Cog):
         self._earnings_results = []  # 発表した決算（チャンネルへの投稿待ち）
 
     def g(self, interaction: discord.Interaction):
-        return self.bot.economy.for_guild(interaction.guild.id)
+        return self.bot.economy.for_guild(ui.guild_id_of(interaction))
 
     group = app_commands.Group(
         name="証券", description="📈 注文・保有・市況・決済（4銘柄と債券。ゲーム内の通貨・現実のお金とは無関係）"
@@ -109,10 +107,15 @@ class MarketCog(commands.Cog):
 
     # ------------------------------ 価格の更新 ------------------------------ #
     def _price(self, symbol: str = market.DEFAULT) -> float:
-        return latest_price(self.bot.economy, symbol)
+        latest = self.bot.economy.market_latest(symbol)
+        if latest is None:
+            start = market.BY_KEY[symbol].start
+            self.bot.economy.market_set(time.time(), start, 0, symbol)
+            return start
+        return latest[1]
 
-    def _prices(self) -> dict:
-        return all_prices(self.bot.economy)
+    def _prices(self) -> dict[str, float]:
+        return {s.key: self._price(s.key) for s in market.SYMBOLS}
 
     def _day_reference(self, now: float) -> dict:
         """値幅制限の基準になる、約24時間前の価格 {銘柄: 価格}。履歴がまだ無い銘柄は含めない。"""
@@ -162,7 +165,7 @@ class MarketCog(commands.Cog):
         self._prices()  # 初回は開始価格を入れる（起動直後でもコマンドが使えるように）
         self.tick.start()
 
-    def cog_unload(self):
+    async def cog_unload(self) -> None:
         self.tick.cancel()
 
     @tasks.loop(minutes=TICK_MINUTES)
@@ -205,7 +208,7 @@ class MarketCog(commands.Cog):
                 continue
             for embed in embeds:
                 try:
-                    await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+                    await ui.send_channel(channel, embed=embed, allowed_mentions=discord.AllowedMentions.none())
                 except discord.HTTPException as exc:
                     logthrottle.warn(("earnings-post", guild.id), f"決算の投稿に失敗: guild={guild.id}: {exc!r}")
 
@@ -218,8 +221,12 @@ class MarketCog(commands.Cog):
             print(f"古いチャート掲示の後始末に失敗: {exc!r}")
 
     # ------------------------------ 表示 ------------------------------ #
+    def _histories_24h(self, now: float) -> dict[str, list]:
+        since = now - CORRELATION_MINUTES * 60
+        return {s.key: self.bot.economy.market_history(since, s.key) for s in market.SYMBOLS}
+
     def correlation_lines(self, symbol: str) -> str:
-        return correlation_lines(self.bot.economy, symbol)
+        return correlation_lines(symbol, self._histories_24h(time.time()))
 
     def chart_embed(
         self,
@@ -230,36 +237,63 @@ class MarketCog(commands.Cog):
         ended: bool = False,
         symbol: str = market.DEFAULT,
     ) -> discord.Embed:
+        now = time.time()
+        _label, seconds = market.PERIODS[period]
+        hist = self.bot.economy.market_history(now - seconds, symbol)
+        pin = self.bot.economy.market_pin(symbol)
+        hist_24h = self._histories_24h(now)
+        holders = (
+            self.bot.economy.for_guild(guild_id).crypto_holders(HOLDER_ROWS, symbol) if guild_id is not None else ()
+        )
+        shorts = self.bot.economy.for_guild(guild_id).short_holders(HOLDER_ROWS, symbol) if guild_id is not None else ()
         return chart_embed(
-            self.bot.economy,
-            period=period,
+            symbol,
+            period,
+            hist,
+            pin,
+            hist_24h,
+            holders=holders,
+            shorts=shorts,
             title_prefix=title_prefix,
-            guild_id=guild_id,
             live_until=live_until,
             ended=ended,
-            symbol=symbol,
+            now=now,
         )
 
     def pin_lines(self, symbol: str) -> str:
-        return pin_lines(self.bot.economy, symbol)
+        return pin_lines(self.bot.economy.market_pin(symbol))
 
     def correlation_table(self) -> str:
-        return correlation_table(self.bot.economy)
+        return correlation_table(self._histories_24h(time.time()))
 
     def event_lines(self) -> str:
-        return event_lines(self.bot.economy)
+        now = time.time()
+        return event_lines(self.bot.economy.market_events(now), now)
 
     def earnings_lines(self) -> str:
-        return earnings_lines(self.bot.economy)
+        return earnings_lines(self.bot.economy.earnings_upcoming(time.time()))
 
     def alert_lines(self) -> str:
-        return _alert_lines(self.bot.economy)
+        since = time.time() - (market_events.ALERT_WINDOW + 5) * 60
+        history = {s.key: [p for _, p, _ in self.bot.economy.market_history(since, s.key)] for s in market.SYMBOLS}
+        return _alert_lines(history)
 
     def cut_lines(self, guild_id: int) -> str:
-        return cut_lines(self.bot.economy, guild_id)
+        prices = self._prices()
+        return cut_lines(prices, self.bot.economy.for_guild(guild_id).margin_cut_map(prices))
 
     def summary_embed(self, guild_id: Optional[int] = None) -> discord.Embed:
-        return summary_embed(self.bot.economy, guild_id=guild_id)
+        now = time.time()
+        hist_24h = self._histories_24h(now)
+        latest = self._prices()
+        upcoming = self.bot.economy.earnings_upcoming(now)
+        ev_rows = self.bot.economy.market_events(now)
+        since_alert = now - (market_events.ALERT_WINDOW + 5) * 60
+        alert_histories = {
+            s.key: [p for _, p, _ in self.bot.economy.market_history(since_alert, s.key)] for s in market.SYMBOLS
+        }
+        cut_rows = self.bot.economy.for_guild(guild_id).margin_cut_map(latest) if guild_id else []
+        return summary_embed(hist_24h, latest, upcoming, ev_rows, alert_histories, cut_rows, now)
 
     @group.command(
         name="市況", description=f"価格・連動・チャート。銘柄を選ぶと、{LIVE_MINUTES}分間、自動で更新するチャートを出す"
@@ -275,29 +309,27 @@ class MarketCog(commands.Cog):
         symbol: Optional[app_commands.Choice[str]] = None,
         period: Optional[app_commands.Choice[str]] = None,
     ):
+        gid = ui.guild_id_of(interaction)
         if symbol is None:
-            view = MarketView(self, interaction.user.id, interaction.guild.id, period.value if period else "24h")
-            return await interaction.response.send_message(
-                embed=self.summary_embed(interaction.guild.id), view=view, ephemeral=True
-            )
+            view = MarketView(self, interaction.user.id, gid, period.value if period else "24h")
+            return await interaction.response.send_message(embed=self.summary_embed(gid), view=view, ephemeral=True)
         await self._post_chart(interaction, symbol.value, period.value if period else "24h")
 
     async def _post_chart(self, interaction: discord.Interaction, sym: str, key: str) -> None:
         now = time.time()
+        gid = ui.guild_id_of(interaction)
         await interaction.response.send_message(
-            embed=self.chart_embed(key, guild_id=interaction.guild.id, live_until=now + LIVE_MINUTES * 60, symbol=sym),
+            embed=self.chart_embed(key, guild_id=gid, live_until=now + LIVE_MINUTES * 60, symbol=sym),
             allowed_mentions=discord.AllowedMentions.none(),
         )
         # チャートは1チャンネルに1つだけ。前に出したチャートは消し、新しいものを、一定時間だけ自動で更新する
         try:
             message = await interaction.original_response()
-            prev = self.bot.economy.swap_chart_post(message.channel.id, message.id, interaction.guild.id, key, now, sym)
+            prev = self.bot.economy.swap_chart_post(message.channel.id, message.id, gid, key, now, sym)
             if prev is not None and prev != message.id:
-                await message.channel.get_partial_message(prev).delete()
+                await ui.partial_message(message.channel, prev).delete()
         except discord.HTTPException as exc:  # 前のチャートがすでに無い・消せないときは、そのままにする（記録だけ残す）
-            logthrottle.warn(
-                ("chart-swap", interaction.guild.id), f"前のチャートを消せません: guild={interaction.guild.id}: {exc!r}"
-            )
+            logthrottle.warn(("chart-swap", gid), f"前のチャートを消せません: guild={gid}: {exc!r}")
 
     # ------------------------------ 売買 ------------------------------ #
     async def _trade(self, interaction: discord.Interaction, action):
@@ -477,18 +509,20 @@ class MarketCog(commands.Cog):
         """信用取引（空売り＝売り建て、信用買い＝買い建て）。担保 = 総額 ÷ レバレッジ を預ける。枚数か金額（建てる総額）で指定する。"""
         label = Economy.SIDE_NAME[side]
         if (lots is None) == (amount is None):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed(
                     "どちらか1つを指定してください", f"{label}する量は、「枚数」か「金額」のどちらか一方で指定します。"
                 ),
                 ephemeral=True,
             )
+            return
         sym = market.BY_KEY[symbol]
 
         def units_at(price: float) -> int:
-            return (
-                int(round(lots * market.UNIT)) if lots is not None else int(amount * market.UNIT // price)
-            )  # 金額のときは、その額を超えない口数
+            if lots is not None:
+                return int(round(lots * market.UNIT))
+            assert amount is not None
+            return int(amount * market.UNIT // price)  # 金額のときは、その額を超えない口数
 
         async def run(uid):
             price = self._price(sym.key)
@@ -550,21 +584,22 @@ class MarketCog(commands.Cog):
         sym, (name, emoji, _hint) = market.BY_KEY[symbol], opt.KINDS[kind]
         pair = kind == opt.PAIR
         if pair and (symbol2 is None or symbol2 == symbol or symbol2 not in market.BY_KEY):
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed(
                     "ペア・ワラントは、2つの銘柄が必要です", "「銘柄」と、ちがう銘柄を「相手」に選んでください。"
                 ),
                 ephemeral=True,
             )
-        other = market.BY_KEY[symbol2] if pair else None
-        title_sym = f"{sym.name} vs {other.name}" if pair else sym.name
+            return
+        other = market.BY_KEY[symbol2] if pair and symbol2 is not None else None
+        title_sym = f"{sym.name} vs {other.name}" if other is not None else sym.name
         seconds = opt.OPTION_HOURS * 3600
         strike_pct = target / 100 if target else opt.default_strike_pct(symbol)  # 目標割合（省略は、銘柄ごとの既定値）
 
         def quote(price: float) -> tuple:
             now = time.time()
             events = self.bot.economy.market_events(now)
-            if pair:
+            if pair and symbol2 is not None:
                 rate = opt.pair_ask_rate(sym.key, symbol2, seconds, now, events)
                 units = int(amount / rate) if rate > 0 else 0
                 return price, units, math.ceil(round(units * rate, 6))
@@ -677,9 +712,10 @@ class MarketCog(commands.Cog):
         eco.option_settle(time.time())
         row = next((r for r in eco.option_list(interaction.user.id)["active"] if r["id"] == option_id), None)
         if row is None:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed("売れません", "その番号のオプションは持っていません。"), ephemeral=True
             )
+            return
         short, prices, now = row["side"] == "short", self._prices(), time.time()
         if short:
             cost = eco.option_close_cost(row, now, prices)
@@ -707,7 +743,8 @@ class MarketCog(commands.Cog):
             return
         ok, got = eco.option_sell(interaction.user.id, option_id)
         if not ok:
-            return await reply(embed=ui.error_embed("できませんでした", got), ephemeral=True)
+            await reply(embed=ui.error_embed("できませんでした", got), ephemeral=True)
+            return
         if short:
             pnl = row["premium"] + got - row["margin"]  # got は、証拠金の戻り（マイナスなら、借金にした額）
             body = f"買い戻しました。証拠金の戻り: **{ui.pelica(max(0, got))}**" + (
@@ -753,9 +790,9 @@ class MarketCog(commands.Cog):
             app_commands.Choice(name="コール裸売り（プレミアムを先にもらう・上がると損）", value="scall"),
             app_commands.Choice(name="プット裸売り（プレミアムを先にもらう・下がると損）", value="sput"),
         ],
-        leverage=[app_commands.Choice(name=f"{n}倍", value=n) for n in Economy.SHORT_LEVERAGES],
         counterpart=SYMBOL_CHOICES,
     )
+    @app_commands.choices(leverage=[app_commands.Choice(name=f"{n}倍", value=n) for n in Economy.SHORT_LEVERAGES])
     @app_commands.autocomplete(amount=_buy_amount_autocomplete)
     async def order(
         self,
@@ -850,22 +887,48 @@ class MarketCog(commands.Cog):
         )
 
     def holdings_embed(self, uid: int, guild_id: int) -> discord.Embed:
-        return holdings_embed(self.bot.economy, uid, guild_id, RNG)
+        now = time.time()
+        guild_eco = self.bot.economy.for_guild(guild_id)
+        guild_eco.bond_settle(now, RNG)  # 満期の分を先に入金する
+        guild_eco.option_settle(now)
+        prices = self._prices()
+        options = guild_eco.option_list(uid)
+        spots = {symbol: (units, cost) for symbol, units, cost in guild_eco.holdings(uid)}
+        margins = {
+            (side, symbol): (units, entry, margin)
+            for side, symbol, units, entry, margin in guild_eco.margin_positions(uid)
+        }
+        bond_data = guild_eco.bond_list(uid)
+        option_quotes = {
+            r["id"]: (
+                guild_eco.option_close_cost(r, now, prices)
+                if r["side"] == "short"
+                else guild_eco.option_value(r, now, prices)
+            )
+            for r in options["active"]
+        }
+        bond_quotes = {
+            r["id"]: guild_eco.bond_price(r, now) for r in bond_data["active"] if bonds.KINDS[r["kind"]].sellable
+        }
+        margin_status = guild_eco.margin_status(uid, prices) if margins else None
+        return holdings_embed(prices, spots, margins, options, bond_data, option_quotes, bond_quotes, margin_status)
 
     @group.command(name="保有", description="現物・信用取引・債券をまとめて見る（ボタンで、すぐ決済できる）")
     async def holdings(self, interaction: discord.Interaction):
-        uid, gid = interaction.user.id, interaction.guild.id
+        uid, gid = interaction.user.id, ui.guild_id_of(interaction)
         embed = self.holdings_embed(uid, gid)
         view = HoldingsView(self, uid, gid)
         # ボタンが無いときは、view を渡さない（None を渡すと discord.py が落ちる）
-        kwargs = {"view": view} if view.children else {}
-        await interaction.response.send_message(embed=embed, ephemeral=True, **kwargs)
+        if view.children:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # ------------------------------ 決済 ------------------------------ #
     async def _position_autocomplete(self, interaction: discord.Interaction, current: str):
         found = [
             app_commands.Choice(name=label, value=code)
-            for code, label in self.positions(interaction.user.id, interaction.guild.id)
+            for code, label in self.positions(interaction.user.id, ui.guild_id_of(interaction))
             if current.lower() in label.lower()
         ]
         return found[:25]
@@ -902,19 +965,22 @@ class MarketCog(commands.Cog):
         eco = self.g(interaction)
         eco.bond_settle(time.time(), RNG)  # 満期の分を先に入金して、買える額を正しくする
         if amount < bonds.MIN_AMOUNT:
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed("買えません", f"債券は {bonds.MIN_AMOUNT:,}ペリカ以上から買えます。"),
                 ephemeral=True,
             )
+            return
         ok, reason = eco.bond_buy(interaction.user.id, kind_key, amount, time.time())
         if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("買えません", reason), ephemeral=True)
+            await interaction.response.send_message(embed=ui.error_embed("買えません", reason), ephemeral=True)
+            return
         await interaction.response.send_message(embed=bond_buy_embed(kind_key, amount, time.time()))
 
     async def _bond_cancel(self, interaction: discord.Interaction, bond_id: int) -> None:
         ok, result = self.g(interaction).bond_cancel(interaction.user.id, bond_id)
         if not ok:
-            return await interaction.response.send_message(embed=ui.error_embed("売れません", result), ephemeral=True)
+            await interaction.response.send_message(embed=ui.error_embed("売れません", result), ephemeral=True)
+            return
         await interaction.response.send_message(  # 公開（ほかの売買の結果と同じ）
             embed=ui.ok_embed(
                 f"{interaction.user.display_name} が債券を売りました", f"{ui.pelica(result)}を残高に戻しました。"
@@ -942,7 +1008,7 @@ class MarketCog(commands.Cog):
                     symbol=post["symbol"],
                 )
             try:  # 履歴を読む権限が要らないよう、投稿を取得せずに直接書き換える
-                await channel.get_partial_message(post["message_id"]).edit(embed=cache[key])
+                await ui.partial_message(channel, post["message_id"]).edit(embed=cache[key])
             except discord.NotFound:
                 self.bot.economy.delete_chart_post(post["channel_id"])  # 消されたチャートは、もう更新しない
                 return
@@ -959,7 +1025,7 @@ class MarketCog(commands.Cog):
             channel = self.bot.get_channel(board["channel_id"])
             if channel is not None:
                 try:
-                    await channel.get_partial_message(board["message_id"]).delete()
+                    await ui.partial_message(channel, board["message_id"]).delete()
                 except discord.HTTPException as exc:  # すでに消えている場合など。設定は捨てるので、記録だけ残す
                     logthrottle.warn(
                         ("chart-board", board["guild_id"]),

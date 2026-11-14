@@ -1,6 +1,6 @@
 """`/ショップ` の操作パネル（View）。"""
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import discord
 
@@ -16,6 +16,7 @@ from cogs._shop_embeds import (
 from core import shop, ui
 
 if TYPE_CHECKING:
+    from cogs.p2p_cog import P2PCog
     from cogs.shop_cog import ShopCog
 
 
@@ -39,7 +40,9 @@ class ShopView(ui.OwnerView):
             tab,
             1,
         )
-        self.picked = None  # 選んだ景品 (種類, 値)。「🛒 購入」を押すまで、買わない。種類は shop / auction / horse
+        self.picked: tuple[str, str] | None = (
+            None  # 選んだ景品 (種類, 値)。「🛒 購入」を押すまで、買わない。種類は shop / auction / horse
+        )
         self.auction_tab = None  # 競売の画面のタブ（players / teiai）。None は、開いたときに決める
         self.p2p_filter, self.p2p_order = "all", "end"  # プレイヤーの出品の、絞り込みと並び順
         self._build()
@@ -126,19 +129,25 @@ class ShopView(ui.OwnerView):
             qty.callback = self._on_qty
             self.add_item(qty)
 
-    def _p2p(self):
+    def _p2p(self) -> "P2PCog | None":
         """プレイヤー間の取引の部品（cogs/p2p_cog.py）。読み込まれていなければ None（画面に出さない）。"""
         get = getattr(self.cog.bot, "get_cog", None)
-        return get("P2PCog") if get else None
+        return cast("P2PCog | None", get("P2PCog")) if get else None
 
     async def _on_player(self, interaction: discord.Interaction):
-        await self._p2p().open_detail(interaction, int(interaction.data["values"][0]))
+        p2p = self._p2p()
+        if p2p is not None:
+            await p2p.open_detail(interaction, int(ui.selected_values(interaction)[0]))
 
     async def _on_sell(self, interaction: discord.Interaction):
-        await self._p2p().open_sell(interaction)
+        p2p = self._p2p()
+        if p2p is not None:
+            await p2p.open_sell(interaction)
 
     async def _on_mine(self, interaction: discord.Interaction):
-        await self._p2p().open_mine(interaction)
+        p2p = self._p2p()
+        if p2p is not None:
+            await p2p.open_mine(interaction)
 
     def _add_buy_button(self) -> None:
         """選んだ景品を買うボタン。何も選んでいないうちは押せない。"""
@@ -152,6 +161,7 @@ class ShopView(ui.OwnerView):
         self.add_item(btn)
 
     def _picked_name(self) -> str:
+        assert self.picked is not None
         kind, value = self.picked
         if kind == "horse":
             horse = next(
@@ -268,7 +278,7 @@ class ShopView(ui.OwnerView):
         return callback
 
     async def _on_p2p_order(self, interaction: discord.Interaction):
-        self.p2p_order = interaction.data["values"][0]
+        self.p2p_order = ui.selected_values(interaction)[0]
         await self._redraw(interaction)
 
     def _build_auction_teiai(self, eco) -> None:
@@ -372,20 +382,20 @@ class ShopView(ui.OwnerView):
         await interaction.response.edit_message(embed=self.embed(), view=self)
 
     async def _on_qty(self, interaction: discord.Interaction):
-        self.qty = int(interaction.data["values"][0])
+        self.qty = int(ui.selected_values(interaction)[0])
         await self._redraw(interaction)
 
     # 選ぶだけでは買わない。選んだものを覚えて、「🛒 購入」ボタンで買う
     async def _on_buy(self, interaction: discord.Interaction):
-        self.picked = ("shop", interaction.data["values"][0])
+        self.picked = ("shop", ui.selected_values(interaction)[0])
         await self._redraw(interaction)
 
     async def _on_buy_horse(self, interaction: discord.Interaction):
-        self.picked = ("horse", interaction.data["values"][0])
+        self.picked = ("horse", ui.selected_values(interaction)[0])
         await self._redraw(interaction)
 
     async def _on_buy_auction(self, interaction: discord.Interaction):
-        self.picked = ("auction", interaction.data["values"][0])
+        self.picked = ("auction", ui.selected_values(interaction)[0])
         await self._redraw(interaction)
 
     async def _on_purchase(self, interaction: discord.Interaction):
@@ -415,10 +425,10 @@ class ShopView(ui.OwnerView):
         await self._redraw(interaction)
 
     async def _on_use(self, interaction: discord.Interaction):
-        await self.cog.use_item(interaction, interaction.data["values"][0])
+        await self.cog.use_item(interaction, ui.selected_values(interaction)[0])
 
     async def _on_unequip(self, interaction: discord.Interaction):
-        await self.cog.unequip_item(interaction, interaction.data["values"][0])
+        await self.cog.unequip_item(interaction, ui.selected_values(interaction)[0])
 
     def _make_nick(self, mode: str):
         async def callback(interaction: discord.Interaction):

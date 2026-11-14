@@ -4,11 +4,15 @@
 """
 
 import time
+from typing import TYPE_CHECKING, cast
 
 import discord
 
 from cogs._teiai_escape import run_escape
 from core import teiai, ui
+
+if TYPE_CHECKING:
+    from cogs.shop_cog import ShopCog
 
 LEVEL_MARK = {"safe": "🟢", "warn": "🟡", "danger": "🔴", "frozen": "🚨"}
 LEVEL_TEXT = {
@@ -113,9 +117,10 @@ class AmountModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         raw = self.amount.value.replace(",", "").strip()
         if raw and not raw.isdigit():
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed("金額が正しくありません", "半角の数字で入れてください。"), ephemeral=True
             )
+            return
         eco, uid = self.panel.eco(interaction), interaction.user.id
         if self.mode == "deposit":
             ok, result = eco.bank_deposit(uid, int(raw))
@@ -139,15 +144,15 @@ class StakeModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         raw = self.stake.value.replace(",", "").strip()
         if not raw.isdigit():
-            return await interaction.response.send_message(
+            await interaction.response.send_message(
                 embed=ui.error_embed("金額が正しくありません", "半角の数字で入れてください。"), ephemeral=True
             )
+            return
         eco, uid = self.panel.eco(interaction), interaction.user.id
         ok, result = eco.cds_buy(uid, self.target_id, int(raw))
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("買えませんでした", result), ephemeral=True
-            )
+            await interaction.response.send_message(embed=ui.error_embed("買えませんでした", result), ephemeral=True)
+            return
         mine = self.target_id == uid
         text = (
             f"**{result}倍**で買いました（掛け金 {ui.pelica(int(raw))}・配当の見込み {ui.pelica(int(int(raw) * result))}）。\n"
@@ -158,7 +163,8 @@ class StakeModal(discord.ui.Modal):
             )
         )
         if mine:  # 自分への保険は、戦略が見えるので、本人だけ
-            return await interaction.response.send_message(embed=ui.ok_embed("CDS を買いました", text), ephemeral=True)
+            await interaction.response.send_message(embed=ui.ok_embed("CDS を買いました", text), ephemeral=True)
+            return
         await interaction.response.send_message(  # 他人への CDS は公開（「あいつの破産に賭けた」）
             embed=ui.embed(
                 f"💀 {interaction.user.display_name} が、<@{self.target_id}> の破産に賭けた",
@@ -202,7 +208,7 @@ class TeiaiPanel(ui.OwnerView):
         self.bot, self.uid = bot, uid
 
     def eco(self, interaction: discord.Interaction):
-        return self.bot.economy.for_guild(interaction.guild.id)
+        return self.bot.economy.for_guild(ui.guild_id_of(interaction))
 
     @discord.ui.button(label="預ける", style=discord.ButtonStyle.success)
     async def deposit(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -252,7 +258,11 @@ class TeiaiPanel(ui.OwnerView):
             )
 
         async def after_success(inter: discord.Interaction):
-            shop_cog = inter.client.get_cog("ShopCog")  # 破産と同じく、色ロールとニックネームをすぐに反映する
+            if inter.guild is None:
+                return
+            shop_cog = cast(
+                "ShopCog | None", ui.bot_of(inter).get_cog("ShopCog")
+            )  # 破産と同じく、色ロールとニックネームをすぐに反映する
             member = inter.guild.get_member(inter.user.id) or inter.user
             if shop_cog is not None and isinstance(member, discord.Member):
                 await shop_cog.after_bankruptcy(inter.guild, member)
