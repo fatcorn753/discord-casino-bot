@@ -184,3 +184,13 @@ def test_messages_format_failures_notices_and_memo():
     assert "<t:123:R>" in format_failure(fail("escape_cooldown", ready=123))
     assert "<@42>" in format_notice(notice("cds_default_payout", target_id=42, pay=500))
     assert "<t:999:F>" in format_memo(MemoInfo("CSトークン", 1, 999.0, 0.8))
+
+
+def test_get_cog_port_handles_missing_and_present_cogs():
+    from cogs.shared.cog_ports import IShopCogPort, get_cog_port
+
+    assert get_cog_port(SimpleNamespace(), "ShopCog", IShopCogPort) is None
+    assert get_cog_port(SimpleNamespace(get_cog=lambda _name: None), "ShopCog", IShopCogPort) is None
+    shop_stub = SimpleNamespace(sync_title_nick=lambda *_a, **_k: None)
+    bot = SimpleNamespace(get_cog=lambda name: shop_stub if name == "ShopCog" else None)
+    assert get_cog_port(bot, "ShopCog", IShopCogPort) is shop_stub

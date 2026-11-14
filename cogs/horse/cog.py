@@ -214,6 +214,11 @@ class HorseCog(commands.Cog):
             logthrottle.warn(("horse-post", channel.id), f"競馬の投稿に失敗: channel={channel.id}: {exc!r}")
             return None
 
+    async def post_bet_announcement(self, guild: discord.Guild, eco, race: dict, content: str) -> None:
+        channel = await self._channel(guild, eco, race)
+        if channel is not None:
+            await self._post(channel, content=content)
+
     async def _announce_entry(self, guild: discord.Guild, eco, race_id: int) -> None:
         race = eco.race_get(race_id)
         channel = await self._channel(guild, eco, race)

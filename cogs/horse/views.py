@@ -10,6 +10,7 @@ from typing import Any, cast
 import discord
 
 from cogs.shared import ui
+from cogs.shared.cog_ports import IHorseCogPort, get_cog_port
 from cogs.shared.horse_display import bar as bar  # noqa: F401
 from cogs.shared.horse_display import stat_lines as stat_lines  # noqa: F401
 from cogs.shared.messages import format_failure
@@ -351,16 +352,15 @@ class BetPanel(discord.ui.View):
 
     async def announce_bet(self, interaction: discord.Interaction, picks: str, result: dict) -> None:
         """買った馬券を、レースのチャンネルに公開する（誰が何に賭けたか）。投稿できなくても、購入は済んでいる。"""
-        cog = self.bot.get_cog("HorseCog")
+        cog = get_cog_port(self.bot, "HorseCog", IHorseCogPort)
         eco = self.bot.economy.for_guild(interaction.guild_id)
         if cog is None or interaction.guild is None:
             return
-        channel = await cog._channel(interaction.guild, eco, self.race)
-        if channel is None:
-            return
-        await cog._post(
-            channel,
-            content=(
+        await cog.post_bet_announcement(
+            interaction.guild,
+            eco,
+            self.race,
+            (
                 f"🎫 <@{interaction.user.id}> が **{horse_mod.BET_KINDS[result['kind']]}** {picks}枠 "
                 f"（{result['name']}）に {ui.pelica(result['stake'])}！　オッズ **{result['odds']:.1f}**"
             ),
@@ -368,17 +368,16 @@ class BetPanel(discord.ui.View):
 
     async def announce_bets(self, interaction: discord.Interaction, results: list) -> None:
         """単勝・複勝をまとめて買ったとき、1つの投稿で公開する。"""
-        cog = self.bot.get_cog("HorseCog")
+        cog = get_cog_port(self.bot, "HorseCog", IHorseCogPort)
         eco = self.bot.economy.for_guild(interaction.guild_id)
         if cog is None or interaction.guild is None or not results:
             return
-        channel = await cog._channel(interaction.guild, eco, self.race)
-        if channel is None:
-            return
         parts = "、".join(f"{r['lane']}枠 {r['name']}（オッズ {r['odds']:.1f}）" for r in results)
-        await cog._post(
-            channel,
-            content=(
+        await cog.post_bet_announcement(
+            interaction.guild,
+            eco,
+            self.race,
+            (
                 f"🎫 <@{interaction.user.id}> が **{horse_mod.BET_KINDS[results[0]['kind']]}** {parts} に"
                 f"、各 {ui.pelica(results[0]['stake'])}！"
             ),

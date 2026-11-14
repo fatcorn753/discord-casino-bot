@@ -90,6 +90,11 @@ class ShopCog(commands.Cog):
         async with self._nick_locks.setdefault(member.id, asyncio.Lock()):
             await apply_title_nick(guild, member, self._nick_tag(guild.id, member.id), eco)
 
+    async def sync_title_nick(
+        self, user_id: int, here: discord.Guild | None = None, member: discord.Member | None = None
+    ) -> tuple[str, int]:
+        return await self._sync_title_nick(user_id, here, member)
+
     async def _sync_title_nick(
         self, user_id: int, here: discord.Guild | None = None, member: discord.Member | None = None
     ) -> tuple[str, int]:

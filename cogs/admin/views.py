@@ -2,7 +2,7 @@
 
 import io
 import time
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional
 
 import discord
 
@@ -10,6 +10,7 @@ from cogs.admin.embeds import announce_embed
 from cogs.admin.purge import PurgeResult, delete_own_messages
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
+from cogs.shared.cog_ports import IApprovalCogPort, IQuizCogPort, get_cog_port
 from domain import approval
 
 if TYPE_CHECKING:
@@ -50,7 +51,7 @@ class ApprovalButton(
             eco.set_guild_status(gid, approval.APPROVED, name, interaction.user.id)
             embed = ui.ok_embed("許可しました", f"**{name}**（`{gid}`）で遊べるようになりました。")
             if guild is not None:
-                cog = cast("ApprovalCog | None", bot.get_cog("ApprovalCog"))
+                cog = get_cog_port(bot, "ApprovalCog", IApprovalCogPort)
                 if cog is not None:
                     await cog.announce_approved(guild)
         else:
@@ -149,9 +150,12 @@ class QuizBulkConfirm(ui.OwnerView):
         ids = self.cog.bot.economy.quiz_add_many(self.quizzes, time.time(), interaction.user.display_name)
         note = "告知はしていません。`/クイズ 挑戦` に出ます。"
         if self.announce:
-            quiz_cog = self.cog.bot.get_cog("QuizCog")
-            counts = [await quiz_cog.broadcast(qid, self.guild, self.channel) for qid in ids]
-            note = f"{self.target_text()}に、{len(ids)}問を出しました（のべ{sum(counts)}件の投稿）。"
+            quiz_cog = get_cog_port(self.cog.bot, "QuizCog", IQuizCogPort)
+            if quiz_cog is None:
+                note = "クイズ機能が読み込まれていないため、告知できませんでした。"
+            else:
+                counts = [await quiz_cog.broadcast(qid, self.guild, self.channel) for qid in ids]
+                note = f"{self.target_text()}に、{len(ids)}問を出しました（のべ{sum(counts)}件の投稿）。"
         await interaction.edit_original_response(
             embeds=[ui.ok_embed(f"クイズを{len(ids)}問登録しました", f"番号: #{ids[0]}〜#{ids[-1]}\n{note}")], view=None
         )

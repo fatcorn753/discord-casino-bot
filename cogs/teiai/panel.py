@@ -4,18 +4,15 @@
 """
 
 import time
-from typing import TYPE_CHECKING, cast
 
 import discord
 
 from cogs.shared import ui
+from cogs.shared.cog_ports import IShopCogPort, get_cog_port
 from cogs.shared.messages import format_failure
 from cogs.teiai.escape import run_escape
 from domain import teiai
 from infra import catalogs
-
-if TYPE_CHECKING:
-    from cogs.shop.cog import ShopCog
 
 _TEIAI_CFG = catalogs.teiai()
 LEVEL_MARK = dict(_TEIAI_CFG.panel_level_mark)
@@ -284,8 +281,8 @@ class TeiaiPanel(ui.OwnerView):
         async def after_success(inter: discord.Interaction):
             if inter.guild is None:
                 return
-            shop_cog = cast(
-                "ShopCog | None", ui.bot_of(inter).get_cog("ShopCog")
+            shop_cog = get_cog_port(
+                ui.bot_of(inter), "ShopCog", IShopCogPort
             )  # 破産と同じく、色ロールとニックネームをすぐに反映する
             member = inter.guild.get_member(inter.user.id) or inter.user
             if shop_cog is not None and isinstance(member, discord.Member):

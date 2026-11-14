@@ -4,7 +4,7 @@ import datetime
 import logging
 import math
 import time
-from typing import Any, Optional
+from typing import Optional
 
 import discord
 from discord import app_commands
@@ -12,6 +12,7 @@ from discord.ext import commands, tasks
 
 from cogs.shared import ranking, ui
 from cogs.shared.amount import balance_choices
+from cogs.shared.cog_ports import IShopCogPort, get_cog_port
 from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
 from cogs.shared.messages import format_failure, format_history, format_memo
 from cogs.teiai.panel import TeiaiPanel, panel_embed
@@ -334,7 +335,7 @@ class EconomyCog(commands.Cog):
             embed=ui.embed(f"🔴 {interaction.user.display_name} が自己破産しました", "\n".join(lines), ui.ERROR)
         )
         eco.take_notices(uid)
-        shop_cog: Any = ui.bot_of(interaction).get_cog("ShopCog")
+        shop_cog = get_cog_port(ui.bot_of(interaction), "ShopCog", IShopCogPort)
         guild = interaction.guild
         if shop_cog is not None and guild is not None:
             member = guild.get_member(uid) or interaction.user

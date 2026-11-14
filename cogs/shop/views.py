@@ -1,10 +1,11 @@
 """`/ショップ` の操作パネル（View）。"""
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import discord
 
 from cogs.shared import ui
+from cogs.shared.cog_ports import IP2PCogPort, get_cog_port
 from cogs.shop.embeds import (
     MAX_QTY,
     P2P_FILTERS,
@@ -17,7 +18,6 @@ from cogs.shop.embeds import (
 from domain import shop
 
 if TYPE_CHECKING:
-    from cogs.p2p.cog import P2PCog
     from cogs.shop.cog import ShopCog
 
 
@@ -130,10 +130,9 @@ class ShopView(ui.OwnerView):
             qty.callback = self._on_qty
             self.add_item(qty)
 
-    def _p2p(self) -> "P2PCog | None":
-        """プレイヤー間の取引の部品（cogs/p2p_cog.py）。読み込まれていなければ None（画面に出さない）。"""
-        get = getattr(self.cog.bot, "get_cog", None)
-        return cast("P2PCog | None", get("P2PCog")) if get else None
+    def _p2p(self) -> IP2PCogPort | None:
+        """プレイヤー間の取引ポート。読み込まれていなければ None（画面に出さない）。"""
+        return get_cog_port(self.cog.bot, "P2PCog", IP2PCogPort)
 
     async def _on_player(self, interaction: discord.Interaction):
         p2p = self._p2p()

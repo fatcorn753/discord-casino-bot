@@ -1,10 +1,11 @@
 """サーバー承認・持ち主 DM コマンドの Discord 入口ガード（cogs 共通基盤）。"""
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 import discord
 
 from cogs.shared import ui
+from cogs.shared.cog_ports import IApprovalCogPort, get_cog_port
 from domain.approval import DENIED, DM_GROUP, is_allowed, owner_ids, requires_approval
 
 if TYPE_CHECKING:
@@ -38,7 +39,7 @@ async def guard(interaction: discord.Interaction) -> bool:
         )
         return False
     row = bot.economy.get_guild_status(guild_id)
-    cog: Any = bot.get_cog("ApprovalCog")
+    cog = get_cog_port(bot, "ApprovalCog", IApprovalCogPort)
     if cog is not None and interaction.guild is not None:
         await cog.ensure_requested(interaction.guild)  # 未登録なら承認を依頼する／しばらくたっていれば催促する
     if row and row["status"] == DENIED:

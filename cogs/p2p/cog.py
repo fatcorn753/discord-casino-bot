@@ -8,7 +8,7 @@
 """
 
 import re
-from typing import Any, cast
+from typing import Any
 
 import discord
 from discord.ext import commands, tasks
@@ -24,6 +24,7 @@ from cogs.p2p.embeds import (  # noqa: F401
 )
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
+from cogs.shared.cog_ports import IP2PCogPort, get_cog_port
 from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
 from cogs.shared.messages import format_failure
 from domain import approval, p2p
@@ -51,7 +52,7 @@ class ListingButton(discord.ui.DynamicItem[discord.ui.Button], template=r"p2p:op
         return cls(int(match["id"]))
 
     async def callback(self, interaction: discord.Interaction):
-        cog = cast("P2PCog | None", ui.bot_of(interaction).get_cog("P2PCog"))
+        cog = get_cog_port(ui.bot_of(interaction), "P2PCog", IP2PCogPort)
         if cog is None:
             return await interaction.response.send_message(
                 embed=ui.error_embed("いまは使えません", "しばらくしてから、もう一度試してください。"), ephemeral=True

@@ -37,6 +37,13 @@ from cogs.admin.targets import pick_channel as _pick_channel_impl
 from cogs.admin.targets import postable as postable  # noqa: F401
 from cogs.admin.views import AnnounceModal, ApprovalButton, PurgeConfirm, QuizBulkConfirm
 from cogs.shared import ui
+from cogs.shared.cog_ports import (
+    IEventCogPort,
+    IHorseCogPort,
+    IQuizCogPort,
+    IRaffleCogPort,
+    get_cog_port,
+)
 from domain import approval, events, quizimport
 from domain import labor as labor_mod
 from domain.games import rtplevel
@@ -290,8 +297,12 @@ class ApprovalCog(commands.Cog):
             return await interaction.response.send_message(
                 embed=ui.error_embed("開く先がありません", "許可されているサーバーがありません。"), ephemeral=True
             )
+        cog = get_cog_port(self.bot, "EventCog", IEventCogPort)
+        if cog is None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("イベント機能が読み込まれていません"), ephemeral=True
+            )
         await interaction.response.defer(ephemeral=True)
-        cog = self.bot.get_cog("EventCog")
         lines = [(await cog.start_manual(g, game.value, boost, minutes, channel))[1] for g in targets]
         await interaction.followup.send(
             embed=ui.ok_embed(f"特別イベントを開きました（{len(targets)}サーバー）", "\n".join(lines)[:3900]),
@@ -309,8 +320,12 @@ class ApprovalCog(commands.Cog):
             return
         if guild_id and await self._pick_guild(interaction, guild_id) is None:
             return
+        cog = get_cog_port(self.bot, "EventCog", IEventCogPort)
+        if cog is None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("イベント機能が読み込まれていません"), ephemeral=True
+            )
         await interaction.response.defer(ephemeral=True)
-        cog = self.bot.get_cog("EventCog")
         lines = [(await cog.stop_manual(g))[1] for g in self._event_targets(guild_id)]
         await interaction.followup.send(
             embed=ui.embed("特別イベントを終わらせました", "\n".join(lines)[:3900] or "対象がありません。", ui.INFO),
@@ -471,7 +486,7 @@ class ApprovalCog(commands.Cog):
         ok, channel = await self._pick_channel(interaction, guild, channel_id)
         if not ok:
             return
-        cog = self.bot.get_cog("HorseCog")
+        cog = get_cog_port(self.bot, "HorseCog", IHorseCogPort)
         if cog is None:
             return await interaction.response.send_message(
                 embed=ui.error_embed("競馬が読み込まれていません"), ephemeral=True
@@ -597,8 +612,13 @@ class ApprovalCog(commands.Cog):
         ok, channel = await self._pick_channel(interaction, guild, channel_id)
         if not ok:
             return
+        cog = get_cog_port(self.bot, "RaffleCog", IRaffleCogPort)
+        if cog is None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("抽選機能が読み込まれていません"), ephemeral=True
+            )
         await interaction.response.defer(ephemeral=True)
-        ok, text = await self.bot.get_cog("RaffleCog").host(guild, interaction.user.id, fee, minutes, channel)
+        ok, text = await cog.host(guild, interaction.user.id, fee, minutes, channel)
         await interaction.followup.send(
             embed=ui.ok_embed("抽選を始めました", text) if ok else ui.error_embed("始められません", text),
             ephemeral=True,
@@ -624,8 +644,13 @@ class ApprovalCog(commands.Cog):
         ok, channel = await self._pick_channel(interaction, guild, channel_id)
         if not ok:
             return
+        cog = get_cog_port(self.bot, "RaffleCog", IRaffleCogPort)
+        if cog is None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("抽選機能が読み込まれていません"), ephemeral=True
+            )
         await interaction.response.defer(ephemeral=True)
-        ok, text = await self.bot.get_cog("RaffleCog").repost(guild, channel)
+        ok, text = await cog.repost(guild, channel)
         await interaction.followup.send(
             embed=ui.ok_embed("出し直しました", text) if ok else ui.error_embed("出し直せません", text), ephemeral=True
         )
@@ -642,8 +667,13 @@ class ApprovalCog(commands.Cog):
         guild = await self._pick_guild(interaction, guild_id)
         if guild is None:
             return
+        cog = get_cog_port(self.bot, "RaffleCog", IRaffleCogPort)
+        if cog is None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("抽選機能が読み込まれていません"), ephemeral=True
+            )
         await interaction.response.defer(ephemeral=True)
-        ok, text = await self.bot.get_cog("RaffleCog").cancel(guild)
+        ok, text = await cog.cancel(guild)
         await interaction.followup.send(
             embed=ui.ok_embed("中止しました", text) if ok else ui.error_embed("中止できません", text), ephemeral=True
         )
@@ -678,9 +708,12 @@ class ApprovalCog(commands.Cog):
         ok, channel = await self._pick_channel(interaction, guild, channel_id)
         if not ok:
             return
-        await interaction.response.send_modal(
-            self.bot.get_cog("QuizCog").add_modal(announce is None or announce.value == 1, guild, channel)
-        )
+        cog = get_cog_port(self.bot, "QuizCog", IQuizCogPort)
+        if cog is None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("クイズ機能が読み込まれていません"), ephemeral=True
+            )
+        await interaction.response.send_modal(cog.add_modal(announce is None or announce.value == 1, guild, channel))
 
     quiz_add.autocomplete("guild_id")(guild_autocomplete)
     quiz_add.autocomplete("channel_id")(channel_autocomplete)
@@ -767,7 +800,12 @@ class ApprovalCog(commands.Cog):
     async def quiz_list(self, interaction: discord.Interaction):
         if not await self._owner_only(interaction):
             return
-        await interaction.response.send_message(embed=self.bot.get_cog("QuizCog").listing_embed(), ephemeral=True)
+        cog = get_cog_port(self.bot, "QuizCog", IQuizCogPort)
+        if cog is None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("クイズ機能が読み込まれていません"), ephemeral=True
+            )
+        await interaction.response.send_message(embed=cog.listing_embed(), ephemeral=True)
 
     @quiz_group.command(name="削除", description="[管理者] クイズを削除する（回答の記録も消える）")
     @app_commands.rename(quiz_id="番号")
@@ -775,7 +813,12 @@ class ApprovalCog(commands.Cog):
     async def quiz_delete(self, interaction: discord.Interaction, quiz_id: int):
         if not await self._owner_only(interaction):
             return
-        if not self.bot.get_cog("QuizCog").remove(quiz_id):
+        cog = get_cog_port(self.bot, "QuizCog", IQuizCogPort)
+        if cog is None:
+            return await interaction.response.send_message(
+                embed=ui.error_embed("クイズ機能が読み込まれていません"), ephemeral=True
+            )
+        if not cog.remove(quiz_id):
             return await interaction.response.send_message(
                 embed=ui.error_embed("その番号の問題はありません"), ephemeral=True
             )

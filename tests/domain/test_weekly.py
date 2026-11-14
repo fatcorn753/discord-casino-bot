@@ -245,7 +245,7 @@ def test_previous_holder_is_synced_off_the_nickname(eco, monkeypatch):
     synced = []
 
     class FakeShop:
-        async def _sync_title_nick(self, uid, g):
+        async def sync_title_nick(self, uid, g):
             synced.append(uid)
 
     cog.bot.get_cog = lambda name: FakeShop() if name == "ShopCog" else None

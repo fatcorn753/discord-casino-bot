@@ -9,6 +9,7 @@ from discord.ext import commands, tasks
 
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
+from cogs.shared.cog_ports import IShopCogPort, get_cog_port
 from cogs.shared.messages import format_standings_lines
 from domain import approval, shop, weekly
 from infra import catalogs, logthrottle
@@ -103,11 +104,11 @@ class WeeklyCog(commands.Cog):
                 )
             except discord.HTTPException as exc:
                 logthrottle.warn(("weekly", guild.id), f"週間ランキングを投稿できません: guild={guild.id}: {exc!r}")
-        shop_cog = self.bot.get_cog("ShopCog")
+        shop_cog = get_cog_port(self.bot, "ShopCog", IShopCogPort)
         for uid in result["previous"]:  # 外れた称号をニックネームからも消す
             if shop_cog is not None:
                 try:
-                    await shop_cog._sync_title_nick(uid, guild)
+                    await shop_cog.sync_title_nick(uid, guild)
                 except Exception as exc:
                     print(f"称号の取り消しをニックネームに反映できません: guild={guild.id} user={uid}: {exc!r}")
 

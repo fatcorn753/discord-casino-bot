@@ -46,6 +46,9 @@ class EcoBase:
     _strict: bool
     _notices: dict[tuple[int, int], list[Notice]]
 
+    DAILY_BASE: int
+    DAILY_STREAK_BONUS: int
+    DAILY_STREAK_CAP: int
     HORSE_PRICE: int
     SIDE_NAME: dict[str, str]
 

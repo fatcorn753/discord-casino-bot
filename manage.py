@@ -16,6 +16,7 @@ from infra.catalogs import bind_catalogs
 bind_catalogs()
 
 from domain import approval  # noqa: E402
+from domain.ports import IEconomy  # noqa: E402
 from infra.db.economy import Economy  # noqa: E402
 from infra.paths import DB_PATH as _DB_PATH  # noqa: E402
 
@@ -23,7 +24,7 @@ DB_PATH = str(_DB_PATH)
 LABEL = {approval.APPROVED: "許可", approval.PENDING: "承認待ち", approval.DENIED: "断った"}
 
 
-def cmd_grant(eco: Economy, args) -> int:
+def cmd_grant(eco: IEconomy, args) -> int:
     balance = eco.for_guild(args.guild_id).credit(args.user_id, args.amount, f"付与（管理）{args.reason}".strip())
     print(
         f"付与しました: サーバー {args.guild_id} / ユーザー {args.user_id} に {args.amount:,}ペリカ（残高 {balance:,}）"
@@ -31,7 +32,7 @@ def cmd_grant(eco: Economy, args) -> int:
     return 0
 
 
-def cmd_servers(eco: Economy, _args) -> int:
+def cmd_servers(eco: IEconomy, _args) -> int:
     rows = eco.list_guild_status()
     if not rows:
         print("記録されているサーバーはありません。")
