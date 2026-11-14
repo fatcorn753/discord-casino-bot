@@ -35,30 +35,43 @@ SILKS = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "⬛", "⬜", "🟫"]  
 
 DISTANCES = (1000, 1200, 1600, 1800, 2000, 2400, 3000)
 GOINGS = ("良", "稍重", "重", "不良")
-GOING_PENALTY = {"良": 0.0, "稍重": 0.012, "重": 0.03, "不良": 0.05}
+GOING_PENALTY = {"良": 0.005, "稍重": 0.025, "重": 0.050, "不良": 0.080}
 GOING_WEIGHT = (60, 25, 11, 4)  # 馬場の出やすさ（良が多い）
 FORM_MARK = {1: "◎", 0: "○", -1: "△"}  # 調子（毎レース、ランダム）
 FORM_MULT = {1: 1.015, 0: 1.0, -1: 0.985}
 
+TACTICS = ("front", "pace", "stalk", "close")
+TACTIC_NAME = {"front": "逃げ", "pace": "先行", "stalk": "差し", "close": "追込"}
+TACTIC_MARK = {"front": "💨", "pace": "🐎", "stalk": "⚡", "close": "🔥"}
+TACTIC_DESC = {
+    "front": "序盤から飛ばすがスタミナ消耗大",
+    "pace": "好位で安定して運ぶ",
+    "stalk": "中盤温存し終盤に脚を伸ばす",
+    "close": "後方待機から直線一気の末脚",
+}
+TACTIC_DRAIN = {"front": 1.12, "pace": 1.00, "stalk": 0.93, "close": 0.86}
+
 TAKEOUT = 0.15  # 控除率（オッズは、公正な倍率の 1 - TAKEOUT 倍）
 ODDS_SIMS = 8000  # estimate（本当の確率を調べる検証用）の、シミュレーション回数
 MAX_ODDS = 99.9
-MIN_STAKE, MAX_STAKE = 100, 50_000  # 1回の賭け金
-MAX_RACE_STAKE = 150_000  # 1人が1レースに賭けられる合計
+MIN_STAKE, MAX_STAKE = 100, 20_000  # 1回の賭け金
+MAX_RACE_STAKE = 60_000  # 1人が1レースに賭けられる合計
 
 ENTRY_FEE = 1_000  # 出走料（レンタル馬も同じ。帝愛の馬=NPCは払わない）
 PRIZES = (12_000, 5_000, 2_000)  # 1着・2着・3着の賞金（馬主へ）。固定額だが、原資（下記）を超えない
+GRADE_HOURS = (21,)  # 重賞（G1）として扱う定時レースの発走時刻
+GRADE_PRIZE_MULT = 1.5  # 重賞の賞金倍率
 
 
-def prize_pool_scale(real_entries: int, placed_prizes: int) -> float:
-    """そのレースで、人間の馬が払った出走料の合計が、賞金（placed_prizes＝人間の馬が獲る分の合計）に足りるか。
+def prize_pool_scale(real_entries: int, placed_prizes: int, bet_pool: int = 0) -> float:
+    """そのレースの賞金原資（人間の馬が払った出走料＋負け馬券からの還元分）が、賞金合計に足りるか。
 
     足りれば1.0（そのまま払う）。足りなければ、その比率ぶん、3着まで同じ割合で削る。
-    新しいペリカが、レースごとに生まれないようにする（出走料を超えて払わない）。
+    新しいペリカが、レースごとに生まれないようにする。
     """
     if placed_prizes <= 0:
         return 1.0
-    return min(1.0, real_entries * ENTRY_FEE / placed_prizes)
+    return min(1.0, (real_entries * ENTRY_FEE + max(0, bet_pool)) / placed_prizes)
 
 
 TICKS = 60  # 平均的な馬が走り切るティック数
@@ -76,9 +89,10 @@ class Runner:
     power: int
     guts: int
     form: int = 0  # 1 ◎ / 0 ○ / -1 △
-    races: int = 0  # 戦績（オッズに使う。レースの結果には効かない）
+    races: int = 0  # 戦績（オッズに使う）
     wins: int = 0
     places: int = 0  # 3着以内（1着を含む）
+    tactic: str = "pace"  # 作戦（front=逃げ / pace=先行 / stalk=差し / close=追込）
 
     def stat(self, key: str) -> int:
         return getattr(self, key)
@@ -168,27 +182,67 @@ def random_form(rng: random.Random) -> int:
     return rng.choices([1, 0, -1], weights=[2, 5, 2], k=1)[0]
 
 
+def default_tactic(stats: dict) -> str:
+    """ステータスに自然に合う初期の作戦。"""
+    sp, st, pw, gt = stats["speed"], stats["stamina"], stats["power"], stats["guts"]
+    if sp >= 60 and pw >= 50:
+        return "front"
+    if gt >= 58 and st >= 50:
+        return "close"
+    if gt >= 54:
+        return "stalk"
+    return "pace"
+
+
+def random_tactic(rng: random.Random) -> str:
+    return rng.choices(TACTICS, weights=[2, 4, 3, 2], k=1)[0]
+
+
+def is_grade_hour(hour: int) -> bool:
+    return hour in GRADE_HOURS
+
+
 # ---- シミュレーション ---- #
 def speed_coef(distance: int) -> float:
-    """距離ごとの、スピードの効き（短いほど効く）。1800m で 0.05。"""
-    return min(0.09, 0.05 * 1800 / distance)
+    """距離ごとの、スピードの効き（短いほど効く）。1800m で 0.032。"""
+    return min(0.055, 0.032 * 1800 / distance)
 
 
-FATIGUE_MAX = 0.18  # バテたときの、最大の減速
-NOISE = 0.03  # 毎ティックの運
-LUCK = 0.020  # レース全体の運（展開）
+FATIGUE_MAX = 0.16  # バテたときの、最大の減速
+NOISE = 0.032  # 毎ティックの運
+LUCK = 0.024  # レース全体の運（展開）
 
 
-def _mult(r: Runner, p: float, track: Track, luck: float, spurt: float) -> float:
+def _eff_stat(val: int) -> float:
+    """50を基準にした能力差。65超は緩やかに逓減し、1点極振りが万能になりすぎないようにする。"""
+    if val <= 65:
+        return (val - 50) / 50
+    return (15 + (val - 65) * 0.55) / 50
+
+
+def _mult(r: Runner, p: float, track: Track, luck: float, spurt: float, front_count: int = 1) -> float:
     dfac = track.distance / 1800
-    m = 1 + (r.speed - 50) / 50 * speed_coef(track.distance)
-    m *= 1 + (r.power - 50) / 50 * 0.03 * max(0.0, 1 - p / 0.2)  # 出足
-    reach = min(1.0, max(0.25, 0.8 * (r.stamina / 50) / dfac))  # ここまでは、バテずに走れる
+    tactic = r.tactic if r.tactic in TACTIC_DRAIN else "pace"
+    m = 1 + _eff_stat(r.speed) * speed_coef(track.distance)
+    m *= 1 + _eff_stat(r.power) * 0.045 * max(0.0, 1 - p / 0.30)  # 序盤の加速・坂の推進力
+    pace_drain = (
+        0.05 if front_count >= 2 and tactic == "front" else (-0.03 if front_count == 0 and tactic == "front" else 0.0)
+    )
+    drain = TACTIC_DRAIN[tactic] + pace_drain
+    reach = min(1.0, max(0.25, 0.78 * (r.stamina / 50) / (dfac * drain)))  # ここまでは、バテずに走れる
     if p > reach and reach < 1.0:
         m *= 1 - FATIGUE_MAX * (p - reach) / (1 - reach)
-    if p >= 0.75:
-        m *= 1 + spurt  # ラストスパート
-    m *= 1 - GOING_PENALTY[track.going] * (1 - (r.power - 20) / 60 * 0.7)  # 馬場
+    if tactic == "front" and p < 0.35:
+        m *= 1.022 if front_count <= 1 else 1.012
+    elif tactic == "pace" and 0.2 <= p < 0.65:
+        m *= 1.008 + (0.006 if front_count == 0 else 0.0)
+    elif tactic == "stalk" and p >= 0.60:
+        m *= 1.016 + (0.008 if front_count >= 2 else 0.0)
+    elif tactic == "close" and p >= 0.72:
+        m *= 1.028 + (0.010 if front_count >= 2 else 0.0)
+    if p >= 0.70:
+        m *= 1 + spurt  # ラストスパート（根性）
+    m *= 1 - GOING_PENALTY[track.going] * (1 - (r.power - 20) / 60 * 0.85)  # 馬場（重・不良ほどパワーが効く）
     return m * FORM_MULT[r.form] * (1 + luck)
 
 
@@ -197,14 +251,15 @@ def simulate(runners: list, track: Track, rng: random.Random, keep_frames: bool 
     n = len(runners)
     pos = [0.0] * n
     finish = [None] * n
+    front_count = sum(1 for r in runners if r.tactic == "front")
     luck = [rng.gauss(0, LUCK) for _ in runners]
-    spurt = [max(0.0, (r.guts - 20) / 60 * 0.05 * rng.uniform(0.5, 1.5)) for r in runners]
+    spurt = [max(0.0, (r.guts - 20) / 60 * 0.075 * rng.uniform(0.5, 1.5)) for r in runners]
     frames = [[0.0] * n] if keep_frames else None
     for t in range(1, MAX_TICKS + 1):
         for i, r in enumerate(runners):
             if finish[i] is not None:
                 continue
-            step = _mult(r, pos[i], track, luck[i], spurt[i]) * (1 + rng.gauss(0, NOISE)) / TICKS
+            step = _mult(r, pos[i], track, luck[i], spurt[i], front_count) * (1 + rng.gauss(0, NOISE)) / TICKS
             new = pos[i] + max(0.0, step)
             if new >= 1.0:
                 finish[i] = t - 1 + (1.0 - pos[i]) / max(1e-9, new - pos[i])  # ゴールを越えた時刻（ティック内で補間）
@@ -260,13 +315,17 @@ def estimate_all(runners: list, track: Track, sims: int = ODDS_SIMS, seed: int =
     return {k: {key: n / sims for key, n in d.items()} for k, d in counts.items()}
 
 
-# ---- 戦績で決めるオッズ ----
-RECORD_PRIOR_RUNS = (
-    4  # 戦績を信じる強さ（この回数ぶんの「平均的な成績」を足して薄める。出走が少ない馬ほど、平均に寄る）
-)
-FIRST_RUN_FACTOR = 0.75  # 初出走の馬は、確率をこの倍率で見積もる（オッズが高くなる）
+# ---- 戦績と基礎能力で決めるオッズ ----
+RECORD_PRIOR_RUNS = 4  # 戦績を信じる強さ（この回数ぶんの「基礎能力に応じた平均的な成績」を足して薄める）
+FIRST_RUN_FACTOR = 0.90  # 初出走の馬は、確率をやや控えめに見積もる（オッズがやや高くなる）
 FORM_ODDS = {1: 1.15, 0: 1.0, -1: 0.85}  # 調子による、確率の補正（◎ は低く、△ は高くなる）
 PLACE_CAP = 0.95  # 3着以内率の上限
+
+
+def _ability_rating(r: Runner) -> float:
+    """基礎能力の緩やかな評価値（コース適性や作戦の噛み合いは見ないため、予想の余地は残る）。"""
+    total = r.speed + r.stamina + r.power + r.guts
+    return math.exp((total - STAT_TOTAL) * 0.035 + (r.speed - 50) * 0.012 + (r.stamina - 50) * 0.008)
 
 
 def npc_record(rng: random.Random) -> tuple:
@@ -278,11 +337,12 @@ def npc_record(rng: random.Random) -> tuple:
 
 
 def _win_weights(runners: list) -> list:
-    """勝つ確率の見積もり（合計 1）。戦績の勝率を平均に寄せ、初出走は下げ、調子で補正する。"""
-    n = len(runners)
-    prior = 1 / n
+    """勝つ確率の見積もり（合計 1）。戦績の勝率を基礎能力ベースの事前値に寄せ、初出走・調子で補正する。"""
+    ratings = [_ability_rating(r) for r in runners]
+    r_sum = sum(ratings) or 1.0
     raw = []
-    for r in runners:
+    for r, rate in zip(runners, ratings):
+        prior = rate / r_sum
         p = (r.wins + RECORD_PRIOR_RUNS * prior) / (r.races + RECORD_PRIOR_RUNS)
         if r.races == 0:
             p *= FIRST_RUN_FACTOR
@@ -294,9 +354,11 @@ def _win_weights(runners: list) -> list:
 def _place_probs(runners: list) -> list:
     """3着以内に入る確率の見積もり（合計はほぼ 3）。"""
     n = len(runners)
-    prior = min(3, n) / n
+    ratings = [_ability_rating(r) for r in runners]
+    r_sum = sum(ratings) or 1.0
     raw = []
-    for r in runners:
+    for r, rate in zip(runners, ratings):
+        prior = min(PLACE_CAP, min(3, n) * rate / r_sum)
         p = (r.places + RECORD_PRIOR_RUNS * prior) / (r.races + RECORD_PRIOR_RUNS)
         if r.races == 0:
             p *= FIRST_RUN_FACTOR

@@ -81,10 +81,24 @@ class HorseMixin:
             s = horse_mod.random_stats(rng, horse_mod.RENTAL_STAT_TOTAL)  # 買った馬より、合計を10低くする
             name = rng.choice(horse_mod.NPC_NAMES)
             coat, silks = rng.choice(horse_mod.COATS), rng.choice(horse_mod.SILKS)
+            tactic = horse_mod.default_tactic(s)
             ins = self._conn.execute(
-                "INSERT INTO horses (guild_id, owner_id, name, coat, silks, speed, stamina, power, guts, created, rented_day) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (self._g(), user_id, name, coat, silks, s["speed"], s["stamina"], s["power"], s["guts"], now, day),
+                "INSERT INTO horses (guild_id, owner_id, name, coat, silks, speed, stamina, power, guts, created, rented_day, tactic) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    self._g(),
+                    user_id,
+                    name,
+                    coat,
+                    silks,
+                    s["speed"],
+                    s["stamina"],
+                    s["power"],
+                    s["guts"],
+                    now,
+                    day,
+                    tactic,
+                ),
             )
             return dict(self._conn.execute("SELECT * FROM horses WHERE id=?", (ins.lastrowid,)).fetchone())
 
@@ -119,6 +133,17 @@ class HorseMixin:
         with self._lock:
             r = self._conn.execute("SELECT * FROM horses WHERE id=? AND guild_id=?", (horse_id, self._g())).fetchone()
             return dict(r) if r else None
+
+    def horse_set_tactic(self, user_id: int, horse_id: int, tactic: str) -> tuple:
+        """馬の作戦（逃げ・先行・差し・追込）を変える。レンタル馬も変えられる。"""
+        if tactic not in horse_mod.TACTICS:
+            return False, "作戦を選んでください。"
+        with self._lock, self._conn:
+            h = self.horse_get(horse_id)
+            if h is None or h["owner_id"] != user_id:
+                return False, "自分の馬を選んでください。"
+            self._conn.execute("UPDATE horses SET tactic=? WHERE id=?", (tactic, horse_id))
+            return True, tactic
 
     def horse_carrot(self, user_id: int, horse_id: int, src: str, dst: str) -> tuple:
         """にんじん1本で、ステータスを CARROT_POINTS 点、src から dst へ動かす。(成功か, 理由か新しいステータス)。"""
@@ -252,11 +277,15 @@ class HorseMixin:
                 "SELECT 1 FROM horse_races WHERE guild_id=? AND kind='regular' AND start_at=?", (self._g(), start)
             ).fetchone():
                 return None
+            tz = datetime.timezone(datetime.timedelta(hours=tz_hours))
+            hour = datetime.datetime.fromtimestamp(start, tz).hour
+            grade = "G1" if horse_mod.is_grade_hour(hour) else ""
             cur = self._conn.execute(
-                "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, channel_id, created) "
-                "VALUES (?, 'regular', ?, ?, ?, 'entry', ?, ?)",
+                "INSERT INTO horse_races (guild_id, kind, grade, start_at, entry_close, bet_close, status, channel_id, created) "
+                "VALUES (?, 'regular', ?, ?, ?, ?, 'entry', ?, ?)",
                 (
                     self._g(),
+                    grade,
                     start,
                     start - horse_mod.ENTRY_LEAD_MIN * 60,
                     start - horse_mod.BET_LEAD_SEC,
@@ -266,15 +295,17 @@ class HorseMixin:
             )
             return cur.lastrowid
 
-    def race_create_special(self, now: float, entry_min: int, bet_min: int, channel_id: int = 0) -> int:
+    def race_create_special(
+        self, now: float, entry_min: int, bet_min: int, channel_id: int = 0, grade: str = ""
+    ) -> int:
         """臨時レースを作る（管理者用）。申し込みを entry_min 分、そのあと馬券を bet_min 分売って、2分後に発走。"""
         with self._lock, self._conn:
             entry_close = now + entry_min * 60
             bet_close = entry_close + bet_min * 60
             cur = self._conn.execute(
-                "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, channel_id, created) "
-                "VALUES (?, 'special', ?, ?, ?, 'entry', ?, ?)",
-                (self._g(), bet_close + horse_mod.BET_LEAD_SEC, entry_close, bet_close, channel_id, now),
+                "INSERT INTO horse_races (guild_id, kind, grade, start_at, entry_close, bet_close, status, channel_id, created) "
+                "VALUES (?, 'special', ?, ?, ?, ?, 'entry', ?, ?)",
+                (self._g(), grade, bet_close + horse_mod.BET_LEAD_SEC, entry_close, bet_close, channel_id, now),
             )
             return cur.lastrowid
 
@@ -376,10 +407,11 @@ class HorseMixin:
             rows = []
             for e in registered:  # 申し込み済みの馬は、いまのステータスをコピーする（締切のあとの、にんじんは効かない）
                 h = self.horse_get(e["horse_id"]) or e
+                tactic = h.get("tactic") or horse_mod.default_tactic({k: h[k] for k in horse_mod.STAT_KEYS})
                 rows.append(
                     (e["horse_id"], e["owner_id"], h["name"], h["coat"], h["silks"])
                     + tuple(h[k] for k in horse_mod.STAT_KEYS)
-                    + (h.get("races", 0), h.get("wins", 0), h.get("places", 0))  # 戦績のコピー（オッズに使う）
+                    + (h.get("races", 0), h.get("wins", 0), h.get("places", 0), tactic)  # 戦績・作戦のコピー
                 )
             self._conn.execute("DELETE FROM horse_entries WHERE race_id=?", (race_id,))
             taken = {r[2] for r in rows}
@@ -403,6 +435,7 @@ class HorseMixin:
                     )
                     + tuple(s[k] for k in horse_mod.STAT_KEYS)
                     + horse_mod.npc_record(rng)
+                    + (horse_mod.random_tactic(rng),)
                 )
             rng.shuffle(rows)
             runners = []
@@ -410,11 +443,13 @@ class HorseMixin:
                 form = horse_mod.random_form(rng)
                 self._conn.execute(
                     "INSERT INTO horse_entries (race_id, lane, horse_id, owner_id, name, coat, silks, speed, stamina, power, guts, "
-                    "races, wins, places, form) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "races, wins, places, tactic, form) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (race_id, lane) + row + (form,),
                 )
                 runners.append(
-                    horse_mod.Runner(lane, row[2], row[5], row[6], row[7], row[8], form, row[9], row[10], row[11])
+                    horse_mod.Runner(
+                        lane, row[2], row[5], row[6], row[7], row[8], form, row[9], row[10], row[11], row[12]
+                    )
                 )
             track = horse_mod.random_track(rng)
             self._conn.execute(
@@ -587,26 +622,65 @@ class HorseMixin:
             self._conn.execute("UPDATE horse_races SET status='done' WHERE id=?", (race_id,))
             entries = self.race_entries(race_id)
             runners = [
-                horse_mod.Runner(e["lane"], e["name"], e["speed"], e["stamina"], e["power"], e["guts"], e["form"])
+                horse_mod.Runner(
+                    e["lane"],
+                    e["name"],
+                    e["speed"],
+                    e["stamina"],
+                    e["power"],
+                    e["guts"],
+                    e["form"],
+                    tactic=e.get("tactic", "pace"),
+                )
                 for e in entries
             ]
             track = horse_mod.Track(race["distance"], race["going"])
             sim = horse_mod.simulate(runners, track, rng, keep_frames=True)
             order = sim["order"]  # entries の添字の並び（着順）
-            # 原資（人間の馬が払った出走料の合計）を超えて、賞金で新しいペリカが生まれないよう、足りなければ3着まで同じ割合で削る
+            order_lanes = [entries[i]["lane"] for i in order]
+            top_lane, top3 = order_lanes[0], set(order_lanes[:3])
+            bets, lost = [], 0
+            for b in self._conn.execute(
+                "SELECT * FROM horse_bets WHERE race_id=? AND settled=0 ORDER BY id", (race_id,)
+            ).fetchall():
+                b = dict(b)
+                if b["kind"] == "win":
+                    hit = b["lane"] == top_lane
+                elif b["kind"] == "place":
+                    hit = b["lane"] in top3
+                else:
+                    sep = ">" if b["kind"] == "exacta" else "-"
+                    hit = horse_mod.combo_hit(b["kind"], [int(x) for x in b["picks"].split(sep)], order_lanes)
+                pay = horse_mod.payout(b["stake"], b["odds"]) if hit else 0
+                if pay:
+                    self._apply(b["user_id"], pay, "競馬:払い戻し", income=max(0, pay - b["stake"]))
+                else:
+                    lost += b["stake"]
+                self._conn.execute("UPDATE horse_bets SET payout=?, settled=1 WHERE id=?", (pay, b["id"]))
+                self._conn.execute(
+                    "UPDATE users SET games_played = games_played + 1, total_won = total_won + ?, "
+                    "biggest_win = MAX(biggest_win, ?) WHERE guild_id=? AND user_id=?",
+                    (pay, pay - b["stake"], self._g(), b["user_id"]),
+                )
+                b["payout"] = pay
+                bets.append(b)
+            # 原資（人間の馬が払った出走料＋負け馬券からの一部還元）を超えて、賞金で新しいペリカが生まれないよう按分する
+            grade_mult = horse_mod.GRADE_PRIZE_MULT if race.get("grade") == "G1" else 1.0
+            base_prizes = [round(p * grade_mult) for p in horse_mod.PRIZES]
             real_entries = sum(1 for e in entries if e["owner_id"])
             placed_total = sum(
-                horse_mod.PRIZES[p - 1]
+                base_prizes[p - 1]
                 for p, idx in enumerate(order, start=1)
-                if p <= len(horse_mod.PRIZES) and entries[idx]["owner_id"]
+                if p <= len(base_prizes) and entries[idx]["owner_id"]
             )
-            scale = horse_mod.prize_pool_scale(real_entries, placed_total)
+            bet_pool = int(lost * teiai.HORSE_BET_PRIZE_SHARE)
+            scale = horse_mod.prize_pool_scale(real_entries, placed_total, bet_pool)
             prizes, retired = {}, []
             for place, idx in enumerate(order, start=1):
                 e = entries[idx]
                 e["finish"] = place
                 self._conn.execute("UPDATE horse_entries SET finish=? WHERE id=?", (place, e["id"]))
-                prize = round((horse_mod.PRIZES[place - 1] if place <= len(horse_mod.PRIZES) else 0) * scale)
+                prize = round((base_prizes[place - 1] if place <= len(base_prizes) else 0) * scale)
                 if e["owner_id"]:
                     horse = self.horse_get(e["horse_id"])
                     if prize:
@@ -638,33 +712,6 @@ class HorseMixin:
                             )
                         self._conn.execute("UPDATE horses SET owner_id=-2 WHERE id=?", (horse["id"],))
                         retired.append({**horse, "value": value})
-            order_lanes = [entries[i]["lane"] for i in order]
-            top_lane, top3 = order_lanes[0], set(order_lanes[:3])
-            bets, lost = [], 0
-            for b in self._conn.execute(
-                "SELECT * FROM horse_bets WHERE race_id=? AND settled=0 ORDER BY id", (race_id,)
-            ).fetchall():
-                b = dict(b)
-                if b["kind"] == "win":
-                    hit = b["lane"] == top_lane
-                elif b["kind"] == "place":
-                    hit = b["lane"] in top3
-                else:
-                    sep = ">" if b["kind"] == "exacta" else "-"
-                    hit = horse_mod.combo_hit(b["kind"], [int(x) for x in b["picks"].split(sep)], order_lanes)
-                pay = horse_mod.payout(b["stake"], b["odds"]) if hit else 0
-                if pay:
-                    self._apply(b["user_id"], pay, "競馬:払い戻し", income=max(0, pay - b["stake"]))
-                else:
-                    lost += b["stake"]
-                self._conn.execute("UPDATE horse_bets SET payout=?, settled=1 WHERE id=?", (pay, b["id"]))
-                self._conn.execute(
-                    "UPDATE users SET games_played = games_played + 1, total_won = total_won + ?, "
-                    "biggest_win = MAX(biggest_win, ?) WHERE guild_id=? AND user_id=?",
-                    (pay, pay - b["stake"], self._g(), b["user_id"]),
-                )
-                b["payout"] = pay
-                bets.append(b)
             self._bank_income(
                 int(lost * teiai.LOSS_SHARE), 1.0, needs_depositors=True
             )  # 負けた額の一部が、預金者の利回り

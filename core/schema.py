@@ -108,13 +108,15 @@ def create_tables(conn: sqlite3.Connection) -> None:
             bonus     INTEGER NOT NULL DEFAULT 0,   -- 金にんじんで増えた、ステータス合計の増加分
             created   REAL NOT NULL,
             listed_at REAL,                         -- 破産で差し押さえられて、帝愛の競売に出た時刻（owner_id=-1 のとき）
-            rented_day TEXT                          -- 帝愛からの、その日だけのレンタル馬なら、その日付。買うと NULL に戻る
+            rented_day TEXT,                         -- 帝愛からの、その日だけのレンタル馬なら、その日付。買うと NULL に戻る
+            tactic    TEXT NOT NULL DEFAULT 'pace'   -- 作戦（front / pace / stalk / close）
         );
         CREATE INDEX IF NOT EXISTS horses_owner ON horses (guild_id, owner_id);
         CREATE TABLE IF NOT EXISTS horse_races (     -- レース（定時と臨時）
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id    INTEGER NOT NULL,
             kind        TEXT NOT NULL,              -- regular / special
+            grade       TEXT NOT NULL DEFAULT '',   -- ''（通常）/ 'G1'（重賞）
             start_at    REAL NOT NULL,
             entry_close REAL NOT NULL,
             bet_close   REAL NOT NULL,
@@ -139,6 +141,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             stamina   INTEGER NOT NULL DEFAULT 50,
             power     INTEGER NOT NULL DEFAULT 50,
             guts      INTEGER NOT NULL DEFAULT 50,
+            tactic    TEXT NOT NULL DEFAULT 'pace', -- 作戦のコピー
             form      INTEGER NOT NULL DEFAULT 0,
             races     INTEGER NOT NULL DEFAULT 0,   -- 戦績のコピー（オッズに使う。帝愛の馬は作りもの）
             wins      INTEGER NOT NULL DEFAULT 0,
@@ -620,10 +623,17 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE horses ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0")
     if "rented_day" not in hs:
         conn.execute("ALTER TABLE horses ADD COLUMN rented_day TEXT")
+    if "tactic" not in hs:
+        conn.execute("ALTER TABLE horses ADD COLUMN tactic TEXT NOT NULL DEFAULT 'pace'")
+    hr = {r["name"] for r in conn.execute("PRAGMA table_info(horse_races)")}
+    if "grade" not in hr:
+        conn.execute("ALTER TABLE horse_races ADD COLUMN grade TEXT NOT NULL DEFAULT ''")
     he = {r["name"] for r in conn.execute("PRAGMA table_info(horse_entries)")}
     for col in ("races", "wins", "places"):
         if col not in he:
             conn.execute(f"ALTER TABLE horse_entries ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+    if "tactic" not in he:
+        conn.execute("ALTER TABLE horse_entries ADD COLUMN tactic TEXT NOT NULL DEFAULT 'pace'")
     us = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
     if "last_slot" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN last_slot INTEGER")
