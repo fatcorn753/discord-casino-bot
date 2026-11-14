@@ -35,6 +35,16 @@ quote-style = "double"
 
 [tool.pyright]
 include = ["core", "games", "play", "cogs", "tests", "main.py", "manage.py"]
+# PR #41/#42 と干渉する未リファクタファイルは、PR #41/#42 マージ後の phase3 で除外解除する
+exclude = [
+  "cogs/_horse_views.py",
+  "cogs/horse_cog.py",
+  "cogs/labor_cog.py",
+  "core/eco_horse.py",
+  "core/eco_labor.py",
+  "core/horse.py",
+  "core/schema.py",
+]
 pythonVersion = "3.12"
 executionEnvironments = [
   { root = "tests", extraPaths = ["."], reportArgumentType = "none", reportAttributeAccessIssue = "none", reportCallIssue = "none", reportFunctionMemberAccess = "none", reportOperatorIssue = "none", reportOptionalMemberAccess = "none", reportOptionalOperand = "none", reportOptionalSubscript = "none", reportPossiblyUnboundVariable = "none", reportRedeclaration = "none", reportUnusedExpression = "none" },
