@@ -44,7 +44,7 @@
 | パス | 内容 |
 |---|---|
 | `loader.py` | 読み込む Cog モジュール一覧（`COG_MODULES`）と `load_all_cogs()`（`main.py` とテストで共有） |
-| `shared/` | 共通 Discord 基盤（`bot.py` / `ui.py` / `confirm.py` / `messages.py` / `approval_guard.py` / `ranking.py` / `announce.py` / `amount.py` / `horse_display.py`） |
+| `shared/` | 共通 Discord 基盤（`bot.py` / `cog_ports.py` / `ui.py` / `confirm.py` / `messages.py` / `approval_guard.py` / `ranking.py` / `announce.py` / `amount.py` / `horse_display.py`） |
 | `casino/` | `/カジノ`。`cog.py` と進行演出（`common.py`・`simple.py`・`blackjack.py`・`chinchiro.py`・`pachinko.py`） |
 | `economy/` | `/ペリカ`。残高・デイリー・ランキング（掲示板の自動更新を含む）・送金・履歴 |
 | `teiai/` | `/ペリカ 帝愛` のパネル（`panel.py`）と海外逃亡の演出（`escape.py`） |
@@ -127,7 +127,8 @@
 |---|---|
 | `base.py` | `EcoDb`（共有 DB 接続・ロック）と全 Mixin が継承する型付き基底クラス `EcoBase` |
 | `schema/` | DB の表定義（`tables.py`）と旧版からの列追加・データ移行（`migrations.py`） |
-| `economy.py` | `Economy(IEconomy)` 本体（残高・デイリー・送金・ランキング） |
+| `economy.py` | `Economy(IEconomy)` Facade（DB バインド・サーバー分離・台帳プリミティブ・全 Mixin 統合） |
+| `escrow.py` / `wallet.py` | 賭け金預かり・精算（`EscrowMixin`）と残高・デイリー・ランキング・統計・送金（`WalletMixin`） |
 | `assets.py` / `auction.py` / `bank.py` / `bonds.py` / `crypto.py` / `debt.py` / `earnings.py` / `events.py` / `guild.py` / `horse.py` / `labor.py` / `loans.py` / `market_events.py` / `options.py` / `p2p.py` / `pachinko.py` / `quiz.py` / `raffle.py` / `records.py` / `rtp.py` / `shop.py` | 機能別の DB 操作 Mixin 群 |
 
 ## `tests/` — 自動テスト
