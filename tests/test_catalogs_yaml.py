@@ -1,0 +1,139 @@
+"""catalogs/*.yaml と core/catalogs.py の境界バリデーション・互換型テスト。"""
+
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from cogs import help_cog
+from core import (
+    bonds,
+    catalogs,
+    earnings,
+    eco_types,
+    events,
+    loans,
+    market,
+    market_events,
+    missions,
+    options,
+    p2p,
+    quizpay,
+    ranking,
+    relics,
+    shop,
+    skins,
+    weekly,
+)
+from games import pachinko, roulette, rtplevel, slot
+
+
+def test_all_yaml_catalogs_load_and_validate() -> None:
+    assert catalogs.shop().insurance_cap == shop.INSURANCE_CAP == eco_types.INSURANCE_CAP
+    assert len(catalogs.skins().skins) == len(skins.SKINS)
+    assert len(catalogs.relics().buffs) > 0
+    assert len(catalogs.bonds().kinds) == len(bonds.KINDS)
+    assert len(catalogs.missions().universal) == len(missions.UNIVERSAL)
+    assert len(catalogs.events().games) == len(events.GAMES)
+    assert len(catalogs.market().market.symbols) == len(market.SYMBOLS)
+    assert len(catalogs.economy().wallet.medals) == len(ranking.MEDALS)
+    assert len(catalogs.games().slot.symbols) == len(slot.SYMBOLS)
+    assert len(catalogs.help_pages().pages) == len(help_cog.PAGES)
+
+
+def test_cross_catalog_consistency() -> None:
+    assert len({i.id for i in shop.CATALOG}) == len(shop.CATALOG)
+    assert skins.check_catalog() == []
+    assert sum(p for _, _, p in pachinko.ROUNDS) == pytest.approx(1.0)
+    assert 0.95 < pachinko.rtp() < 1.0
+    assert missions.JACKPOT_ART.startswith("```") and missions.JACKPOT_ART.endswith("```")
+    assert events.BOOST == pytest.approx(0.5)
+    assert market.EVENT_PROB == pytest.approx(1 / 720)
+    assert market_events.ANNOUNCE_PROB == pytest.approx(1 / 300)
+    assert earnings.RELEASE_WEEKDAY == 1
+    assert loans.USER_MIN_PRINCIPAL > 0
+    assert quizpay.BASE_REWARD > 0
+    assert weekly.ANNOUNCE_TOP > 0
+    assert p2p.FEE_RATE == pytest.approx(0.05)
+    assert options.OPTION_HOURS > 0
+    assert relics.BUFF_RATE > 0
+
+
+def test_python_runtime_types_preserved() -> None:
+    assert isinstance(roulette.RED, set)
+    assert all(isinstance(n, int) for n in roulette.RED)
+    assert isinstance(market.GAINS_TAX_BRACKETS, tuple)
+    assert isinstance(ranking.MEDALS, dict)
+    assert all(isinstance(k, int) for k in ranking.MEDALS)
+    assert isinstance(rtplevel.GAMES, tuple)
+    assert isinstance(rtplevel.LEVELS, tuple)
+    assert all(isinstance(title, str) and isinstance(lines, list) for title, lines in help_cog.PAGES.values())
+
+
+def test_strict_model_rejects_unknown_keys(tmp_path: Path) -> None:
+    bad_yaml = tmp_path / "shop.yaml"
+    bad_yaml.write_text(
+        (catalogs.CATALOG_DIR / "shop.yaml").read_text(encoding="utf-8") + "\nunknown_extra_key: 123\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError):
+        catalogs.load_yaml_model("shop.yaml", catalogs.ShopCatalog, root=tmp_path)
+
+
+def test_shop_rejects_duplicate_item_id(tmp_path: Path) -> None:
+    (tmp_path / "shop.yaml").write_text(
+        """
+kind_labels:
+  title: 称号
+role_prefix: "P:"
+insurance_cap: 1000
+auto_used: []
+stock_rules: {}
+items:
+  - id: dup_item
+    name: A
+    kind: title
+    price: 100
+  - id: dup_item
+    name: B
+    kind: title
+    price: 200
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError, match="duplicate item id"):
+        catalogs.load_yaml_model("shop.yaml", catalogs.ShopCatalog, root=tmp_path)
+
+
+def test_pachinko_rejects_bad_probability_sum(tmp_path: Path) -> None:
+    text = (catalogs.CATALOG_DIR / "games.yaml").read_text(encoding="utf-8")
+    broken = text.replace("continue_prob: 0.50", "continue_prob: 0.50").replace("prob: 0.04", "prob: 0.50", 1)
+    (tmp_path / "games.yaml").write_text(broken, encoding="utf-8")
+    with pytest.raises(ValidationError, match="probabilities must sum to 1.0"):
+        catalogs.load_yaml_model("games.yaml", catalogs.GamesCatalog, root=tmp_path)
+
+
+def test_help_rejects_unknown_button_page(tmp_path: Path) -> None:
+    (tmp_path / "help.yaml").write_text(
+        """
+home:
+  title: "Home"
+  description: "Desc"
+  footer_template: "{min_bet:,}"
+buttons:
+  - key: missing_page
+    label: "Missing"
+pages:
+  game:
+    title: "Game"
+    lines: ["Line 1"]
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValidationError, match="unknown page"):
+        catalogs.load_yaml_model("help.yaml", catalogs.HelpCatalog, root=tmp_path)
+
+
+def test_missing_catalog_raises_file_not_found(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        catalogs.load_yaml_model("does_not_exist.yaml", catalogs.ShopCatalog, root=tmp_path)

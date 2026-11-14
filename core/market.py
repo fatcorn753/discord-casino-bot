@@ -9,14 +9,18 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
-MIN_PRICE = 20
-MAX_PRICE = 50_000
-EVENT_PROB = 1 / 720  # 1日に2回ほど、有事（全銘柄が同じ向きに動く急騰・急落）が起こる
-EVENT_RANGE = (0.015, 0.035)  # 有事の大きさ（CSトークンで±1.5〜3.5%。ほかの銘柄は、値動きの大きさ σ の比をかける）
-EVENT_SCALE_MAX = 1.5  # 有事の大きさにかける比の上限（NUMAバイオが、動きすぎないように）
-UNIT = 1_000  # 1枚 = 1000口。小数で買えるよう、保有は口で数える
-FEE_RATE = 0.0  # 買うときと売るときに、それぞれ取引額にかかる割合（今は無料）
-SIDE_NAME = {"short": "空売り", "long": "信用買い"}
+from core import catalogs
+
+_CFG = catalogs.market().market
+
+MIN_PRICE = _CFG.min_price
+MAX_PRICE = _CFG.max_price
+EVENT_PROB = 1.0 / _CFG.event_interval_minutes  # 1日に2回ほど、有事（全銘柄が同じ向きに動く急騰・急落）が起こる
+EVENT_RANGE = _CFG.event_range  # 有事の大きさ（CSトークンで±1.5〜3.5%。ほかの銘柄は、値動きの大きさ σ の比をかける）
+EVENT_SCALE_MAX = _CFG.event_scale_max  # 有事の大きさにかける比の上限（NUMAバイオが、動きすぎないように）
+UNIT = _CFG.unit  # 1枚 = 1000口。小数で買えるよう、保有は口で数える
+FEE_RATE = _CFG.fee_rate  # 買うときと売るときに、それぞれ取引額にかかる割合（今は無料）
+SIDE_NAME = dict(_CFG.side_name)
 
 
 @dataclass(frozen=True)
@@ -29,25 +33,11 @@ class Symbol:
     drift: float = 0.0  # 1日あたりの期待成長率（対数。リスクプレミアム）。0 なら、期待値が変わらない（マルチンゲール）
 
 
-# 銘柄。値動きの大きさ σ と、銘柄どうしの相関 ρ は、ここの数字だけで決まる（調整はここを書き換える）
-# 1日（1,440分）の標準偏差は σ × √1440 ≒ 38σ。現実の値動きに少しスリルを足した水準にしてある
-CS = Symbol("cs", "CSトークン", "🪙", 1_000.0, 0.0012, 0.008)  # 標準（1日の標準偏差 約4.6%。主要な暗号資産ほど）
-TEIO = Symbol(
-    "teio", "TEIO重工", "🏭", 1_200.0, 0.0007, 0.007
-)  # 大型株（1日 約2.7%）。CSとは正相関だが、連れ安しすぎない
-NUMA = Symbol("numa", "NUMAバイオ", "🧪", 400.0, 0.0022, 0.010)  # 仕手株（1日 約8.3%）。ほかとはほぼ無相関
-GOLD = Symbol("gold", "GOLD地金", "🥇", 3_000.0, 0.0004, 0.003)  # 避難先（1日 約1.5%）。CS・TEIOと逆相関
-SYMBOLS = (CS, TEIO, NUMA, GOLD)
+SYMBOLS = tuple(Symbol(s.key, s.name, s.emoji, s.start, s.sigma, s.drift) for s in _CFG.symbols)
 BY_KEY = {s.key: s for s in SYMBOLS}
+CS, TEIO, NUMA, GOLD = BY_KEY["cs"], BY_KEY["teio"], BY_KEY["numa"], BY_KEY["gold"]
 DEFAULT = CS.key
-CORRELATION = {
-    ("cs", "teio"): 0.60,
-    ("cs", "numa"): 0.05,
-    ("teio", "numa"): 0.05,
-    ("cs", "gold"): -0.6,
-    ("teio", "gold"): -0.5,
-    ("numa", "gold"): -0.1,
-}
+CORRELATION = {c.pair: c.value for c in _CFG.correlations}
 
 # 互換のための別名（CSトークン）
 NAME = CS.name
@@ -55,9 +45,7 @@ START_PRICE = CS.start
 SIGMA = CS.sigma
 
 
-# 期待成長率（drift）は、通常債（72時間で+4%＝1日約1.3%）より控えめにしてある。債券は1人30,000までしか持てないが、株には上限がないので、
-# 大きな資産を運用する先になる。際限なく値上がりしてペリカが増えすぎないよう、開始価格の DRIFT_BAND 倍に近づくほど、成長率は弱まり、0 になる
-DRIFT_BAND = 8.0
+DRIFT_BAND = _CFG.drift_band
 
 
 def drift_per_minute(sym: "Symbol", price: float) -> float:
@@ -68,7 +56,7 @@ def drift_per_minute(sym: "Symbol", price: float) -> float:
     return sym.drift * fade / 1440.0
 
 
-DAILY_LIMIT = 0.30  # 値幅制限。24時間前の価格から、上下にこの割合まで（ストップ高・ストップ安）
+DAILY_LIMIT = _CFG.daily_limit  # 値幅制限。24時間前の価格から、上下にこの割合まで（ストップ高・ストップ安）
 
 
 def limit_to_day(prices: dict, reference: dict, limit: float = DAILY_LIMIT) -> dict:
@@ -90,18 +78,8 @@ def pin_states(fair: dict, reference: dict, limit: float = DAILY_LIMIT) -> dict:
 
 
 # 張り付き中に、約定しなくなる売買（買い手・売り手がいないため）。逆張りの売買と、利益確定は通る
-PIN_LOCKS = {
-    -1: ("sell_spot", "close_long", "sell_call"),  # ストップ安: 売りが殺到して買い手がいない
-    1: ("buy_spot", "open_long", "cover_short"),  # ストップ高: 買いが殺到して売り手がいない
-}
-PIN_ACTION_TEXT = {
-    "sell_spot": "現物の売却",
-    "close_long": "買い建て（ロング）の決済",
-    "sell_call": "コールの売却",
-    "buy_spot": "現物の買い",
-    "open_long": "買い建て（ロング）の新規",
-    "cover_short": "空売りの買い戻し",
-}
+PIN_LOCKS = dict(_CFG.pin_locks)
+PIN_ACTION_TEXT = dict(_CFG.pin_action_text)
 
 
 def pin_lock_reason(symbol: str, pin: int, action: str) -> str:
@@ -114,11 +92,11 @@ def pin_lock_reason(symbol: str, pin: int, action: str) -> str:
     return f"🚀 {name} は**ストップ高に張り付いています**。{PIN_ACTION_TEXT[action]}は、売り手がいなくて約定しません（上げが止まるまで、待つしかありません）。"
 
 
-PIN_MARK = {1: "🚀 ストップ高", -1: "🚨 ストップ安"}
+PIN_MARK = dict(_CFG.pin_mark)
 
 
 # 利益への帝愛の税（キャピタルゲイン税）。現物の売却と信用建玉の決済で、利益が出たときだけ、その利益から天引きする。超過累進（段ごとに税率がかわる）
-GAINS_TAX_BRACKETS = ((10_000, 0.0), (100_000, 0.03), (1_000_000, 0.07), (None, 0.12))  # (段の上限, 税率)
+GAINS_TAX_BRACKETS = tuple((b.limit, b.rate) for b in _CFG.gains_tax_brackets)  # (段の上限, 税率)
 
 
 def capital_gains_tax(profit: int) -> int:
@@ -136,12 +114,10 @@ def capital_gains_tax(profit: int) -> int:
     return int(tax)
 
 
-# 信用取引の金利（日利）。建玉を持っている間、担保から引いて、帝愛の銀行（預金者の利回り）に納める。株を借りて売る側（空売り）の受取金利は、いまは付けない
-BORROW_RATE_PER_DAY = {
-    "long": 0.001,
-    "short": 0.0005,
-}  # 信用買い: 借りている額（建てた総額 − 担保）に 0.1%。空売り: 貸株料として、建てた総額に 0.05%
-INTEREST_MIN_CHARGE = 10  # 引く金利が、この額に貯まるまでは、数えるだけで、担保から引かない（履歴を細かくしすぎない）
+BORROW_RATE_PER_DAY = dict(_CFG.borrow_rate_per_day)
+INTEREST_MIN_CHARGE = (
+    _CFG.interest_min_charge
+)  # 引く金利が、この額に貯まるまでは、数えるだけで、担保から引かない（履歴を細かくしすぎない）
 
 
 def margin_interest_base(side: str, entry_value: float, margin: int) -> float:
@@ -211,10 +187,10 @@ def next_prices(prices: dict, rng: random.Random, vol: Optional[dict] = None) ->
 
 
 # ---- クロスマージン（口座ぜんたいの証拠金）----
-RISK_K = 20.0  # 必要証拠金 = RISK_K × √(wᵀΣw)。1分の値動きの約2.6σ を、約60分ぶん（2.6×√60≒20）見込んだ額
-OPEN_RATIO = 1.3  # 新しく建てる（または担保を手放す）とき、この維持率を下回るなら受け付けない
-LOSSCUT_RATIO = 1.0  # 維持率がこれを下回ったら、損失の大きい建玉から順に強制決済する
-COLLATERAL_HAIRCUT = {"spot": 0.8, "normal": 0.95, "junk": 0.5}  # 現物・通常債・ジャンク債を、担保として数える掛目
+RISK_K = _CFG.risk_k  # 必要証拠金 = RISK_K × √(wᵀΣw)。1分の値動きの約2.6σ を、約60分ぶん（2.6×√60≒20）見込んだ額
+OPEN_RATIO = _CFG.open_ratio  # 新しく建てる（または担保を手放す）とき、この維持率を下回るなら受け付けない
+LOSSCUT_RATIO = _CFG.losscut_ratio  # 維持率がこれを下回ったら、損失の大きい建玉から順に強制決済する
+COLLATERAL_HAIRCUT = dict(_CFG.collateral_haircut)  # 現物・通常債・ジャンク債を、担保として数える掛目
 
 
 def required_margin(exposure: dict) -> float:
@@ -281,7 +257,7 @@ def pel(price: float) -> str:
     return f"{fmt(price)}{UNIT_NAME}"
 
 
-UNIT_NAME = "ペリカ"
+UNIT_NAME = _CFG.unit_name
 
 
 def lots(units: int) -> str:
@@ -319,8 +295,8 @@ def describe_correlation(value: Optional[float]) -> str:
 
 
 # ----------------------------- 文字のチャート ----------------------------- #
-LEVELS = " ▁▂▃▄▅▆▇█"
-PERIODS = {"1h": ("1時間", 3600), "6h": ("6時間", 6 * 3600), "24h": ("24時間", 24 * 3600), "7d": ("7日", 7 * 24 * 3600)}
+LEVELS = _CFG.levels
+PERIODS = {k: (v.label, v.seconds) for k, v in _CFG.periods.items()}
 
 
 def downsample(prices: list, width: int) -> list:

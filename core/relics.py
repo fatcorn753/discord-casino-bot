@@ -5,18 +5,14 @@
 
 import random
 
-BUFF_RATE = 0.01  # ★なしの発掘品1個ぶんの効果の大きさ
-MERGE_COUNT = 10  # 同じ発掘品をこの個数集めると、★が1つ増えた1個に合体できる
-STAR_MAX = 3  # ★の最大。★が1つ増えるごとに、効果と目安の価値が MERGE_COUNT 倍（個数ぶんと同じ）
+from core import catalogs
+
+_CFG = catalogs.relics()
+BUFF_RATE = _CFG.buff_rate  # ★なしの発掘品1個ぶんの効果の大きさ
+MERGE_COUNT = _CFG.merge_count  # 同じ発掘品をこの個数集めると、★が1つ増えた1個に合体できる
+STAR_MAX = _CFG.star_max  # ★の最大。★が1つ増えるごとに、効果と目安の価値が MERGE_COUNT 倍（個数ぶんと同じ）
 # 品のID → (効果の名前, 効果の説明)。効果の名前は、処理側が見分ける
-BUFFS = {
-    "relic_fossil": ("click", "地下作業の「働く」1回の稼ぎ"),
-    "relic_bone": ("wage", "作業員の稼ぎ"),
-    "relic_meteor": ("luck", "作業員の鉱石・発掘品の出やすさ"),
-    "relic_vase": ("recovery", "地下作業の疲労の回復"),
-    "relic_crown": ("daily", "デイリーボーナスの額"),
-    "relic_tear": ("prize", "競馬の賞金（馬主として受け取る額）"),
-}
+BUFFS = {k: (v.effect, v.description) for k, v in _CFG.buffs.items()}
 
 
 def split_id(item_id: str) -> tuple:

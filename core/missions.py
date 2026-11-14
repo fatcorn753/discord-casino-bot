@@ -8,11 +8,14 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
-BLACKJACK = "ブラックジャック"
-GAMES = ["スロット", "ルーレット", "チンチロ", BLACKJACK, "パチンコ"]
-MIN_BET = 100  # これ未満の賭けは、ミッションの進み具合に数えない（小さい賭けの量産で報酬を稼がせない）
-COMPLETE_BONUS = 500  # 3つ全部達成したときの追加ボーナス
-PER_DAY = 3
+from core import catalogs
+
+_CFG = catalogs.missions()
+BLACKJACK = _CFG.blackjack_game
+GAMES = list(_CFG.games)
+MIN_BET = _CFG.min_bet  # これ未満の賭けは、ミッションの進み具合に数えない（小さい賭けの量産で報酬を稼がせない）
+COMPLETE_BONUS = _CFG.complete_bonus  # 3つ全部達成したときの追加ボーナス
+PER_DAY = _CFG.per_day
 
 
 @dataclass(frozen=True)
@@ -26,27 +29,29 @@ class Mission:
     tag: Optional[str] = None  # kind が tag のとき、ゲームが付ける印（例: ブラックジャックのダブル勝ち）
 
 
-UNIVERSAL = [  # どのゲームでも進む
-    Mission("play5", "ゲームを5回遊ぶ", "play", 5, 300),
-    Mission("play10", "ゲームを10回遊ぶ", "play", 10, 500),
-    Mission("win3", "3回勝つ", "win", 3, 400),
-    Mission("win5", "5回勝つ", "win", 5, 600),
-    Mission("wager5k", "合計5,000ペリカ賭ける", "wager", 5_000, 400),
-    Mission("wager20k", "合計20,000ペリカ賭ける", "wager", 20_000, 700),
-    Mission("streak2", "2連勝する", "streak", 2, 400),
-    Mission("streak3", "3連勝する", "streak", 3, 700),
-]
-OTHER_GAMES = [Mission(f"game_{g}", f"{g}を3回遊ぶ", "play_game", 3, 400, g) for g in GAMES if g != BLACKJACK] + [
-    Mission(f"gwin_{g}", f"{g}で2回勝つ", "game_win", 2, 600, g) for g in GAMES if g != BLACKJACK
+UNIVERSAL = [
+    Mission(m.id, m.name, m.kind, m.target, m.reward, m.game, m.tag) for m in _CFG.universal
+]  # どのゲームでも進む
+OTHER_GAMES = [
+    Mission(f"game_{g}", f"{g}を3回遊ぶ", "play_game", _CFG.other_game_play_target, _CFG.other_game_play_reward, g)
+    for g in GAMES
+    if g != BLACKJACK
+] + [
+    Mission(f"gwin_{g}", f"{g}で2回勝つ", "game_win", _CFG.other_game_win_target, _CFG.other_game_win_reward, g)
+    for g in GAMES
+    if g != BLACKJACK
 ]  # 特定のゲーム向け
-BLACKJACK_MISSIONS = [  # ブラックジャック向け
-    Mission(f"game_{BLACKJACK}", f"{BLACKJACK}を3回遊ぶ", "play_game", 3, 300, BLACKJACK),
-    Mission(f"gwin_{BLACKJACK}", f"{BLACKJACK}で2回勝つ", "game_win", 2, 400, BLACKJACK),
-    Mission("bj_double", "ブラックジャックでダブルダウンに成功する", "tag", 1, 600, BLACKJACK, "double_win"),
-    Mission("bj_natural", "ナチュラルブラックジャックを出す", "tag", 1, 700, BLACKJACK, "natural"),
-]
+BLACKJACK_MISSIONS = [
+    Mission(m.id, m.name, m.kind, m.target, m.reward, m.game, m.tag) for m in _CFG.blackjack_missions
+]  # ブラックジャック向け
 BIG_WIN = Mission(
-    "big3x", "賭け金の3倍以上の利益を1回で出す", "big_win", 3, 600
+    _CFG.big_win.id,
+    _CFG.big_win.name,
+    _CFG.big_win.kind,
+    _CFG.big_win.target,
+    _CFG.big_win.reward,
+    _CFG.big_win.game,
+    _CFG.big_win.tag,
 )  # ブラックジャックでは出ない（最大でも1.5倍）
 
 POOL = UNIVERSAL + OTHER_GAMES + BLACKJACK_MISSIONS + [BIG_WIN]
@@ -103,25 +108,15 @@ def big_win_line(bet: int, net: int) -> str:
     if net <= 0 or bet <= 0:
         return ""
     ratio = net / bet
-    if ratio >= 50:
-        return "🎰💥 **超特大ジャックポット級！！** 💥🎰"
-    if ratio >= 10:
-        return "💎✨ **特大勝ち！！** ✨💎"
-    if ratio >= 3:
-        return "🎉 **大勝ち！** 🎉"
+    for tier in _CFG.win_tiers:
+        if ratio >= tier.min_ratio:
+            return tier.message
     return ""
 
 
-JACKPOT_ART = """```
- *  .  *  .  *  .  *  .  *
- +=======================+
- |   J A C K P O T !!!   |
- |      7   7   7        |
- +=======================+
- *  .  *  .  *  .  *  .  *
-```"""
+JACKPOT_ART = _CFG.jackpot_art
 
 
 def is_jackpot(bet: int, net: int) -> bool:
     """賭け金の50倍以上の利益。たまにしか出ないので、特別な演出を付ける。"""
-    return bet > 0 and net >= bet * 50
+    return bet > 0 and net >= bet * _CFG.jackpot_multiplier

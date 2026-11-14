@@ -15,6 +15,7 @@
 | ゲームの進行 | `play/` | ゲームごとの、ボタン操作・演出・精算の流れ（Discord の画面） |
 | ゲームのルール | `games/` | 出目・勝敗・払い戻し・還元率の計算。Discord にも DB にも触らない |
 | 経済・データ | `core/` | ペリカの残高、DB の表、各機能の計算。`eco_*.py` は DB を触る部品、それ以外は計算だけの純粋なロジック |
+| 設定カタログ | `catalogs/` | 商品・スキン・確率表・配当表・ヘルプ文面などの静的な定義（YAML）。`core/catalogs.py` で型検証して読み込む |
 
 ## 最上位
 
@@ -25,6 +26,7 @@
 | `config.example.json` | 設定ファイルの見本（トークンなどは空）。`config.json` を作るときのひな形 |
 | `config.json` | 実際の設定（Bot のトークンなど）。**秘匿情報なので Git に入れない**（`.gitignore` 済み） |
 | `config.json.migrated-to-server` | 古い設定ファイルの控え。`config.json.*` として Git に入れない |
+| `catalogs/` | YAML の静的カタログ群（ショップ・スキン・遺物・債券・ミッション・イベント・証券・経済・ゲーム・ヘルプ） |
 | `data/` | 実行時のデータ。`casino.db`（SQLite 本体）と `bot.lock`（二重起動の防止）。**Git に入れない** |
 | `README.md` | 概要・コマンド一覧・導入手順・運用・docs への案内 |
 | `docs/` | 機能ごとの、くわしい仕様（`casino.md`・`stocks.md`・`teiai.md`・`horse.md`・`labor.md`・`shop.md`・`admin.md`） |
@@ -58,7 +60,7 @@
 | `help_cog.py` | `/help`。カテゴリ別の案内 |
 | `_admin_embeds.py` / `_admin_views.py` / `_admin_purge.py` / `_admin_targets.py` | `/運営` の部品。埋め込みの組み立て / 確認・承認ボタンと入力フォーム / Bot の発言の一括削除 / 対象のサーバー・チャンネル・メンバー補完 |
 | `_shop_embeds.py` / `_shop_views.py` / `_shop_discord.py` | `/ショップ` の部品。棚・所持品・スキンの埋め込み / 操作ボタンとモーダル / Discord ロール・ニックネームの反映 |
-| `_market_embeds.py` / `_market_views.py` | `/証券` の部品。市況・保有・決算の埋め込み / 市況切替と保有決済のボタン・モーダル |
+| `_market_embeds.py` / `_market_views.py` / `_market_orders.py` | `/証券` の部品。市況・保有・決算の埋め込み / 市況切替と保有決済のボタン・モーダル / 注文実行の組み立てと検証 |
 | `_p2p_embeds.py` / `_bond_embeds.py` | プレイヤー間取引（競り・出品）と債券の表示文・埋め込みの部品（`shop_cog` / `market_cog` からも共有） |
 | `_horse_views.py` | 競馬の画面の部品（出馬表・厩舎・馬券のボタンとモーダル） |
 | `_teiai_panel.py` / `_teiai_escape.py` | `/ペリカ 帝愛` のパネル / 海外逃亡の演出 |
@@ -93,6 +95,7 @@
 | ファイル | 内容 |
 |---|---|
 | `economy.py` | `Economy` 本体。残高・デイリー・送金・ランキング。下の `eco_*.py` を部品として混ぜ込んでいる |
+| `bot.py` | `CasinoBot(commands.Bot)` 基底クラス（`config`・`economy`・`sessions` の型付き基盤） |
 | `schema.py` | DB の表の定義（作成）と、古い版への列の追加・データの移行 |
 | `eco_types.py` | `Economy` と各部品が共有する定数と、結果を返す入れ物 |
 | `ui.py` | 埋め込みの生成・ペリカの表記・所有者チェックつき View（`OwnerView`） |
@@ -145,6 +148,7 @@
 | `events.py` | 突発イベントの抽選と、勝ち分の増加 |
 | `weekly.py` | 週間ランキングの週の数え方と、発表の文面 |
 | `ranking.py` | ランキングの表示（コマンドと掲示板で共通） |
+| `catalogs.py` | `catalogs/` 配下の YAML を読み込み・型検証・キャッシュする窓口 |
 | `history.py` | ペリカの増減の履歴を、読みやすい行にまとめる |
 | `quizimport.py` / `quizpay.py` / `duration.py` | クイズの一括入力の読み取り / ユーザー出題の報酬の数字 / 「2時間」などの期間の読み取り |
 | `approval.py` | Bot を追加できるサーバーの許可リストと、持ち主の承認 |
@@ -157,6 +161,7 @@
 | ファイル | 内容 |
 |---|---|
 | `conftest.py` | テスト共通の準備（記録をサーバーごとに分けず、1 つの口座として確かめる設定など） |
+| `test_catalogs_yaml.py` | `catalogs/*.yaml` の読み込み・Pydantic バリデーション・クロスチェックの確認 |
 | `test_flows.py` | コマンドの一覧・画面の流れ全体の確認 |
 | `test_economy.py` / `test_guild_scope.py` | 残高・送金・サーバーごとの口座の分離 |
 | `test_games.py` / `test_rtplevel.py` / `test_pachinko_model.py` | ゲームのルール・還元率・パチンコの設計と演出 |

@@ -11,27 +11,27 @@
 import math
 from typing import Optional
 
-from core import market, market_events
+from core import catalogs, market, market_events
 
-OPTION_HOURS = 6  # 満期までの時間（固定）
-STRIKE_OTM = 0.02  # 権利行使価格のずれ（コール = 現在値 ×1.02、プット = 現在値 ×0.98）。6時間の値動き（CSで約2.3%）に合わせた大きさ
-TICK_SECONDS = 60  # 価格が動く間隔（cogs/market_cog.py の TICK_MINUTES と同じ）
-SPREAD = 0.015  # 買値は公正価格の +1.5%、売値は −1.5%（往復で約3%。ルーレット・パチンコ並みの控除）
-PAYOUT_CAP_MULT = 50  # 配当の上限（掛け金の何倍までか）
-MIN_PREMIUM = 100  # 1回の掛け金の下限
-MAX_OPEN_PREMIUM = 20_000  # 1人が同時に持てる、有効なオプションの掛け金の合計の上限
-YIELD_SHARE = 0.04  # 掛け金のうち、預金者の利回りへ回す割合（残りは、配当に備えて銀行の手元に残る）
+_CFG = catalogs.market().options
 
-MARGIN_RATE = 0.20  # 裸売りの証拠金（行使価格 × 口数 の、この割合を、売るときに預ける）
-MAX_SHORT_MARGIN = 20_000  # 1人が同時に預けられる、裸売りの証拠金の合計の上限
+OPTION_HOURS = _CFG.option_hours  # 満期までの時間（固定）
+STRIKE_OTM = (
+    _CFG.strike_otm
+)  # 権利行使価格のずれ（コール = 現在値 ×1.02、プット = 現在値 ×0.98）。6時間の値動き（CSで約2.3%）に合わせた大きさ
+TICK_SECONDS = _CFG.tick_seconds  # 価格が動く間隔（cogs/market_cog.py の TICK_MINUTES と同じ）
+SPREAD = _CFG.spread  # 買値は公正価格の +1.5%、売値は −1.5%（往復で約3%。ルーレット・パチンコ並みの控除）
+PAYOUT_CAP_MULT = _CFG.payout_cap_mult  # 配当の上限（掛け金の何倍までか）
+MIN_PREMIUM = _CFG.min_premium  # 1回の掛け金の下限
+MAX_OPEN_PREMIUM = _CFG.max_open_premium  # 1人が同時に持てる、有効なオプションの掛け金の合計の上限
+YIELD_SHARE = _CFG.yield_share  # 掛け金のうち、預金者の利回りへ回す割合（残りは、配当に備えて銀行の手元に残る）
+
+MARGIN_RATE = _CFG.margin_rate  # 裸売りの証拠金（行使価格 × 口数 の、この割合を、売るときに預ける）
+MAX_SHORT_MARGIN = _CFG.max_short_margin  # 1人が同時に預けられる、裸売りの証拠金の合計の上限
 
 CALL, PUT, PAIR = "call", "put", "pair"
-KINDS = {
-    CALL: ("爆騰コール", "🚀", "上がると儲かる"),
-    PUT: ("暴落プット", "📉", "下がると儲かる"),
-    PAIR: ("ペア・ワラント", "⚖️", "相手の銘柄より上がると儲かる"),
-}
-SHORT_NAMES = {CALL: "コール裸売り", PUT: "プット裸売り"}  # 売る側（帝愛に売って、プレミアムを先にもらう）
+KINDS = {k: (v.name, v.emoji, v.desc) for k, v in _CFG.kinds.items()}
+SHORT_NAMES = dict(_CFG.short_names)  # 売る側（帝愛に売って、プレミアムを先にもらう）
 
 
 def phi(x: float) -> float:
@@ -84,13 +84,8 @@ def fair_price(kind: str, spot: float, strike: float, variance: float) -> float:
     return strike * phi(-d2) - spot * phi(-d1)
 
 
-STRIKE_BY_SYMBOL = {
-    "cs": 0.03,
-    "teio": 0.02,
-    "numa": 0.05,
-    "gold": 0.015,
-}  # 目標割合を省略したときの、銘柄ごとのずれ（6時間の値動きの約1〜1.5倍）
-MAX_TARGET_PCT = 50  # 目標割合（%）の上限
+STRIKE_BY_SYMBOL = dict(_CFG.strike_by_symbol)  # 目標割合を省略したときの、銘柄ごとのずれ（6時間の値動きの約1〜1.5倍）
+MAX_TARGET_PCT = _CFG.max_target_pct  # 目標割合（%）の上限
 
 
 def default_strike_pct(symbol: str) -> float:

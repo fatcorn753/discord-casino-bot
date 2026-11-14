@@ -3,12 +3,16 @@
 import itertools
 import random
 
+from core import catalogs
+
+_CFG = catalogs.games().slot
+
 # 出目と重み（重いほど出やすい）
-WEIGHTS = {"🍒": 10, "🍋": 8, "🍇": 6, "🔔": 4, "💎": 2, "7️⃣": 1}
+WEIGHTS = {s.symbol: s.weight for s in _CFG.symbols}
 # 3つ揃いの払い戻し倍率（賭け金に対する総額）
-THREE = {"🍒": 5, "🍋": 8, "🍇": 15, "🔔": 30, "💎": 100, "7️⃣": 500}
-CHERRY_TWO = 1.5  # 🍒が2つ
-CHERRY_ONE = 0.3  # 🍒が1つ（少し戻る）
+THREE = {s.symbol: s.three_mult for s in _CFG.symbols}
+CHERRY_TWO = _CFG.cherry_two  # 🍒が2つ
+CHERRY_ONE = _CFG.cherry_one  # 🍒が1つ（少し戻る）
 
 SYMBOLS = list(WEIGHTS)
 

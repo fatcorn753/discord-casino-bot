@@ -2,11 +2,14 @@
 
 from dataclasses import dataclass
 
-INITIAL_BALANCE = 3000
-INSURANCE_CAP = 1_000  # 保険券で戻る額の上限（core/shop.py の説明と同じ値）
+from core import catalogs
+
+_WALLET = catalogs.economy().wallet
+INITIAL_BALANCE = _WALLET.initial_balance
+INSURANCE_CAP = catalogs.shop().insurance_cap  # 保険券で戻る額の上限（catalogs/shop.yaml と同じ値）
 
 # 消耗品 → 効果の列。呼び出し側の指定ではなく、ここで対応を固定する
-CONSUMABLE_EFFECTS = {"daily_double": "daily_boost", "insurance": "insurance"}
+CONSUMABLE_EFFECTS = dict(_WALLET.consumable_effects)
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,10 @@
 import math
 from dataclasses import dataclass
 
-MIN_AMOUNT = 1_000
+from core import catalogs
+
+_CFG = catalogs.bonds()
+MIN_AMOUNT = _CFG.min_amount
 
 
 @dataclass(frozen=True)
@@ -24,9 +27,11 @@ class Kind:
     sellable: bool  # 満期の前に、DCF の値段で売れるか
 
 
-NORMAL = Kind("normal", "通常債", "🏦", 72, 4, 0, 30_000, True)
-JUNK = Kind("junk", "ジャンク債", "🗑️", 24, 20, 20, 10_000, False)
-KINDS = {k.key: k for k in (NORMAL, JUNK)}
+KINDS = {
+    k.key: Kind(k.key, k.name, k.emoji, k.hours, k.rate, k.default_pct, k.max_total, k.sellable) for k in _CFG.kinds
+}
+NORMAL = KINDS["normal"]
+JUNK = KINDS["junk"]
 
 
 def interest(kind: Kind, principal: int) -> int:
@@ -38,8 +43,8 @@ def maturity_payout(kind: Kind, principal: int) -> int:
 
 
 SALE_DISCOUNT_PER_HOUR = (
-    0.001  # 満期前に売るときの割引率（1時間あたり。連続複利）。市場で売る手間賃で、満期まで待つよりは必ず少し安い
-)
+    _CFG.sale_discount_per_hour
+)  # 満期前に売るときの割引率（1時間あたり。連続複利）。市場で売る手間賃で、満期まで待つよりは必ず少し安い
 
 
 def hazard_per_hour(kind: Kind) -> float:

@@ -14,43 +14,33 @@ import random
 from dataclasses import dataclass
 from functools import lru_cache
 
-REEL_SYMBOLS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "🔥"]
-SMALL = ["1️⃣", "2️⃣", "3️⃣"]
-MEDIUM = ["4️⃣", "5️⃣", "6️⃣"]
+from core import catalogs
+
+_CFG = catalogs.games().pachinko
+
+REEL_SYMBOLS = list(_CFG.reel_symbols)
+SMALL = list(_CFG.small)
+MEDIUM = list(_CFG.medium)
 
 NORMAL, SUPER, PREMIUM = "normal", "super", "premium"
 
-BALLS_PER_SET = 100  # 1セットで打ち出す玉の数（賭け金 ÷ この数 が、玉1発の値段）
-P_START = 0.07  # 玉1発が、スタートに入る確率
-MAX_SETS = 10  # 連続投入できるセット数
-ANALYSIS_MAX = 400  # 還元率などの計算で、これ以上の出玉は「それ以上」にまとめる（遊びには上限がない。確率は 1e-9 以下で、計算への影響は無視できる）
+BALLS_PER_SET = _CFG.balls_per_set  # 1セットで打ち出す玉の数（賭け金 ÷ この数 が、玉1発の値段）
+P_START = _CFG.p_start  # 玉1発が、スタートに入る確率
+MAX_SETS = _CFG.max_sets  # 連続投入できるセット数
+ANALYSIS_MAX = _CFG.analysis_max  # 還元率などの計算で、これ以上の出玉は「それ以上」にまとめる（遊びには上限がない。確率は 1e-9 以下で、計算への影響は無視できる）
 
 # 大当たり1回の出玉（名前, 賭け金の倍数, 確率）と、確変が続く確率
-ROUNDS = [
-    ("小当たり", 2, 0.695),
-    ("大当たり", 10, 0.265),
-    ("激アツ確変", 30, 0.04),
-]  # 還元率は約97%（当たりやすさは変えず、出玉の配分で調整）
-CONTINUE = 0.50
+ROUNDS = [(r.name, r.mult, r.prob) for r in _CFG.rounds]  # 還元率は約97%（当たりやすさは変えず、出玉の配分で調整）
+CONTINUE = _CFG.continue_prob
 ROUND_NAME = {m: name for name, m, _ in ROUNDS}
 
 # 演出ごとの（出る確率, 当たる確率に足す分）。足した合計が 1 を超えたら 1（確定）
-OMEN_TABLE = {  # 予告の色（リーチの前に出る）。"" は予告なし
-    "": (0.75, 0.00),
-    "blue": (0.15, 0.002),
-    "red": (0.08, 0.01),
-    "gold": (0.02, 0.08),
-}
-TIER_TABLE = {  # リーチの格。"" はリーチなし（当たっても、リーチ演出なしで突然揃う「サプライズ当たり」になる）
-    "": (0.85, 0.00),
-    NORMAL: (0.10, 0.01),
-    SUPER: (0.04, 0.12),
-    PREMIUM: (0.01, 0.45),
-}
+OMEN_TABLE = {k: (v.prob, v.bonus) for k, v in _CFG.omen_table.items()}
+TIER_TABLE = {k: (v.prob, v.bonus) for k, v in _CFG.tier_table.items()}
 HIT_TARGET = (
-    0.01322  # 1回転あたりの、当たる確率の平均。基本の確率は、これに合うよう下で決める（還元率が100%を超えない値）
+    _CFG.hit_target  # 1回転あたりの、当たる確率の平均。基本の確率は、これに合うよう下で決める（還元率が100%を超えない値）
 )
-OMEN_TEXT = {"blue": "（青）ざわ…", "red": "（赤）ゾワッ…！ 予告だ…！", "gold": "（金）⚡ 激アツ予告 ⚡ これは来る…！"}
+OMEN_TEXT = dict(_CFG.omen_text)
 
 
 def _base_hit() -> float:

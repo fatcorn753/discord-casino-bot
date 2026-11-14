@@ -4,9 +4,9 @@ from typing import Optional
 
 import discord
 
-from core import teiai, ui
+from core import catalogs, teiai, ui
 
-MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
+MEDALS = dict(catalogs.economy().wallet.medals)
 TOP_N = 10
 
 

@@ -163,7 +163,7 @@ class EconomyCog(commands.Cog):
         e = ui.embed(
             f"{icon} {target.display_name} の残高",
             f"{title_line}# {ui.pelica(s['balance'])}",
-            color_item.value if color_item else ui.GOLD,
+            color_item.value if color_item and isinstance(color_item.value, int) else ui.GOLD,
         )
         e.set_thumbnail(url=target.display_avatar.url)
         e.add_field(name="身分", value=teiai.STATUS_LABEL[self.g(interaction).display_status(target.id)], inline=True)

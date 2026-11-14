@@ -12,21 +12,21 @@ import math
 import random
 from typing import Optional
 
-from core import market
+from core import catalogs, market
 
-LEAD_MIN = 15  # 予告から、開始までの分
-DURATION_MIN = 20  # 続く分
-FACTOR = 2.0  # 値動きの大きさ σ の倍率
-ANNOUNCE_PROB = 1 / 300  # 1分ごとに、新しい予告が出る確率（約5時間に1回）
-COOLDOWN_MIN = 60  # 終わってから、次の予告が出るまでの最短の分
-PRICED_AT_ANNOUNCE = (
-    1.0  # 予告の直後に、オプションの値段が、イベントを織り込んでいる割合（公知の情報なので、予告の瞬間に 1.0）
-)
-KEEP_DAYS = 7  # 終わったイベントの記録を残す日数
+_CFG = catalogs.market().events
 
-ALERT_WINDOW = 60  # 相関崩壊を調べる、直近の分
-Z_ALERT = 2.5
-MIN_ABS_CORR = 0.5  # 警報の対象にする、連動の強さ（相関の絶対値）
+LEAD_MIN = _CFG.lead_min  # 予告から、開始までの分
+DURATION_MIN = _CFG.duration_min  # 続く分
+FACTOR = _CFG.factor  # 値動きの大きさ σ の倍率
+ANNOUNCE_PROB = 1.0 / _CFG.announce_interval_minutes  # 1分ごとに、新しい予告が出る確率（約5時間に1回）
+COOLDOWN_MIN = _CFG.cooldown_min  # 終わってから、次の予告が出るまでの最短の分
+PRICED_AT_ANNOUNCE = _CFG.priced_at_announce  # 予告の直後に、オプションの値段が、イベントを織り込んでいる割合
+KEEP_DAYS = _CFG.keep_days  # 終わったイベントの記録を残す日数
+
+ALERT_WINDOW = _CFG.alert_window  # 相関崩壊を調べる、直近の分
+Z_ALERT = _CFG.z_alert
+MIN_ABS_CORR = _CFG.min_abs_corr  # 警報の対象にする、連動の強さ（相関の絶対値）
 
 
 def plan_event(now: float, rng: random.Random) -> dict:

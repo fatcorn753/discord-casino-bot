@@ -11,17 +11,20 @@ W は「賭けた額あたり、勝ち分が平均いくらか」。スロット
 
 import itertools
 
+from core import catalogs
 from games import pachinko, slot
 
-GAMES = ("スロット", "ルーレット", "パチンコ", "チンチロ", "ブラックジャック")
-LEVELS = (1, 2, 3, 4, 5, 6)
-DEFAULT_LEVEL = 3
-STEP = 0.04  # 1レベルあたりの還元率の動き（4ポイント）
+_CFG = catalogs.games().rtplevel
+
+GAMES = _CFG.games
+LEVELS = _CFG.levels
+DEFAULT_LEVEL = _CFG.default_level
+STEP = _CFG.step  # 1レベルあたりの還元率の動き（4ポイント）
 
 # シミュレーションで求めた目安（tests/test_rtplevel.py で再計算して、近いことを確かめている）
-CHINCHIRO_RTP, CHINCHIRO_W = 0.985, 0.653
-BLACKJACK_RTP, BLACKJACK_W = 0.918, 0.412  # 「17まで引く」打ち方の場合
-ROULETTE_DEFAULT_KIND = "red"
+CHINCHIRO_RTP, CHINCHIRO_W = _CFG.chinchiro_rtp, _CFG.chinchiro_w
+BLACKJACK_RTP, BLACKJACK_W = _CFG.blackjack_rtp, _CFG.blackjack_w  # 「17まで引く」打ち方の場合
+ROULETTE_DEFAULT_KIND = _CFG.roulette_default_kind
 
 
 def _slot_stats() -> tuple:

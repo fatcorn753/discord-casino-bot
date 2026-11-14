@@ -2,21 +2,15 @@
 
 import random
 
-RED = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
+from core import catalogs
+
+_CFG = catalogs.games().roulette
+
+RED = set(_CFG.red)
 
 # 賭け方 → (表示名, 払い戻し倍率: 当たったときの受け取り総額/賭け金)
-BETS = {
-    "red": ("赤", 2),
-    "black": ("黒", 2),
-    "even": ("偶数", 2),
-    "odd": ("奇数", 2),
-    "low": ("1〜18", 2),
-    "high": ("19〜36", 2),
-    "dozen1": ("1〜12", 3),
-    "dozen2": ("13〜24", 3),
-    "dozen3": ("25〜36", 3),
-    "number": ("ストレート（数字）", 36),
-}
+BETS = {k: (v.label, v.mult) for k, v in _CFG.bets.items()}
+_COLOR_EMOJI = dict(_CFG.color_emoji)
 
 
 def spin(rng: random.Random) -> int:
@@ -30,7 +24,7 @@ def color_of(n: int) -> str:
 
 
 def color_emoji(n: int) -> str:
-    return {"緑": "🟢", "赤": "🔴", "黒": "⚫"}[color_of(n)]
+    return _COLOR_EMOJI[color_of(n)]
 
 
 def wins(kind: str, result: int, number: int | None = None) -> bool:

@@ -8,35 +8,32 @@
 
 import math
 
-from core import shop
+from core import catalogs, shop
 
-FEE_RATE = 0.05  # 売れたとき、売り手の受け取りから引く割合（帝愛銀行の収入）
-MAX_ACTIVE = 5  # 1人が同時に出せる数
-FIXED_DAYS = 7  # 定価の出品の有効期間（過ぎると、売れ残りとして戻る）
-AUCTION_HOURS = (1, 6, 24, 72)  # 競りの長さ（時間）
-MIN_INCREMENT_RATE, MIN_INCREMENT = 0.05, 100  # 入札は、いまの最高値より、5%（最低100）以上高く
-SNIPE_SECONDS = 300  # 締切の5分前から入札があると、締切が5分延びる（ぎりぎりの入札だけで決まらないように）
-PAIR_DAILY_LIMIT = 100_000  # 同じ2人（売り手と買い手）の、24時間の取引額の合計の上限（送金の抜け道をふさぐ）
-MIN_PRICE = 100
-ITEM_PRICE_RANGE = (0.10, 5.0)  # 品の値段の幅（定価 × 個数 に対する割合）
-HORSE_PRICE_RANGE = (3_000, 300_000)  # 競走馬の値段の幅（購入券は30,000。金にんじんで育てた馬は、高く売れる）
-ESCROW_OWNER = -3  # 出品中の馬の持ち主（預かり中。厩舎にも出ず、レースにも出られない）
+_CFG = catalogs.economy().p2p
+FEE_RATE = _CFG.fee_rate  # 売れたとき、売り手の受け取りから引く割合（帝愛銀行の収入）
+MAX_ACTIVE = _CFG.max_active  # 1人が同時に出せる数
+FIXED_DAYS = _CFG.fixed_days  # 定価の出品の有効期間（過ぎると、売れ残りとして戻る）
+AUCTION_HOURS = _CFG.auction_hours  # 競りの長さ（時間）
+MIN_INCREMENT_RATE, MIN_INCREMENT = (
+    _CFG.min_increment_rate,
+    _CFG.min_increment,
+)  # 入札は、いまの最高値より、5%（最低100）以上高く
+SNIPE_SECONDS = (
+    _CFG.snipe_seconds
+)  # 締切の5分前から入札があると、締切が5分延びる（ぎりぎりの入札だけで決まらないように）
+PAIR_DAILY_LIMIT = (
+    _CFG.pair_daily_limit
+)  # 同じ2人（売り手と買い手）の、24時間の取引額の合計の上限（送金の抜け道をふさぐ）
+MIN_PRICE = _CFG.min_price
+ITEM_PRICE_RANGE = _CFG.item_price_range  # 品の値段の幅（定価 × 個数 に対する割合）
+HORSE_PRICE_RANGE = _CFG.horse_price_range  # 競走馬の値段の幅（購入券は30,000。金にんじんで育てた馬は、高く売れる）
+ESCROW_OWNER = _CFG.escrow_owner  # 出品中の馬の持ち主（預かり中。厩舎にも出ず、レースにも出られない）
 
-TRADABLE_KINDS = (
-    shop.CONSUMABLE,
-    shop.RACING,
-    shop.CARD_COLOR,
-    shop.CARD_ICON,
-    shop.SKIN_DICE,
-    shop.SKIN_TABLE,
-    shop.COLOR_ROLE,
-)
-SLOT_OF_KIND = {
-    shop.CARD_COLOR: "card_color",
-    shop.CARD_ICON: "card_icon",
-    shop.SKIN_DICE: "skin_dice",
-    shop.SKIN_TABLE: "skin_table",
-}  # 出品すると、外れる装備（色ロールは、Discord 側のロールなので、ここには入らない）
+TRADABLE_KINDS = _CFG.tradable_kinds
+SLOT_OF_KIND = dict(
+    _CFG.slot_of_kind
+)  # 出品すると、外れる装備（色ロールは、Discord 側のロールなので、ここには入らない）
 
 
 def tradable(item_id: str) -> bool:

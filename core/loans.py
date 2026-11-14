@@ -9,16 +9,21 @@
 
 import math
 
-USER_MIN_PRINCIPAL = 100
-MIN_TERM_DAYS = 1
-MAX_TERM_DAYS = 30
-OFFER_HOURS = 24  # 承諾を待つ時間
-MAX_BORROWER_OPEN = 1  # 同時に出せる募集（借りたい人が出す）の数
-MAX_LENDER_OPEN = 5  # 同時に出せる提案（承諾待ち）の数
-MAX_LENDER_ACTIVE = 10  # 同時に貸せる件数
-REMIND_HOURS = 24  # 期限のこの時間前に知らせる
-LATE_MIN_RATE_TENTHS = 20  # 遅延日利の下限（2.0%/日）。約定日利の1.5倍がこれより小さいときは、これを使う
-LATE_CAP = 2  # 遅延損害金の合計の上限（元本の何倍まで）
+from core import catalogs
+
+_CFG = catalogs.economy().loans
+USER_MIN_PRINCIPAL = _CFG.user_min_principal
+MIN_TERM_DAYS = _CFG.min_term_days
+MAX_TERM_DAYS = _CFG.max_term_days
+OFFER_HOURS = _CFG.offer_hours  # 承諾を待つ時間
+MAX_BORROWER_OPEN = _CFG.max_borrower_open  # 同時に出せる募集（借りたい人が出す）の数
+MAX_LENDER_OPEN = _CFG.max_lender_open  # 同時に出せる提案（承諾待ち）の数
+MAX_LENDER_ACTIVE = _CFG.max_lender_active  # 同時に貸せる件数
+REMIND_HOURS = _CFG.remind_hours  # 期限のこの時間前に知らせる
+LATE_MIN_RATE_TENTHS = (
+    _CFG.late_min_rate_tenths
+)  # 遅延日利の下限（2.0%/日）。約定日利の1.5倍がこれより小さいときは、これを使う
+LATE_CAP = _CFG.late_cap  # 遅延損害金の合計の上限（元本の何倍まで）
 
 
 def rate_text(rate_tenths: int) -> str:

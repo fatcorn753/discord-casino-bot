@@ -8,16 +8,20 @@
 import datetime
 import math
 
-SYMBOLS = ("teio", "numa")  # 決算の対象になる銘柄
-RELEASE_WEEKDAY, RELEASE_TIME = 1, (13, 30)  # 火曜 13:30
-ANNOUNCE_WEEKDAY, ANNOUNCE_TIME = 0, (9, 0)  # 月曜 9:00（予告）
-SIZE_RANGE = (0.08, 0.22)  # ふつうの決算の、理論価格の動き（±）
-SURPRISE_PROB = 0.15  # 大サプライズの確率
-SURPRISE_RANGE = (0.35, 0.60)  # 大サプライズの動き（値幅制限 ±30% を突き抜ける）
-MEMO_PROB = 0.10  # デイリー1回あたりの、裏情報メモの確率
-MEMO_TRUTH = 0.70  # 噂が、決算の方向と合っている確率（デイリーでもらうもの）
-SHOP_TRUTH = 0.80  # 帝愛市で買うメモの確度（お金を払うぶん、少し高い）
-SHOP_STOCK = 5  # 1つの決算に、1つのサーバーで売るメモの数
+from core import catalogs
+
+_CFG = catalogs.market().earnings
+
+SYMBOLS = _CFG.symbols  # 決算の対象になる銘柄
+RELEASE_WEEKDAY, RELEASE_TIME = _CFG.release_weekday, _CFG.release_time  # 火曜 13:30
+ANNOUNCE_WEEKDAY, ANNOUNCE_TIME = _CFG.announce_weekday, _CFG.announce_time  # 月曜 9:00（予告）
+SIZE_RANGE = _CFG.size_range  # ふつうの決算の、理論価格の動き（±）
+SURPRISE_PROB = _CFG.surprise_prob  # 大サプライズの確率
+SURPRISE_RANGE = _CFG.surprise_range  # 大サプライズの動き（値幅制限 ±30% を突き抜ける）
+MEMO_PROB = _CFG.memo_prob  # デイリー1回あたりの、裏情報メモの確率
+MEMO_TRUTH = _CFG.memo_truth  # 噂が、決算の方向と合っている確率（デイリーでもらうもの）
+SHOP_TRUTH = _CFG.shop_truth  # 帝愛市で買うメモの確度（お金を払うぶん、少し高い）
+SHOP_STOCK = _CFG.shop_stock  # 1つの決算に、1つのサーバーで売るメモの数
 
 
 def _local(ts: float, tz_hours: float) -> datetime.datetime:

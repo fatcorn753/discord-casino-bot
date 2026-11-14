@@ -9,22 +9,21 @@ f は正答率が TARGET_RATE に近いほど大きい係数（ちょうどで 1
 
 import math
 
-USER_MIN_MINUTES = 1  # 出題の有効期間（分）
-USER_MAX_MINUTES = 7 * 24 * 60  # 7日
-USER_DEFAULT_MINUTES = 3 * 24 * 60
-MIN_PARTICIPANTS = 2  # 出題者報酬が出る最低の回答者数
-MIN_GAMES_FOR_REWARD = (
-    3  # 正解の報酬をもらえるのは、ゲームを3回以上遊んだ人だけ（複数アカウントで稼ぐのを防ぐ。送金と同じ）
-)
-OPEN_LIMIT = 2  # 1人が同時に出せる問題の数
-DAILY_LIMIT = 3  # 1人が24時間に出せる問題の数
-BASE_REWARD = 100
-MAX_BONUS = 200
-TARGET_RATE = 0.40
-REWARD_SCALE_BASE = 100  # 報酬がこの額のとき、基本・ボーナスの倍率が 1 になる
-PARTICIPATION_RATE = (
-    1.0  # 回答者1人あたり、報酬の何割を出題者が受け取るか（f をかける）。1.0 なら「報酬 × 回答者数 × f」
-)
+from core import catalogs
+
+_CFG = catalogs.economy().quizpay
+USER_MIN_MINUTES = _CFG.user_min_minutes  # 出題の有効期間（分）
+USER_MAX_MINUTES = _CFG.user_max_minutes  # 7日
+USER_DEFAULT_MINUTES = _CFG.user_default_minutes
+MIN_PARTICIPANTS = _CFG.min_participants  # 出題者報酬が出る最低の回答者数
+MIN_GAMES_FOR_REWARD = _CFG.min_games_for_reward  # 正解の報酬をもらえるのは、ゲームを3回以上遊んだ人だけ
+OPEN_LIMIT = _CFG.open_limit  # 1人が同時に出せる問題の数
+DAILY_LIMIT = _CFG.daily_limit  # 1人が24時間に出せる問題の数
+BASE_REWARD = _CFG.base_reward
+MAX_BONUS = _CFG.max_bonus
+TARGET_RATE = _CFG.target_rate
+REWARD_SCALE_BASE = _CFG.reward_scale_base  # 報酬がこの額のとき、基本・ボーナスの倍率が 1 になる
+PARTICIPATION_RATE = _CFG.participation_rate  # 回答者1人あたり、報酬の何割を出題者が受け取るか
 
 
 def factor(participants: int, correct: int) -> float:

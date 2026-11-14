@@ -6,7 +6,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from core import shop
+from core import catalogs, shop
 
 CHINCHIRO, PACHINKO, BLACKJACK = "チンチロ", "パチンコ", "ブラックジャック"
 
@@ -26,81 +26,24 @@ class Skin:
     banner: str = ""  # パチンコ: 大当たり以上のときの見出し（なければ、いつもの見出し）
 
 
+_CFG = catalogs.skins()
 SKINS = {
-    s.item_id: s
-    for s in (
-        Skin(
-            "skin_kuro",
-            (CHINCHIRO,),
-            "🕴️ ",
-            "黒服が、静かに立ち会っている…",
-            "黒服「…お見事です」",
-            "黒服「…残念でしたな」",
-            dice_mark="⚫",
-            role_win={
-                "pinzoro": "黒服「ピンゾロ…。5倍、お支払いします」 場が凍りつく…",
-                "arashi": "黒服「嵐…。3倍です」 ざわ…ざわ…",
-                "shigoro": "黒服「シゴロ。2倍です」 流れが来ている…",
-            },
-            role_lose={
-                "pinzoro": "黒服「親のピンゾロ。5倍のお支払いを」 血の気が引いていく…",
-                "arashi": "黒服「親の嵐。3倍です」 地下に悲鳴が響く…",
-                "hifumi": "黒服「ヒフミ。倍のお支払いを」 地獄だ…",
-            },
-            roll_comment="　黒服「…{hand}」",
-        ),
-        Skin(
-            "skin_gold_dice",
-            (CHINCHIRO,),
-            "✨ ",
-            "黄金の賽が、丼の中で鈍く光る…",
-            "✨ 黄金の賽が、まばゆく輝いた！",
-            "黄金の賽は、冷たく転がった…",
-            dice_mark="🟡",
-            role_win={
-                "pinzoro": "✨ 黄金のピンゾロ…ッ！！ 5倍…！ 賽が燃えるように輝く…！",
-                "arashi": "✨ 黄金の嵐…ッ！ 3倍…！ 光が丼からあふれる…",
-                "shigoro": "✨ 黄金のシゴロ…！ 2倍…。賽が笑っている…",
-            },
-            role_lose={"pinzoro": "親の黄金の賽がピンゾロ…！ 5倍払い…。金色の絶望…"},
-        ),
-        Skin(
-            "skin_glass_dice",
-            (CHINCHIRO,),
-            "🩸 ",
-            "赤い爪が、ガラスの賽をそっとつまむ…",
-            "🩸 ガラスの賽が、高く澄んだ音で鳴いた…",
-            "ガラスの賽に、ひびが入った…",
-            dice_mark="🔴",
-            role_win={
-                "pinzoro": "🩸 ガラスの賽が、ピンゾロで砕け散った…ッ！ 5倍…！",
-                "arashi": "🩸 嵐の音が、ガラスを震わせる…！ 3倍…！",
-                "shigoro": "🩸 シゴロ…。赤い爪が、静かに笑う… 2倍…",
-            },
-            role_lose={"pinzoro": "🩸 親のピンゾロ…。ガラスが血に染まる… 5倍払い…"},
-            roll_comment="　🩸",
-        ),
-        Skin(
-            "skin_vip",
-            (PACHINKO, BLACKJACK),
-            "🥀 ",
-            "黒薔薇のシートに、深く腰を沈める…",
-            "🥀 黒薔薇が、静かに祝福している…",
-            "🥀 黒薔薇の花びらが、一枚散った…",
-            banner="# 🥀 黒薔薇の祝福 🥀",
-        ),
-        Skin(
-            "skin_numa",
-            (PACHINKO,),
-            "🕳️ ",
-            "…第3クギを、玉が抜けていく…",
-            "🕳️ 沼が、ついに口を開けた！！",
-            "🕳️ 沼は、すべてを飲み込んだ…",
-            banner="# 🕳️ 沼が開いた…！！ 🕳️",
-        ),
+    s.item_id: Skin(
+        s.item_id,
+        s.games,
+        s.title_prefix,
+        s.start_line,
+        s.win_line,
+        s.lose_line,
+        dice_mark=s.dice_mark,
+        role_win=s.role_win,
+        role_lose=s.role_lose,
+        roll_comment=s.roll_comment,
+        banner=s.banner,
     )
+    for s in _CFG.skins
 }
-SLOT_OF_GAME = {CHINCHIRO: "skin_dice", PACHINKO: "skin_table", BLACKJACK: "skin_table"}  # ゲームごとに見る装備の枠
+SLOT_OF_GAME = dict(_CFG.slot_of_game)  # ゲームごとに見る装備の枠
 
 
 def active_skin(profile: dict, game: str) -> Optional[Skin]:

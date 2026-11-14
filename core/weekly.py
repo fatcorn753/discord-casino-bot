@@ -6,9 +6,12 @@
 import datetime
 from typing import Optional
 
-MIN_PLAYS = 5  # 王者になるのに必要な、その週のゲーム数（1回だけの運で決まらないように）
-ANNOUNCE_TOP = 5  # 発表に載せる人数
-MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
+from core import catalogs
+
+_ECON = catalogs.economy()
+MIN_PLAYS = _ECON.weekly.min_plays  # 王者になるのに必要な、その週のゲーム数（1回だけの運で決まらないように）
+ANNOUNCE_TOP = _ECON.weekly.announce_top  # 発表に載せる人数
+MEDALS = dict(_ECON.wallet.medals)
 
 
 def week_start(day: datetime.date) -> datetime.date:
