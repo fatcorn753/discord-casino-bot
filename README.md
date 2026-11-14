@@ -117,17 +117,17 @@ uv run pytest
 
 ## ディレクトリ構成
 各ファイルの役割は、[STRUCTURE.md](STRUCTURE.md) にあります。
-```
+```text
 casino-bot/
-├── main.py              # エントリポイント
-├── core/                # economy.py（残高・預かり金・デイリー・送金・ランキングと、起動処理）, schema.py（表の定義と列の追加）, shop.py（景品の一覧）, session.py, ui.py, confirm.py ほか
-│   ├── eco_*.py         #   Economy に混ぜ込む部品。quiz / bonds / raffle / events / loans / pachinko / rtp、labor（地下作業）、records（連勝・ミッション・週間）、crypto（証券）、shop（持ち物）、guild（サーバーの承認・掲示・ニックネーム）。型と定数は eco_types.py
-│   └── bonds.py / quizpay.py / loans.py / events.py   # 利率・報酬・イベントの数字と計算
-├── games/               # ルールと確率（Discord に依存しない）
-├── play/                # Discord 上のゲームの流れ（ボタン・演出）
-├── cogs/                # /ペリカ /カジノ /ショップ /証券 /クイズ /運営(DM) /help ほか。`_` で始まるファイル（_admin_views.py など）は部品で、Bot は読み込まない
+├── main.py              # Composition Root（Bot 起動点）
+├── manage.py            # Composition Root（持ち主向け CLI 管理ツール）
+├── domain/              # 純粋ドメインルール・値型・水平ポート契約（ports/）とゲーム計算（games/）
+├── services/            # アプリケーションサービス（session.py ほか）
+├── infra/               # 永続化・外部I/O（db/ 配下の SQLite/Economy/schema、catalogs.py、clock.py、paths.py）
+├── cogs/                # Discord UI・コマンド群（loader.py、shared/、casino/、機能別サブパッケージ）
+├── catalogs/            # 静的定義（YAML）
 ├── docs/                # 機能ごとの、くわしい仕様（README から、リンクしています）
-├── tests/
+├── tests/               # domain/ ・ infra/ ・ cogs/ ・ flows/
 ├── pyproject.toml / uv.lock             # 依存関係・ruff・pyright・pytest 設定（uv）
 ├── requirements.txt / requirements-dev.txt  # pip 環境向け依存一覧
 └── data/                # 実行時データ（自動生成・gitignore済）
