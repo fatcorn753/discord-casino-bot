@@ -1089,3 +1089,55 @@ def test_labor_click_stops_early_after_three_mechanical_hours(eco):
     r = eco.labor_click(U, T0, DAY)
     assert r["ok"] and r["pay"] == lab.OVER_CAP_PAY  # 上限にはまだ届いていないのに、早めに打ち止め
     assert eco.labor_state(U, T0 + 1, DAY)["day_click"] < lab.MAX_CLICKS_PER_DAY
+
+
+# ----------------------------- 鉱脈ヒット・コンボ・今日の地層（#40） ----------------------------- #
+class _AlwaysCrit:
+    @staticmethod
+    def random():
+        return 0.0  # しきい値より必ず下（ヒットし、鉱石も出る）
+
+    @staticmethod
+    def choices(pop, weights, k=1):
+        return [pop[0]]
+
+
+class _NeverCrit:
+    @staticmethod
+    def random():
+        return 1.0
+
+
+def test_crit_multiplies_pay_and_can_add_an_ore(eco):
+    r = eco.labor_click(U, T0, DAY, rng=_AlwaysCrit)
+    assert r["crit"] and r["ore"] == "coal"
+    assert r["pay"] == 10 * lab.CRIT_MULT  # Lv0・疲労なしの通常10が、ヒットで5倍
+    state = eco.labor_state(U, T0 + 1, DAY)
+    assert state["ores"]["coal"] == 1
+
+
+def test_crit_chance_rises_with_pick_level_and_workers():
+    base = lab.crit_chance(0, 0, "none")
+    assert lab.crit_chance(10, 0, "none") > base
+    assert lab.crit_chance(0, 5, "none") > base
+    assert lab.crit_chance(10, 100, "hit") == lab.CRIT_MAX  # 上限で止まる
+
+
+def test_combo_bonus_applies_every_tenth_click(eco, monkeypatch):
+    monkeypatch.setattr(lab, "crit_chance", lambda *a: 0.0)  # ヒットを混ぜない
+    pays = [eco.labor_click(U, T0 + k * 2000, DAY)["pay"] for k in range(10)]  # 疲労が回復するほど間をあける
+    assert pays[9] == round(10 * (1 + lab.COMBO_BONUS)) and all(p == 10 for p in pays[:9])
+
+
+def test_terrain_is_shared_and_stable_for_the_same_day():
+    a = lab.terrain_today("2026-11-15")
+    assert a == lab.terrain_today("2026-11-15")
+    assert a in lab.TERRAIN_KINDS
+
+
+def test_fatigue_terrain_reduces_fatigue_gain(eco, monkeypatch):
+    monkeypatch.setattr(lab, "terrain_today", lambda day: "fatigue")
+    monkeypatch.setattr(lab, "crit_chance", lambda *a: 0.0)
+    eco.labor_click(U, T0, DAY)
+    fat = eco.labor_state(U, T0, DAY)["fatigue"]  # クリックと同じ時刻で読んで、自然回復ぶんを混ぜない
+    assert abs(fat - lab.FATIGUE_GAIN * (1 - lab.TERRAIN_FATIGUE_CUT)) < 1e-6

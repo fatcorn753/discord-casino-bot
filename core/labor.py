@@ -98,6 +98,62 @@ def click_outcome(pick: int, glove: int, fatigue: float) -> dict:
 
 
 # ---------------------------------------------------------------- #
+# 鉱脈ヒット・作業コンボ・今日の地層（手掘りを気持ちよくする、見習い〜職人の全員に効く）
+# ---------------------------------------------------------------- #
+CRIT_BASE = 0.05  # 鉱脈ヒットの確率（ツルハシLv0）
+CRIT_PER_LEVEL = 0.01  # ツルハシ1Lvごとに上乗せ（Lv10で+10%）
+CRIT_WORKER_BONUS = 0.002  # 雇用中の作業員1人ごとに上乗せ（現場シナジー）
+CRIT_MAX = 0.30  # 鉱脈ヒット率の上限
+CRIT_MULT = 5  # 鉱脈ヒットの稼ぎの倍率
+CRIT_ORE_CHANCE = 0.15  # 鉱脈ヒットのとき、さらに鉱石も掘り当てる確率
+# 手掘り用の小さな鉱石表（ヒットの中での相対比。ダイヤ・伝説級は出ない。(id, 名前, 印, 相対比, 売値)）
+CRIT_ORES = (
+    ("coal", "石炭", "⚫", 45, 3),
+    ("copper", "銅", "🟤", 40, 60),
+    ("silver", "銀", "⚪", 12, 240),
+    ("gold", "金", "🟡", 3, 1_200),
+)
+
+COMBO_SIZE = 10  # 「働く」が、この回数に届くごとに
+COMBO_BONUS = 0.20  # コンボ達成時の、その1回の稼ぎの上乗せ（+20%）
+
+TERRAIN_KINDS = ("hit", "fatigue", "silver", "none")
+TERRAIN_HIT_BONUS = 0.05  # 鉱脈ヒット率 +5%
+TERRAIN_FATIGUE_CUT = 0.20  # 疲労の溜まりが20%軽くなる
+TERRAIN_SILVER_MULT = 2  # 手掘りの銀の出やすさが2倍
+
+
+def terrain_today(day: str) -> str:
+    """日替わりの「今日の地層」（サーバー・人を問わず、日付だけで決まる）。TERRAIN_KINDS のどれか。"""
+    return random.Random(f"terrain:{day}").choice(TERRAIN_KINDS)
+
+
+def terrain_label(kind: str) -> str:
+    return {
+        "hit": f"⛏ 鉱脈ヒット率 +{TERRAIN_HIT_BONUS:.0%}",
+        "fatigue": f"😌 疲労の溜まりが{TERRAIN_FATIGUE_CUT:.0%}軽い",
+        "silver": f"⚪ 銀が{TERRAIN_SILVER_MULT}倍出やすい（手掘り）",
+        "none": "特になし",
+    }[kind]
+
+
+def crit_chance(pick: int, workers: int, terrain: str) -> float:
+    """鉱脈ヒットの確率。ツルハシのレベルと、雇用中の作業員の数で上がる。"""
+    c = CRIT_BASE + CRIT_PER_LEVEL * clamp_level(pick) + CRIT_WORKER_BONUS * max(0, workers)
+    if terrain == "hit":
+        c += TERRAIN_HIT_BONUS
+    return min(CRIT_MAX, c)
+
+
+def roll_crit_ore(rng, terrain: str) -> str:
+    """鉱脈ヒットで、さらに鉱石も出たときの、その鉱石のID。"""
+    weights = [
+        w * (TERRAIN_SILVER_MULT if terrain == "silver" and cid == "silver" else 1) for cid, _, _, w, _ in CRIT_ORES
+    ]
+    return rng.choices([cid for cid, _, _, _, _ in CRIT_ORES], weights=weights, k=1)[0]
+
+
+# ---------------------------------------------------------------- #
 # 雇用（作業員）。放置でも稼げる。数字はここだけを直せばよい
 # ---------------------------------------------------------------- #
 WORKERS = ("apprentice", "miner", "craftsman", "foreman")
