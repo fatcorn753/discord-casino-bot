@@ -176,7 +176,7 @@ def test_display_frames_end_when_the_winner_crosses_and_never_move_backward():
     rs = [h.Runner(i + 1, f"馬{i + 1}", **h.random_stats(rng)) for i in range(8)]
     sim = h.simulate(rs, h.Track(1800, "良"), rng, keep_frames=True)
     winner = sim["order"][0]
-    frames = horse_cog.display_frames(sim["frames"], winner)
+    frames = horse_cog.display_frames(sim["frames"], winner, sim["finish"])
     assert frames[-1][winner] == 1.0 and all(p <= 1.0 for row in frames for p in row)
     assert sum(1 for p in frames[-1] if p < 1.0) >= 6  # ゴールの瞬間に、全馬が並んでいない（差が見える）
     for a, b in zip(frames, frames[1:]):
@@ -471,3 +471,15 @@ def test_retire_view_charges_or_pays_and_updates_the_stable(setup):
     remaining = eco.horse_list(U)
     assert [h for h in remaining if not h["rented_day"]] == []  # 持ち馬はもういない（レンタルだけ残る）
     assert stable.horse_id == remaining[0]["id"]
+
+
+def test_tactic_view_updates_horse_tactic(setup):
+    eco, bot, stable, hid = _stable_with_horse(setup)
+    horse = eco.horse_get(hid)
+    view = views.TacticView(stable, U, horse)
+    assert "作戦" in view.embed().title
+    close_btn = next(c for c in view.children if c.label == h.TACTIC_NAME["close"])
+    it = _It(U)
+    asyncio.run(close_btn.callback(it))
+    assert eco.horse_get(hid)["tactic"] == "close"
+    assert "作戦を変更しました" in it.edited[0]["embed"].title

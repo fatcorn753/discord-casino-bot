@@ -117,14 +117,16 @@ def test_few_runs_pull_the_record_toward_the_average():
     )  # 1戦1勝より、10戦10勝のほうが低い
 
 
-def test_form_moves_the_odds_but_stats_do_not():
+def test_form_and_rating_move_odds_while_tactic_does_not():
     base = [_record_runner(i, 8, 1, 3) for i in range(1, 9)]
     good = [_record_runner(1, 8, 1, 3, form=1)] + base[1:]
     bad = [_record_runner(1, 8, 1, 3, form=-1)] + base[1:]
     strong = [_record_runner(1, 8, 1, 3, speed=80, stamina=40, power=40, guts=40)] + base[1:]
+    closer = [h.Runner(1, "r1", 50, 50, 50, 50, 0, 8, 1, 3, tactic="close")] + base[1:]
     flat = h.make_all_odds(base)["win"]["1"]
     assert h.make_all_odds(good)["win"]["1"] < flat < h.make_all_odds(bad)["win"]["1"]  # 好調ほど低い
-    assert h.make_all_odds(strong)["win"]["1"] == flat  # ステータスは、オッズに入らない
+    assert h.make_all_odds(strong)["win"]["1"] < flat  # 高い能力評価は、緩やかにオッズへ入る
+    assert h.make_all_odds(closer)["win"]["1"] == flat  # 作戦は、オッズに入らない
 
 
 def test_npc_records_are_plausible():
@@ -679,3 +681,53 @@ def test_rental_horse_prize_gets_an_extra_skim(eco):
         scale = h.prize_pool_scale(1, gross)
         rate = teiai.HORSE_PRIZE_SKIM_RATE + teiai.HORSE_RENTAL_EXTRA_SKIM_RATE
         assert result["prizes"].get(U, 0) == round(round(gross * scale) * (1 - rate))
+
+
+def test_horse_tactic_can_be_changed_and_persists_into_races(eco):
+    hid = make_horse(eco, U, "作戦馬")
+    rental = eco.rental_ensure(U, NOW, 9.0)
+    assert eco.horse_set_tactic(U, hid, "close") == (True, "close")
+    assert eco.horse_set_tactic(U, rental["id"], "front") == (True, "front")
+    assert not eco.horse_set_tactic(V, hid, "pace")[0]
+    assert not eco.horse_set_tactic(U, hid, "bogus")[0]
+    assert eco.horse_get(hid)["tactic"] == "close"
+    rid = open_race(eco)
+    assert eco.race_register(U, hid, rid, NOW + 1)[0]
+    eco.race_close_entries(rid, random.Random(2))
+    mine = next(e for e in eco.race_entries(rid) if e["horse_id"] == hid)
+    assert mine["tactic"] == "close"
+
+
+def test_grade_race_at_night_and_losing_bets_feed_prize_pool(eco):
+    tz = 9.0
+    night = datetime.datetime(2026, 11, 10, 21, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=tz))).timestamp()
+    rid = eco.race_ensure_scheduled(night - h.ENTRY_OPEN_MIN * 60, tz)
+    assert rid is not None and eco.race_get(rid)["grade"] == "G1"
+    hid = make_horse(eco, U, "重賞馬")
+    eco.credit(V, 100_000, "テスト")
+    special_g1 = eco.race_create_special(NOW, 10, 10, grade="G1")
+    assert eco.race_register(U, hid, special_g1, NOW + 1)[0]
+    field_ = eco.race_close_entries(special_g1, random.Random(1))
+    eco.race_set_odds(special_g1, h.make_all_odds(field_["runners"]))
+    for lane in range(1, 9):
+        assert eco.race_bet(V, special_g1, "win", lane, 1_000, NOW + 700)[0]
+    result = eco.race_run(special_g1, random.Random(5))
+    mine = next(e for e in result["entries"] if e["owner_id"] == U)
+    if mine["finish"] <= 3:
+        lost = sum(b["stake"] for b in result["bets"] if b["payout"] == 0)
+        bet_pool = int(lost * teiai.HORSE_BET_PRIZE_SHARE)
+        gross = round(h.PRIZES[mine["finish"] - 1] * h.GRADE_PRIZE_MULT)
+        scale = h.prize_pool_scale(1, gross, bet_pool)
+        expected = round(round(gross * scale) * (1 - teiai.HORSE_PRIZE_SKIM_RATE))
+        assert result["prizes"][U] == expected
+
+
+def test_extreme_build_does_not_dominate_win_rate():
+    rng = random.Random(11)
+    extreme = h.Runner(1, "ex", 80, 65, 35, 30, tactic="pace")
+    wins = 0
+    for _ in range(300):
+        npcs = [h.Runner(k, f"n{k}", **h.random_stats(rng), tactic=h.random_tactic(rng)) for k in range(2, 9)]
+        if h.simulate([extreme] + npcs, h.random_track(rng), rng)["order"][0] == 0:
+            wins += 1
+    assert wins / 300 < 0.35
