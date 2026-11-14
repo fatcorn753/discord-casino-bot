@@ -35,3 +35,22 @@ def error_embed(title: str, description: str = "") -> discord.Embed:
 
 def warn_embed(title: str, description: str = "") -> discord.Embed:
     return embed(f"⚠️ {title}", description, WARN)
+
+
+class OwnerView(discord.ui.View):
+    """開いた本人（owner_id）だけが操作できる View の基底クラス。"""
+
+    def __init__(self, owner_id: int, timeout: float | None = 300, owner_message: str = ""):
+        super().__init__(timeout=timeout)
+        self.owner_id = owner_id
+        self._owner_message = owner_message
+
+    async def _reject_non_owner(self, interaction: discord.Interaction) -> None:
+        if self._owner_message:
+            await interaction.response.send_message(self._owner_message, ephemeral=True)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await self._reject_non_owner(interaction)
+            return False
+        return True
