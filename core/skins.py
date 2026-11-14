@@ -106,7 +106,8 @@ SLOT_OF_GAME = {CHINCHIRO: "skin_dice", PACHINKO: "skin_table", BLACKJACK: "skin
 def active_skin(profile: dict, game: str) -> Optional[Skin]:
     """そのゲームで、いま装備している変更品（なければ None）。別のゲーム用のものを装備していても、効かない。"""
     slot = SLOT_OF_GAME.get(game)
-    skin = SKINS.get(profile.get(slot)) if slot else None
+    skin_id = profile.get(slot) if slot else None
+    skin = SKINS.get(skin_id) if isinstance(skin_id, str) else None
     return skin if skin is not None and game in skin.games else None
 
 

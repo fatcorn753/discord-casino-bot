@@ -4,6 +4,7 @@
 """
 
 import datetime
+from typing import Optional
 
 MIN_PLAYS = 5  # 王者になるのに必要な、その週のゲーム数（1回だけの運で決まらないように）
 ANNOUNCE_TOP = 5  # 発表に載せる人数
@@ -30,7 +31,7 @@ def week_label(week: str) -> str:
     return f"{start.month}/{start.day}〜{end.month}/{end.day}"
 
 
-def standings_lines(rows: list, viewer_id: int = None) -> list:
+def standings_lines(rows: list, viewer_id: Optional[int] = None) -> list:
     """[(user_id, 損益, ゲーム数), ...]（順位順）から、表示の行を作る。"""
     lines = []
     for rank, (uid, net, plays) in enumerate(rows, 1):

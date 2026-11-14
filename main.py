@@ -16,6 +16,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from core import approval, ui
+from core.bot import CasinoBot
 from core.economy import Economy
 from core.session import Sessions
 
@@ -99,21 +100,21 @@ config = load_config()
 
 intents = discord.Intents.default()  # 特権インテントは不要（メッセージの内容もメンバー一覧も読まない）
 
-bot = commands.Bot(
+if config.get("debug_http"):
+    # 原因調査用: Discord への通信（応答の送信など）を1件ずつ記録する
+    logging.getLogger("discord.http").setLevel(logging.DEBUG)
+# ペリカはサーバーごとに別々。古い形式の記録は legacy_guild_id（無ければ許可リストの先頭）のサーバーが引き継ぐ
+_legacy = config.get("legacy_guild_id") or next(iter(config.get("allowed_guild_ids") or []), None)
+bot = CasinoBot(
+    config=config,
+    economy=Economy(DB_PATH, legacy_guild_id=_legacy, strict=True),
+    sessions=Sessions(),
     command_prefix=commands.when_mentioned,
     intents=intents,
     help_command=None,
     tree_cls=BotTree,
     activity=discord.Game(name=config.get("status", "/help でペリカを稼ごう")),
 )
-bot.config = config
-if config.get("debug_http"):
-    # 原因調査用: Discord への通信（応答の送信など）を1件ずつ記録する
-    logging.getLogger("discord.http").setLevel(logging.DEBUG)
-# ペリカはサーバーごとに別々。古い形式の記録は legacy_guild_id（無ければ許可リストの先頭）のサーバーが引き継ぐ
-_legacy = config.get("legacy_guild_id") or next(iter(config.get("allowed_guild_ids") or []), None)
-bot.economy = Economy(DB_PATH, legacy_guild_id=_legacy, strict=True)
-bot.sessions = Sessions()
 
 
 async def load_all_cogs() -> list:
@@ -181,7 +182,8 @@ async def setup_hook():
 @bot.event
 async def on_ready():
     print("=" * 50)
-    print(f"ログイン: {bot.user} (ID: {bot.user.id})")
+    uid = bot.user.id if bot.user is not None else "?"
+    print(f"ログイン: {bot.user} (ID: {uid})")
     print(f"参加サーバー数: {len(bot.guilds)}")
     allowed = bot.config.get("allowed_guild_ids") or []
     print(f"許可サーバー: {allowed if allowed else '制限なし（どのサーバーでも遊べます）'}")
@@ -215,7 +217,7 @@ def acquire_single_instance_lock() -> None:
 
 def main():
     acquire_single_instance_lock()
-    token = validate_token(config.get("token"))
+    token = validate_token(config.get("token") or "")
     test_guild = config.get("test_guild_id")
     if test_guild is not None and not str(test_guild).isdigit():
         raise SystemExit("config.json の test_guild_id は数字のサーバーIDか null にしてください。")

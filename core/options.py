@@ -9,6 +9,7 @@
 """
 
 import math
+from typing import Optional
 
 from core import market, market_events
 
@@ -97,7 +98,7 @@ def default_strike_pct(symbol: str) -> float:
     return STRIKE_BY_SYMBOL.get(symbol, STRIKE_OTM)
 
 
-def strike_for(kind: str, spot: float, pct: float = None) -> float:
+def strike_for(kind: str, spot: float, pct: Optional[float] = None) -> float:
     """買った時点の価格から決まる、権利行使価格（小数2桁）。"""
     pct = STRIKE_OTM if pct is None else pct
     return round(spot * (1 + pct if kind == CALL else 1 - pct), 2)

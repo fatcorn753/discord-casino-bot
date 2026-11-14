@@ -7,9 +7,14 @@
 持ち主（owner_ids）は、どのサーバーでもコマンドを使える（承認の操作を、承認待ちのサーバーの中からもできるように）。
 """
 
+from typing import TYPE_CHECKING, Any, cast
+
 import discord
 
 from core import ui
+
+if TYPE_CHECKING:
+    from core.bot import CasinoBot
 
 PENDING, APPROVED, DENIED = "pending", "approved", "denied"
 
@@ -41,19 +46,23 @@ DM_GROUP = "運営"  # Bot とのDMでだけ使える、持ち主向けのコマ
 
 def is_owner_dm_command(interaction: discord.Interaction) -> bool:
     """Bot の持ち主が、DM で「運営」のコマンド（サーバーの許可の管理）を使うとき。サーバーの外で使える、ただ1つの場合。"""
+    bot = cast("CasinoBot", interaction.client)
     cmd = interaction.command
-    root = (cmd.root_parent or cmd) if cmd is not None else None
+    root = (getattr(cmd, "root_parent", None) or cmd) if cmd is not None else None
     return (
         interaction.guild is None
         and getattr(root, "name", None) == DM_GROUP
-        and interaction.user.id in owner_ids(interaction.client.config)
+        and interaction.user.id in owner_ids(bot.config)
     )
 
 
 async def guard(interaction: discord.Interaction) -> bool:
     """コマンドの入口の検査。使えないサーバーには理由を返して False を返す。"""
-    bot = interaction.client
-    if is_allowed(bot.economy, bot.config, interaction.guild_id, interaction.user.id):
+    guild_id = interaction.guild_id
+    if guild_id is None:
+        return False
+    bot = cast("CasinoBot", interaction.client)
+    if is_allowed(bot.economy, bot.config, guild_id, interaction.user.id):
         return True
     if not requires_approval(bot.config):
         await interaction.response.send_message(
@@ -61,9 +70,9 @@ async def guard(interaction: discord.Interaction) -> bool:
             ephemeral=True,
         )
         return False
-    row = bot.economy.get_guild_status(interaction.guild_id)
-    cog = bot.get_cog("ApprovalCog")
-    if cog is not None:
+    row = bot.economy.get_guild_status(guild_id)
+    cog: Any = bot.get_cog("ApprovalCog")
+    if cog is not None and interaction.guild is not None:
         await cog.ensure_requested(interaction.guild)  # 未登録なら承認を依頼する／しばらくたっていれば催促する
     if row and row["status"] == DENIED:
         msg = "このサーバーでの利用は、Bot の持ち主に許可されていません。"
