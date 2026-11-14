@@ -48,7 +48,7 @@ def _roulette_stats(kind: str) -> tuple:
     return p * mult, p * (mult - 1)
 
 
-def base_stats(game: str, kind: str = None) -> tuple:
+def base_stats(game: str, kind: str | None = None) -> tuple[float, float]:
     """(いまの還元率, 勝ち分の平均 W)。"""
     if game == "スロット":
         return SLOT_RTP, SLOT_W
@@ -63,19 +63,19 @@ def base_stats(game: str, kind: str = None) -> tuple:
     raise KeyError(game)
 
 
-def factor(game: str, level: int, kind: str = None) -> float:
+def factor(game: str, level: int, kind: str | None = None) -> float:
     """勝ち分にかける倍率。"""
     _, w = base_stats(game, kind)
     return 1 + (level - DEFAULT_LEVEL) * STEP / w
 
 
-def approx_rtp(game: str, level: int, kind: str = None) -> float:
+def approx_rtp(game: str, level: int, kind: str | None = None) -> float:
     """そのレベルでの還元率の目安。"""
     rtp, _ = base_stats(game, kind)
     return rtp + (level - DEFAULT_LEVEL) * STEP
 
 
-def adjust(game: str, level: int, bet: int, payout: int, kind: str = None) -> int:
+def adjust(game: str, level: int, bet: int, payout: int, kind: str | None = None) -> int:
     """勝ったときだけ、勝ち分（払い戻し - 賭け金）を倍率で増減した払い戻しを返す。負け・引き分け・レベル3は、そのまま。"""
     if level == DEFAULT_LEVEL or game not in GAMES or payout <= bet:
         return payout

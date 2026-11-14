@@ -33,7 +33,7 @@ def color_emoji(n: int) -> str:
     return {"緑": "🟢", "赤": "🔴", "黒": "⚫"}[color_of(n)]
 
 
-def wins(kind: str, result: int, number: int = None) -> bool:
+def wins(kind: str, result: int, number: int | None = None) -> bool:
     """その賭け方が当たりか。0 は、数字の賭け以外はすべてハズレ。"""
     if kind == "number":
         return number == result
@@ -52,7 +52,7 @@ def wins(kind: str, result: int, number: int = None) -> bool:
     }[kind]
 
 
-def payout(kind: str, bet: int, result: int, number: int = None) -> int:
+def payout(kind: str, bet: int, result: int, number: int | None = None) -> int:
     """受け取る総額（ハズレは 0）。"""
     return bet * BETS[kind][1] if wins(kind, result, number) else 0
 

@@ -1,6 +1,7 @@
 """ゲーム共通の流れ: 賭け金の検証と預かり、精算、ボタンの持ち主確認、結果の表示。"""
 
 import time
+from typing import Any
 
 import discord
 
@@ -11,7 +12,7 @@ from games import rtplevel
 MIN_BET = 10
 
 
-def local_today(bot):
+def local_today(bot: Any):
     return local_now(bot).date()
 
 
@@ -26,7 +27,7 @@ def log_display_failure(game: str, step: str, exc: Exception) -> None:
 class GameContext:
     """1回のゲーム。賭け金は預かり済みで、settle() か abort() で必ず精算する。"""
 
-    def __init__(self, bot, user_id: int, escrow_id: int, game: str, bet: int, guild_id: int, name: str = ""):
+    def __init__(self, bot: Any, user_id: int, escrow_id: int, game: str, bet: int, guild_id: int, name: str = ""):
         self.bot = bot
         self.economy = bot.economy.for_guild(guild_id)  # ペリカはサーバーごとに別々
         self.name = name  # 遊んでいる人の表示名（タイトルに付けて、誰のゲームか分かるようにする）
@@ -40,17 +41,17 @@ class GameContext:
         self.insured_refund = 0  # 保険券で戻った額
         self.event_bonus = 0  # 突発イベントで上乗せされた額
         self.rtp_shift = 0  # 還元率レベルで増減した払い戻し（表示の払い戻しに足す。レベルそのものは見せない）
-        self.events = {}  # 連勝・ミッションの結果（演出の表示に使う）
-        self.skin = None  # 装備中の、演出の変更品（core/skins.py）。見た目だけが変わる
-        self.notices = []  # 精算で起きた、強制執行・種銭などの一言（core/eco_debt.py）
+        self.events: dict[str, Any] = {}  # 連勝・ミッションの結果（演出の表示に使う）
+        self.skin: skins.Skin | None = None  # 装備中の、演出の変更品（core/skins.py）。見た目だけが変わる
+        self.notices: list[str] = []  # 精算で起きた、強制執行・種銭などの一言（core/eco_debt.py）
 
     def settle(
         self,
         payout: int,
         penalty: int = 0,
         keep_session: bool = False,
-        tags=(),
-        rtp_kind: str = None,
+        tags: Any = (),
+        rtp_kind: str | None = None,
         rtp_done: bool = False,
     ) -> int:
         """払い戻し総額で精算し、損益を返す。二重に呼んでも一度しか払わない。
@@ -107,14 +108,15 @@ class GameContext:
 
 
 async def start_game(
-    interaction: discord.Interaction, bot, bet: int, game: str, balance_factor: int = 1, factor_reason: str = ""
-):
+    interaction: discord.Interaction, bot: Any, bet: int, game: str, balance_factor: int = 1, factor_reason: str = ""
+) -> GameContext | None:
     """賭け金を検証して預かる。成功すれば GameContext、失敗すれば理由を返信して None。
 
     balance_factor: 開始時に「賭け金の何倍の残高」が必要か（チンチロの倍払いに備える）。
     """
     uid = interaction.user.id
-    eco = bot.economy.for_guild(interaction.guild_id)  # このサーバーの口座を使う
+    guild_id = ui.guild_id_of(interaction)
+    eco = bot.economy.for_guild(guild_id)  # このサーバーの口座を使う
     reason = bot.sessions.try_start(uid)
     if reason:
         await interaction.response.send_message(embed=ui.error_embed("まだ始められません", reason), ephemeral=True)
@@ -148,9 +150,7 @@ async def start_game(
                 ephemeral=True,
             )
             return None
-        ctx = GameContext(
-            bot, uid, escrow, game, bet, interaction.guild_id, getattr(interaction.user, "display_name", "") or ""
-        )
+        ctx = GameContext(bot, uid, escrow, game, bet, guild_id, getattr(interaction.user, "display_name", "") or "")
         ctx.skin = skins.active_skin(eco.get_profile(uid), game)
         return ctx
     finally:
@@ -198,7 +198,7 @@ def result_color(bet: int, net: int, base: int) -> int:
     return ui.GOLD if bet > 0 and net >= bet * 10 else base
 
 
-def _celebration(ctx: GameContext, net: int) -> tuple:
+def _celebration(ctx: GameContext, net: int) -> tuple[list[str], list[str]]:
     """(結果の数字の前に出す、大勝ち・連勝の演出, 最後に出す、ミッション達成の通知)。"""
     ev, head, tail = ctx.events, [], []
     if missions.is_jackpot(ctx.bet, net):
@@ -221,21 +221,23 @@ def _celebration(ctx: GameContext, net: int) -> tuple:
 class ReplayView(ui.OwnerView):
     """結果の下に出す「もう一度」ボタン。遊んだ本人だけが押せて、押すと新しいゲームが始まる。"""
 
-    def __init__(self, bot, user_id: int, bet: int, replay, timeout: float = 90):
+    def __init__(self, bot: Any, user_id: int, bet: int, replay: Any, timeout: float = 90):
         super().__init__(
             user_id,
             timeout=timeout,
             owner_message="これは他の人のゲームです。`/カジノ` で自分も遊べます。",
         )
         self.bot, self.user_id, self.bet, self.replay = bot, user_id, bet, replay
-        self.origin = None  # この結果を出したメッセージの元になった interaction（時間切れでボタンを消すのに使う）
+        self.origin: discord.Interaction | None = (
+            None  # この結果を出したメッセージの元になった interaction（時間切れでボタンを消すのに使う）
+        )
         self.again.label = f"🔁 同じ額でもう一度（{bet:,}）"
         self.double.label = f"⏫ 倍にして（{bet * 2:,}）"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not await super().interaction_check(interaction):
             return False
-        if not approval.is_allowed(self.bot.economy, self.bot.config, interaction.guild_id, interaction.user.id):
+        if not approval.is_allowed(self.bot.economy, self.bot.config, ui.guild_id_of(interaction), interaction.user.id):
             await interaction.response.send_message(
                 embed=ui.error_embed("使えません", "このサーバーでは、いまは遊べません。"), ephemeral=True
             )
@@ -269,15 +271,16 @@ class OwnerView(ui.OwnerView):
         )
         self.ctx = ctx
 
-    async def on_error(self, interaction: discord.Interaction, error: Exception, item) -> None:
+    async def on_error(self, interaction: discord.Interaction, error: Exception, item: discord.ui.Item[Any]) -> None:
         print(f"ゲーム中のエラー: {self.ctx.game}: {error!r}")
         self.ctx.abort()  # 賭け金を返す
         try:
-            await interaction.channel.send(
+            await ui.send_channel(
+                interaction.channel,
                 embed=ui.error_embed(
                     "エラーが発生しました",
                     "ゲームを中止しました。精算前なら賭け金はお返ししています（`/ペリカ 履歴` で確認できます）。",
-                )
+                ),
             )
         except discord.HTTPException:
             pass

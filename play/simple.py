@@ -20,9 +20,9 @@ STEP = 0.9  # 演出のコマ送り間隔（秒）
 async def show(
     interaction: discord.Interaction,
     first: discord.Embed,
-    frames: list,
+    frames: list[discord.Embed],
     final: discord.Embed,
-    view: discord.ui.View = None,
+    view: ReplayView | None = None,
     game: str = "",
 ) -> None:
     """演出を見せる。表示の失敗（メッセージ削除・通信エラー）は結果に影響しない（精算は済んでいる）ので続行するが、記録は残す。"""
@@ -79,20 +79,22 @@ async def play_slot(interaction: discord.Interaction, bot, bet: int):
 
 
 # --------------------------- ルーレット --------------------------- #
-async def play_roulette(interaction: discord.Interaction, bot, bet: int, kind: str, number: int = None):
+async def play_roulette(interaction: discord.Interaction, bot, bet: int, kind: str, number: int | None = None) -> None:
     # 賭け方の指定ミスは、賭け金を預かる前に弾く
     if kind == "number" and number is None:
-        return await interaction.response.send_message(
+        await interaction.response.send_message(
             embed=ui.error_embed(
                 "数字が必要です", "「ストレート（数字）」を選んだときは、0〜36 の数字も指定してください。"
             ),
             ephemeral=True,
         )
+        return
     if kind != "number" and number is not None:
-        return await interaction.response.send_message(
+        await interaction.response.send_message(
             embed=ui.error_embed("数字は不要です", "数字を指定するのは「ストレート（数字）」のときだけです。"),
             ephemeral=True,
         )
+        return
     ctx = await start_game(interaction, bot, bet, "ルーレット")
     if ctx is None:
         return
