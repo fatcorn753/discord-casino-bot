@@ -7,8 +7,8 @@
 
 import pytest
 
-from core import events, missions
-from core.economy import Economy
+from domain import events, missions
+from infra.db.economy import Economy
 
 
 def pytest_configure(config):

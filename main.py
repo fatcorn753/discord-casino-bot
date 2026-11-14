@@ -15,15 +15,16 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from core import approval, ui
-from core.bot import CasinoBot
-from core.economy import Economy
-from core.session import Sessions
+from cogs.loader import load_all_cogs as _load_cogs
+from cogs.shared import approval_guard, ui
+from cogs.shared.bot import CasinoBot
+from infra.db.economy import Economy
+from infra.paths import CONFIG_PATH as _CONFIG_PATH
+from infra.paths import DB_PATH as _DB_PATH
+from services.session import Sessions
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-COGS_DIR = os.path.join(BASE_DIR, "cogs")
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-DB_PATH = os.path.join(BASE_DIR, "data", "casino.db")
+CONFIG_PATH = str(_CONFIG_PATH)
+DB_PATH = str(_DB_PATH)
 
 
 def load_config() -> dict:
@@ -57,14 +58,14 @@ class BotTree(app_commands.CommandTree):
                 f"⚠ コマンドの受信が {late:.1f} 秒遅れました（{getattr(interaction.command, 'qualified_name', '?')}）。"
                 f"Bot のネットワークや、PC のスリープ・負荷を確認してください。ゲートウェイ遅延: {interaction.client.latency * 1000:.0f}ms"
             )
-        if approval.is_owner_dm_command(interaction):  # 持ち主の「運営」コマンドは、Bot とのDMで使える
+        if approval_guard.is_owner_dm_command(interaction):  # 持ち主の「運営」コマンドは、Bot とのDMで使える
             return True
         if interaction.guild is None:
             await interaction.response.send_message(
                 embed=ui.error_embed("利用できません", "このコマンドはサーバー内でのみ使えます。"), ephemeral=True
             )
             return False
-        if not await approval.guard(interaction):  # 許可リスト・持ち主の承認
+        if not await approval_guard.guard(interaction):  # 許可リスト・持ち主の承認
             return False
         return True
 
@@ -117,20 +118,8 @@ bot = CasinoBot(
 )
 
 
-async def load_all_cogs() -> list:
-    failed = []
-    for filename in sorted(os.listdir(COGS_DIR)):
-        if not filename.endswith(".py") or filename.startswith("_"):
-            continue
-        module = f"cogs.{filename[:-3]}"
-        try:
-            await bot.load_extension(module)
-            print(f"✓ ロード: {module}")
-        except Exception:
-            print(f"✗ 失敗: {module}")
-            traceback.print_exc()
-            failed.append(module)
-    return failed
+async def load_all_cogs() -> list[str]:
+    return await _load_cogs(bot)
 
 
 async def sync_test_guild(guild_id: int) -> bool:

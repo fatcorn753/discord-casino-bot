@@ -11,11 +11,11 @@ import argparse
 import os
 import sys
 
-from core import approval
-from core.economy import Economy
+from domain import approval
+from infra.db.economy import Economy
+from infra.paths import DB_PATH as _DB_PATH
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "data", "casino.db")
+DB_PATH = str(_DB_PATH)
 LABEL = {approval.APPROVED: "許可", approval.PENDING: "承認待ち", approval.DENIED: "断った"}
 
 
