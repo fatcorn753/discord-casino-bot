@@ -45,44 +45,48 @@ def bank_lines(bank: dict) -> str:
     return "\n".join(lines)
 
 
-def panel_embed(eco, uid: int) -> discord.Embed:
-    """帝愛銀行と、自分の状況の画面。"""
-    now = time.time()
-    bank = eco.bank_status(now)
+def render_teiai_panel_embed(
+    *,
+    bank: dict,
+    house: dict,
+    graced: list,
+    claims: int,
+    status: str,
+    display_status: str,
+    deposit: int,
+    debt: int,
+    grace_until: float | None,
+    cds: dict,
+    uid: int,
+) -> discord.Embed:
+    """帝愛銀行と自分の状況の画面を組み立てる（純粋な Base）。"""
     color = {"safe": ui.OK, "warn": ui.GOLD, "danger": ui.ERROR, "frozen": ui.ERROR}[bank["level"]]
     e = ui.embed("🏦 帝愛銀行", bank_lines(bank), color)
-    house = eco.house_account()
     e.add_field(
         name="🕴️ 帝愛の胴元の口座",
         value=f"**{ui.pelica(house['balance'])}**　（ピンハネの合計 {ui.pelica(house['skimmed'])}。デイリーと地下作業から入る）",
         inline=False,
     )
-    graced = eco.grace_list()
     if graced:
         e.add_field(
             name="⚠️ 破産猶予のカウントダウン中",
             value="\n".join(
-                f"<@{u}>　借金 {ui.pelica(debt)}　<t:{int(until)}:R> に強制破産" for u, debt, until in graced[:10]
+                f"<@{u}>　借金 {ui.pelica(u_debt)}　<t:{int(until)}:R> に強制破産" for u, u_debt, until in graced[:10]
             ),
             inline=False,
         )
-    claims = eco.cds_total_claims()
     if claims:
         e.add_field(name="💀 掛けられている CDS（配当見込みの合計）", value=ui.pelica(claims), inline=False)
-    status, debt = eco.status(uid, now), eco.debt(uid)
-    me = [
-        f"身分: {teiai.STATUS_LABEL[eco.display_status(uid) if status == teiai.KATAGI else status]}　預金: **{ui.pelica(eco.deposit_of(uid))}**"
-    ]
+    shown_status = display_status if status == teiai.KATAGI else status
+    me = [f"身分: {teiai.STATUS_LABEL[shown_status]}　預金: **{ui.pelica(deposit)}**"]
     if debt:
         me.append(
             f"帝愛への借金: **{ui.pelica(debt)}**（利息: 1日 {teiai.DEBT_RATE_PER_DAY:.0%}・{teiai.DEBT_INTEREST_CEILING:,}ペリカまで）"
         )
-    until = eco.grace_until(uid)
-    if until is not None:
+    if grace_until is not None:
         me.append(
-            f"⚠️ **破産猶予中**。<t:{int(until)}:R> までに借金を {ui.pelica(teiai.GRACE_DEBT)} 未満へ戻せないと、強制破産です。"
+            f"⚠️ **破産猶予中**。<t:{int(grace_until)}:R> までに借金を {ui.pelica(teiai.GRACE_DEBT)} 未満へ戻せないと、強制破産です。"
         )
-    cds = eco.cds_list(uid)
     if cds["bought"]:
 
         def who(c: dict) -> str:
@@ -99,6 +103,25 @@ def panel_embed(eco, uid: int) -> discord.Embed:
         text=f"預金はカタギだけ。利回りは、ピンハネ・CDS の掛け金・カジノの負け分から。CDS は、対象が時間切れで強制破産したときだけ配当（{teiai.CDS_TERM_DAYS}日で失効）"
     )
     return e
+
+
+def panel_embed(eco, uid: int) -> discord.Embed:
+    """帝愛銀行と、自分の状況の画面（Wings: eco から値を集めて Base へ渡す）。"""
+    now = time.time()
+    status = eco.status(uid, now)
+    return render_teiai_panel_embed(
+        bank=eco.bank_status(now),
+        house=eco.house_account(),
+        graced=eco.grace_list(),
+        claims=eco.cds_total_claims(),
+        status=status,
+        display_status=eco.display_status(uid) if status == teiai.KATAGI else status,
+        deposit=eco.deposit_of(uid),
+        debt=eco.debt(uid),
+        grace_until=eco.grace_until(uid),
+        cds=eco.cds_list(uid),
+        uid=uid,
+    )
 
 
 class AmountModal(discord.ui.Modal):
