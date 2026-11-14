@@ -1,7 +1,7 @@
 """地下作業（Economy に混ぜ込む部品）。クリッカー。数字と計算は core/labor.py、表は core/schema.py の labor。
 
 稼ぎは、まず「受け取る前の稼ぎ（pot）」に貯まる。受け取りを押すと、まとめて残高に移る（収入なので、借金があれば天引き）。
-「働く」クリックの稼ぎには、1日の上限がある（CLICK_DAY_CAP。day_click で数える。超えたら1回 OVER_CAP_PAY）。day_earned は、画面に出す「今日の稼ぎ」。
+「働く」クリックには、1日に押せる回数の上限がある（MAX_CLICKS_PER_DAY。day_click で数える。超えたら1回 OVER_CAP_PAY）。day_earned は、画面に出す「今日の稼ぎ」。
 """
 
 import json
@@ -362,8 +362,8 @@ class LaborMixin:
                 return {"ok": False, "reason": "押すのが早すぎます。", "quiet": True}
             out = labor_mod.click_outcome(row["pick"], row["glove"], row["fatigue"])
             pay = max(1, relics_mod.chance_round(out["pay"] * (1 + self._relic_buffs(user_id).get("click", 0.0))))
-            room = labor_mod.CLICK_DAY_CAP - row["day_click"]  # 今日、あと何ペリカ、クリックで稼げるか
-            pay = labor_mod.OVER_CAP_PAY if room <= 0 else min(pay, room)
+            room = labor_mod.MAX_CLICKS_PER_DAY - row["day_click"]  # 今日、あと何回、「働く」を押せるか
+            pay = labor_mod.OVER_CAP_PAY if room <= 0 else pay
             hour = int(now // 3600)
             since = now - labor_mod.SUSPECT_HOURS * 3600
             suspected = labor_mod.auto_click_suspected(self.labor_click_hours(user_id, since), hour)
@@ -376,7 +376,7 @@ class LaborMixin:
                 clicks=row["clicks"] + 1,
                 pot=row["pot"] + pay,
                 day_earned=row["day_earned"] + pay,
-                day_click=row["day_click"] + pay,
+                day_click=row["day_click"] + 1,
                 earned_total=row["earned_total"] + pay,
             )
             self._labor_log_click(user_id, now, pay, now - row["last_click_before"])

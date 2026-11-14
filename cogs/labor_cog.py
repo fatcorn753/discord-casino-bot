@@ -68,10 +68,10 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     e = ui.embed("⛏ 地下作業", note or "「働く」を押すと、ペリカが貯まります。", ui.DARK)
     e.add_field(name="💴 手元", value=ui.pelica(state["balance"]), inline=True)
     e.add_field(name="🎒 未受け取り", value=pot_text(state), inline=True)
-    capped = state["day_click"] >= lab.CLICK_DAY_CAP
+    capped = state["day_click"] >= lab.MAX_CLICKS_PER_DAY
     e.add_field(
         name="📅 今日の稼ぎ",
-        value=f"{ui.pelica(state['day_earned'])}\n（クリック {state['day_click']:,}/{lab.CLICK_DAY_CAP:,}ペリカ）",
+        value=f"{ui.pelica(state['day_earned'])}\n（クリック {state['day_click']:,}/{lab.MAX_CLICKS_PER_DAY:,}回）",
         inline=True,
     )
     e.add_field(

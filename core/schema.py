@@ -184,7 +184,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             relics       TEXT NOT NULL DEFAULT '',     -- 受け取る前の発掘品（JSON {品のID: 個数}。受け取ると持ち物に入る）
             day          TEXT NOT NULL DEFAULT '',
             day_earned   INTEGER NOT NULL DEFAULT 0,   -- 今日の稼ぎ（画面に出す額）
-            day_click    INTEGER NOT NULL DEFAULT 0,   -- 今日の「働く」クリックの稼ぎ（1日の上限の判定。作業員の分は入らない）
+            day_click    INTEGER NOT NULL DEFAULT 0,   -- 今日の「働く」を押した回数（1日の上限の判定。作業員の分は入らない）
             last_click   REAL NOT NULL DEFAULT 0,
             rest_until   REAL NOT NULL DEFAULT 0,
             clicks       INTEGER NOT NULL DEFAULT 0,

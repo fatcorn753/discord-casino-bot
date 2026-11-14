@@ -108,7 +108,7 @@ def test_fatigue_reduces_pay_and_recovers_over_time(eco):
 
 def test_no_balance_limit_and_today_total_resets(eco):
     eco.set_balance(U, 1_000_000, "テスト")  # 金持ちも、働ける
-    for i in range(300):  # 残高に上限はない（CLICK_DAY_CAP・疲労で、稼ぎの速さが頭打ちになるだけ）
+    for i in range(300):  # 残高に上限はない（MAX_CLICKS_PER_DAY・疲労で、稼ぎの速さが頭打ちになるだけ）
         assert eco.labor_click(U, T0 + i * 1.5, DAY)["ok"]
     assert eco.labor_state(U, T0 + 500, DAY)["day_earned"] > 600
     assert eco.labor_state(U, T0 + 500, "2026-11-11")["day_earned"] == 0  # 日が変われば、「今日の稼ぎ」は戻る
@@ -1044,14 +1044,14 @@ def test_donation_total_is_the_sum_of_everyone_in_the_server(eco, monkeypatch):
     assert eco.labor_state(U, T0 + 202, DAY)["donated_all"] == a["donated"] + b["donated"]
 
 
-def test_click_earnings_are_capped_per_day_and_workers_are_not(eco, monkeypatch):
-    monkeypatch.setattr(lab, "CLICK_DAY_CAP", 100)
+def test_click_count_is_capped_per_day_and_workers_are_not(eco, monkeypatch):
+    monkeypatch.setattr(lab, "MAX_CLICKS_PER_DAY", 4)
     monkeypatch.setattr(lab, "click_pay", lambda pick, fatigue: 30)
     monkeypatch.setattr(lab, "pay_per_click", lambda pick: 30)
     pays = [eco.labor_click(U, T0 + i * 2, DAY)["pay"] for i in range(8)]
-    assert sum(pays[:4]) == 100 and pays[3] == 10  # 上限ちょうどまで。4回目は、残りの分だけ
+    assert pays[:4] == [30] * 4  # 上限（回数）までは、ふつうに稼げる
     assert pays[4:] == [lab.OVER_CAP_PAY] * 4  # 上限を超えたら、1ペリカずつ
-    assert eco.labor_state(U, T0 + 20, DAY)["day_click"] == 100 + 4 * lab.OVER_CAP_PAY
+    assert eco.labor_state(U, T0 + 20, DAY)["day_click"] == 8
     assert eco.labor_click(U, T0 + 100_000, "2026-11-20")["pay"] > lab.OVER_CAP_PAY  # 日が変われば、また稼げる
 
 
@@ -1088,4 +1088,4 @@ def test_labor_click_stops_early_after_three_mechanical_hours(eco):
     eco._conn.commit()
     r = eco.labor_click(U, T0, DAY)
     assert r["ok"] and r["pay"] == lab.OVER_CAP_PAY  # 上限にはまだ届いていないのに、早めに打ち止め
-    assert eco.labor_state(U, T0 + 1, DAY)["day_click"] < lab.CLICK_DAY_CAP
+    assert eco.labor_state(U, T0 + 1, DAY)["day_click"] < lab.MAX_CLICKS_PER_DAY
