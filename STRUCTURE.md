@@ -15,7 +15,7 @@
 | アプリケーション | `services/` | ユースケース・実行制御（二重プレイ防止など）。`domain/` の契約とルールにのみ依存 |
 | ドメイン | `domain/` | 純粋な業務ルール・ゲーム計算（`games/`）・値型・水平ポート契約（`ports/`）。SQLite にも Discord にも触らない |
 | インフラストラクチャ | `infra/` | SQLite 永続化（`db/`）・YAML カタログ読み込み（`catalogs.py`）・時刻・パス解決（`paths.py`） |
-| 設定カタログ | `catalogs/` | 商品・スキン・確率表・配当表・ヘルプ文面などの静的な定義（YAML）。`infra/catalogs.py` で型検証して読み込む |
+| 設定カタログ | `catalogs/` | 商品・確率表・配当表などの UI 非依存なゲームバランス/マスタ定義（YAML）。`infra/catalogs/` で型検証して読み込む |
 
 ## 最上位
 
@@ -26,7 +26,7 @@
 | `config.example.json` | 設定ファイルの見本（トークンなどは空）。`config.json` を作るときのひな形 |
 | `config.json` | 実際の設定（Bot のトークンなど）。**秘匿情報なので Git に入れない**（`.gitignore` 済み） |
 | `config.json.migrated-to-server` | 古い設定ファイルの控え。`config.json.*` として Git に入れない |
-| `catalogs/` | YAML の静的カタログ群（ショップ・スキン・遺物・債券・ミッション・イベント・地下作業・競馬・証券・帝愛・経済・ゲーム・ヘルプ） |
+| `catalogs/` | YAML の静的カタログ群（ショップ・スキン・遺物・債券・ミッション・イベント・地下作業・競馬・証券・帝愛・経済・ゲーム） |
 | `data/` | 実行時のデータ。`casino.db`（SQLite 本体）と `bot.lock`（二重起動の防止）。**Git に入れない** |
 | `README.md` | 概要・コマンド一覧・導入手順・運用・docs への案内 |
 | `docs/` | 機能ごとの、くわしい仕様（`casino.md`・`stocks.md`・`teiai.md`・`horse.md`・`labor.md`・`shop.md`・`admin.md`） |
@@ -39,31 +39,31 @@
 
 ## `cogs/` — コマンドと画面
 
-`loader.py` に列挙された `*_cog.py` / `cog.py` が Discord に読み込まれる Cog です。
+`loader.py` に列挙された `*_cog.py` / `cog.py` が Discord に読み込まれる Cog です。静的文言テーブル・AA・ラベル定義は各サブパッケージの `texts.py`（プレゼンテーション静的テキスト層）に分離しています。
 
 | パス | 内容 |
 |---|---|
 | `loader.py` | 読み込む Cog モジュール一覧（`COG_MODULES`）と `load_all_cogs()`（`main.py` とテストで共有） |
-| `shared/` | 共通 Discord 基盤（`bot.py` / `cog_ports.py` / `ui.py` / `confirm.py` / `messages/` / `approval_guard.py` / `ranking.py` / `announce.py` / `amount.py` / `horse_display.py`） |
-| `casino/` | `/カジノ`。`cog.py` と進行演出（`common.py`・`simple.py`・`blackjack.py`・`chinchiro.py`・`pachinko.py`） |
+| `shared/` | 共通 Discord 基盤（`bot.py` / `cog_ports.py` / `ui.py` / `texts.py` / `confirm.py` / `messages/` / `approval_guard.py` / `ranking.py` / `announce.py` / `amount.py` / `horse_display.py`） |
+| `casino/` | `/カジノ`。`cog.py` と進行演出・静的台本（`common.py`・`simple.py`・`blackjack.py`・`chinchiro.py`・`pachinko.py`・`texts.py`） |
 | `economy/` | `/ペリカ`。`cog.py`・`boards.py`（残高・デイリー・ランキング・掲示板自動更新・送金・履歴） |
-| `teiai/` | `/ペリカ 帝愛` のパネル（`panel.py`）と海外逃亡の演出（`escape.py`） |
-| `shop/` | `/ショップ`。`cog.py`・`actions.py`・`embeds.py`・`views.py`・`discord_ops.py`（ロール・ニックネーム反映） |
+| `teiai/` | `/ペリカ 帝愛` のパネル（`panel.py`）と海外逃亡の演出（`escape.py`）、静的 AA・状態文言（`texts.py`） |
+| `shop/` | `/ショップ`。`cog.py`・`actions.py`・`embeds.py`・`texts.py`・`views.py`・`discord_ops.py`（ロール・ニックネーム反映） |
 | `horse/` | `/競馬`。`cog.py`・`cards.py`・`betting.py`・`stable.py`・`views.py`（ファサード） |
 | `market/` | `/証券` と債券定期処理。`cog.py`・`feed.py`・`bond_cog.py`・`embeds.py`・`bond_embeds.py`・`orders.py`・`views.py` |
 | `loan/` | `/貸付`。ユーザー同士の貸し借り |
 | `p2p/` | プレイヤー間の市場と競り（`cog.py`・`embeds.py`） |
 | `labor/` | `/地下 作業`・`/地下 ランキング`。クリッカー、作業員の雇用、鉱石の掘り出し |
-| `quiz/` | `/クイズ`。`cog.py`・`embeds.py`・`views.py`（4 択クイズと報酬） |
+| `quiz/` | `/クイズ`。`cog.py`・`embeds.py`・`texts.py`・`views.py`（4 択クイズと報酬） |
 | `raffle/` | 抽選。参加費を預かり、締切で 1 人に全額を渡す |
-| `event/` | 突発イベントの告知（1 日 1 回、30 分だけ勝ち分が増える） |
+| `event/` | 突発イベントの告知（`cog.py`・`texts.py`、1 日 1 回、30 分だけ勝ち分が増える） |
 | `weekly/` | 週間ランキングの自動発表（毎週月曜 0 時）と限定称号の授与 |
-| `admin/` | サーバー承認と `/運営` コマンド（`cog.py`・`approval_ops.py`・`economy_ops.py`・`content_ops.py`・`embeds.py`・`views.py`・`purge.py`・`targets.py`） |
-| `help/` | `/help`。カテゴリ別の案内 |
+| `admin/` | サーバー承認と `/運営` コマンド（`cog.py`・`approval_ops.py`・`economy_ops.py`・`content_ops.py`・`embeds.py`・`texts.py`・`views.py`・`purge.py`・`targets.py`） |
+| `help/` | `/help`。カテゴリ別の案内（`cog.py`・`texts.py`） |
 
 ## `services/` — アプリケーションサービス
 
-`cogs/` と `domain/`・`infra/` を仲介し、ユースケース単位のトランザクション・時間取得・状態遷移を調停します。
+`cogs/` と `domain/`・`infra/` を仲介し、ユースケース単位のトランザクション・時刻取得・状態遷移を調停します。
 
 | パス | 内容 |
 |---|---|
@@ -94,14 +94,14 @@
 | `roulette.py` | ルーレット。賭け方と払い戻し |
 | `blackjack.py` | ブラックジャックのルール |
 | `chinchiro.py` | チンチロの役と勝敗 |
-| `pachinko.py` | パチンコ。当たりの確率、リーチ・予告の設計、演出の台本、還元率の計算 |
+| `pachinko.py` | パチンコ。当たりの確率、リーチ・予告の抽選、還元率の計算 |
 | `rtplevel.py` | 還元率のレベル（1〜6）と `MIN_BET` |
 
 ### ドメインモジュール（DB・Discord 非依存）
 
 | パス | 内容 |
 |---|---|
-| `types.py` | 結果データクラス（`DailyResult` 等）と共有定数（`INITIAL_BALANCE`・`DAILY_*`・`PART_LABELS`・`asset_groups` 等） |
+| `types.py` | 結果データクラス（`DailyResult` 等）と共有定数（`INITIAL_BALANCE`・`DAILY_*`・`asset_groups` 等） |
 | `errors.py` | 構造化エラー・通知イベント（`Failure`・`Notice`・`fail`・`notice`） |
 | `approval.py` | サーバー許可リストと承認状態の純粋判定 |
 | `nick.py` | 称号をニックネームの後ろに付け外しする文字列処理 |
@@ -125,7 +125,7 @@
 | パス | 内容 |
 |---|---|
 | `paths.py` | ルート・`catalogs/`・`config.json`・`data/casino.db` の基準パス解決 |
-| `catalogs/` | `catalogs/*.yaml` を責務別に読み込み・Pydantic 型検証・キャッシュするパッケージ（`loader.py`・`shop.py`・`economy.py`・`games.py`・`market.py`・`ui.py`、`YamlCatalogs(ICatalogs)`） |
+| `catalogs/` | `catalogs/*.yaml` を責務別に読み込み・Pydantic 型検証・キャッシュするパッケージ（`loader.py`・`shop.py`・`economy.py`・`games.py`・`market.py`、`YamlCatalogs(ICatalogs)`） |
 | `clock.py` | `ConfigClock(IClock)` とタイムゾーンに基づく現在時刻・日付の取得 |
 | `logthrottle.py` | 同じ原因のログを出し続けないための間引き |
 

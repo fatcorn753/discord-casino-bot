@@ -18,12 +18,12 @@ from cogs.casino.common import (
     signed,
     start_game,
 )
+from cogs.casino.texts import SIMPLE_STEP_SECONDS as STEP
+from cogs.casino.texts import roulette_color_emoji
 from cogs.shared import ui
 from domain.games import roulette, slot
-from infra import catalogs
 
 RNG = random.SystemRandom()  # OS の乱数。結果を予測・再現できない
-STEP = catalogs.games().common.simple_step_seconds  # 演出のコマ送り間隔（秒）
 
 
 async def show(
@@ -114,8 +114,9 @@ async def play_roulette(interaction: discord.Interaction, bot, bet: int, kind: s
         net = ctx.settle(payout, keep_session=True, rtp_kind=kind)
         title, head = game_title("🎡 ルーレット", ctx), f"あなたの賭け: **{name}**\n"
         verdict = "当たり🎉" if payout else "ハズレ"
+        color = roulette.color_of(result)
         final = ui.embed(
-            f"{title} — {roulette.color_emoji(result)} **{result}**（{roulette.color_of(result)}） {verdict}　{signed(net)}ペリカ",
+            f"{title} — {roulette_color_emoji(color)} **{result}**（{color}） {verdict}　{signed(net)}ペリカ",
             result_lines(ctx, payout, net, head.rstrip()),
             result_color(bet, net, ui.OK if payout else ui.ERROR),
         )

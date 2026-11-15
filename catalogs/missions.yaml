@@ -95,20 +95,3 @@ big_win:
 
 jackpot_multiplier: 50
 
-win_tiers:
-  - min_ratio: 50
-    message: "🎰💥 **超特大ジャックポット級！！** 💥🎰"
-  - min_ratio: 10
-    message: "💎✨ **特大勝ち！！** ✨💎"
-  - min_ratio: 3
-    message: "🎉 **大勝ち！** 🎉"
-
-jackpot_art: |-
-  ```
-   *  .  *  .  *  .  *  .  *
-   +=======================+
-   |   J A C K P O T !!!   |
-   |      7   7   7        |
-   +=======================+
-   *  .  *  .  *  .  *  .  *
-  ```

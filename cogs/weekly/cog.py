@@ -66,7 +66,7 @@ class WeeklyCog(commands.Cog):
         return announce_channel(guild, eco)
 
     def build_embed(self, week: str, result: dict) -> discord.Embed:
-        lines = format_standings_lines(result["standings"], weekly.MEDALS)
+        lines = format_standings_lines(result["standings"], ui.MEDALS)
         champ = result["champion"]
         if champ:
             lines += [

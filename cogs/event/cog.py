@@ -10,6 +10,7 @@ import time
 import discord
 from discord.ext import commands, tasks
 
+from cogs.event.texts import event_copy
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
 from domain import approval, events
@@ -44,17 +45,18 @@ class EventCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     def build_embed(self, ev: events.Event, ended: bool) -> discord.Embed:
+        title, blurb = event_copy(ev.game)
         if ended:
-            return ui.embed(f"{ev.title} は終了しました", "また次のイベントをお楽しみに！", ui.INFO)
+            return ui.embed(f"{title} は終了しました", "また次のイベントをお楽しみに！", ui.INFO)
         text = (
-            f"{ev.blurb}\n\n**{ev.clock(ev.start_min)} 〜 {ev.clock(ev.end_min)}**（{events.DURATION_MIN}分間）の間、"
+            f"{blurb}\n\n**{ev.clock(ev.start_min)} 〜 {ev.clock(ev.end_min)}**（{events.DURATION_MIN}分間）の間、"
             f"`/カジノ {ev.game}` で勝つと、**勝ち分が{1 + events.BOOST:g}倍**になります。\n"
             f"（上乗せは1回につき最大 {ui.pelica(events.BONUS_CAP)} まで）"
         )
-        return ui.embed(f"🔥 突発イベント発生！ {ev.title}", text, ui.GOLD)
+        return ui.embed(f"🔥 突発イベント発生！ {title}", text, ui.GOLD)
 
     def manual_embed(self, m: dict, ended: bool) -> discord.Embed:
-        title, blurb = events.GAMES.get(m["game"], (m["game"], ""))  # 廃止したゲームのイベントが残っていても落ちない
+        title, blurb = event_copy(m["game"])  # 廃止したゲームのイベントが残っていても落ちない
         if ended:
             return ui.embed(f"{title} は終了しました", "また次のイベントをお楽しみに！", ui.INFO)
         text = (
@@ -71,7 +73,8 @@ class EventCog(commands.Cog):
         replaced = eco.manual_event_get(now) is not None
         eco.manual_event_start(game, boost_pct, now, now + minutes * 60, channel.id if channel is not None else 0)
         await self._post(guild, eco, self.manual_embed(eco.manual_event_get(now), False), channel)
-        return True, f"{guild.name}: {events.GAMES[game][0]}を{minutes}分間、勝ち分+{boost_pct}%で開きました" + (
+        title, _ = event_copy(game)
+        return True, f"{guild.name}: {title}を{minutes}分間、勝ち分+{boost_pct}%で開きました" + (
             "（前のイベントは置き換えました）" if replaced else ""
         )
 
@@ -81,7 +84,8 @@ class EventCog(commands.Cog):
         if m is None:
             return False, f"{guild.name}: 開催中の特別イベントはありません"
         await self._post(guild, eco, self.manual_embed(m, True), _event_channel(guild, m))
-        return True, f"{guild.name}: {events.GAMES.get(m['game'], (m['game'],))[0]}を終わらせました"
+        title, _ = event_copy(m["game"])
+        return True, f"{guild.name}: {title}を終わらせました"
 
     async def run_once(self) -> None:
         now = local_now(self.bot)

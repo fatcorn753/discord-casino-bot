@@ -10,7 +10,6 @@ RED = set(_CFG.red)
 
 # 賭け方 → (表示名, 払い戻し倍率: 当たったときの受け取り総額/賭け金)
 BETS = {k: (v.label, v.mult) for k, v in _CFG.bets.items()}
-_COLOR_EMOJI = dict(_CFG.color_emoji)
 
 
 def spin(rng: random.Random) -> int:
@@ -21,10 +20,6 @@ def color_of(n: int) -> str:
     if n == 0:
         return "緑"
     return "赤" if n in RED else "黒"
-
-
-def color_emoji(n: int) -> str:
-    return _COLOR_EMOJI[color_of(n)]
 
 
 def wins(kind: str, result: int, number: int | None = None) -> bool:

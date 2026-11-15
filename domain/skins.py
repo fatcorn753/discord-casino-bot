@@ -23,7 +23,8 @@ class Skin:
     dice_mark: str = ""  # チンチロ: サイコロ1つごとに付ける飾り
     role_win: Optional[dict] = None  # チンチロ: 自分の役ごとの、勝ったときの地の文（なければ、いつもの文）
     role_lose: Optional[dict] = None  # チンチロ: 負けたときの地の文（親の役、または自分のヒフミで引く）
-    roll_comment: str = ""  # チンチロ: 1回振るごとに添える一言（{hand} に役の名前が入る）
+    roll_speaker: str = ""  # チンチロ: 1回振るごとに役名を囁く話者名（例: 黒服）
+    roll_mark: str = ""  # チンチロ: 1回振るごとに末尾へ添える飾り記号
     banner: str = ""  # パチンコ: 大当たり以上のときの見出し（なければ、いつもの見出し）
 
 
@@ -39,7 +40,8 @@ SKINS = {
         dice_mark=s.dice_mark,
         role_win=dict(s.role_win) if s.role_win is not None else None,
         role_lose=dict(s.role_lose) if s.role_lose is not None else None,
-        roll_comment=s.roll_comment,
+        roll_speaker=s.roll_speaker,
+        roll_mark=s.roll_mark,
         banner=s.banner,
     )
     for s in _CFG.skins

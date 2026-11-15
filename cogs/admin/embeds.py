@@ -4,15 +4,25 @@ import datetime
 
 import discord
 
+from cogs.admin.texts import (
+    ANNOUNCE_TITLE as ANNOUNCE_TITLE,
+)
+from cogs.admin.texts import (
+    LEVEL_NAME as LEVEL_NAME,
+)
+from cogs.admin.texts import (
+    OMEN_NAME as OMEN_NAME,
+)
+from cogs.admin.texts import (
+    TIER_NAME as TIER_NAME,
+)
 from cogs.shared import ui
 from domain import approval
 from domain import labor as lab
 from domain.duration import format_minutes
 from domain.games import pachinko, rtplevel
-from infra import catalogs
 
 MAX_IMAGE_BYTES = ui.MAX_IMAGE_BYTES
-ANNOUNCE_TITLE = "📢 お知らせ"
 
 
 def announce_embed(title: str, body: str, filename: str = "") -> discord.Embed:
@@ -34,9 +44,6 @@ def bulk_preview_lines(quizzes: list) -> str:
     return "\n".join(lines)
 
 
-_PK_CFG = catalogs.games().pachinko
-OMEN_NAME = dict(_PK_CFG.omen_names)
-TIER_NAME = dict(_PK_CFG.tier_names)
 SMALL_SAMPLE = 100  # これより少ない回転数の行には「参考」を付ける（当たり率がまだ安定しないため）
 
 
@@ -81,9 +88,6 @@ def pachinko_stats_embed(data: dict, scope: str) -> discord.Embed:
         text=f"{SMALL_SAMPLE}回転に満たない行は参考値です。還元率は連チャンの偏りで大きくぶれます（還元率レベルをかける前の数字です）"
     )
     return e
-
-
-LEVEL_NAME = dict(catalogs.games().rtplevel.level_names)
 
 
 def rtp_table_embed(levels: dict, title: str) -> discord.Embed:

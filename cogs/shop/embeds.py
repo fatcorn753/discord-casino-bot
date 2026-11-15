@@ -4,6 +4,27 @@ import discord
 
 from cogs.p2p.embeds import entry_text
 from cogs.shared import ui
+from cogs.shop.texts import (
+    P2P_FILTERS as P2P_FILTERS,
+)
+from cogs.shop.texts import (
+    P2P_ORDERS as P2P_ORDERS,
+)
+from cogs.shop.texts import (
+    SECTION_NAME as SECTION_NAME,
+)
+from cogs.shop.texts import (
+    TAB_NOTE as TAB_NOTE,
+)
+from cogs.shop.texts import (
+    TABS as TABS,
+)
+from cogs.shop.texts import (
+    TIERS as TIERS,
+)
+from cogs.shop.texts import (
+    UNEQUIP_NAMES as UNEQUIP_NAMES,
+)
 from domain import p2p, shop, teiai
 from domain import types as eco_types
 
@@ -18,14 +39,6 @@ SLOT_OF_KIND = {
     shop.SKIN_TABLE: "skin_table",
 }
 EFFECT_OF_ITEM = dict(eco_types.CONSUMABLE_EFFECTS)
-UNEQUIP_NAMES = {  # 「外す」で選べるもの
-    "title": "称号",
-    "card_color": "カードの色",
-    "card_icon": "カードのアイコン",
-    "role": "名前の色（ロール）",
-    "skin_dice": "演出（チンチロ用）",
-    "skin_table": "演出（パチンコ・ブラックジャック用）",
-}
 
 
 def shop_slots() -> tuple:
@@ -35,56 +48,6 @@ def shop_slots() -> tuple:
 
 def kind_name(kind: str) -> str:
     return shop.KIND_LABEL[kind].split(" ", 1)[1]
-
-
-# ショップの売り場（種類をまとめたもの）。画面上部のボタンで切り替える
-TABS = {
-    "home": ("🏠 トップ", ()),
-    "title": ("🏷️ 称号", (shop.TITLE,)),
-    "card": ("🎴 カード", (shop.CARD_COLOR, shop.CARD_ICON)),
-    "item": ("🎟️ 消耗品", (shop.CONSUMABLE,)),
-    "horse": ("🐎 競馬", (shop.RACING,)),
-    "market": ("🕴️ 帝愛市", (shop.MARKET,)),
-    "style": ("✨ 演出・名前の色", (shop.SKIN_DICE, shop.SKIN_TABLE, shop.COLOR_ROLE)),
-    "collection": ("🏆 コレクション", (shop.COLLECTION,)),
-}
-TAB_NOTE = {
-    "title": "名前の横に出る称号です（1つだけ装備できます）。",
-    "card": "`/ペリカ 残高` のカードの、色とアイコンです。",
-    "item": "使うと減る品です。デイリー2倍券・保険券は「🎒 持ち物」で使い、連続守り券は持っているだけで自動で使われます。栄養ドリンコは、`/地下 作業` の画面で飲みます。",
-    "horse": "競走馬を迎える購入券と、ステータスを動かすにんじんです。どちらも `/競馬 厩舎` で使います。馬そのものは、使うと減る品ではありません。",
-    "market": "帝愛が、情報を売る市です。決算の裏情報メモ（確度 80%・2割はガセ）が買えます。持ち物には増えず、買うとその場で、本人にだけ見えます。",
-    "style": "ゲーム画面の演出と、名前の色（ロール）です。勝率と配当は変わりません。",
-    "collection": "持っているだけで、`/ペリカ 残高` に飾られる自慢の品です。",
-}
-TIERS = (  # 値段の段階（称号・コレクション）
-    (10_000, "🌱 入門"),
-    (100_000, "🥉 中堅"),
-    (1_000_000, "🥈 大物"),
-    (None, "🥇 頂点"),
-)
-SECTION_NAME = {
-    shop.CARD_COLOR: "🎨 色",
-    shop.CARD_ICON: "🖼️ アイコン",
-    shop.CONSUMABLE: "品ぞろえ（安い順）",
-    shop.RACING: "品ぞろえ（安い順）",
-    shop.SKIN_DICE: "🎲 チンチロの演出",
-    shop.SKIN_TABLE: "🃏 パチンコ・ブラックジャックの演出",
-    shop.COLOR_ROLE: "🌈 名前の色（ロール）",
-}
-
-P2P_FILTERS = {  # 絞り込み: キー → (ラベル, 種類, 方式)
-    "all": ("すべて", None, None),
-    "horse": ("🐴 馬", "horse", None),
-    "item": ("📦 品物", "item", None),
-    "auction": ("🔨 競りだけ", None, "auction"),
-}
-P2P_ORDERS = {
-    "end": "締切が近い順",
-    "price_asc": "安い順",
-    "price_desc": "高い順",
-    "new": "新しい順",
-}
 
 
 def stock_text(stock: dict) -> str:

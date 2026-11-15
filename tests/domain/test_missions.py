@@ -4,6 +4,7 @@ import datetime
 
 import pytest
 
+from cogs.casino import texts as casino_texts
 from domain import missions
 from infra.db.economy import INITIAL_BALANCE, Economy
 
@@ -67,20 +68,20 @@ def test_status_does_not_create_an_account(eco):
     [(100, 50, ""), (100, 300, "大勝ち"), (100, 1_000, "特大勝ち"), (100, 5_000, "ジャックポット"), (100, -100, "")],
 )
 def test_big_win_line_by_ratio(bet, net, has):
-    line = missions.big_win_line(bet, net)
+    line = casino_texts.big_win_line(bet, net)
     assert (has in line) if has else line == ""
 
 
 def test_streak_line_starts_at_two_and_marks_new_best():
-    assert missions.streak_line(1, True) == ""
-    assert "2連勝" in missions.streak_line(2, True) and "自己ベスト" not in missions.streak_line(2, True)
-    assert "自己ベスト" in missions.streak_line(3, True) and "自己ベスト" not in missions.streak_line(3, False)
+    assert casino_texts.streak_line(1, True) == ""
+    assert "2連勝" in casino_texts.streak_line(2, True) and "自己ベスト" not in casino_texts.streak_line(2, True)
+    assert "自己ベスト" in casino_texts.streak_line(3, True) and "自己ベスト" not in casino_texts.streak_line(3, False)
 
 
 def test_jackpot_banner_only_from_50x_profit_and_is_a_code_block():
     assert not missions.is_jackpot(100, 4_999) and missions.is_jackpot(100, 5_000) and not missions.is_jackpot(0, 5_000)
-    assert missions.JACKPOT_ART.startswith("```") and missions.JACKPOT_ART.endswith("```")
-    assert max(len(line) for line in missions.JACKPOT_ART.split("\n")) <= 30  # スマホでも折り返さない幅
+    assert casino_texts.JACKPOT_ART.startswith("```") and casino_texts.JACKPOT_ART.endswith("```")
+    assert max(len(line) for line in casino_texts.JACKPOT_ART.split("\n")) <= 30  # スマホでも折り返さない幅
 
 
 def test_small_bets_do_not_count_for_missions(eco, monkeypatch):

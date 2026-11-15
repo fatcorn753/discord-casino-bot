@@ -10,55 +10,31 @@ import discord
 from cogs.shared import ui
 from cogs.shared.confirm import confirm_action
 from cogs.shared.messages import format_failure
+from cogs.teiai.texts import (
+    ESCAPE_FRAME_SECONDS as FRAME_SECONDS,
+)
+from cogs.teiai.texts import (
+    FAIL_ART as FAIL_ART,
+)
+from cogs.teiai.texts import (
+    PROGRESS as PROGRESS,
+)
+from cogs.teiai.texts import (
+    SHIP as SHIP,
+)
+from cogs.teiai.texts import (
+    SUCCESS_ART as SUCCESS_ART,
+)
+from cogs.teiai.texts import (
+    WAVES as WAVES,
+)
 from domain import teiai
-
-FRAME_SECONDS = 1.4
-SHIP = [
-    "      |\\",
-    "      | \\",
-    " _____|__\\_____",
-    " \\  o  o  o   /",
-    "  \\___________/",
-]
-WAVES = [
-    "~^~^~^~^~^~^~^~^~^~^~^~^~^~^",
-    "^~^~^~^~^~^~^~^~^~^~^~^~^~^~",
-]
-PROGRESS = [
-    "🌃 夜の港から、こっそり出航…",
-    "🌊 沖へ…灯りが遠ざかる…",
-    "🌫️ 霧の中を進む…",
-    "💡 …遠くに、光が見える…？",
-    "🌅 公海が近い…！",
-    "⚓ 運命の瞬間…",
-]
 
 
 def ship_frame(step: int) -> str:
     indent = " " * (1 + step * 2)
     lines = [indent + row for row in SHIP]
     return "\n".join(lines + [WAVES[step % 2], WAVES[(step + 1) % 2]])
-
-
-SUCCESS_ART = """
-          \\  |  /
-        --  ( )  --      * * *
-          /  |  \\
-                |\\
-       _________| \\________
-       \\  o  o  o   /  ===> FREE!
-  ~~~~~~\\___________/~~~~~~~~~~~~
-  ^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^
-"""
-FAIL_ART = """
-     !!  KEIBI  !!       ___
-    =====[]=====       _|   |_
-     __|_____|__      |  o o |
-    /  KAIJO     \\     \\_____/
-    \\____________/   ~~ CAUGHT! ~~
-  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  ^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^~^
-"""
 
 
 def block(text: str) -> str:

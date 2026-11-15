@@ -17,7 +17,6 @@ from infra.catalogs.games import (
 from infra.catalogs.loader import CATALOG_DIR, StrictModel, load_yaml_model
 from infra.catalogs.market import MarketCatalog, market
 from infra.catalogs.shop import RelicsCatalog, ShopCatalog, SkinsCatalog, relics, shop, skins
-from infra.catalogs.ui import HelpCatalog, help_pages
 
 
 class YamlCatalogs(ICatalogs):
@@ -73,7 +72,6 @@ __all__ = [
     "EconomyCatalog",
     "EventsCatalog",
     "GamesCatalog",
-    "HelpCatalog",
     "HorseCatalog",
     "LaborCatalog",
     "MarketCatalog",
@@ -89,7 +87,6 @@ __all__ = [
     "economy",
     "events",
     "games",
-    "help_pages",
     "horse",
     "labor",
     "load_yaml_model",

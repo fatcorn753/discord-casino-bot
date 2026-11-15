@@ -19,7 +19,6 @@ _CFG = get_catalogs().games().chinchiro
 PINZORO, ARASHI, SHIGORO, ME, MENASHI, HIFUMI = "pinzoro", "arashi", "shigoro", "me", "menashi", "hifumi"
 
 MAX_ROLLS = _CFG.max_rolls
-DICE_FACES = dict(_CFG.dice_faces)
 
 # 役ごとの表示名と、役の倍率
 ROLE_NAME = {k: v.name for k, v in _CFG.roles.items()}
@@ -125,11 +124,6 @@ def payout(bet: int, outcome: Outcome) -> tuple:
     if outcome.result == "draw":
         return bet, 0
     return 0, bet * (outcome.multiplier - 1)
-
-
-def dice_text(dice, mark: str = "") -> str:
-    """出目の表示。mark は、サイコロごとの飾り（演出の変更品が付ける。出目や配当には関係しない）。"""
-    return " ".join(mark + DICE_FACES[d] for d in dice)
 
 
 def expected_value(trials: int = 200_000, seed: int = 1) -> float:

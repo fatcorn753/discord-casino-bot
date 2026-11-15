@@ -14,29 +14,33 @@ from cogs.casino.common import (
     signed,
     start_game,
 )
+from cogs.casino.texts import (
+    BLACKJACK_FLAIR_BLACKJACK,
+    BLACKJACK_FLAIR_DOUBLED,
+    BLACKJACK_FLAIR_TWENTY_ONE,
+)
+from cogs.casino.texts import (
+    BLACKJACK_RESULT_TEXT as RESULT_TEXT,
+)
+from cogs.casino.texts import (
+    BLACKJACK_TITLE as TITLE,
+)
 from cogs.shared import ui
 from cogs.shared.confirm import confirm_action
 from cogs.shared.messages import format_failure
 from domain.games import blackjack as rules
-from infra import catalogs
-
-_BJ_CFG = catalogs.games().blackjack
-_COLORS = {"ok": ui.OK, "info": ui.INFO, "warn": ui.WARN, "error": ui.ERROR, "gold": ui.GOLD, "dark": ui.DARK}
 
 RNG = random.SystemRandom()
-TITLE = _BJ_CFG.title
-
-RESULT_TEXT = {k: (v.text, _COLORS[v.color]) for k, v in _BJ_CFG.result_text.items()}
 
 
 def flair(res: str, g) -> str:
     """ブラックジャックの勝ち方に応じた一言（大勝ちの演出は倍率で決まるので、ここでは勝ち方を祝う）。"""
     if res == "blackjack":
-        return _BJ_CFG.flair.blackjack
+        return BLACKJACK_FLAIR_BLACKJACK
     if res == "win" and g.doubled:
-        return _BJ_CFG.flair.doubled
+        return BLACKJACK_FLAIR_DOUBLED
     if res == "win" and rules.value(g.player) == 21 and len(g.player) >= 3:
-        return _BJ_CFG.flair.twenty_one
+        return BLACKJACK_FLAIR_TWENTY_ONE
     return ""
 
 

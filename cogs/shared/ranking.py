@@ -5,9 +5,9 @@ from typing import Optional
 import discord
 
 from cogs.shared import ui
+from cogs.shared.texts import PART_LABELS
 from domain import teiai
 from domain.ports import IRankingReader
-from domain.types import PART_LABELS
 
 MEDALS = ui.MEDALS
 TOP_N = 10

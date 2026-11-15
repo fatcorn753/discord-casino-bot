@@ -20,7 +20,7 @@ skins:
       pinzoro: "黒服「親のピンゾロ。5倍のお支払いを」 血の気が引いていく…"
       arashi: "黒服「親の嵐。3倍です」 地下に悲鳴が響く…"
       hifumi: "黒服「ヒフミ。倍のお支払いを」 地獄だ…"
-    roll_comment: "　黒服「…{hand}」"
+    roll_speaker: "黒服"
 
   - item_id: skin_gold_dice
     games: ["チンチロ"]
@@ -49,7 +49,7 @@ skins:
       shigoro: "🩸 シゴロ…。赤い爪が、静かに笑う… 2倍…"
     role_lose:
       pinzoro: "🩸 親のピンゾロ…。ガラスが血に染まる… 5倍払い…"
-    roll_comment: "　🩸"
+    roll_mark: "🩸"
 
   - item_id: skin_vip
     games: ["パチンコ", "ブラックジャック"]

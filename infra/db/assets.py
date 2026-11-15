@@ -21,7 +21,7 @@ from domain.types import (
     LIQUID_KEYS as LIQUID_KEYS,  # noqa: F401
 )
 from domain.types import (
-    PART_LABELS as PART_LABELS,  # noqa: F401
+    PART_KEYS,
 )
 from infra.db.base import EcoBase
 
@@ -185,7 +185,7 @@ class AssetMixin(EcoBase):
         with self._lock:
             g = self._g()
             parts = {
-                r["user_id"]: dict.fromkeys(PART_LABELS, 0)
+                r["user_id"]: dict.fromkeys(PART_KEYS, 0)
                 for r in self._conn.execute("SELECT user_id FROM users WHERE guild_id=?", (g,))
             }
 

@@ -69,7 +69,8 @@ class SkinConfig(StrictModel):
     dice_mark: str = ""
     role_win: dict[str, str] | None = None
     role_lose: dict[str, str] | None = None
-    roll_comment: str = ""
+    roll_speaker: str = ""
+    roll_mark: str = ""
     banner: str = ""
 
 

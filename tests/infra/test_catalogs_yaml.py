@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from cogs.admin import embeds as _admin_embeds
 from cogs.casino import pachinko as play_pachinko
+from cogs.casino import texts as casino_texts
 from cogs.help import cog as help_cog
 from cogs.labor import cog as labor_cog
 from cogs.quiz import cog as quiz_cog
@@ -55,9 +56,8 @@ def test_all_yaml_catalogs_load_and_validate() -> None:
     assert len(catalogs.horse().npc_names) == len(horse.NPC_NAMES)
     assert len(catalogs.market().market.symbols) == len(market.SYMBOLS)
     assert len(catalogs.teiai().statuses) == len(teiai.STATUS_LABEL)
-    assert len(catalogs.economy().wallet.medals) == len(ranking.MEDALS)
     assert len(catalogs.games().slot.symbols) == len(slot.SYMBOLS)
-    assert len(catalogs.help_pages().pages) == len(help_cog.PAGES)
+    assert len(help_cog.PAGES) > 0
 
 
 def test_cross_catalog_consistency() -> None:
@@ -71,7 +71,7 @@ def test_cross_catalog_consistency() -> None:
     assert len(_teiai_escape.PROGRESS) > 0 and len(_teiai_panel.LEVEL_TEXT) == 4
     assert sum(p for _, _, p in pachinko.ROUNDS) == pytest.approx(1.0)
     assert 0.95 < pachinko.rtp() < 1.0
-    assert missions.JACKPOT_ART.startswith("```") and missions.JACKPOT_ART.endswith("```")
+    assert casino_texts.JACKPOT_ART.startswith("```") and casino_texts.JACKPOT_ART.endswith("```")
     assert events.BOOST == pytest.approx(0.5)
     assert market.EVENT_PROB == pytest.approx(1 / 720)
     assert market_events.ANNOUNCE_PROB == pytest.approx(1 / 300)
@@ -103,8 +103,8 @@ def test_python_runtime_types_preserved() -> None:
     assert isinstance(ranking.MEDALS, dict)
     assert ranking.MEDALS == labor_cog.MEDALS
     assert all(isinstance(k, int) for k in ranking.MEDALS)
-    assert isinstance(chinchiro.DICE_FACES, dict)
-    assert all(isinstance(k, int) for k in chinchiro.DICE_FACES)
+    assert isinstance(casino_texts.DICE_FACES, dict)
+    assert all(isinstance(k, int) for k in casino_texts.DICE_FACES)
     assert isinstance(play_pachinko.BANNER, dict)
     assert all(isinstance(k, int) for k in play_pachinko.BANNER)
     assert isinstance(_admin_embeds.LEVEL_NAME, dict)
@@ -145,27 +145,6 @@ def test_pachinko_rejects_bad_probability_sum(tmp_path: Path) -> None:
     (tmp_path / "games.yaml").write_text(broken, encoding="utf-8")
     with pytest.raises(ValidationError, match="probabilities must sum to 1.0"):
         catalogs.load_yaml_model("games.yaml", catalogs.GamesCatalog, root=tmp_path)
-
-
-def test_help_rejects_unknown_button_page(tmp_path: Path) -> None:
-    (tmp_path / "help.yaml").write_text(
-        """
-home:
-  title: "Home"
-  description: "Desc"
-  footer_template: "{min_bet:,}"
-buttons:
-  - key: missing_page
-    label: "Missing"
-pages:
-  game:
-    title: "Game"
-    lines: ["Line 1"]
-""",
-        encoding="utf-8",
-    )
-    with pytest.raises(ValidationError, match="unknown page"):
-        catalogs.load_yaml_model("help.yaml", catalogs.HelpCatalog, root=tmp_path)
 
 
 def test_missing_catalog_raises_file_not_found(tmp_path: Path) -> None:

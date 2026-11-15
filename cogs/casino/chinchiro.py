@@ -19,17 +19,35 @@ from cogs.casino.common import (
     signed,
     start_game,
 )
+from cogs.casino.texts import (
+    CHINCHIRO_LOSE_LINE as LOSE_LINE,
+)
+from cogs.casino.texts import (
+    CHINCHIRO_STEP_SECONDS as STEP,
+)
+from cogs.casino.texts import (
+    CHINCHIRO_TITLE as TITLE,
+)
+from cogs.casino.texts import (
+    CHINCHIRO_WIN_LINE as WIN_LINE,
+)
+from cogs.casino.texts import (
+    dice_text,
+)
 from cogs.shared import ui
 from domain.games import chinchiro as rules
-from infra import catalogs
 
-_CH_CFG = catalogs.games().chinchiro
 RNG = random.SystemRandom()
-TITLE = _CH_CFG.title
-STEP = _CH_CFG.step_seconds
 
-WIN_LINE = dict(_CH_CFG.win_lines)
-LOSE_LINE = dict(_CH_CFG.lose_lines)
+
+def _roll_comment(skin, hand_name: str) -> str:
+    if skin is None:
+        return ""
+    if skin.roll_speaker:
+        return f"\u3000{skin.roll_speaker}「…{hand_name}」"
+    if skin.roll_mark:
+        return f"\u3000{skin.roll_mark}"
+    return ""
 
 
 def _rolls_text(rolls: list, who: str, skin=None) -> str:
@@ -37,13 +55,13 @@ def _rolls_text(rolls: list, who: str, skin=None) -> str:
     lines = []
     for i, (dice, hand) in enumerate(rolls, 1):
         again = "　→ 振り直し" if hand.kind == rules.MENASHI and i < rules.MAX_ROLLS else ""
-        comment = skin.roll_comment.format(hand=hand.name) if skin and skin.roll_comment else ""  # 演出の変更品の実況
-        lines.append(f"{i}回目: {rules.dice_text(dice, mark)} **{hand.name}**{again}{comment}")
+        comment = _roll_comment(skin, hand.name)  # 演出の変更品の実況
+        lines.append(f"{i}回目: {dice_text(dice, mark)} **{hand.name}**{again}{comment}")
     return f"**{who}**\n" + "\n".join(lines)
 
 
 def _rolling_text(skin=None) -> str:
-    return rules.dice_text([RNG.randint(1, 6) for _ in range(3)], skin.dice_mark if skin else "") + "　カラカラカラ…"
+    return dice_text([RNG.randint(1, 6) for _ in range(3)], skin.dice_mark if skin else "") + "　カラカラカラ…"
 
 
 def _role_line(table: dict, skin_table: Optional[dict], key: str) -> str:

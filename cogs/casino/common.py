@@ -4,9 +4,10 @@ from typing import Any
 
 import discord
 
+from cogs.casino.texts import JACKPOT_ART, big_win_line, streak_line
 from cogs.shared import ui
 from cogs.shared.messages import format_notices
-from domain import approval, missions, skins, teiai
+from domain import approval, missions, teiai
 from domain.games.rtplevel import MIN_BET as MIN_BET  # noqa: F401
 from services import services_of
 
@@ -41,7 +42,7 @@ class GameContext:
         self.event_bonus = 0  # 突発イベントで上乗せされた額
         self.rtp_shift = 0  # 還元率レベルで増減した払い戻し（表示の払い戻しに足す。レベルそのものは見せない）
         self.events: dict[str, Any] = {}  # 連勝・ミッションの結果（演出の表示に使う）
-        self.skin: skins.Skin | None = None  # 装備中の、演出の変更品（domain/skins.py）。見た目だけが変わる
+        self.skin: Any = None  # 装備中の、演出の変更品（domain/skins.py）。見た目だけが変わる
         self.notices: list[str] = []  # 精算で起きた、強制執行・種銭などの一言（infra/db/notices.py）
 
     def settle(
@@ -179,10 +180,10 @@ def _celebration(ctx: GameContext, net: int) -> tuple[list[str], list[str]]:
     """(結果の数字の前に出す、大勝ち・連勝の演出, 最後に出す、ミッション達成の通知)。"""
     ev, head, tail = ctx.events, [], []
     if missions.is_jackpot(ctx.bet, net):
-        head.append(missions.JACKPOT_ART)
-    if line := missions.big_win_line(ctx.bet, net):
+        head.append(JACKPOT_ART)
+    if line := big_win_line(ctx.bet, net):
         head.append(line)
-    if ev and (line := missions.streak_line(ev["streak"], ev["new_best"])):
+    if ev and (line := streak_line(ev["streak"], ev["new_best"])):
         head.append(line)
     if head:
         head.append("")

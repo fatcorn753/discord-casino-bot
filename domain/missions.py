@@ -91,32 +91,6 @@ def progress_after(m: Mission, current: int, game: str, bet: int, net: int, stre
     return current
 
 
-# ----------------------------- 演出の文言 ----------------------------- #
-def streak_line(streak: int, new_best: bool) -> str:
-    """連勝の表示。2連勝から出す。"""
-    if streak < 2:
-        return ""
-    fire = "🔥" * min(streak // 2 + 1, 4)
-    line = f"{fire} **{streak}連勝中！**"
-    if new_best and streak >= 3:
-        line += "　🏅 自己ベスト更新！"
-    return line
-
-
-def big_win_line(bet: int, net: int) -> str:
-    """賭け金に対する利益の大きさに応じた、勝ちの派手な一言。"""
-    if net <= 0 or bet <= 0:
-        return ""
-    ratio = net / bet
-    for tier in _CFG.win_tiers:
-        if ratio >= tier.min_ratio:
-            return tier.message
-    return ""
-
-
-JACKPOT_ART = _CFG.jackpot_art
-
-
 def is_jackpot(bet: int, net: int) -> bool:
     """賭け金の50倍以上の利益。たまにしか出ないので、特別な演出を付ける。"""
     return bet > 0 and net >= bet * _CFG.jackpot_multiplier

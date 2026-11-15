@@ -21,11 +21,6 @@ class MissionConfig(StrictModel):
     tag: str | None = None
 
 
-class WinTierConfig(StrictModel):
-    min_ratio: float = Field(gt=0)
-    message: str = Field(min_length=1)
-
-
 class MissionsCatalog(StrictModel):
     blackjack_game: str = Field(min_length=1)
     games: tuple[str, ...] = Field(min_length=1)
@@ -40,24 +35,17 @@ class MissionsCatalog(StrictModel):
     blackjack_missions: tuple[MissionConfig, ...] = Field(min_length=1)
     big_win: MissionConfig
     jackpot_multiplier: int = Field(gt=0)
-    win_tiers: tuple[WinTierConfig, ...] = Field(min_length=1)
-    jackpot_art: str
 
 
 # ------------------------------------------------------------------ #
 # events.yaml
 # ------------------------------------------------------------------ #
-class EventGameConfig(StrictModel):
-    title: str = Field(min_length=1)
-    blurb: str = Field(min_length=1)
-
-
 class EventsCatalog(StrictModel):
     duration_min: int = Field(gt=0)
     earliest_hour: int = Field(ge=0, lt=24)
     boost: float = Field(gt=0)
     bonus_cap: int = Field(gt=0)
-    games: dict[str, EventGameConfig]
+    games: tuple[str, ...] = Field(min_length=1)
 
 
 # ------------------------------------------------------------------ #
@@ -256,7 +244,6 @@ class HorseCatalog(StrictModel):
 # ------------------------------------------------------------------ #
 class GamesCommonSection(StrictModel):
     min_bet: int = Field(gt=0)
-    simple_step_seconds: float = Field(gt=0)
 
 
 class SlotSymbolConfig(StrictModel):
@@ -279,26 +266,11 @@ class RouletteBetConfig(StrictModel):
 class RouletteSection(StrictModel):
     red: tuple[int, ...] = Field(min_length=1)
     bets: dict[str, RouletteBetConfig]
-    color_emoji: dict[str, str]
-
-
-class BlackjackResultConfig(StrictModel):
-    text: str = Field(min_length=1)
-    color: str = Field(min_length=1)
-
-
-class BlackjackFlairConfig(StrictModel):
-    blackjack: str = Field(min_length=1)
-    doubled: str = Field(min_length=1)
-    twenty_one: str = Field(min_length=1)
 
 
 class BlackjackSection(StrictModel):
     suits: list[str] = Field(min_length=1)
     ranks: list[str] = Field(min_length=1)
-    title: str = Field(min_length=1)
-    result_text: dict[str, BlackjackResultConfig]
-    flair: BlackjackFlairConfig
 
 
 class ChinchiroRoleConfig(StrictModel):
@@ -308,13 +280,8 @@ class ChinchiroRoleConfig(StrictModel):
 
 class ChinchiroSection(StrictModel):
     max_rolls: int = Field(gt=0)
-    dice_faces: dict[int, str]
     roles: dict[str, ChinchiroRoleConfig]
     hifumi_factor: int = Field(gt=0)
-    title: str = Field(min_length=1)
-    step_seconds: float = Field(gt=0)
-    win_lines: dict[str, str]
-    lose_lines: dict[str, str]
 
 
 class PachinkoRoundConfig(StrictModel):
@@ -326,21 +293,6 @@ class PachinkoRoundConfig(StrictModel):
 class ProbBonusConfig(StrictModel):
     prob: float = Field(ge=0, le=1)
     bonus: float = Field(ge=0)
-
-
-class PachinkoRankConfig(StrictModel):
-    floor: int = Field(ge=0)
-    label: str = Field(min_length=1)
-
-
-class PachinkoStoryConfig(StrictModel):
-    title: str = Field(min_length=1)
-    sub: str = Field(min_length=1)
-
-
-class PachinkoReviveConfig(StrictModel):
-    line: str = Field(min_length=1)
-    sub: str = Field(min_length=1)
 
 
 class PachinkoSection(StrictModel):
@@ -356,27 +308,8 @@ class PachinkoSection(StrictModel):
     omen_table: dict[str, ProbBonusConfig]
     tier_table: dict[str, ProbBonusConfig]
     hit_target: float = Field(gt=0, lt=1)
-    omen_text: dict[str, str]
-    title: str = Field(min_length=1)
-    step_seconds: float = Field(gt=0)
-    frame_budget: int = Field(gt=0)
-    shown_rounds: int = Field(gt=0)
-    extra_sets: tuple[int, ...] = Field(min_length=1)
-    banner: dict[int, str]
-    ranks: tuple[PachinkoRankConfig, ...] = Field(min_length=1)
-    spinning: str = Field(min_length=1)
-    step_text: list[str] = Field(min_length=1)
-    step_icon: list[str] = Field(min_length=1)
-    steps_of: dict[str, int]
-    cutin: dict[str, list[str]]
-    stories: dict[str, list[PachinkoStoryConfig]]
-    normal_whispers: list[str] = Field(min_length=1)
     revive_chance: dict[str, float]
-    revive_text: list[PachinkoReviveConfig] = Field(min_length=1)
     pseudo_counts: dict[str, list[int]]
-    flavor: dict[str, str]
-    omen_names: dict[str, str]
-    tier_names: dict[str, str]
 
     @model_validator(mode="after")
     def _validate_probabilities(self) -> Self:
@@ -399,7 +332,6 @@ class RtplevelSection(StrictModel):
     blackjack_rtp: float = Field(gt=0)
     blackjack_w: float = Field(gt=0)
     roulette_default_kind: str = Field(min_length=1)
-    level_names: dict[int, str]
 
 
 class GamesCatalog(StrictModel):

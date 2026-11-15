@@ -91,8 +91,6 @@ class WalletSection(StrictModel):
     daily_slot_hours: int = Field(gt=0)
     max_notices: int = Field(gt=0)
     consumable_effects: dict[str, str]
-    medals: dict[int, str]
-    part_labels: dict[str, str]
 
 
 class TransferSection(StrictModel):
@@ -136,8 +134,6 @@ class QuizpaySection(StrictModel):
     max_verdict_len: int = Field(gt=0)
     max_minutes: int = Field(gt=0)
     default_reward: int = Field(gt=0)
-    default_right: str = Field(min_length=1)
-    default_wrong: str = Field(min_length=1)
     letters: str = Field(min_length=4)
 
 

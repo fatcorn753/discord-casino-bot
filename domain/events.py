@@ -18,8 +18,7 @@ LATEST_MIN = 24 * 60 - DURATION_MIN  # 開始の最も遅い時刻（23:30。0�
 BOOST = _CFG.boost  # 勝ち分（払い戻し - 賭け金）に上乗せする割合
 BONUS_CAP = _CFG.bonus_cap  # 1回で上乗せできる上限
 
-# ゲームごとの名前と、告知の一言
-GAMES = {k: (v.title, v.blurb) for k, v in _CFG.games.items()}
+GAMES = tuple(_CFG.games)
 
 
 @dataclass(frozen=True)
@@ -31,14 +30,6 @@ class Event:
     @property
     def end_min(self) -> int:
         return self.start_min + DURATION_MIN
-
-    @property
-    def title(self) -> str:
-        return GAMES[self.game][0]
-
-    @property
-    def blurb(self) -> str:
-        return GAMES[self.game][1]
 
     def clock(self, minutes: int) -> str:
         return f"{minutes // 60}:{minutes % 60:02d}"
