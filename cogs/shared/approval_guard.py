@@ -5,8 +5,9 @@ from typing import TYPE_CHECKING, cast
 import discord
 
 from cogs.shared import ui
-from cogs.shared.cog_ports import IApprovalCogPort, get_cog_port
+from cogs.shared.cog_ports import IApprovalCogPort, get_cog_port, port_of
 from domain.approval import DENIED, DM_GROUP, is_allowed, owner_ids, requires_approval
+from domain.ports import IGuildApprovalStore
 
 if TYPE_CHECKING:
     from cogs.shared.bot import CasinoBot
@@ -30,7 +31,8 @@ async def guard(interaction: discord.Interaction) -> bool:
     if guild_id is None:
         return False
     bot = cast("CasinoBot", interaction.client)
-    if is_allowed(bot.economy, bot.config, guild_id, interaction.user.id):
+    store = port_of(bot, IGuildApprovalStore)
+    if is_allowed(store, bot.config, guild_id, interaction.user.id):
         return True
     if not requires_approval(bot.config):
         await interaction.response.send_message(
@@ -38,7 +40,7 @@ async def guard(interaction: discord.Interaction) -> bool:
             ephemeral=True,
         )
         return False
-    row = bot.economy.get_guild_status(guild_id)
+    row = store.get_guild_status(guild_id)
     cog = get_cog_port(bot, "ApprovalCog", IApprovalCogPort)
     if cog is not None and interaction.guild is not None:
         await cog.ensure_requested(interaction.guild)  # 未登録なら承認を依頼する／しばらくたっていれば催促する

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from cogs.shared import ui
-from cogs.shared.cog_ports import IP2PCogPort, get_cog_port
+from cogs.shared.cog_ports import IP2PCogPort, get_cog_port, guild_port
 from cogs.shop.embeds import (
     MAX_QTY,
     P2P_FILTERS,
@@ -16,6 +16,7 @@ from cogs.shop.embeds import (
     tab_items,
 )
 from domain import shop
+from domain.ports import IShopPort
 
 if TYPE_CHECKING:
     from cogs.shop.cog import ShopCog
@@ -94,9 +95,13 @@ class ShopView(ui.OwnerView):
         self.add_item(go)
         items = tab_items(self.tab) if self.tab != "home" else []
         if items:
-            eco = self.cog.bot.economy.for_guild(self.guild_id)
+            eco = guild_port(self.cog.bot, self.guild_id, IShopPort)
             inv = eco.inventory(self.user_id)
-            stocks = {i.id: eco.shop_stock(self.user_id, i.id) for i in items if i.id in shop.STOCK_RULES}
+            stocks = {
+                i.id: st
+                for i in items
+                if i.id in shop.STOCK_RULES and (st := eco.shop_stock(self.user_id, i.id)) is not None
+            }
             mixed = len(TABS[self.tab][1]) > 1
             buy = discord.ui.Select(
                 placeholder="買う景品を選ぶ（安い順）",
@@ -108,7 +113,7 @@ class ShopView(ui.OwnerView):
                         value=i.id,
                         default=self.picked == ("shop", i.id),
                         description=f"{i.price:,}ペリカ"
-                        + (f"　在庫 {stocks[i.id]['stock']}/{stocks[i.id]['max']}" if stocks.get(i.id) else "")
+                        + (f"　在庫 {st['stock']}/{st['max']}" if (st := stocks.get(i.id)) else "")
                         + (f"　{i.desc}" if i.desc else "")[:60],
                         emoji=i.mark or None,
                     )
@@ -165,7 +170,11 @@ class ShopView(ui.OwnerView):
         kind, value = self.picked
         if kind == "horse":
             horse = next(
-                (h for h in self.cog.bot.economy.for_guild(self.guild_id).auction_horses() if str(h["id"]) == value),
+                (
+                    h
+                    for h in guild_port(self.cog.bot, self.guild_id, IShopPort).auction_horses()
+                    if str(h["id"]) == value
+                ),
                 None,
             )
             return horse["name"] if horse else "競走馬"
@@ -181,13 +190,13 @@ class ShopView(ui.OwnerView):
 
     def _default_auction_tab(self) -> str:
         """競売の画面を開いたときのタブ。プレイヤーの出品があれば、そちら。なければ、帝愛の棚。"""
-        eco = self.cog.bot.economy.for_guild(self.guild_id)
+        eco = guild_port(self.cog.bot, self.guild_id, IShopPort)
         return "players" if self._p2p() is not None and eco.p2p_count() else "teiai"
 
     def _build_auction(self) -> None:
         if self.auction_tab is None:
             self.auction_tab = self._default_auction_tab()
-        eco = self.cog.bot.economy.for_guild(self.guild_id)
+        eco = guild_port(self.cog.bot, self.guild_id, IShopPort)
         p2p_cog = self._p2p()
         # 上の段: タブ（いまのタブは青）と、出品・自分の取引・ショップへもどる
         if p2p_cog is not None:
@@ -335,7 +344,7 @@ class ShopView(ui.OwnerView):
             self._add_buy_button()
 
     def _build_inventory(self) -> None:
-        eco = self.cog.bot.economy.for_guild(self.guild_id)
+        eco = guild_port(self.cog.bot, self.guild_id, IShopPort)
         inv = eco.inventory(self.user_id)
         owned = [
             i

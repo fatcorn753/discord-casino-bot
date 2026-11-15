@@ -17,8 +17,10 @@ from discord.ext import commands, tasks
 from cogs.horse.views import RaceButton, Stable, card_embed, card_view, race_title
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
+from cogs.shared.cog_ports import guild_port, port_of
 from domain import approval
 from domain import horse as horse_mod  # noqa: F401
+from domain.ports import IGuildApprovalStore, IHorsePort
 from infra import logthrottle
 from services import services_of
 
@@ -106,7 +108,7 @@ def comment(entries: list, positions: list, previous_leader, final: bool, winner
     return f"先頭は {name}。", leader
 
 
-def result_embed(eco, result: dict) -> discord.Embed:
+def result_embed(eco: IHorsePort, result: dict) -> discord.Embed:
     e = card_embed(eco, {**result["race"], "status": "done"})
     bets = result["bets"]
     if bets:
@@ -128,7 +130,7 @@ def result_embed(eco, result: dict) -> discord.Embed:
         )
     if result.get("retired"):
         lines = [
-            f"🎌 **{h['silks']} {h['name']}** が定年（{horse_mod.MAX_RACES}戦）で名誉引退"
+            f"💐 **{h['silks']} {h['name']}** が定年（{horse_mod.MAX_RACES}戦）で名誉引退"
             + (
                 f"（<@{h['owner_id']}> に引退{'金' if h['value'] >= 0 else '費用'} {abs(h['value']):,}）"
                 if h["value"]
@@ -158,8 +160,8 @@ class HorseCog(commands.Cog):
         name="競馬", description="🏇 競走馬を育てて走らせる・馬券を買う（毎日2回）", guild_only=True
     )
 
-    def g(self, interaction: discord.Interaction):
-        return self.bot.economy.for_guild(ui.guild_id_of(interaction))
+    def g(self, interaction: discord.Interaction) -> IHorsePort:
+        return guild_port(self.bot, ui.guild_id_of(interaction), IHorsePort)
 
     # ------------------------------ コマンド ------------------------------ #
     @group.command(name="厩舎", description="自分の馬・ステータスの配分・出走の申し込み")
@@ -197,14 +199,14 @@ class HorseCog(commands.Cog):
         self, guild: discord.Guild, entry_min: int, bet_min: int, channel: Optional[discord.abc.Messageable] = None
     ) -> int:
         """臨時レースを開催する（管理者用）。channel を指定すれば、掲示・馬券・レースはそこに出す。作ったレースの番号を返す。"""
-        eco = self.bot.economy.for_guild(guild.id)
+        eco = guild_port(self.bot, guild.id, IHorsePort)
         target = channel or announce_channel(guild, eco)
         target_id = getattr(target, "id", 0)
         race_id = eco.race_create_special(time.time(), entry_min, bet_min, target_id)
         await self._announce_entry(guild, eco, race_id)
         return race_id
 
-    async def _channel(self, guild: discord.Guild, eco, race: dict):
+    async def _channel(self, guild: discord.Guild, eco: IHorsePort, race: dict):
         channel = guild.get_channel(race["channel_id"]) if race["channel_id"] else None
         return channel or announce_channel(guild, eco)
 
@@ -215,13 +217,15 @@ class HorseCog(commands.Cog):
             logthrottle.warn(("horse-post", channel.id), f"競馬の投稿に失敗: channel={channel.id}: {exc!r}")
             return None
 
-    async def post_bet_announcement(self, guild: discord.Guild, eco, race: dict, content: str) -> None:
+    async def post_bet_announcement(self, guild: discord.Guild, eco: IHorsePort, race: dict, content: str) -> None:
         channel = await self._channel(guild, eco, race)
         if channel is not None:
             await self._post(channel, content=content)
 
-    async def _announce_entry(self, guild: discord.Guild, eco, race_id: int) -> None:
+    async def _announce_entry(self, guild: discord.Guild, eco: IHorsePort, race_id: int) -> None:
         race = eco.race_get(race_id)
+        if race is None:
+            return
         channel = await self._channel(guild, eco, race)
         if channel is None:
             return
@@ -234,7 +238,7 @@ class HorseCog(commands.Cog):
         if msg is not None:
             eco.race_set_message(race_id, channel.id, msg.id)
 
-    async def _retire(self, guild: discord.Guild, eco, race: dict) -> None:
+    async def _retire(self, guild: discord.Guild, eco: IHorsePort, race: dict) -> None:
         """締切後の古い投稿を、ボタンなしで「締め切りました」の表示に書き換える（残ると、締切の「◯秒前」が増え続ける）。
 
         チャンネルへの告知のほか、`/競馬 出馬表` で出した投稿（self._posts）も同じように書き換える。
@@ -251,7 +255,7 @@ class HorseCog(commands.Cog):
             except discord.HTTPException as exc:  # 消されていても、進行には関係ない
                 logthrottle.warn(("horse-retire", channel.id), f"競馬の古い投稿を書き換えられません: {exc!r}")
 
-    async def _close_entries(self, guild: discord.Guild, eco, race: dict) -> None:
+    async def _close_entries(self, guild: discord.Guild, eco: IHorsePort, race: dict) -> None:
         updated = services_of(self.bot).horse.close_entries_and_set_odds(guild.id, race["id"])
         if updated is None:
             return
@@ -268,7 +272,7 @@ class HorseCog(commands.Cog):
             if msg is not None:
                 eco.race_set_message(race["id"], channel.id, msg.id)  # 発走で書き換えるために、こちらを覚える
 
-    async def _run(self, guild: discord.Guild, eco, race: dict) -> None:
+    async def _run(self, guild: discord.Guild, eco: IHorsePort, race: dict) -> None:
         result = services_of(self.bot).horse.run_race(guild.id, race["id"])
         if result is None:
             return
@@ -301,7 +305,7 @@ class HorseCog(commands.Cog):
                     await asyncio.sleep(STEP)
                     embed, leader = frame_embed(i, leader)
                     await msg.edit(embed=embed)
-            except discord.HTTPException as exc:  # 消されても、結果はもう精算済み
+            except discord.HTTPException as exc:  # 消されていても、結果はもう精算済み
                 logthrottle.warn(("horse-anim", guild.id), f"競馬の演出を表示できません: {exc!r}")
         await asyncio.sleep(STEP)
         await self._post(channel, embed=result_embed(eco, result))
@@ -322,11 +326,13 @@ class HorseCog(commands.Cog):
         now = time.time()
         horse_svc = services_of(self.bot).horse
         for guild in list(self.bot.guilds):
-            if guild.id in self._busy or not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
+            if guild.id in self._busy or not approval.is_allowed(
+                port_of(self.bot, IGuildApprovalStore), self.bot.config, guild.id, 0
+            ):
                 continue
             self._busy.add(guild.id)
             try:
-                eco = self.bot.economy.for_guild(guild.id)
+                eco = guild_port(self.bot, guild.id, IHorsePort)
                 channel = announce_channel(guild, eco)
                 race_id = horse_svc.ensure_scheduled(guild.id, now, channel.id if channel else 0)
                 if race_id:

@@ -18,10 +18,12 @@ from discord.ext import commands, tasks
 from cogs.shared import ui
 from cogs.shared.amount import balance_choices
 from cogs.shared.announce import announce_channel
+from cogs.shared.cog_ports import guild_port, port_of
 from cogs.shared.confirm import confirm_action
 from cogs.shared.messages import format_failure
 from domain import approval, loans, teiai
 from domain.duration import format_minutes
+from domain.ports import IGuildApprovalStore, ILoanPort
 from infra import logthrottle
 
 
@@ -127,7 +129,7 @@ def request_view(loan_id: int) -> discord.ui.View:
 
 async def handle_lend(bot, interaction: discord.Interaction, loan_id: int) -> None:
     """募集の「貸す」。お金が動くので、確認ボタンを挟んでから貸す。"""
-    eco = bot.economy.for_guild(interaction.guild_id)
+    eco = guild_port(bot, ui.guild_id_of(interaction), ILoanPort)
     loan = eco.loan_get(loan_id)
     if loan is None or loan["status"] != "request":
         await interaction.response.send_message(
@@ -154,6 +156,7 @@ async def handle_lend(bot, interaction: discord.Interaction, loan_id: int) -> No
             embed=ui.error_embed("貸せませんでした", format_failure(reason)), ephemeral=True
         )
     loan = eco.loan_get(loan_id)
+    assert loan is not None
     embed = state_embed(
         loan,
         "成立",
@@ -175,10 +178,12 @@ async def handle_lend(bot, interaction: discord.Interaction, loan_id: int) -> No
 
 async def handle_button(bot, interaction: discord.Interaction, act: str, loan_id: int) -> None:
     guild_id = interaction.guild_id
-    if guild_id is None or not approval.is_allowed(bot.economy, bot.config, guild_id, interaction.user.id):
+    if guild_id is None or not approval.is_allowed(
+        port_of(bot, IGuildApprovalStore), bot.config, guild_id, interaction.user.id
+    ):
         await interaction.response.send_message(embed=ui.error_embed("利用できません"), ephemeral=True)
         return
-    eco = bot.economy.for_guild(guild_id)
+    eco = guild_port(bot, guild_id, ILoanPort)
     now = time.time()
     if act == "lend":
         return await handle_lend(bot, interaction, loan_id)
@@ -194,6 +199,7 @@ async def handle_button(bot, interaction: discord.Interaction, act: str, loan_id
         )
         return
     loan = eco.loan_get(loan_id)
+    assert loan is not None
     if act == "accept":
         embed = state_embed(
             loan,
@@ -217,10 +223,10 @@ class LoanCog(commands.Cog):
     async def cog_unload(self) -> None:
         self.tick.cancel()
 
-    group = app_commands.Group(name="貸付", description="🤝 ペリカの貸し借り（日割りの利息つき）", guild_only=True)
+    group = app_commands.Group(name="貸付", description="🤝 ペリカの貸し借り（日割りの単利つき）", guild_only=True)
 
-    def g(self, interaction: discord.Interaction):
-        return self.bot.economy.for_guild(interaction.guild_id)
+    def g(self, interaction: discord.Interaction) -> ILoanPort:
+        return guild_port(self.bot, ui.guild_id_of(interaction), ILoanPort)
 
     # ------------------------------ 提案 ------------------------------ #
     async def _principal_autocomplete(self, interaction: discord.Interaction, current: str):
@@ -247,6 +253,7 @@ class LoanCog(commands.Cog):
         if member.bot:
             return await interaction.response.send_message(embed=ui.error_embed("Bot には貸せません"), ephemeral=True)
         eco = self.g(interaction)
+        assert interaction.channel_id is not None
         ok, result = eco.loan_offer(
             interaction.user.id, member.id, principal, round(rate * 10), days, interaction.channel_id, time.time()
         )
@@ -255,6 +262,7 @@ class LoanCog(commands.Cog):
                 embed=ui.error_embed("提案できません", format_failure(result)), ephemeral=True
             )
         loan = eco.loan_get(result)
+        assert loan is not None
         await interaction.response.send_message(
             content=f"<@{member.id}>",
             embed=offer_embed(loan, borrower_note(eco, member.id)),
@@ -283,6 +291,7 @@ class LoanCog(commands.Cog):
         days: app_commands.Range[int, loans.MIN_TERM_DAYS, loans.MAX_TERM_DAYS],
     ):
         eco = self.g(interaction)
+        assert interaction.channel_id is not None
         ok, result = eco.loan_request(
             interaction.user.id, principal, round(rate * 10), days, interaction.channel_id, time.time()
         )
@@ -291,6 +300,7 @@ class LoanCog(commands.Cog):
                 embed=ui.error_embed("募集できません", format_failure(result)), ephemeral=True
             )
         loan = eco.loan_get(result)
+        assert loan is not None
         await interaction.response.send_message(
             embed=request_embed(loan, borrower_note(eco, interaction.user.id)),
             view=request_view(result),
@@ -319,6 +329,7 @@ class LoanCog(commands.Cog):
                 embed=ui.error_embed("返せません", format_failure(result)), ephemeral=True
             )
         loan = self.g(interaction).loan_get(loan_id)
+        assert loan is not None
         left = self.g(interaction).loan_remaining(loan, time.time())
         note = (
             "返済が終わりました。"
@@ -391,11 +402,12 @@ class LoanCog(commands.Cog):
 
     async def run_once(self) -> None:
         now = time.time()
+        approval_store = port_of(self.bot, IGuildApprovalStore)
         for guild in list(self.bot.guilds):
-            if not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
+            if not approval.is_allowed(approval_store, self.bot.config, guild.id, 0):
                 continue
             try:
-                eco = self.bot.economy.for_guild(guild.id)
+                eco = guild_port(self.bot, guild.id, ILoanPort)
                 for loan in eco.loan_expire_offers(now):
                     await self._edit_offer(
                         guild,

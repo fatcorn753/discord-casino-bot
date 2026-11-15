@@ -18,9 +18,11 @@ from cogs.quiz.embeds import (
     verdict,
 )
 from cogs.shared import ui
+from cogs.shared.cog_ports import guild_port, port_of
 from cogs.shared.messages import format_failure
 from domain import approval, quizpay
 from domain.duration import format_minutes, parse_duration
+from domain.ports import IQuizPort
 from infra import logthrottle
 
 if TYPE_CHECKING:
@@ -29,15 +31,16 @@ if TYPE_CHECKING:
 
 async def record_answer(bot, interaction: discord.Interaction, quiz_id: int, pos: int) -> None:
     """公開された問題のボタン。押した人が答える（結果は本人だけに見える）。"""
-    quiz = bot.economy.quiz_get(quiz_id)
+    quiz_port = port_of(bot, IQuizPort)
+    quiz = quiz_port.quiz_get(quiz_id)
     if quiz is None:
         await interaction.response.send_message(embed=ui.error_embed("この問題は終了しました"), ephemeral=True)
         return
     guild_id = interaction.guild_id
-    if guild_id is None or not approval.is_allowed(bot.economy, bot.config, guild_id, interaction.user.id):
+    if guild_id is None or not approval.is_allowed(quiz_port, bot.config, guild_id, interaction.user.id):
         await interaction.response.send_message(embed=ui.error_embed("利用できません"), ephemeral=True)
         return
-    eco = bot.economy.for_guild(guild_id)
+    eco = quiz_port.for_guild(guild_id)
     ok, result = eco.quiz_answer(interaction.user.id, quiz_id, quiz["order"][pos], time.time())
     if not ok:
         await interaction.response.send_message(
@@ -108,7 +111,7 @@ class AnswerView(ui.OwnerView):
 
     def _make_callback(self, index: int):
         async def callback(interaction: discord.Interaction):
-            eco = self.cog.bot.economy.for_guild(interaction.guild_id)
+            eco = guild_port(self.cog.bot, ui.guild_id_of(interaction), IQuizPort)
             ok, result = eco.quiz_answer(self.user_id, self.quiz["id"], self.order[index], time.time())
             if not ok:
                 self.stop()
@@ -195,7 +198,7 @@ class AddModal(QuizForm, title="クイズを追加"):
             return
         now = time.time()
         expires = now + form.minutes * 60 if form.minutes else None
-        qid = self.cog.bot.economy.quiz_add(
+        qid = port_of(self.cog.bot, IQuizPort).quiz_add(
             self.question.value.strip(),
             form.choices,
             self.explanation.value.strip(),
@@ -245,15 +248,15 @@ class UserModal(QuizForm, title="クイズを出題"):
         except ValueError as exc:
             await interaction.response.send_message(embed=ui.error_embed("入力エラー", str(exc)), ephemeral=True)
             return
-        eco = self.cog.bot.economy.for_guild(interaction.guild_id)
+        eco = guild_port(self.cog.bot, ui.guild_id_of(interaction), IQuizPort)
         ok, result = eco.quiz_post(
             interaction.user.id,
             self.question.value.strip(),
             form.choices,
             self.explanation.value.strip(),
             form.reward,
-            form.minutes,
-            interaction.channel_id,
+            form.minutes or quizpay.USER_DEFAULT_MINUTES,
+            interaction.channel_id or 0,
             time.time(),
             interaction.user.display_name,
             form.msg_right,
@@ -264,8 +267,10 @@ class UserModal(QuizForm, title="クイズを出題"):
                 embed=ui.error_embed("出題できません", format_failure(result)), ephemeral=True
             )
             return
+        quiz_row = eco.quiz_get(result)
+        assert quiz_row is not None
         await interaction.response.send_message(
-            embed=public_embed(eco.quiz_get(result)),
+            embed=public_embed(quiz_row),
             view=public_view(result),
             allowed_mentions=discord.AllowedMentions.none(),
         )

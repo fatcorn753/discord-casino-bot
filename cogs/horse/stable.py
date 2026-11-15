@@ -1,15 +1,18 @@
 """競馬の厩舎画面（Stable）と調教・引退 View（GoldCarrotView / RetireView）。"""
 
 import time
+from typing import Optional
 
 import discord
 
 from cogs.horse.cards import race_title, refresh_entry_card
 from cogs.shared import ui
+from cogs.shared.cog_ports import guild_port
 from cogs.shared.horse_display import stat_lines
 from cogs.shared.messages import format_failure
 from domain import horse as horse_mod
 from domain import shop
+from domain.ports import IHorsePort
 from services import services_of
 
 
@@ -55,7 +58,9 @@ class StyleView(discord.ui.View):
             return await interaction.response.send_message(
                 embed=ui.error_embed("選べません", format_failure(reason)), ephemeral=True
             )
-        self.horse = eco.horse_get(self.horse["id"])
+        updated = eco.horse_get(self.horse["id"])
+        assert updated is not None
+        self.horse = updated
         self.stop()
         await interaction.response.edit_message(embed=self.embed(), view=None)
 
@@ -66,12 +71,14 @@ class GoldCarrotView(discord.ui.View):
     def __init__(self, stable: "Stable", user_id: int):
         super().__init__(timeout=300)
         self.stable, self.user_id = stable, user_id
-        self.horse_id = stable.horse_id
+        assert stable.horse_id is not None
+        self.horse_id: int = stable.horse_id
         self.first = self.second = "speed"
         self._build()
 
     def embed(self) -> discord.Embed:
         horse = self.stable.eco_for().horse_get(self.horse_id)
+        assert horse is not None
         text = f"**{horse['name']}** に、金にんじん1本を使います。選んだ2か所に、{horse_mod.GOLD_CARROT_POINTS}点ずつ足します（同じところを2回選べば、+{2 * horse_mod.GOLD_CARROT_POINTS}）。\n"
         text += f"いまのステータス:\n{stat_lines(horse)}\n"
         text += f"**{horse_mod.STAT_NAMES[self.first]}** +{horse_mod.GOLD_CARROT_POINTS}　**{horse_mod.STAT_NAMES[self.second]}** +{horse_mod.GOLD_CARROT_POINTS}"
@@ -166,7 +173,7 @@ class Stable(ui.OwnerView):
     def __init__(self, bot, user_id: int, guild_id: int):
         super().__init__(user_id, timeout=600)
         self.bot, self.user_id, self.guild_id = bot, user_id, guild_id
-        self.horse_id = None
+        self.horse_id: Optional[int] = None
         self.src, self.dst = "speed", "guts"
         eco = self.eco_for()
         eco.rental_ensure(user_id, time.time(), self._tz())
@@ -183,11 +190,11 @@ class Stable(ui.OwnerView):
     def _tz(self) -> float:
         return services_of(self.bot).horse.tz_hours()
 
-    def eco_for(self):
-        return self.bot.economy.for_guild(self.guild_id)
+    def eco_for(self) -> IHorsePort:
+        return guild_port(self.bot, self.guild_id, IHorsePort)
 
-    def eco(self, interaction: discord.Interaction):
-        return self.bot.economy.for_guild(interaction.guild_id)
+    def eco(self, interaction: discord.Interaction) -> IHorsePort:
+        return guild_port(self.bot, ui.guild_id_of(interaction), IHorsePort)
 
     def embed(self) -> discord.Embed:
         eco = self.eco_for()
@@ -297,6 +304,7 @@ class Stable(ui.OwnerView):
         await self._redraw(interaction)
 
     async def _on_carrot(self, interaction: discord.Interaction):
+        assert self.horse_id is not None
         ok, result = self.eco(interaction).horse_carrot(interaction.user.id, self.horse_id, self.src, self.dst)
         if not ok:
             return await interaction.response.send_message(
@@ -309,6 +317,7 @@ class Stable(ui.OwnerView):
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
     async def _on_style(self, interaction: discord.Interaction):
+        assert self.horse_id is not None
         eco = self.eco(interaction)
         horse = eco.horse_get(self.horse_id)
         if horse is None or horse["owner_id"] != interaction.user.id:
@@ -319,6 +328,7 @@ class Stable(ui.OwnerView):
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
     async def _on_retire(self, interaction: discord.Interaction):
+        assert self.horse_id is not None
         eco = self.eco(interaction)
         horse = eco.horse_get(self.horse_id)
         if horse is None or horse["owner_id"] != interaction.user.id:
@@ -333,6 +343,7 @@ class Stable(ui.OwnerView):
         return next((r for r in eco.race_open() if r["status"] == "entry"), None)
 
     async def _on_enter(self, interaction: discord.Interaction):
+        assert self.horse_id is not None
         eco = self.eco(interaction)
         race = self._next_entry_race(eco)
         if race is None:
@@ -349,6 +360,7 @@ class Stable(ui.OwnerView):
         await refresh_entry_card(interaction, eco, race["id"])
 
     async def _on_withdraw(self, interaction: discord.Interaction):
+        assert self.horse_id is not None
         eco = self.eco(interaction)
         race = self._next_entry_race(eco)
         if race is None:
@@ -371,6 +383,7 @@ class Stable(ui.OwnerView):
                 embed=ui.error_embed("買えません", format_failure(result)), ephemeral=True
             )
         horse = eco.horse_get(result)
+        assert horse is not None
         await self._redraw(interaction)
         await interaction.followup.send(
             embed=ui.ok_embed(

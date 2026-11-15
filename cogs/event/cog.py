@@ -13,7 +13,9 @@ from discord.ext import commands, tasks
 from cogs.event.texts import event_copy
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
+from cogs.shared.cog_ports import guild_port, port_of
 from domain import approval, events
+from domain.ports import IEventPort, IGuildApprovalStore
 from infra import logthrottle
 from infra.clock import local_now
 
@@ -68,18 +70,20 @@ class EventCog(commands.Cog):
 
     async def start_manual(self, guild: discord.Guild, game: str, boost_pct: int, minutes: int, channel=None) -> tuple:
         """持ち主が開く特別イベント。いま開催中のものがあれば置き換える。channel を渡すと、そこに告知する（終了の告知も同じ所）。"""
-        eco = self.bot.economy.for_guild(guild.id)
+        eco = guild_port(self.bot, guild.id, IEventPort)
         now = time.time()
         replaced = eco.manual_event_get(now) is not None
         eco.manual_event_start(game, boost_pct, now, now + minutes * 60, channel.id if channel is not None else 0)
-        await self._post(guild, eco, self.manual_embed(eco.manual_event_get(now), False), channel)
+        started = eco.manual_event_get(now)
+        if started is not None:
+            await self._post(guild, eco, self.manual_embed(started, False), channel)
         title, _ = event_copy(game)
         return True, f"{guild.name}: {title}を{minutes}分間、勝ち分+{boost_pct}%で開きました" + (
             "（前のイベントは置き換えました）" if replaced else ""
         )
 
     async def stop_manual(self, guild: discord.Guild) -> tuple:
-        eco = self.bot.economy.for_guild(guild.id)
+        eco = guild_port(self.bot, guild.id, IEventPort)
         m = eco.manual_event_stop(time.time())
         if m is None:
             return False, f"{guild.name}: 開催中の特別イベントはありません"
@@ -89,8 +93,9 @@ class EventCog(commands.Cog):
 
     async def run_once(self) -> None:
         now = local_now(self.bot)
+        approval_store = port_of(self.bot, IGuildApprovalStore)
         for guild in list(self.bot.guilds):
-            if not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
+            if not approval.is_allowed(approval_store, self.bot.config, guild.id, 0):
                 continue
             try:
                 await self._run_guild(guild, now)
@@ -99,7 +104,7 @@ class EventCog(commands.Cog):
 
     async def _run_guild(self, guild: discord.Guild, now: datetime.datetime) -> None:
         minutes = now.hour * 60 + now.minute
-        eco = self.bot.economy.for_guild(guild.id)
+        eco = guild_port(self.bot, guild.id, IEventPort)
         done = eco.manual_event_finish_due(time.time())  # 時間が来た特別イベントの終了を、1回だけ告知する
         if done is not None:
             await self._post(guild, eco, self.manual_embed(done, True), _event_channel(guild, done))

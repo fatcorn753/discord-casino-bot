@@ -11,9 +11,11 @@ from discord import app_commands
 from discord.ext import commands
 
 from cogs.shared import ui
+from cogs.shared.cog_ports import guild_port
 from cogs.shared.messages import format_failure
 from domain import labor as lab
 from domain import relics, shop
+from domain.ports import ILaborPort
 from services import services_of
 
 VIEW_TIMEOUT = 900  # 画面が反応する時間（秒）。過ぎたら、`/地下 作業` で開き直す
@@ -192,8 +194,8 @@ class LaborView(discord.ui.View):
         self.refresh()
 
     # -------------------------------------------------------------- #
-    def eco(self):
-        return self.bot.economy.for_guild(self.guild_id)
+    def eco(self) -> ILaborPort:
+        return guild_port(self.bot, self.guild_id, ILaborPort)
 
     def refresh(self) -> None:
         """いまの状態を読み直して、ボタンを組み直す。"""
@@ -456,7 +458,7 @@ class LaborCog(commands.Cog):
         period=[app_commands.Choice(name="通算", value="total"), app_commands.Choice(name="今日", value="today")]
     )
     async def ranking(self, interaction: discord.Interaction, period: str = "total"):
-        eco = self.bot.economy.for_guild(interaction.guild_id)
+        eco = guild_port(self.bot, ui.guild_id_of(interaction), ILaborPort)
         daily = period == "today"
         data = eco.labor_top(10, today(self.bot) if daily else None, interaction.user.id)
         await interaction.response.send_message(

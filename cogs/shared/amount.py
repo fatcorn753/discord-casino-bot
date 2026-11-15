@@ -12,6 +12,8 @@ from typing import Optional
 import discord
 from discord import app_commands
 
+from cogs.shared.cog_ports import guild_port
+from domain.ports import IRankingReader
 from domain.types import INITIAL_BALANCE
 
 
@@ -19,7 +21,7 @@ def own_balance(bot, interaction: discord.Interaction) -> Optional[int]:
     """いまの残高。口座を作らずに読む（初めての人は、最初に遊ぶときに初期支給が入る額を返す）。DM などサーバー外は None。"""
     if interaction.guild_id is None:
         return None
-    stats = bot.economy.for_guild(interaction.guild_id).peek_stats(interaction.user.id)
+    stats = guild_port(bot, interaction.guild_id, IRankingReader).peek_stats(interaction.user.id)
     return stats["balance"] if stats else INITIAL_BALANCE
 
 

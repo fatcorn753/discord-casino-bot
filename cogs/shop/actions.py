@@ -5,12 +5,14 @@ from typing import Callable, cast
 import discord
 
 from cogs.shared import ui
+from cogs.shared.cog_ports import port_of
 from cogs.shared.confirm import confirm_action as default_confirm_action
 from cogs.shared.confirm import confirmed_reply, user_session
 from cogs.shared.messages import format_failure, format_memo
 from cogs.shop.discord_ops import ShopError, apply_title_nick, nick_blocker, set_color_role
 from cogs.shop.embeds import EFFECT_OF_ITEM, SLOT_OF_KIND, UNEQUIP_NAMES, stock_text
 from domain import relics, shop
+from domain.ports import IShopPort
 
 
 async def buy_auction_horse(
@@ -305,7 +307,7 @@ async def use_item(cog, interaction: discord.Interaction, item: str) -> None:
         problem, others = await cog._sync_title_nick(uid, guild, member)
         if problem:
             note = f"\n⚠️ ニックネームには反映できませんでした: {problem}"
-        elif cog.bot.economy.nick_pref(gid, uid):
+        elif port_of(cog.bot, IShopPort).nick_pref(gid, uid):
             note = "\nニックネームにも反映しました。"
         if others:
             note += f"\n※ 他のサーバー {others} 件では反映できませんでした。"
@@ -352,7 +354,8 @@ async def set_title_display(cog, interaction: discord.Interaction, mode: str) ->
     guild = cast(discord.Guild, interaction.guild)
     member = cast(discord.Member, interaction.user)
     gid = ui.guild_id_of(interaction)
-    was_on = cog.bot.economy.nick_pref(gid, uid)
+    shop_port = port_of(cog.bot, IShopPort)
+    was_on = shop_port.nick_pref(gid, uid)
     if mode == "on":
         reason = nick_blocker(guild, member)
         if reason:
@@ -360,13 +363,13 @@ async def set_title_display(cog, interaction: discord.Interaction, mode: str) ->
                 embed=ui.error_embed("ニックネームに付けられません", reason), ephemeral=True
             )
             return
-        cog.bot.economy.set_nick_pref(gid, uid, True)
+        shop_port.set_nick_pref(gid, uid, True)
         await interaction.response.defer(ephemeral=True)
         problem, others = await cog._sync_title_nick(uid, guild, member)
         title = cog._equipped_title(gid, uid)
         if problem:
             if not was_on:
-                cog.bot.economy.set_nick_pref(gid, uid, False)
+                shop_port.set_nick_pref(gid, uid, False)
             await interaction.followup.send(
                 embed=ui.error_embed("ニックネームに付けられません", problem), ephemeral=True
             )
@@ -389,10 +392,10 @@ async def set_title_display(cog, interaction: discord.Interaction, mode: str) ->
     problem = ""
     if was_on:
         try:
-            await apply_title_nick(guild, member, None, cog.bot.economy)
+            await apply_title_nick(guild, member, None, shop_port)
         except ShopError as exc:
             problem = f"\n⚠️ ニックネームを元に戻せませんでした（手動で直してください）: {exc}"
-        cog.bot.economy.set_nick_pref(gid, uid, False)
+        shop_port.set_nick_pref(gid, uid, False)
     await interaction.followup.send(
         embed=ui.ok_embed(
             "ニックネームには付けません",

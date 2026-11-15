@@ -4,22 +4,19 @@ main.py と各 Cog が共有する属性（config, economy, sessions, services�
 動的な後付けではなく型付き属性として定義する。
 """
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 from discord.ext import commands
 
-from domain.ports import ISessionGuard
+from domain.ports import IEconomy, ISessionGuard
 from services import ServiceRegistry, build_services
-
-if TYPE_CHECKING:
-    from infra.db.economy import Economy
 
 
 class CasinoBot(commands.Bot):
     """ペリカカジノ Bot 本体。"""
 
     config: dict[str, Any]
-    economy: "Economy"
+    economy: IEconomy
     sessions: ISessionGuard
     services: ServiceRegistry
 
@@ -27,7 +24,7 @@ class CasinoBot(commands.Bot):
         self,
         *,
         config: dict[str, Any],
-        economy: "Economy",
+        economy: IEconomy,
         sessions: ISessionGuard,
         services: Optional[ServiceRegistry] = None,
         **kwargs: Any,

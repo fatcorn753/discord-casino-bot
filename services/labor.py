@@ -4,15 +4,15 @@ import time
 from typing import Any
 
 from domain import labor as labor_mod
-from domain.ports import IClock, IEconomy
+from domain.ports import IClock, ILaborPort
 from infra.clock import offset_hours
 
 
 class LaborService:
     """地下作業の日付キー・クリック分析レポート取得を担う。"""
 
-    def __init__(self, economy: IEconomy, clock: IClock, config: dict[str, Any]) -> None:
-        self._economy: Any = economy
+    def __init__(self, economy: ILaborPort, clock: IClock, config: dict[str, Any]) -> None:
+        self._economy = economy
         self._clock = clock
         self._config = config
 

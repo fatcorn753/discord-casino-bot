@@ -29,8 +29,10 @@ from cogs.admin.targets import postable as postable  # noqa: F401
 from cogs.admin.views import AnnounceModal as AnnounceModal  # noqa: F401
 from cogs.admin.views import ApprovalButton
 from cogs.shared import ui
+from cogs.shared.cog_ports import port_of
 from domain import approval, events
 from domain.games import rtplevel
+from domain.ports import IGuildApprovalStore
 
 MAX_IMAGE_BYTES = content_ops.MAX_IMAGE_BYTES
 MAX_IMPORT_BYTES = content_ops.MAX_IMPORT_BYTES
@@ -87,7 +89,8 @@ class ApprovalCog(commands.Cog):
         return True
 
     def _allowed_guilds(self) -> list:
-        return [g for g in self.bot.guilds if approval.is_allowed(self.bot.economy, self.bot.config, g.id, 0)]
+        approval_store = port_of(self.bot, IGuildApprovalStore)
+        return [g for g in self.bot.guilds if approval.is_allowed(approval_store, self.bot.config, g.id, 0)]
 
     def _event_targets(self, guild_id: Optional[str]) -> list:
         return [self.bot.get_guild(int(guild_id))] if guild_id else self._allowed_guilds()

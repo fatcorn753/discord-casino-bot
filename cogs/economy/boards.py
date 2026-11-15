@@ -7,13 +7,15 @@ from typing import Optional
 import discord
 
 from cogs.shared import ranking, ui
+from cogs.shared.cog_ports import guild_port, port_of
+from domain.ports import ILeaderboardStore, IRankingReader
 from infra import logthrottle
 
 
 class RankingView(ui.OwnerView):
     """ランキングの切り替え（純資産 / 総資産）と、自分の資産の内訳。押せるのは、開いた本人だけ。"""
 
-    def __init__(self, eco, user_id: int):
+    def __init__(self, eco: IRankingReader, user_id: int):
         super().__init__(
             user_id,
             timeout=300,
@@ -65,7 +67,7 @@ class RankingView(ui.OwnerView):
 def board_embed(bot, guild_id: int, interval_minutes: int) -> discord.Embed:
     ts = int(datetime.datetime.now().timestamp())
     return ranking.build_embed(
-        bot.economy.for_guild(guild_id),
+        guild_port(bot, guild_id, IRankingReader),
         None,
         "🏆 ペリカランキング（純資産）",
         header=f"最終更新: <t:{ts}:R>\n\n",
@@ -78,9 +80,10 @@ async def refresh_board(bot, board: dict, interval_minutes: int) -> None:
     guild = bot.get_guild(board["guild_id"])
     if guild is None:
         return
+    store = port_of(bot, ILeaderboardStore)
     channel = guild.get_channel(board["channel_id"])
     if channel is None:
-        bot.economy.delete_leaderboard(guild.id)
+        store.delete_leaderboard(guild.id)
         return
     embed = board_embed(bot, guild.id, interval_minutes)
     try:
@@ -88,7 +91,7 @@ async def refresh_board(bot, board: dict, interval_minutes: int) -> None:
     except discord.NotFound:
         try:
             new = await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
-            bot.economy.set_leaderboard(guild.id, channel.id, new.id)
+            store.set_leaderboard(guild.id, channel.id, new.id)
         except discord.HTTPException as exc:
             logthrottle.warn(
                 ("board-repost", guild.id), f"ランキング掲示板を投稿し直せません: guild={guild.id}: {exc!r}"
@@ -137,12 +140,13 @@ async def board_set(
         )
         return
     await interaction.response.defer(ephemeral=True)
-    old = cog.bot.economy.get_leaderboard(guild.id)
+    store = port_of(cog.bot, ILeaderboardStore)
+    old = store.get_leaderboard(guild.id)
     message = await channel.send(
         embed=board_embed(cog.bot, guild.id, interval_minutes),
         allowed_mentions=discord.AllowedMentions.none(),
     )
-    cog.bot.economy.set_leaderboard(guild.id, channel.id, message.id)
+    store.set_leaderboard(guild.id, channel.id, message.id)
     await delete_board_message(guild, old)
     await interaction.followup.send(
         embed=ui.ok_embed(
@@ -157,7 +161,8 @@ async def board_unset(cog, interaction: discord.Interaction) -> None:
     guild = interaction.guild
     if guild is None:
         return
-    board = cog.bot.economy.get_leaderboard(guild.id)
+    store = port_of(cog.bot, ILeaderboardStore)
+    board = store.get_leaderboard(guild.id)
     if board is None:
         await interaction.response.send_message(
             embed=ui.warn_embed("掲示していません", "このサーバーには、ランキングの掲示がありません。"),
@@ -166,7 +171,7 @@ async def board_unset(cog, interaction: discord.Interaction) -> None:
         return
     await interaction.response.defer(ephemeral=True)
     await delete_board_message(guild, board)
-    cog.bot.economy.delete_leaderboard(guild.id)
+    store.delete_leaderboard(guild.id)
     await interaction.followup.send(
         embed=ui.ok_embed("掲示を止めました", "自動の更新をやめて、ランキングの投稿を削除しました。"),
         ephemeral=True,

@@ -6,9 +6,11 @@ import discord
 
 from cogs.casino.texts import JACKPOT_ART, big_win_line, streak_line
 from cogs.shared import ui
+from cogs.shared.cog_ports import port_of
 from cogs.shared.messages import format_notices
 from domain import approval, missions, teiai
 from domain.games.rtplevel import MIN_BET as MIN_BET  # noqa: F401
+from domain.ports import IGuildApprovalStore
 from services import services_of
 
 
@@ -29,7 +31,7 @@ class GameContext:
 
     def __init__(self, bot: Any, user_id: int, escrow_id: int, game: str, bet: int, guild_id: int, name: str = ""):
         self.bot = bot
-        self.economy = bot.economy.for_guild(guild_id)  # ペリカはサーバーごとに別々
+        self.economy = services_of(bot).casino.for_guild(guild_id)  # ペリカはサーバーごとに別々
         self.name = name  # 遊んでいる人の表示名（タイトルに付けて、誰のゲームか分かるようにする）
         self.guild_id = guild_id
         self.user_id = user_id
@@ -215,7 +217,9 @@ class ReplayView(ui.OwnerView):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not await super().interaction_check(interaction):
             return False
-        if not approval.is_allowed(self.bot.economy, self.bot.config, ui.guild_id_of(interaction), interaction.user.id):
+        if not approval.is_allowed(
+            port_of(self.bot, IGuildApprovalStore), self.bot.config, ui.guild_id_of(interaction), interaction.user.id
+        ):
             await interaction.response.send_message(
                 embed=ui.error_embed("使えません", "このサーバーでは、いまは遊べません。"), ephemeral=True
             )

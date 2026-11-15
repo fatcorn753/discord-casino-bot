@@ -4,15 +4,15 @@ import time
 from typing import Any, Optional
 
 from domain import horse as horse_mod
-from domain.ports import IEconomy
+from domain.ports import IHorsePort
 from infra.clock import offset_hours
 
 
 class HorseService:
     """定時レースのスケジュール作成・締切オッズ確定・発走精算の調整役。"""
 
-    def __init__(self, economy: IEconomy, config: dict[str, Any]) -> None:
-        self._economy: Any = economy
+    def __init__(self, economy: IHorsePort, config: dict[str, Any]) -> None:
+        self._economy = economy
         self._config = config
 
     def tz_hours(self) -> float:

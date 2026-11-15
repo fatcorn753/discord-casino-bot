@@ -6,15 +6,15 @@ from typing import Any, Optional
 from domain import bonds, earnings, market, market_events
 from domain import options as opt
 from domain.options import name_of
-from domain.ports import IEconomy
+from domain.ports import IMarketPort
 from infra.clock import offset_hours
 
 
 class MarketService:
     """市場価格の進行・ボラティリティ/決算更新・保有スナップショットを提供する。"""
 
-    def __init__(self, economy: IEconomy, config: dict[str, Any]) -> None:
-        self._economy: Any = economy
+    def __init__(self, economy: IMarketPort, config: dict[str, Any]) -> None:
+        self._economy = economy
         self._config = config
 
     def latest_price(self, symbol: str = market.DEFAULT) -> float:

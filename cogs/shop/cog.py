@@ -10,6 +10,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs.shared import ui
+from cogs.shared.cog_ports import guild_port, port_of
 from cogs.shared.confirm import confirm_action as confirm_action  # noqa: F401
 from cogs.shop import actions
 from cogs.shop.discord_ops import ShopError, apply_title_nick, set_color_role
@@ -35,6 +36,7 @@ from cogs.shop.embeds import (  # noqa: F401
 )
 from cogs.shop.views import ShopView
 from domain import approval, shop, teiai
+from domain.ports import IGuildApprovalStore, IShopPort
 from infra import catalogs, logthrottle
 
 _SHOP_CFG = catalogs.shop()
@@ -54,18 +56,18 @@ class ShopCog(commands.Cog):
     def _role_lock(self, guild_id: int) -> asyncio.Lock:
         return self._role_locks.setdefault(guild_id, asyncio.Lock())
 
-    def g(self, interaction: discord.Interaction):
+    def g(self, interaction: discord.Interaction) -> IShopPort:
         """このサーバーのペリカの記録（ペリカはサーバーごとに別々）。"""
-        return self.bot.economy.for_guild(ui.guild_id_of(interaction))
+        return guild_port(self.bot, ui.guild_id_of(interaction), IShopPort)
 
     def _equipped_title(self, guild_id: int, user_id: int) -> str | None:
         """そのサーバーで装備している称号（景品はサーバーごとに別々）。"""
-        item = shop.BY_ID.get(self.bot.economy.for_guild(guild_id).get_profile(user_id)["title"])
+        item = shop.BY_ID.get(guild_port(self.bot, guild_id, IShopPort).get_profile(user_id)["title"])
         return item.name if item else None
 
     def _nick_tag(self, guild_id: int, user_id: int) -> str | None:
         """ニックネームの末尾に付ける名前。"""
-        eco = self.bot.economy.for_guild(guild_id)
+        eco = guild_port(self.bot, guild_id, IShopPort)
         status = eco.status(user_id)
         if status != teiai.KATAGI:
             return teiai.STATUS_NAME[status]
@@ -75,7 +77,7 @@ class ShopCog(commands.Cog):
 
     async def sync_status_nick(self, guild: discord.Guild, member: discord.Member) -> None:
         """身分に合わせて、ニックネームの末尾の【地下労働者】などを付ける・外す。"""
-        eco = self.bot.economy.for_guild(guild.id)
+        eco = guild_port(self.bot, guild.id, IShopPort)
         tag = self._nick_tag(guild.id, member.id)
         if tag is None and not eco.nick_managed(guild.id, member.id):
             return
@@ -93,9 +95,10 @@ class ShopCog(commands.Cog):
         self, user_id: int, here: discord.Guild | None = None, member: discord.Member | None = None
     ) -> tuple[str, int]:
         """称号の変更を、ニックネーム表示をONにしているサーバーへ反映する。"""
+        shop_port = port_of(self.bot, IShopPort)
         async with self._nick_locks.setdefault(user_id, asyncio.Lock()):
             problem, others_failed = "", 0
-            for gid in self.bot.economy.nick_pref_guilds(user_id):
+            for gid in shop_port.nick_pref_guilds(user_id):
                 guild = self.bot.get_guild(gid)
                 if guild is None or (here is not None and gid != here.id):
                     continue
@@ -107,7 +110,7 @@ class ShopCog(commands.Cog):
                         if is_here and member is not None
                         else (guild.get_member(user_id) or await guild.fetch_member(user_id))
                     )
-                    await apply_title_nick(guild, m, title, self.bot.economy)
+                    await apply_title_nick(guild, m, title, shop_port)
                 except discord.NotFound:
                     continue
                 except ShopError as exc:
@@ -156,10 +159,11 @@ class ShopCog(commands.Cog):
 
     async def run_status_nick(self) -> None:
         """借金・延滞・破産者の人のニックネームに【地下労働者】などを付け、カタギに戻った人から外す。"""
+        approval_store = port_of(self.bot, IGuildApprovalStore)
         for guild in list(self.bot.guilds):
-            if not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
+            if not approval.is_allowed(approval_store, self.bot.config, guild.id, 0):
                 continue
-            eco = self.bot.economy.for_guild(guild.id)
+            eco = guild_port(self.bot, guild.id, IShopPort)
             for user_id in eco.status_nick_targets()[:STATUS_NICK_PER_GUILD]:
                 member = guild.get_member(user_id)
                 if member is None:
@@ -175,7 +179,7 @@ class ShopCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
-        self.bot.economy.delete_guild_nick_prefs(guild.id)
+        port_of(self.bot, IShopPort).delete_guild_nick_prefs(guild.id)
 
     @app_commands.command(name="ショップ", description="🛍️ 景品を見る・買う・身につける（ボタンで操作）")
     @app_commands.guild_only()
@@ -184,13 +188,17 @@ class ShopCog(commands.Cog):
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
     def _catalog_embed(self, guild_id: int, user_id: int, tab: str = "home") -> discord.Embed:
-        eco = self.bot.economy.for_guild(guild_id)
+        eco = guild_port(self.bot, guild_id, IShopPort)
         inv = eco.inventory(user_id)
         me = eco.peek_stats(user_id)
         balance = me["balance"] if me else 0
         waiting = len(eco.auction_list()) + len(eco.auction_horses()) if tab == "home" else 0
         stocks = (
-            {i.id: eco.shop_stock(user_id, i.id) for i in tab_items(tab) if i.id in shop.STOCK_RULES}
+            {
+                i.id: st
+                for i in tab_items(tab)
+                if i.id in shop.STOCK_RULES and (st := eco.shop_stock(user_id, i.id)) is not None
+            }
             if tab != "home"
             else None
         )
@@ -199,7 +207,7 @@ class ShopCog(commands.Cog):
     def _auction_embed(
         self, guild_id: int, user_id: int, tab: str = "teiai", p2p_filter: str = "all", p2p_order: str = "end"
     ) -> discord.Embed:
-        eco = self.bot.economy.for_guild(guild_id)
+        eco = guild_port(self.bot, guild_id, IShopPort)
         me = eco.peek_stats(user_id)
         balance = me["balance"] if me else 0
         if tab == "players":
@@ -223,7 +231,7 @@ class ShopCog(commands.Cog):
         )
 
     def _inventory_embed(self, guild_id: int, user_id: int) -> discord.Embed:
-        eco = self.bot.economy.for_guild(guild_id)
+        eco = guild_port(self.bot, guild_id, IShopPort)
         return inventory_embed(eco.inventory(user_id), eco.get_profile(user_id))
 
     async def buy_auction_horse(self, interaction: discord.Interaction, horse_id: int):

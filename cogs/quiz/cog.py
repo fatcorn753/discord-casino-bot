@@ -75,8 +75,10 @@ from cogs.quiz.views import (
 )
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
+from cogs.shared.cog_ports import guild_port, port_of
 from domain import approval
 from domain.duration import format_minutes
+from domain.ports import IGuildApprovalStore, IQuizPort
 from infra import logthrottle
 
 
@@ -105,11 +107,12 @@ class QuizCog(commands.Cog):
 
     async def run_once(self) -> None:
         now = time.time()
+        approval_store = port_of(self.bot, IGuildApprovalStore)
         for guild in list(self.bot.guilds):
-            if not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
+            if not approval.is_allowed(approval_store, self.bot.config, guild.id, 0):
                 continue
             try:
-                for q in self.bot.economy.for_guild(guild.id).quiz_settle(now):
+                for q in guild_port(self.bot, guild.id, IQuizPort).quiz_settle(now):
                     await self.announce_settle(guild, q)
             except Exception as exc:  # 1サーバーの失敗で、ほかを止めない
                 print(f"クイズを精算できません: guild={guild.id}: {exc!r}")
@@ -140,12 +143,15 @@ class QuizCog(commands.Cog):
 
     async def broadcast(self, quiz_id: int, only_guild=None, only_channel=None) -> int:
         """問題を、許可されている全サーバーの告知チャンネルに出す。出せた投稿の数を返す。"""
-        quiz = self.bot.economy.quiz_get(quiz_id)
+        quiz_port = port_of(self.bot, IQuizPort)
+        quiz = quiz_port.quiz_get(quiz_id)
+        if quiz is None:
+            return 0
         count = 0
         for guild in [only_guild] if only_guild is not None else list(self.bot.guilds):
-            if only_guild is None and not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
+            if only_guild is None and not approval.is_allowed(quiz_port, self.bot.config, guild.id, 0):
                 continue
-            channel = only_channel or announce_channel(guild, self.bot.economy.for_guild(guild.id))
+            channel = only_channel or announce_channel(guild, guild_port(self.bot, guild.id, IQuizPort))
             if channel is None:
                 continue
             try:
@@ -164,7 +170,7 @@ class QuizCog(commands.Cog):
 
     @group.command(name="挑戦", description="クイズに挑戦する（正解でペリカがもらえる）")
     async def play(self, interaction: discord.Interaction):
-        eco = self.bot.economy.for_guild(interaction.guild_id)
+        eco = guild_port(self.bot, ui.guild_id_of(interaction), IQuizPort)
         quiz, remaining = eco.quiz_next(interaction.user.id, time.time())
         if quiz is None:
             return await interaction.response.send_message(
@@ -185,7 +191,9 @@ class QuizCog(commands.Cog):
     @app_commands.rename(quiz_id="番号")
     @app_commands.describe(quiz_id="取り下げる問題（自分の問題だけ候補に出ます）")
     async def withdraw(self, interaction: discord.Interaction, quiz_id: int):
-        done = self.bot.economy.for_guild(interaction.guild_id).quiz_withdraw(interaction.user.id, quiz_id, time.time())
+        done = guild_port(self.bot, ui.guild_id_of(interaction), IQuizPort).quiz_withdraw(
+            interaction.user.id, quiz_id, time.time()
+        )
         if done is None:
             return await interaction.response.send_message(
                 embed=ui.error_embed(
@@ -207,7 +215,7 @@ class QuizCog(commands.Cog):
         now = time.time()
         cur = current.strip().lower()
         out = []
-        for q in self.bot.economy.for_guild(interaction.guild_id).quiz_own_open(interaction.user.id, now):
+        for q in guild_port(self.bot, interaction.guild_id, IQuizPort).quiz_own_open(interaction.user.id, now):
             text = q["question"].replace("\n", " ")
             label = f"#{q['id']} {text[:50]}（あと{format_minutes(max(1, int((q['expires'] - now) // 60)))}）"
             if not cur or cur in label.lower():
@@ -220,7 +228,7 @@ class QuizCog(commands.Cog):
 
     def listing_embed(self) -> discord.Embed:
         now, lines = time.time(), []
-        for q in self.bot.economy.quiz_list()[:15]:
+        for q in port_of(self.bot, IQuizPort).quiz_list()[:15]:
             state = "⌛" if q["expires"] is not None and now >= q["expires"] else "🟢"
             until = "" if q["expires"] is None else f" 〜<t:{int(q['expires'])}:d>"
             lines.append(
@@ -233,7 +241,7 @@ class QuizCog(commands.Cog):
         )
 
     def remove(self, quiz_id: int) -> bool:
-        return self.bot.economy.quiz_delete(quiz_id)
+        return port_of(self.bot, IQuizPort).quiz_delete(quiz_id)
 
 
 async def setup(bot):

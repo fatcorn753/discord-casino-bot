@@ -24,11 +24,12 @@ from cogs.p2p.embeds import (  # noqa: F401
 )
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
-from cogs.shared.cog_ports import IP2PCogPort, get_cog_port
+from cogs.shared.cog_ports import IP2PCogPort, get_cog_port, guild_port, port_of
 from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
 from cogs.shared.messages import format_failure
 from domain import approval, p2p
 from domain import shop as shop_mod
+from domain.ports import IGuildApprovalStore, IP2PPort
 from infra import catalogs, logthrottle
 
 CONFIRM_FROM = catalogs.economy().p2p.confirm_from  # この金額以上の購入・入札は、確認ボタンを挟む
@@ -147,6 +148,11 @@ class SellModal(discord.ui.Modal):
                 embed=ui.error_embed("出品できません", "数字で入れてください。"), ephemeral=True
             )
             return
+        if price is None:
+            await interaction.response.send_message(
+                embed=ui.error_embed("出品できません", "数字で入れてください。"), ephemeral=True
+            )
+            return
         assert self.view.target is not None
         kind, _, ref = self.view.target.partition(":")
         eco = self.view.cog.eco_of(interaction)
@@ -178,7 +184,7 @@ class SellView(ui.OwnerView):
         super().__init__(user_id, timeout=300)
         self.cog, self.user_id = cog, user_id
         self.target: str | None = None
-        eco = cog.bot.economy.for_guild(guild_id)
+        eco = guild_port(cog.bot, guild_id, IP2PPort)
         self.options = []
         for item_id, qty in eco.inventory(user_id).items():
             if p2p.tradable(item_id):
@@ -232,7 +238,7 @@ class MineView(ui.OwnerView):
     def __init__(self, cog: "P2PCog", user_id: int, guild_id: int):
         super().__init__(user_id, timeout=300)
         self.cog, self.user_id, self.guild_id = cog, user_id, guild_id
-        eco = cog.bot.economy.for_guild(guild_id)
+        eco = guild_port(cog.bot, guild_id, IP2PPort)
         self.data = eco.p2p_mine(user_id)
         cancellable = [r for r in self.data["selling"] if not r["bidder_id"]]  # 入札が入った競りは、取り消せない
         if cancellable:
@@ -247,7 +253,7 @@ class MineView(ui.OwnerView):
             self.add_item(select)
 
     def embed(self) -> discord.Embed:
-        eco = self.cog.bot.economy.for_guild(self.guild_id)
+        eco = guild_port(self.cog.bot, self.guild_id, IP2PPort)
         sell = "\n".join(line_of(r, eco.p2p_label(r)) for r in self.data["selling"]) or "出していません。"
         bid = "\n".join(line_of(r, eco.p2p_label(r)) for r in self.data["bidding"]) or "入札中のものは、ありません。"
         e = ui.embed("📋 自分の取引", "", ui.INFO)
@@ -256,7 +262,7 @@ class MineView(ui.OwnerView):
         return e
 
     async def _on_cancel(self, interaction: discord.Interaction):
-        eco = self.cog.bot.economy.for_guild(self.guild_id)
+        eco = guild_port(self.cog.bot, self.guild_id, IP2PPort)
         listing_id = int(ui.selected_values(interaction)[0])
         ok, why = eco.p2p_cancel(self.user_id, listing_id)
         if not ok:
@@ -282,10 +288,10 @@ class P2PCog(commands.Cog):
     async def cog_unload(self) -> None:
         self.tick.cancel()
 
-    def eco_of(self, interaction: discord.Interaction):
-        return self.bot.economy.for_guild(ui.guild_id_of(interaction))
+    def eco_of(self, interaction: discord.Interaction) -> IP2PPort:
+        return guild_port(self.bot, ui.guild_id_of(interaction), IP2PPort)
 
-    def _post_args(self, eco, row: dict) -> tuple[str, dict | None]:
+    def _post_args(self, eco: IP2PPort, row: dict) -> tuple[str, dict | None]:
         horse = eco.horse_get(int(row["ref"])) if row["kind"] == "horse" else None
         return eco.p2p_label(row), horse
 
@@ -294,7 +300,7 @@ class P2PCog(commands.Cog):
         """出品を、告知チャンネルに投稿する（投稿を覚えて、入札・売れたときに書き換える）。投稿できたら True。失敗しても、出品には影響しない。"""
         if guild is None:
             return False
-        eco = self.bot.economy.for_guild(guild.id)
+        eco = guild_port(self.bot, guild.id, IP2PPort)
         row = eco.p2p_get(listing_id)
         channel = announce_channel(guild, eco) if row else None
         if row is None or channel is None:
@@ -314,7 +320,7 @@ class P2PCog(commands.Cog):
         """告知の投稿を、いまの状態（最高入札・売れた・取り消し・終了）に書き換える。終わったら、ボタンを外す。"""
         if guild is None:
             return
-        eco = self.bot.economy.for_guild(guild.id)
+        eco = guild_port(self.bot, guild.id, IP2PPort)
         row = eco.p2p_get(listing_id)
         if row is None or not row["message_id"]:
             return
@@ -448,7 +454,7 @@ class P2PCog(commands.Cog):
     @tasks.loop(seconds=30)
     async def tick(self):
         for guild in list(self.bot.guilds):
-            if not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
+            if not approval.is_allowed(port_of(self.bot, IGuildApprovalStore), self.bot.config, guild.id, 0):
                 continue
             try:
                 await self._settle_guild(guild)
@@ -460,7 +466,7 @@ class P2PCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _settle_guild(self, guild: discord.Guild) -> None:
-        eco = self.bot.economy.for_guild(guild.id)
+        eco = guild_port(self.bot, guild.id, IP2PPort)
         results = eco.p2p_settle()
         for row, _res in results:
             await self.refresh_post(guild, row["id"])  # 告知を、売れた・終了に書き換える

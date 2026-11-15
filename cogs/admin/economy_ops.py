@@ -7,7 +7,8 @@ import discord
 
 from cogs.admin.embeds import LEVEL_NAME, click_history_embed, pachinko_stats_embed, rtp_table_embed
 from cogs.shared import ui
-from cogs.shared.cog_ports import IEventCogPort, require_cog_port
+from cogs.shared.cog_ports import IEventCogPort, guild_port, port_of, require_cog_port
+from domain.ports import IRecordPort, IRtpPort, IWalletPort
 from services import services_of
 
 
@@ -16,7 +17,7 @@ async def grant(cog, interaction: discord.Interaction, guild_id: str, user_id: s
     if picked is None:
         return
     guild, member = picked
-    balance = cog.bot.economy.for_guild(guild.id).credit(member.id, amount, f"付与（管理）{reason}".strip())
+    balance = guild_port(cog.bot, guild.id, IWalletPort).credit(member.id, amount, f"付与（管理）{reason}".strip())
     await interaction.response.send_message(
         embed=ui.ok_embed(
             "付与しました",
@@ -34,7 +35,7 @@ async def set_balance(
     if picked is None:
         return
     guild, member = picked
-    before, after, debt_before, debt_after = cog.bot.economy.for_guild(guild.id).set_balance(
+    before, after, debt_before, debt_after = guild_port(cog.bot, guild.id, IWalletPort).set_balance(
         member.id, amount, f"残高の設定（管理）{reason}".strip()
     )
     await interaction.response.send_message(
@@ -99,7 +100,7 @@ async def rtp_set(cog, interaction: discord.Interaction, guild_id: str, game: st
     guild = await cog._pick_guild(interaction, guild_id)
     if guild is None:
         return
-    eco = cog.bot.economy.for_guild(guild.id)
+    eco = guild_port(cog.bot, guild.id, IRtpPort)
     changed = eco.rtp_level_set(None if game == "*" else game, level)
     await interaction.response.send_message(
         embeds=[
@@ -119,7 +120,7 @@ async def rtp_list(cog, interaction: discord.Interaction, guild_id: Optional[str
         return
     targets = [guild] if guild else cog._allowed_guilds()
     embeds = [
-        rtp_table_embed(cog.bot.economy.for_guild(g.id).rtp_levels(), f"🎚️ {g.name} の還元率") for g in targets[:10]
+        rtp_table_embed(guild_port(cog.bot, g.id, IRtpPort).rtp_levels(), f"🎚️ {g.name} の還元率") for g in targets[:10]
     ]
     await interaction.response.send_message(embeds=embeds or [ui.error_embed("対象がありません")], ephemeral=True)
 
@@ -131,7 +132,7 @@ async def pachinko_stats(cog, interaction: discord.Interaction, guild_id: Option
         if guild is None:
             return
     since = time.time() - days * 86400 if days else None
-    data = cog.bot.economy.pachinko_stats(guild.id if guild else None, since)
+    data = port_of(cog.bot, IRecordPort).pachinko_stats(guild.id if guild else None, since)
     scope = (guild.name if guild else "全サーバー") + (f"・過去{days}日" if days else "・全期間")
     await interaction.response.send_message(embed=pachinko_stats_embed(data, scope), ephemeral=True)
 

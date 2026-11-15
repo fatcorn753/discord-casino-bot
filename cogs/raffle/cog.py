@@ -15,8 +15,10 @@ from discord.ext import commands, tasks
 
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
+from cogs.shared.cog_ports import guild_port, port_of
 from cogs.shared.messages import format_failure
 from domain import approval
+from domain.ports import IGuildApprovalStore, IRafflePort
 from infra import catalogs, logthrottle
 
 _RAFFLE_CFG = catalogs.economy().raffle
@@ -83,8 +85,8 @@ class RaffleCog(commands.Cog):
     async def cog_unload(self) -> None:
         self.tick.cancel()
 
-    def g(self, interaction: discord.Interaction):
-        return self.bot.economy.for_guild(interaction.guild_id)
+    def g(self, interaction: discord.Interaction) -> IRafflePort:
+        return guild_port(self.bot, ui.guild_id_of(interaction), IRafflePort)
 
     # ------------------------------ 運営の操作（`/運営 抽選 …` から呼ぶ。サーバーは持ち主が指定する） ------------------------------ #
     async def host(
@@ -96,7 +98,7 @@ class RaffleCog(commands.Cog):
         channel=None,
     ) -> tuple:
         """そのサーバーの告知チャンネル（channel を渡せば、そのチャンネル）に、抽選の募集を出す。(成功か, 説明) を返す。"""
-        eco = self.bot.economy.for_guild(guild.id)
+        eco = guild_port(self.bot, guild.id, IRafflePort)
         channel = channel or announce_channel(guild, eco)
         if channel is None:
             return (
@@ -108,6 +110,7 @@ class RaffleCog(commands.Cog):
         if not ok:
             return False, format_failure(reason)
         raffle = eco.raffle_get()
+        assert raffle is not None
         try:
             message = await ui.send_channel(
                 channel,
@@ -124,7 +127,7 @@ class RaffleCog(commands.Cog):
 
     async def repost(self, guild: discord.Guild, channel=None) -> tuple:
         """募集中の抽選の投稿を、告知チャンネル（channel を渡せば、そのチャンネル）に出し直す（古い投稿は消す）。"""
-        eco = self.bot.economy.for_guild(guild.id)
+        eco = guild_port(self.bot, guild.id, IRafflePort)
         raffle = eco.raffle_get()
         if raffle is None:
             return False, "募集中の抽選がありません。"
@@ -154,7 +157,7 @@ class RaffleCog(commands.Cog):
 
     async def cancel(self, guild: discord.Guild) -> tuple:
         """募集中の抽選をやめて、参加費を全員に返す。"""
-        raffle = self.bot.economy.for_guild(guild.id).raffle_close(cancel=True)
+        raffle = guild_port(self.bot, guild.id, IRafflePort).raffle_close(cancel=True)
         if raffle is None:
             return False, "募集中の抽選がありません。"
         await self._finish_message(
@@ -171,7 +174,7 @@ class RaffleCog(commands.Cog):
     # ------------------------------ 参加ボタン ------------------------------ #
     async def on_join(self, interaction: discord.Interaction):
         if interaction.guild_id is None or not approval.is_allowed(
-            self.bot.economy, self.bot.config, interaction.guild_id, interaction.user.id
+            port_of(self.bot, IGuildApprovalStore), self.bot.config, interaction.guild_id, interaction.user.id
         ):
             return await interaction.response.send_message(embed=ui.error_embed("利用できません"), ephemeral=True)
         eco = self.g(interaction)
@@ -184,6 +187,7 @@ class RaffleCog(commands.Cog):
                 embed=ui.error_embed("参加できません", format_failure(reason)), ephemeral=True
             )
         raffle = eco.raffle_get()
+        assert raffle is not None
         await interaction.response.edit_message(embed=raffle_embed(raffle))
         await interaction.followup.send(
             embed=ui.ok_embed(
@@ -207,10 +211,11 @@ class RaffleCog(commands.Cog):
 
     async def run_once(self) -> None:
         now = time.time()
+        approval_store = port_of(self.bot, IGuildApprovalStore)
         for guild in list(self.bot.guilds):
-            if not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
+            if not approval.is_allowed(approval_store, self.bot.config, guild.id, 0):
                 continue
-            eco = self.bot.economy.for_guild(guild.id)
+            eco = guild_port(self.bot, guild.id, IRafflePort)
             raffle = eco.raffle_get()
             if raffle is None or now < raffle["closes"]:
                 continue

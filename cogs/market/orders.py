@@ -21,10 +21,12 @@ from cogs.market.embeds import (
     tax_line,
 )
 from cogs.shared import ui
+from cogs.shared.cog_ports import port_of
 from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
 from cogs.shared.messages import format_failure
 from domain import bonds, market
 from domain import options as opt
+from domain.ports import IMarketDataPort
 from infra import catalogs
 
 RNG = random.SystemRandom()
@@ -346,7 +348,7 @@ async def option_buy(
 
     def quote(price: float) -> tuple:
         now = time.time()
-        events = cog.bot.economy.market_events(now)
+        events = port_of(cog.bot, IMarketDataPort).market_events(now)
         if pair and symbol2 is not None:
             rate = opt.pair_ask_rate(sym.key, symbol2, seconds, now, events)
             units = int(amount / rate) if rate > 0 else 0
@@ -419,7 +421,9 @@ async def option_write(
         now = time.time()
         strike = opt.strike_for(kind, price, strike_pct)
         units = int(amount / opt.margin_per_unit(strike))
-        bid = opt.bid_per_unit(kind, sym.key, price, strike, seconds, now, cog.bot.economy.market_events(now))
+        bid = opt.bid_per_unit(
+            kind, sym.key, price, strike, seconds, now, port_of(cog.bot, IMarketDataPort).market_events(now)
+        )
         return strike, units, math.ceil(round(units * opt.margin_per_unit(strike), 6)), int(bid * units)
 
     async def run(uid: int) -> None:

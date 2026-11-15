@@ -8,8 +8,9 @@ from cogs.admin.embeds import bulk_preview_lines
 from cogs.admin.purge import can_read_history
 from cogs.admin.views import AnnounceModal, PurgeConfirm, QuizBulkConfirm
 from cogs.shared import ui
-from cogs.shared.cog_ports import IHorseCogPort, IQuizCogPort, IRaffleCogPort, require_cog_port
+from cogs.shared.cog_ports import IHorseCogPort, IQuizCogPort, IRaffleCogPort, port_of, require_cog_port
 from domain import quizimport
+from domain.ports import IQuizPort
 
 MAX_IMAGE_BYTES = ui.MAX_IMAGE_BYTES
 MAX_IMPORT_BYTES = 200 * 1024
@@ -212,7 +213,7 @@ async def quiz_bulk(
         return
     quizzes, errors = quizimport.parse_bulk(text)
     if not errors:
-        existing = cog.bot.economy.quiz_existing_questions()
+        existing = port_of(cog.bot, IQuizPort).quiz_existing_questions()
         errors = [
             f"{i}問目: すでに登録されている問題です（同じ問題文）。"
             for i, q in enumerate(quizzes, start=1)

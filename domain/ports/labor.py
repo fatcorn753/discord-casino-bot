@@ -1,0 +1,39 @@
+"""地下作業・発掘品領域の水平ポート契約。"""
+
+from typing import Any, Optional, Protocol
+
+from domain.ports.core import IGuildScopable, IWalletPort
+
+
+class ILaborPort(IGuildScopable, IWalletPort, Protocol):
+    """地下作業・発掘品強化の契約。"""
+
+    def labor_state(self, user_id: int, now: Optional[float] = None, day: str = "") -> dict[str, Any]: ...
+
+    def labor_top(
+        self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None
+    ) -> dict[str, Any]: ...
+
+    def labor_click(
+        self, user_id: int, now: Optional[float] = None, day: str = "", rng: Any = None
+    ) -> dict[str, Any]: ...
+
+    def labor_click_hours(self, user_id: int, since: float) -> list[Any]: ...
+
+    def labor_collect(self, user_id: int, now: Optional[float] = None, day: str = "", detail: bool = False) -> Any: ...
+
+    def labor_drink(self, user_id: int, now: Optional[float] = None, day: str = "") -> tuple[Any, ...]: ...
+
+    def labor_upgrade(self, user_id: int, tool: str, now: Optional[float] = None, day: str = "") -> tuple[Any, ...]: ...
+
+    def labor_hire(self, user_id: int, kind: str, now: Optional[float] = None, day: str = "") -> tuple[Any, ...]: ...
+
+    def labor_dismiss(self, user_id: int, kind: str, now: Optional[float] = None, day: str = "") -> tuple[Any, ...]: ...
+
+    def labor_dorm(self, user_id: int, now: Optional[float] = None, day: str = "") -> tuple[Any, ...]: ...
+
+    def labor_set_renew(
+        self, user_id: int, on: bool, now: Optional[float] = None, day: str = ""
+    ) -> tuple[Any, ...]: ...
+
+    def relic_merge(self, user_id: int, item_id: str) -> tuple[Any, ...]: ...

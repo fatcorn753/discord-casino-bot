@@ -2,12 +2,13 @@
 
 import datetime
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from domain import events, skins
 from domain.games import rtplevel
-from domain.ports import IClock, IEconomy, ISessionGuard
+from domain.ports import ICasinoPort, IClock, ISessionGuard
 
 
 @dataclass(frozen=True)
@@ -35,18 +36,18 @@ class SettleGameResult:
 class CasinoService:
     """カジノ 1 プレイの開始〜精算〜中断のアプリケーションサービス。"""
 
-    def __init__(self, economy: IEconomy, sessions: ISessionGuard, clock: IClock) -> None:
+    def __init__(self, economy: ICasinoPort, sessions: ISessionGuard, clock: IClock) -> None:
         self._economy = economy
         self._sessions = sessions
         self._clock = clock
 
-    def for_guild(self, guild_id: int) -> Any:
+    def for_guild(self, guild_id: int) -> ICasinoPort:
         return self._economy.for_guild(guild_id)
 
-    def today(self):
+    def today(self) -> datetime.date:
         return self._clock.today()
 
-    def now(self):
+    def now(self) -> datetime.datetime:
         return self._clock.now()
 
     def begin_game(
@@ -58,7 +59,7 @@ class CasinoService:
         balance_factor: int = 1,
     ) -> BeginGameResult:
         """排他セッションを取得し、賭け金を検証して預かる。失敗時はセッションを解放して返す。"""
-        eco: Any = self._economy.for_guild(guild_id)
+        eco = self._economy.for_guild(guild_id)
         reason = self._sessions.try_start(user_id)
         if reason:
             return BeginGameResult(False, reason_kind="session", reason=reason)
@@ -90,13 +91,13 @@ class CasinoService:
         *,
         penalty: int = 0,
         keep_session: bool = False,
-        tags: Any = (),
+        tags: Iterable[Any] = (),
         rtp_kind: Optional[str] = None,
         rtp_done: bool = False,
         now: Optional[datetime.datetime] = None,
     ) -> SettleGameResult:
         """RTP・突発イベント補正を適用して預かり金を精算し、通知とミッション/連勝記録を更新する。"""
-        eco: Any = self._economy.for_guild(guild_id)
+        eco = self._economy.for_guild(guild_id)
         current_now = self._clock.now() if now is None else now
         rtp_shift = 0
         level = eco.rtp_level_get(game)
@@ -140,7 +141,7 @@ class CasinoService:
         self._sessions.end(user_id)
 
     def abort_game(self, guild_id: int, user_id: int, escrow_id: int) -> None:
-        eco: Any = self._economy.for_guild(guild_id)
+        eco = self._economy.for_guild(guild_id)
         try:
             eco.refund(escrow_id)
         finally:

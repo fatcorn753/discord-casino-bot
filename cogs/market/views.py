@@ -5,8 +5,10 @@ import time
 import discord
 
 from cogs.shared import ui
+from cogs.shared.cog_ports import port_of
 from domain import market, market_events
 from domain import options as opt
+from domain.ports import IMarketDataPort
 
 
 class HoldingsView(ui.OwnerView):
@@ -73,7 +75,7 @@ class MarketView(ui.OwnerView):
         self.add_item(self.symbol_select)
         self.add_item(self.period_select)
         now = time.time()
-        ev = market_events.current(cog.bot.economy.market_events(now), now)
+        ev = market_events.current(port_of(cog.bot, IMarketDataPort).market_events(now), now)
         if ev is not None:  # イベントがあるとき、その銘柄のコール・プットを、すぐ買えるボタンを出す
             for kind in (opt.CALL, opt.PUT):
                 name, emoji, _ = opt.KINDS[kind]

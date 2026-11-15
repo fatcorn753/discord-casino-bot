@@ -7,13 +7,15 @@ from typing import Any, cast
 import discord
 
 from cogs.shared import ui
+from cogs.shared.cog_ports import guild_port
 from domain import horse as horse_mod
+from domain.ports import IHorsePort
 
 MEDAL = ui.MEDALS
 
 
 def record_text(e: dict) -> str:
-    """戦績（オッズの元）。初出走は、そう書く。"""
+    """成績（オッズの元）。初出走は、そう書く。"""
     if not e.get("races"):
         return "初出走"
     return f"{e['races']}戦{e['wins']}勝（3着内{e['places']}）"
@@ -23,12 +25,12 @@ def stat_short(e: dict) -> str:
     return f"速{e['speed']} ス{e['stamina']} パ{e['power']} 根{e['guts']}"
 
 
-def race_title(eco, race: dict) -> str:
+def race_title(eco: IHorsePort, race: dict) -> str:
     tag = "（臨時）" if race["kind"] == "special" else ("🏆重賞" if horse_mod.is_major_race(race) else "")
     return f"🏇 第{eco.race_number(race['id'])}競走{tag}"
 
 
-async def refresh_entry_card(interaction: discord.Interaction, eco, race_id: int) -> None:
+async def refresh_entry_card(interaction: discord.Interaction, eco: IHorsePort, race_id: int) -> None:
     """申し込み・取り下げのあと、チャンネルの出馬表（申し込み中）を、いまの申し込みに書き換える。"""
     race = eco.race_get(race_id)
     if race is None or race["status"] != "entry" or not race["message_id"] or not race["channel_id"]:
@@ -51,7 +53,7 @@ def when(ts: float) -> str:
     return f"<t:{int(ts)}:t>（<t:{int(ts)}:R>）"
 
 
-def card_embed(eco, race: dict, closed: bool = False) -> discord.Embed:
+def card_embed(eco: IHorsePort, race: dict, closed: bool = False) -> discord.Embed:
     """出馬表。申し込み中は申し込みの馬、発売中は枠・オッズ・調子、終わったら着順。"""
     title = race_title(eco, race)
     entries = eco.race_entries(race["id"])
@@ -77,7 +79,7 @@ def card_embed(eco, race: dict, closed: bool = False) -> discord.Embed:
         else:
             head = [
                 f"コース: **{track.label}**　発走: {when(race['start_at'])}",
-                f"馬券の発売: **{when(race['bet_close'])}** まで（単勝=1着・複勝=3着以内。**オッズは戦績で決まり、賭けた時点で確定**）",
+                f"馬券の発売: **{when(race['bet_close'])}** まで（単勝=1着・複勝=3着以内。**オッズは成績で決まり、賭けた時点で確定**）",
             ]
 
         def entry_style(e: dict) -> str:
@@ -128,7 +130,7 @@ class RaceButton(discord.ui.DynamicItem[discord.ui.Button], template=r"horse:(?P
     async def callback(self, interaction: discord.Interaction):
         from cogs.horse.betting import BetPanel
 
-        eco = ui.bot_of(interaction).economy.for_guild(ui.guild_id_of(interaction))
+        eco = guild_port(ui.bot_of(interaction), ui.guild_id_of(interaction), IHorsePort)
         race = eco.race_get(self.race_id)
         if race is None:
             return await interaction.response.send_message(

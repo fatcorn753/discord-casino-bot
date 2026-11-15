@@ -8,7 +8,7 @@ import time
 import discord
 
 from cogs.shared import ui
-from cogs.shared.cog_ports import IShopCogPort, get_cog_port
+from cogs.shared.cog_ports import IShopCogPort, get_cog_port, guild_port
 from cogs.shared.messages import format_failure
 from cogs.teiai.escape import run_escape
 from cogs.teiai.texts import (
@@ -18,6 +18,7 @@ from cogs.teiai.texts import (
     LEVEL_TEXT as LEVEL_TEXT,
 )
 from domain import teiai
+from domain.ports import ITeiaiPort
 
 
 def meter(ratio, width: int = 10) -> str:
@@ -229,8 +230,8 @@ class TeiaiPanel(ui.OwnerView):
         )
         self.bot, self.uid = bot, uid
 
-    def eco(self, interaction: discord.Interaction):
-        return self.bot.economy.for_guild(ui.guild_id_of(interaction))
+    def eco(self, interaction: discord.Interaction) -> ITeiaiPort:
+        return guild_port(self.bot, ui.guild_id_of(interaction), ITeiaiPort)
 
     @discord.ui.button(label="預ける", style=discord.ButtonStyle.success)
     async def deposit(self, interaction: discord.Interaction, button: discord.ui.Button):

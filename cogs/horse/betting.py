@@ -6,9 +6,10 @@ import discord
 
 from cogs.horse.cards import race_title, stat_short, when
 from cogs.shared import ui
-from cogs.shared.cog_ports import IHorseCogPort, get_cog_port
+from cogs.shared.cog_ports import IHorseCogPort, get_cog_port, guild_port
 from cogs.shared.messages import format_failure
 from domain import horse as horse_mod
+from domain.ports import IHorsePort
 
 
 class StakeModal(discord.ui.Modal):
@@ -22,7 +23,7 @@ class StakeModal(discord.ui.Modal):
         )
         self.add_item(self.stake)
 
-    async def _submit_many(self, interaction: discord.Interaction, eco, lanes: list, stake: int) -> None:
+    async def _submit_many(self, interaction: discord.Interaction, eco: IHorsePort, lanes: list, stake: int) -> None:
         """単勝・複勝: 選んだ馬ごとに、同じ金額ずつ買う。"""
         ok, result = eco.race_bet_many(
             interaction.user.id, self.panel.race["id"], self.panel.kind, lanes, stake, time.time()
@@ -53,7 +54,7 @@ class StakeModal(discord.ui.Modal):
                 embed=ui.error_embed("金額が正しくありません", "半角の数字で入れてください。"), ephemeral=True
             )
             return
-        eco = self.panel.bot.economy.for_guild(ui.guild_id_of(interaction))
+        eco = guild_port(self.panel.bot, ui.guild_id_of(interaction), IHorsePort)
         lanes = self.panel.picked()
         if self.panel.kind in horse_mod.MULTI_KINDS:
             await self._submit_many(interaction, eco, lanes, int(raw))
@@ -97,7 +98,7 @@ class BetPanel(ui.OwnerView):
         self.kind = "win"
         self.lanes = [1, 2, 3]  # 複数選ぶ馬券の選択（先頭から、必要な頭数だけ使う）
         self.multi = [1]  # 単勝・複勝で選んでいる馬（何頭でも）
-        self._build(bot.economy.for_guild(race["guild_id"]))
+        self._build(guild_port(bot, race["guild_id"], IHorsePort))
 
     async def _reject_non_owner(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message("この画面を使えるのは、開いた本人だけです。", ephemeral=True)
@@ -105,7 +106,7 @@ class BetPanel(ui.OwnerView):
     async def announce_bet(self, interaction: discord.Interaction, picks: str, result: dict) -> None:
         """買った馬券を、レースのチャンネルに公開する（誰が何に賭けたか）。投稿できなくても、購入は済んでいる。"""
         cog = get_cog_port(self.bot, "HorseCog", IHorseCogPort)
-        eco = self.bot.economy.for_guild(interaction.guild_id)
+        eco = guild_port(self.bot, ui.guild_id_of(interaction), IHorsePort)
         if cog is None or interaction.guild is None:
             return
         await cog.post_bet_announcement(
@@ -121,7 +122,7 @@ class BetPanel(ui.OwnerView):
     async def announce_bets(self, interaction: discord.Interaction, results: list) -> None:
         """単勝・複勝をまとめて買ったとき、1つの投稿で公開する。"""
         cog = get_cog_port(self.bot, "HorseCog", IHorseCogPort)
-        eco = self.bot.economy.for_guild(interaction.guild_id)
+        eco = guild_port(self.bot, ui.guild_id_of(interaction), IHorsePort)
         if cog is None or interaction.guild is None or not results:
             return
         parts = "、".join(f"{r['lane']}枠 {r['name']}（オッズ {r['odds']:.1f}）" for r in results)
@@ -153,7 +154,7 @@ class BetPanel(ui.OwnerView):
             for e in entries
         ]
 
-    def _build(self, eco) -> None:
+    def _build(self, eco: IHorsePort) -> None:
         self.clear_items()
         kind = discord.ui.Select(
             placeholder="馬券の種類",
@@ -198,7 +199,7 @@ class BetPanel(ui.OwnerView):
         go.callback = self._on_go
         self.add_item(go)
 
-    def embed(self, eco) -> discord.Embed:
+    def embed(self, eco: IHorsePort) -> discord.Embed:
         mine = eco.race_bets(self.user_id, self.race["id"])
         lanes = self.picked()
         lines = [
@@ -234,7 +235,7 @@ class BetPanel(ui.OwnerView):
         return e
 
     async def _redraw(self, interaction: discord.Interaction) -> None:
-        eco = self.bot.economy.for_guild(self.race["guild_id"])
+        eco = guild_port(self.bot, self.race["guild_id"], IHorsePort)
         self._build(eco)
         await interaction.response.edit_message(embed=self.embed(eco), view=self)
 

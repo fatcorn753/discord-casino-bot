@@ -10,8 +10,9 @@ from cogs.admin.embeds import announce_embed
 from cogs.admin.purge import PurgeResult, delete_own_messages
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
-from cogs.shared.cog_ports import IApprovalCogPort, IQuizCogPort, get_cog_port
+from cogs.shared.cog_ports import IApprovalCogPort, IQuizCogPort, get_cog_port, guild_port, port_of
 from domain import approval
+from domain.ports import IAdminPort, IApprovalAdminPort, IQuizPort
 
 if TYPE_CHECKING:
     from cogs.admin.cog import ApprovalCog
@@ -43,7 +44,7 @@ class ApprovalButton(
 
     async def callback(self, interaction: discord.Interaction):
         bot = ui.bot_of(interaction)
-        eco, gid = bot.economy, self.guild_id
+        eco, gid = port_of(bot, IApprovalAdminPort), self.guild_id
         guild = bot.get_guild(gid)
         row = eco.get_guild_status(gid) or {}
         name = guild.name if guild else row.get("name") or str(gid)
@@ -95,7 +96,7 @@ class AnnounceConfirm(ui.OwnerView):
         )
         done, failed = [], []
         for guild in self.guilds:
-            channel = self.channel or announce_channel(guild, self.cog.bot.economy.for_guild(guild.id))
+            channel = self.channel or announce_channel(guild, guild_port(self.cog.bot, guild.id, IAdminPort))
             if channel is None:
                 failed.append(f"{guild.name}（投稿できるチャンネルがありません）")
                 continue
@@ -147,7 +148,7 @@ class QuizBulkConfirm(ui.OwnerView):
     async def register(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.stop()
         await interaction.response.defer()
-        ids = self.cog.bot.economy.quiz_add_many(self.quizzes, time.time(), interaction.user.display_name)
+        ids = port_of(self.cog.bot, IQuizPort).quiz_add_many(self.quizzes, time.time(), interaction.user.display_name)
         note = "告知はしていません。`/クイズ 挑戦` に出ます。"
         if self.announce:
             quiz_cog = get_cog_port(self.cog.bot, "QuizCog", IQuizCogPort)

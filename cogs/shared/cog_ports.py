@@ -4,9 +4,12 @@
 各連携ポイントで必要なメソッドだけを切り出した水平インターフェースを定義する。
 """
 
-from typing import Any, Optional, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Optional, Protocol, TypeVar, cast
 
 import discord
+
+if TYPE_CHECKING:
+    from domain.ports import IHorsePort
 
 T = TypeVar("T")
 
@@ -43,7 +46,9 @@ class IHorseCogPort(Protocol):
         bet_min: int,
         channel: Optional[discord.abc.Messageable] = None,
     ) -> int: ...
-    async def post_bet_announcement(self, guild: discord.Guild, eco: Any, race: dict, content: str) -> None: ...
+    async def post_bet_announcement(
+        self, guild: discord.Guild, eco: "IHorsePort", race: dict, content: str
+    ) -> None: ...
 
 
 class IRaffleCogPort(Protocol):
@@ -82,6 +87,16 @@ class IP2PCogPort(Protocol):
     async def open_detail(self, interaction: discord.Interaction, listing_id: int) -> None: ...
     async def open_sell(self, interaction: discord.Interaction) -> None: ...
     async def open_mine(self, interaction: discord.Interaction) -> None: ...
+
+
+def port_of(bot: Any, _port: type[T]) -> T:
+    """`bot.economy` を利用側が要求する水平ポート契約（`domain/ports`）型として取得する。"""
+    return cast(T, bot.economy)
+
+
+def guild_port(bot: Any, guild_id: int, _port: type[T]) -> T:
+    """`bot.economy.for_guild(guild_id)` を水平ポート契約型として取得する。"""
+    return cast(T, bot.economy.for_guild(guild_id))
 
 
 def get_cog_port(bot: Any, name: str, _port: type[T]) -> Optional[T]:

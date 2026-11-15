@@ -5,7 +5,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from domain.ports import IClock, IEconomy
+from domain.earnings import MemoInfo
+from domain.ports import IClock, IEconomyServicePort
 from domain.types import DailyResult, TransferResult
 from infra.clock import offset_hours
 
@@ -13,14 +14,14 @@ from infra.clock import offset_hours
 @dataclass(frozen=True)
 class DailyClaimOutcome:
     result: DailyResult
-    memo: Any = None
+    memo: Optional[MemoInfo] = None
 
 
 class EconomyService:
     """デイリーボーナス・送金・週間集計補完のユースケース調整。"""
 
-    def __init__(self, economy: IEconomy, clock: IClock, config: dict[str, Any]) -> None:
-        self._economy: Any = economy
+    def __init__(self, economy: IEconomyServicePort, clock: IClock, config: dict[str, Any]) -> None:
+        self._economy = economy
         self._clock = clock
         self._config = config
 

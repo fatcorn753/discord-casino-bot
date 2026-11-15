@@ -9,9 +9,10 @@ from discord.ext import commands, tasks
 
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
-from cogs.shared.cog_ports import IShopCogPort, get_cog_port
+from cogs.shared.cog_ports import IShopCogPort, get_cog_port, guild_port, port_of
 from cogs.shared.messages import format_standings_lines
 from domain import approval, shop, weekly
+from domain.ports import IGuildApprovalStore, IWeeklyPort
 from infra import catalogs, logthrottle
 from infra.clock import local_now
 from services import services_of
@@ -47,10 +48,11 @@ class WeeklyCog(commands.Cog):
     async def run_once(self) -> None:
         today = local_now(self.bot).date()
         prev_week = weekly.previous_week_id(today)
+        approval_store = port_of(self.bot, IGuildApprovalStore)
         for guild in list(self.bot.guilds):
-            if not approval.is_allowed(self.bot.economy, self.bot.config, guild.id, 0):
+            if not approval.is_allowed(approval_store, self.bot.config, guild.id, 0):
                 continue
-            eco = self.bot.economy.for_guild(guild.id)
+            eco = guild_port(self.bot, guild.id, IWeeklyPort)
             last = eco.weekly_last_announced()
             if last is None:
                 eco.set_weekly_announced(

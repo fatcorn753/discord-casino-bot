@@ -84,7 +84,6 @@ class Economy(
     MarketEventMixin,
     EarningsMixin,
     P2PMixin,
-    IEconomy,
 ):
     DAILY_BASE = DAILY_BASE
     DAILY_STREAK_BONUS = DAILY_STREAK_BONUS
@@ -179,3 +178,8 @@ class Economy(
 
     def close(self) -> None:
         self._db.close()
+
+
+def _verify_ieconomy(eco: Economy) -> IEconomy:
+    """Pyright による IEconomy 構造的部分型の一致検証アンカー。"""
+    return eco

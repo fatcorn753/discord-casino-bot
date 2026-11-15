@@ -12,12 +12,13 @@ from cogs.economy import boards
 from cogs.economy.boards import RankingView as RankingView  # noqa: F401
 from cogs.shared import ranking, ui
 from cogs.shared.amount import balance_choices
-from cogs.shared.cog_ports import IShopCogPort, get_cog_port
+from cogs.shared.cog_ports import IShopCogPort, get_cog_port, guild_port, port_of
 from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
 from cogs.shared.messages import format_failure, format_history, format_memo
 from cogs.teiai.panel import TeiaiPanel, panel_embed
 from domain import approval, shop, teiai
 from domain import missions as missions_mod
+from domain.ports import IEconomyPanelPort, ILeaderboardStore
 from domain.types import DAILY_BASE, DAILY_STREAK_BONUS, DAILY_STREAK_CAP
 from infra import catalogs
 from infra.clock import local_now
@@ -86,9 +87,9 @@ class EconomyCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    def g(self, interaction: discord.Interaction):
+    def g(self, interaction: discord.Interaction) -> IEconomyPanelPort:
         """このサーバーのペリカの記録（ペリカはサーバーごとに別々）。"""
-        return self.bot.economy.for_guild(ui.guild_id_of(interaction))
+        return guild_port(self.bot, ui.guild_id_of(interaction), IEconomyPanelPort)
 
     group = app_commands.Group(name="ペリカ", description="💴 残高・デイリー・ランキング・送金")
 
@@ -347,7 +348,7 @@ class EconomyCog(commands.Cog):
 
     @tasks.loop(minutes=BOARD_INTERVAL_MINUTES)
     async def refresh_boards(self):
-        for board in self.bot.economy.list_leaderboards():
+        for board in port_of(self.bot, ILeaderboardStore).list_leaderboards():
             try:
                 await self._refresh_board(board)
             except Exception as exc:  # 1つのサーバーの失敗で、他のサーバーの更新を止めない
@@ -359,7 +360,7 @@ class EconomyCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild):
-        self.bot.economy.delete_leaderboard(guild.id)
+        port_of(self.bot, ILeaderboardStore).delete_leaderboard(guild.id)
 
     async def _delete_board_message(self, guild: discord.Guild, board: Optional[dict]) -> None:
         await boards.delete_board_message(guild, board)
