@@ -24,6 +24,10 @@ class AccountCore:
         )
         if cur.rowcount:
             self.ledger(guild_id, user_id, INITIAL_BALANCE, INITIAL_BALANCE, "初期支給")
+            # 帝愛共済の口を 1 口配る（#34）
+            self._conn.execute(
+                "INSERT OR IGNORE INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, 1)", (guild_id, user_id)
+            )
 
     def ledger(self, guild_id: int, user_id: int, delta: int, balance_after: int, reason: str) -> None:
         self._conn.execute(

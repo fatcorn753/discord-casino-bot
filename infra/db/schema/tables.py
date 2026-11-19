@@ -378,7 +378,12 @@ def create_tables(conn: sqlite3.Connection) -> None:
             trust_paid      REAL NOT NULL DEFAULT 0,   -- これまでに払った信託の利息の累計
             excess_unpaid   REAL NOT NULL DEFAULT 0,   -- 信託でも熱浴・共済でも払えなかった超過損失の累計
             rf              REAL NOT NULL DEFAULT 0,   -- 無リスク金利 r_f（1日あたり。0 は未開始で、基準の金利。#18）
-            rf_ts           REAL NOT NULL DEFAULT 0    -- r_f を、ここまで進めた時刻
+            rf_ts           REAL NOT NULL DEFAULT 0,   -- r_f を、ここまで進めた時刻
+            kyosai_div_ts   REAL NOT NULL DEFAULT 0,   -- 帝愛共済の配当を、最後に配った時刻（0 は未開始。#34）
+            kyosai_paid     REAL NOT NULL DEFAULT 0,   -- これまでに配った共済の配当の累計
+            kyosai_charged  REAL NOT NULL DEFAULT 0,   -- これまでに共済へ請求した超過損失の累計
+            kyosai_house_ts REAL NOT NULL DEFAULT 0,   -- 帝愛の持ち口の値段を数え始めた時刻（回収した時刻）
+            trust_premium   REAL                       -- 動議で決まった信託の上乗せ金利（NULL は設定の既定値）
         );
         CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛の胴元の口座（サーバーごとに1行）。ピンハネが入る。銀行の手元（預金の準備）とは別
             guild_id INTEGER PRIMARY KEY,
@@ -410,6 +415,38 @@ def create_tables(conn: sqlite3.Connection) -> None:
             amount      INTEGER NOT NULL,              -- 出資額の合計（払い戻しはできない）
             dividends   INTEGER NOT NULL DEFAULT 0,    -- これまでに受け取った配当の合計
             PRIMARY KEY (guild_id, owner_id, investor_id)
+        );
+        CREATE TABLE IF NOT EXISTS kyosai_units (      -- 帝愛共済の口（人ごと。user_id=0 は帝愛の持ち口。#34）
+            guild_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            units    INTEGER NOT NULL DEFAULT 0,        -- 0 の行も残す（配り直さないため）
+            PRIMARY KEY (guild_id, user_id)
+        );
+        CREATE TABLE IF NOT EXISTS kyosai_offers (     -- 口の譲渡の申し出（売り手 → 買い手。買い手が受けると成立）
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            seller   INTEGER NOT NULL,
+            buyer    INTEGER NOT NULL,
+            units    INTEGER NOT NULL,
+            price    INTEGER NOT NULL,                  -- 全部でいくら
+            expires  REAL    NOT NULL,
+            status   TEXT    NOT NULL DEFAULT 'open'    -- open / done / cancelled
+        );
+        CREATE TABLE IF NOT EXISTS kyosai_motions (    -- 動議（信託の上乗せ金利を premium にする）。1サーバーに投票中は1つだけ
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            proposer INTEGER NOT NULL,
+            premium  REAL    NOT NULL,
+            closes   REAL    NOT NULL,
+            status   TEXT    NOT NULL DEFAULT 'open',   -- open / passed / rejected
+            yes      INTEGER NOT NULL DEFAULT 0,        -- 締めたときの賛成の口数
+            no       INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS kyosai_votes (      -- 動議への投票（締めるときに、そのときの口数で数える）
+            motion_id INTEGER NOT NULL,
+            user_id   INTEGER NOT NULL,
+            yes       INTEGER NOT NULL,
+            PRIMARY KEY (motion_id, user_id)
         );
         CREATE TABLE IF NOT EXISTS teiai_deposits (    -- 帝愛への預金（人ごと）
             guild_id INTEGER NOT NULL,

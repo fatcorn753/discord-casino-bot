@@ -20,6 +20,7 @@ COG_MODULES: tuple[str, ...] = (
     "cogs.event.cog",
     "cogs.help.cog",
     "cogs.horse.cog",
+    "cogs.kyosai.cog",
     "cogs.labor.cog",
     "cogs.loan.cog",
     "cogs.market.bond_cog",

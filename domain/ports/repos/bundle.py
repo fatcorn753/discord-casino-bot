@@ -32,7 +32,7 @@ from domain.ports.repos.social import (
     IRaffleRepo,
     IShopRepo,
 )
-from domain.ports.repos.teiai import IBankRepo, IDebtRepo, ILoanRepo
+from domain.ports.repos.teiai import IBankRepo, IDebtRepo, IKyosaiRepo, ILoanRepo
 
 
 @dataclass(frozen=True)
@@ -67,6 +67,7 @@ class IRepositoryBundle(IGuildScopedRepo):
     bonds: IBondRepo
     options: IOptionRepo
     p2p: IP2PRepo
+    kyosai: IKyosaiRepo
     wallet: IWalletRepo
     assets: IAssetRepo
 

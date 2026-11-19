@@ -46,6 +46,7 @@ from infra.db.debt import (
     DebtRepo,
     DepositLiquidationStep,
     DepositSeizureStep,
+    KyosaiLiquidationStep,
     MarginLiquidationStep,
     MarginSeizureStep,
     OptionLiquidationStep,
@@ -57,12 +58,14 @@ from infra.db.escrow import EscrowRepo
 from infra.db.events import EventRepo
 from infra.db.guild import GuildRepo
 from infra.db.horse import HorseRepo
+from infra.db.kyosai import KyosaiRepo
 from infra.db.labor import LaborRepo
 from infra.db.lazy_bridges import (
     LazyAssetSeizureStep,
     LazyBankruptExecutor,
     LazyBankruptPrepHook,
     LazyDebtLifecycleHook,
+    LazyExcessLossSink,
     LazyGraceEnterHook,
     LazyLiquidationStep,
     LazyMarginCollateralGuard,
@@ -122,6 +125,7 @@ class RepositoryBundle(IRepositoryBundle):
     bonds: BondRepo
     options: OptionRepo
     p2p: P2PRepo
+    kyosai: KyosaiRepo
     wallet: WalletRepo
     assets: AssetRepo
     db: EcoDb
@@ -160,6 +164,7 @@ class RepositoryBundle(IRepositoryBundle):
             bonds=self.bonds.for_guild(guild_id),
             options=self.options.for_guild(guild_id),
             p2p=self.p2p.for_guild(guild_id),
+            kyosai=self.kyosai.for_guild(guild_id),
             wallet=self.wallet.for_guild(guild_id),
             assets=self.assets.for_guild(guild_id),
         )
@@ -195,6 +200,7 @@ def open_repositories(
         db,
         account,
         notices,
+        excess_sink=LazyExcessLossSink(lambda: kyosai),
         status_reader=LazyStatusReader(lambda: debt),
         margin_ratio_reader=LazyMarginRatioReader(lambda: margin),
         grace_enter_hook=CompositeGraceEnterHook((LazyGraceEnterHook(lambda: p2p),)),
@@ -239,6 +245,7 @@ def open_repositories(
     bonds = BondRepo(db, account, bank, debt_repay=debt, collateral_guard=margin, strict=strict)
     options = OptionRepo(db, account, market, market_events, earnings, bank, debt, strict=strict)
     p2p = P2PRepo(db, account, horses, debt, bank, bank, notices, strict=strict)
+    kyosai = KyosaiRepo(db, account, bank, notices, strict=strict)
 
     seizure_step = CompositeAssetSeizureStep(
         (
@@ -258,6 +265,7 @@ def open_repositories(
             OptionLiquidationStep(options),
             DepositLiquidationStep(account, bank),
             CompanyLiquidationStep(account, company),
+            KyosaiLiquidationStep(kyosai),
         )
     )
     seizure_value_step = CompositeSeizureValueStep((ShopAndHorseSeizureStep(shop, auction, horses),))
@@ -321,6 +329,7 @@ def open_repositories(
         bonds=bonds,
         options=options,
         p2p=p2p,
+        kyosai=kyosai,
         wallet=wallet,
         assets=assets,
     )

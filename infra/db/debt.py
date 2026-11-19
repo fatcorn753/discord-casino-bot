@@ -32,7 +32,7 @@ from domain.ports.bridges import (
     NoOpOverdueLoanCollector,
     NoOpSeizureValueStep,
 )
-from domain.ports.repos import IDebtRepo
+from domain.ports.repos import IDebtRepo, IKyosaiRepo
 from infra.db.account import AccountCore
 from infra.db.auction import AuctionRepo
 from infra.db.bank import BankRepo
@@ -227,6 +227,16 @@ class DepositLiquidationStep(ILiquidationStep):
         saved = self._bank.deposit_take_for(guild_id, user_id, self._bank.deposit_of_for(guild_id, user_id), now)
         if saved:
             self._account.apply(guild_id, user_id, saved, "破産:預金の差し押さえ")
+
+
+class KyosaiLiquidationStep(ILiquidationStep):
+    """自己破産で、帝愛共済の口を帝愛の持ち口へ回収する（#34。値段はつけず、破産財団には入れない）。"""
+
+    def __init__(self, kyosai: IKyosaiRepo) -> None:
+        self._kyosai = kyosai
+
+    def liquidate(self, guild_id: int, user_id: int, now: float) -> None:
+        self._kyosai.recover_units_for(guild_id, user_id, now)
 
 
 class ShopAndHorseSeizureStep(ISeizureValueStep):

@@ -9,6 +9,7 @@ from domain.ports.bridges import (
     IBankruptExecutor,
     IBankruptPrepHook,
     IDebtLifecycleHook,
+    IExcessLossSink,
     IGraceEnterHook,
     ILiquidationStep,
     IMarginCollateralGuard,
@@ -146,3 +147,13 @@ class LazyWealthyReader(IWealthyReader):
 
     def wealthy_ids_for(self, guild_id: int) -> set[int]:
         return self._target().wealthy_ids_for(guild_id)
+
+
+class LazyExcessLossSink(IExcessLossSink):
+    """帝愛共済（#34）は銀行より後に組み立てるので、呼ばれたときに解決する。"""
+
+    def __init__(self, target: Callable[[], IExcessLossSink]) -> None:
+        self._target = target
+
+    def charge_excess_for(self, guild_id: int, amount: int, now: float) -> int:
+        return self._target().charge_excess_for(guild_id, amount, now)

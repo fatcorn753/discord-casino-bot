@@ -56,9 +56,17 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         "excess_unpaid",
         "rf",
         "rf_ts",
+        "kyosai_div_ts",
+        "kyosai_paid",
+        "kyosai_charged",
+        "kyosai_house_ts",
     ):
         if col not in tb:
             conn.execute(f"ALTER TABLE teiai_bank ADD COLUMN {col} REAL NOT NULL DEFAULT 0")
+    if tb and "trust_premium" not in tb:
+        conn.execute("ALTER TABLE teiai_bank ADD COLUMN trust_premium REAL")
+    # 帝愛共済（#34）: 口をまだ持ったことのない人に、1口ずつ配る（行が残るので、2回目からは何もしない）
+    conn.execute("INSERT OR IGNORE INTO kyosai_units (guild_id, user_id, units) SELECT guild_id, user_id, 1 FROM users")
     th = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_house)")}
     if "grant_day" not in th:
         conn.execute("ALTER TABLE teiai_house ADD COLUMN grant_day TEXT NOT NULL DEFAULT ''")

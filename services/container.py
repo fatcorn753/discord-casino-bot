@@ -14,6 +14,7 @@ from services.company import CompanyService
 from services.economy import EconomyService
 from services.event import EventService
 from services.horse import HorseService
+from services.kyosai import KyosaiService
 from services.labor import LaborService
 from services.loan import LoanService
 from services.market import MarketService
@@ -41,6 +42,7 @@ class ServiceRegistry:
     loan: LoanService
     shop: ShopService
     teiai: TeiaiService
+    kyosai: KyosaiService
     ranking: RankingService
     quiz: QuizService
     p2p: P2PService
@@ -113,6 +115,7 @@ def build_services(
             loans=repos.loans,
             clock=clock,
         ),
+        kyosai=KyosaiService(kyosai=repos.kyosai, clock=clock),
         quiz=QuizService(quiz=repos.quiz, clock=clock),
         p2p=P2PService(p2p=repos.p2p, horses=repos.horses, shop=repos.shop, wallet=repos.wallet, clock=clock),
         raffle=RaffleService(raffle=repos.raffle, clock=clock),

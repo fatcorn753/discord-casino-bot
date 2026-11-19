@@ -344,7 +344,7 @@ class BankRepo(ScopedRepo, IBankRepo):
         cash += bailout - cover  # 余った肩代わりは、手元へ
         charged = 0
         left = int(excess - cover)
-        if left > 0:  # 残りは共済の負担（#34 まではつながっておらず、払えない）
+        if left > 0:  # 残りは帝愛共済の口の持ち主の負担（#34）。帝愛の持ち口の分は払われずに残る
             charged = min(left, max(0, self._excess_sink.charge_excess_for(guild_id, left, now)))
             if left > charged:
                 self._conn.execute(
@@ -393,7 +393,20 @@ class BankRepo(ScopedRepo, IBankRepo):
 
     def trust_rate_per_day_for(self, guild_id: int, now: float) -> float:
         """帝愛信託の利率 r_trust = r_f + 上乗せ（1日あたり。連続複利）。"""
-        return self.risk_free_per_day_for(guild_id, now) + teiai.TRUST_PREMIUM_PER_DAY
+        return self.risk_free_per_day_for(guild_id, now) + self.trust_premium_for(guild_id)
+
+    def trust_premium_for(self, guild_id: int) -> float:
+        """信託の上乗せ金利。共済の動議で決まっていればその値、なければ設定の既定値（#34）。"""
+        row = self._conn.execute("SELECT trust_premium FROM teiai_bank WHERE guild_id=?", (guild_id,)).fetchone()
+        if row is None or row["trust_premium"] is None:
+            return teiai.TRUST_PREMIUM_PER_DAY
+        return row["trust_premium"]
+
+    def bank_reserve_for(self, guild_id: int, now: float) -> tuple[float, int, Optional[float]]:
+        """(利用可能現金, 負債 = 信託 + 社債の元本, 準備率 θ)。呼び出し側のトランザクションの中で使う。"""
+        state = self.bank_sync_for(guild_id, now)
+        total, bonds, _locks, available, ratio = self._reserve_for(guild_id, state["cash"], now)
+        return available, total + bonds, ratio
 
     def bank_trust_accrue(self, now: float) -> int:
         """帝愛信託の利息を、前回からの経過時間ぶん払う（1時間たっていなければ何もしない）。払った額を返す。

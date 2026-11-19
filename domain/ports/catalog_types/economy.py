@@ -31,6 +31,21 @@ class TeiaiStatusContract:
 
 
 @dataclass(frozen=True)
+class KyosaiSectionContract:
+    target_ratio: float
+    dividend_share: float
+    dividend_cap: int
+    gate_ratio: float
+    dormant_days: int
+    auction_start: int
+    auction_decay: float
+    auction_floor: int
+    offer_hours: int
+    motion_hours: int
+    premium_max: float
+
+
+@dataclass(frozen=True)
 class ThermostatSectionContract:
     enforce: bool
     cool_days: float
@@ -95,6 +110,7 @@ class TeiaiCatalogContract:
     wealthy_assets: int
     statuses: Mapping[str, TeiaiStatusContract]
     thermostat: ThermostatSectionContract
+    kyosai: KyosaiSectionContract
 
 
 @dataclass(frozen=True)

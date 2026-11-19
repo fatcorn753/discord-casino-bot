@@ -158,7 +158,11 @@ def test_the_bank_pays_only_what_it_has_and_never_creates_money(eco):
     cash = eco.bank.bank_status(1.0)["cash"]
     set_price(eco, "cs", 3000.0, ts=res["expiry"] - 10)  # 大当たり
     done = eco.options.option_settle(res["expiry"] + 1)
-    assert done[0]["paid"] <= cash and eco.bank.bank_status(res["expiry"] + 1)["cash"] >= 0
+    # 手元で足りない分は、帝愛共済の口の持ち主が負担する（#34）。それを超えては払わない
+    charged = eco.db.conn.execute(
+        "SELECT kyosai_charged FROM teiai_bank WHERE guild_id=?", (eco.bank.guild_id,)
+    ).fetchone()[0]
+    assert done[0]["paid"] <= cash + charged and eco.bank.bank_status(res["expiry"] + 1)["cash"] >= 0
 
 
 def test_winnings_above_the_premium_count_as_income_for_the_debt_withholding(eco):

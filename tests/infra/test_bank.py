@@ -114,10 +114,11 @@ def test_trust_interest_is_never_taken_from_the_trust_itself(eco):
         eco.bank.bank_set_for(G, 0.0, cash["loaned"])
         eco.db.conn.execute("UPDATE teiai_bank SET ts=? WHERE guild_id=?", (NOW + 10 * 86400, G))  # 地下融資は戻さない
     paid = eco.bank.bank_trust_accrue(NOW + 86400)
-    assert paid == 0 and eco.bank.deposit_of(A) == 100_000  # 信託から利息を払うと、自分で自分に払うことになる
-    assert (
-        eco.bank.bank_status(NOW + 86400)["excess_unpaid"] > 0
-    )  # 払えなかった分は、超過損失として記録（#34 で共済が負う）
+    assert eco.bank.deposit_of(A) == 100_000 + paid  # 信託から利息を払うと、自分で自分に払うことになる
+    s = eco.bank.bank_status(NOW + 86400)
+    assert paid > 0 and s["excess_unpaid"] == 0  # 手元で払えない分は、帝愛共済の口の持ち主が負担する（#34）
+    charged = eco.db.conn.execute("SELECT kyosai_charged FROM teiai_bank WHERE guild_id=?", (G,)).fetchone()[0]
+    assert charged == paid
 
 
 def test_no_depositors_means_skim_and_losses_vanish_as_before(eco):
@@ -427,8 +428,11 @@ def test_shortfall_within_the_trust_is_shared_by_size_and_never_goes_negative(ec
     assert eco.bank.deposit_of(A) == 180_000 and eco.bank.deposit_of(B) == 90_000  # 1割ずつ按分
     with eco.db.tx():
         paid = eco.bank.bank_pay_for(G, 1_000_000, NOW)  # 信託の総額を超える
-    assert paid == 270_000 and eco.bank.deposit_of(A) == 0 and eco.bank.deposit_of(B) == 0
-    assert eco.bank.bank_status(NOW)["excess_unpaid"] == pytest.approx(730_000)  # 共済（#34）が負うはずの分
+    assert paid == 1_000_000 and eco.bank.deposit_of(A) == 0 and eco.bank.deposit_of(B) == 0
+    # 信託の総額を超えた 73万は、帝愛共済（#34）の口の持ち主が 1口ずつ負担する
+    assert eco.bank.bank_status(NOW)["excess_unpaid"] == 0
+    charged = eco.db.conn.execute("SELECT kyosai_charged FROM teiai_bank WHERE guild_id=?", (G,)).fetchone()[0]
+    assert charged == 730_000
 
 
 def test_thermostat_bank_bears_the_whole_loss_while_the_load_is_positive(eco, monkeypatch):

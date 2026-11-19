@@ -10,6 +10,7 @@ from domain.ports.catalog_types.economy import (
     BondKindContract,
     BondsCatalogContract,
     EconomyCatalogContract,
+    KyosaiSectionContract,
     LoansSectionContract,
     P2pSectionContract,
     QuizpaySectionContract,
@@ -63,6 +64,21 @@ class ThermostatSection(ThermostatSectionContract):
     memory_ratio: float = Field(ge=1)
     capacity_min: int = Field(gt=0)
     coupling: float = Field(gt=0)
+
+
+@pydantic_dataclass(frozen=True, config=STRICT_CONFIG, kw_only=True)
+class KyosaiSection(KyosaiSectionContract):
+    target_ratio: float = Field(gt=0)
+    dividend_share: float = Field(ge=0, le=1)
+    dividend_cap: int = Field(ge=0)
+    gate_ratio: float = Field(ge=0)
+    dormant_days: int = Field(gt=0)
+    auction_start: int = Field(gt=0)
+    auction_decay: float = Field(ge=0, le=1)
+    auction_floor: int = Field(gt=0)
+    offer_hours: int = Field(gt=0)
+    motion_hours: int = Field(gt=0)
+    premium_max: float = Field(ge=0, le=0.1)
 
 
 @pydantic_dataclass(frozen=True, config=STRICT_CONFIG, kw_only=True)
@@ -121,6 +137,7 @@ class TeiaiCatalog(TeiaiCatalogContract):
     wealthy_assets: int = Field(gt=0)
     statuses: Mapping[str, TeiaiStatusConfig]
     thermostat: ThermostatSection
+    kyosai: KyosaiSection
 
 
 # ------------------------------------------------------------------ #

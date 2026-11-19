@@ -46,7 +46,7 @@ from domain.ports.repos.social import (
     IRaffleRepo,
     IShopRepo,
 )
-from domain.ports.repos.teiai import IBankRepo, IDebtRepo, ILoanRepo
+from domain.ports.repos.teiai import IBankRepo, IDebtRepo, IKyosaiRepo, ILoanRepo
 
 __all__ = [
     "IQuizPlayRepo",
@@ -63,6 +63,7 @@ __all__ = [
     "IAuctionRepo",
     "ICompanyRepo",
     "IBankRepo",
+    "IKyosaiRepo",
     "IBondRepo",
     "ICryptoRepo",
     "IDebtRepo",

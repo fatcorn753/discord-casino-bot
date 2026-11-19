@@ -54,6 +54,21 @@ ECONOMY_FAILURES: dict[str, FailureFormatter] = {
     "insufficient_balance_need": lambda p: (
         f"ペリカが足りません（{p['need']:,}ペリカ必要・残高 {p['balance']:,}ペリカ）。"
     ),
+    "kyosai_bad_units": lambda p: "口数は1以上を指定してください。",
+    "kyosai_bad_price": lambda p: "値段は0以上を指定してください。",
+    "kyosai_bad_buyer": lambda p: "自分や帝愛には譲れません。",
+    "kyosai_house_short": lambda p: f"帝愛が売りに出している口は {p['have']}口 です。",
+    "kyosai_units_short": lambda p: f"譲れる口は {p['have']}口 です（ほかの申し出に出している口は数えません）。",
+    "kyosai_gate_locked": lambda p: (
+        "いまは口の売買が止まっています（帝愛銀行の準備率が低いか、破産猶予中の人がいます）。"
+    ),
+    "kyosai_offer_not_found": lambda p: (
+        "その申し出は見つかりません（期限切れか、取り消されたか、自分あてではありません）。"
+    ),
+    "kyosai_bad_premium": lambda p: f"上乗せ金利は 0〜{p['max_pct']:.2f}%/日 で指定してください。",
+    "kyosai_no_units": lambda p: "共済の口を持っている人だけができます。",
+    "kyosai_motion_open": lambda p: "投票中の動議があります。締め切られてから出してください。",
+    "kyosai_no_motion": lambda p: "投票中の動議はありません。",
     "debt_blocks": lambda p: f"借金が {p['debt']:,}ペリカ 残っているので、{p['verb']}。",
     "grace_lock": "破産猶予中は、取引（出品・買う・入札）ができません（破産の前に、資産を移して、借金を踏み倒すのを防ぐためです）。",
     "user_not_registered": "その人は、まだこのサーバーで遊んでいません。",
