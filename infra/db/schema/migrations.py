@@ -43,7 +43,18 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     if co and "dividend_rate" not in co:
         conn.execute("ALTER TABLE companies ADD COLUMN dividend_rate REAL NOT NULL DEFAULT 0")
     tb = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_bank)")}
-    for col in ("thermo_load", "thermo_capacity", "thermo_ts", "bailout_debt", "thermo_burned", "thermo_bailed"):
+    for col in (
+        "thermo_load",
+        "thermo_capacity",
+        "thermo_ts",
+        "bailout_debt",
+        "thermo_burned",
+        "thermo_bailed",
+        "trust_ts",
+        "trust_accrued",
+        "trust_paid",
+        "excess_unpaid",
+    ):
         if col not in tb:
             conn.execute(f"ALTER TABLE teiai_bank ADD COLUMN {col} REAL NOT NULL DEFAULT 0")
     th = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_house)")}

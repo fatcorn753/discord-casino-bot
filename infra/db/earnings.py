@@ -9,7 +9,6 @@ from typing import Any, Optional
 from domain import earnings as ea
 from domain import market as market_mod
 from domain import shop as shop_mod
-from domain import teiai
 from domain.errors import fail
 from domain.ports.bridges import IBankCashFlow
 from domain.ports.repos import IEarningsRepo
@@ -165,7 +164,7 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
                 return False, fail("insufficient_balance_need", need=price, balance=bal)
             hint = ea.memo_direction(ev["direction"], rng, ea.SHOP_TRUTH)
             self._account.apply(gid, user_id, -price, "購入:裏情報メモ（帝愛市）")
-            self._bank.bank_income_for(gid, price, teiai.AUCTION_YIELD_SHARE, now)
+            self._bank.bank_income_for(gid, price, now)
             self._conn.execute(
                 "INSERT INTO earnings_shop (event_id, guild_id, user_id, hint, price, ts) VALUES (?, ?, ?, ?, ?, ?)",
                 (ev["id"], gid, user_id, hint, price, now),

@@ -126,7 +126,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                 return False, fail("option_max_open_premium", max_open=opt.MAX_OPEN_PREMIUM, left=left)
             label = opt.KINDS[kind][0]
             self._account.apply(gid, user_id, -cost, f"{label}購入:{market_mod.BY_KEY[symbol].name}")
-            self._bank.bank_income_for(gid, cost, opt.YIELD_SHARE, now)
+            self._bank.bank_income_for(gid, cost, now)
             expiry = now + seconds
             cur = self._conn.execute(
                 "INSERT INTO options (guild_id, user_id, kind, symbol, strike, units, premium, expiry, spot, ts, symbol2, spot2) "
@@ -303,7 +303,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         if row["side"] == "short":
             cost = self.option_close_cost(row, now, prices)
             back = row["margin"] - cost
-            self._bank.bank_income_for(guild_id, cost, 0.0, now)  # 買い戻しの費用は、銀行に入る
+            self._bank.bank_income_for(guild_id, cost, now)  # 買い戻しの費用は、銀行に入る
             # 先に決済済みにする（超えた分の支払いで差し押さえが走っても、同じ建玉を、もう一度買い戻そうとしない）
             self._conn.execute("UPDATE options SET status='sold', paid=? WHERE id=?", (max(0, back), option_id))
             if back > 0:
@@ -364,7 +364,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                 self._account.ensure(gid, r["user_id"])
                 if r["side"] == "short":
                     paid = max(0, r["margin"] - gross)  # 証拠金の戻り
-                    self._bank.bank_income_for(gid, gross, 0.0, now, thermo=False)
+                    self._bank.bank_income_for(gid, gross, now, thermo=False)
                     self._conn.execute(  # 先に決済済みにする（損失の支払いで差し押さえが走っても、同じ建玉を、もう一度決済しない）
                         "UPDATE options SET status=?, paid=?, final=? WHERE id=?",
                         ("exercised" if gross > 0 else "expired", paid, final, r["id"]),

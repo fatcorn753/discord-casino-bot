@@ -138,7 +138,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
                 "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty",
                 (gid, user_id, item_id, qty),
             )
-            self._bank.bank_income_for(gid, total, teiai.AUCTION_YIELD_SHARE, now)
+            self._bank.bank_income_for(gid, total, now)
             return PurchaseResult(True, balance=self._account.raw_balance(gid, user_id))
 
     # ------------------------------------------------------------------ #
@@ -245,7 +245,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
                 "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty",
                 (gid, user_id, got, qty),
             )
-            self._bank.bank_income_for(gid, total, teiai.AUCTION_YIELD_SHARE, now)
+            self._bank.bank_income_for(gid, total, now)
             return MarketPurchase(
                 True,
                 balance=self._account.raw_balance(gid, user_id),

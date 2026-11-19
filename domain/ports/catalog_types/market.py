@@ -80,7 +80,6 @@ class OptionsSectionContract:
     payout_cap_mult: int
     min_premium: int
     max_open_premium: int
-    yield_share: float
     margin_rate: float
     max_short_margin: int
     kinds: Mapping[str, OptionKindContract]

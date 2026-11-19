@@ -104,7 +104,6 @@ options:
   payout_cap_mult: 50
   min_premium: 100
   max_open_premium: 20000
-  yield_share: 0.04
   margin_rate: 0.20
   max_short_margin: 20000
   kinds:

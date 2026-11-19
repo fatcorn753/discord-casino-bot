@@ -56,7 +56,7 @@ LEVEL_TEXT: dict[str, str] = {
     "safe": "余裕あり",
     "warn": "取り付け警戒",
     "danger": "取り付け危険水域！",
-    "frozen": "支払停止（預金封鎖）",
+    "frozen": "支払停止（信託の解約停止）",
 }
 
 THERMOSTAT_TITLE = "🌡️ サーモスタット"

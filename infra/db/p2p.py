@@ -213,7 +213,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         self._account.ensure(guild_id, row["seller_id"])
         label = self._p2p_label_for(guild_id, row)
         self._account.apply(guild_id, row["seller_id"], price - fee, f"取引:売却（{label}）", income=price - fee)
-        self._bank.bank_income_for(guild_id, fee, teiai.AUCTION_YIELD_SHARE, now)
+        self._bank.bank_income_for(guild_id, fee, now)
         self._p2p_give(guild_id, buyer_id, row)
         self._p2p_close(row["id"], "sold", now, buyer_id, price)
         self._notices.note_for(

@@ -64,6 +64,7 @@ class BondCog(commands.Cog):
 
         def handle_guild(guild) -> None:
             self._market_svc.settle_maturities(guild.id, now, RNG)  # 満期の債券と、満期のオプションの決済
+            self._teiai.trust_accrue(guild.id, now)  # 帝愛信託の利息（1時間ごと）
             for user_id, result in self._teiai.grace_expire(
                 guild.id, now
             ):  # 破産猶予の時間切れ（強制破産と、CDS の配当）

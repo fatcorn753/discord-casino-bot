@@ -102,6 +102,9 @@ class IBankRepo(IGuildScopedRepo, IBankCashFlow, IHouseAccount, IGainsTaxCollect
     def grace_expire(self, now: float) -> list[Any]:
         raise NotImplementedError
 
+    def bank_trust_accrue(self, now: float) -> int:
+        raise NotImplementedError
+
     def cds_quote(self, target_id: int, now: float) -> CdsQuote:
         raise NotImplementedError
 

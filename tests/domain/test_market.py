@@ -759,18 +759,22 @@ def test_capital_gains_tax_is_progressive_and_zero_for_small_profits():
     assert tax(50_000) < tax(60_000) < tax(500_000)  # 利益が増えれば、税も増える
 
 
-def test_a_big_spot_gain_is_taxed_and_the_tax_goes_to_depositors(eco):
+def test_a_big_spot_gain_is_taxed_and_the_tax_goes_to_the_bank(eco):
     a = eco.for_guild(G)
     a.wallet.credit(U, 500_000, "テスト")
     a.wallet.credit(2, 20_000, "テスト")
     a.bank.bank_deposit(2, 20_000, 1.0)  # 預金者
     r = a.crypto.crypto_buy(U, 200_000, 1000)
     before_deposit = a.bank.deposit_of(2)
+    cash0 = a.bank.bank_status(time.time())["cash"]  # 税の入金は、いまの時刻で地下融資の回収を数える
     s = a.crypto.crypto_sell(U, None, 1300)  # 約 +30%
     assert s.ok and s.profit > 50_000
     assert s.tax == market.capital_gains_tax(s.profit) > 0
     assert a.wallet.balance(U) == INITIAL_BALANCE + 500_000 - r.money + s.money  # 受け取りは、税を引いた額
-    assert a.bank.deposit_of(2) == before_deposit + s.tax  # 預金者がひとりなので、税が全額、預金に入る
+    assert a.bank.deposit_of(2) == before_deposit  # 税は信託に配らない（#33。信託は決まった利息を受け取る）
+    assert a.bank.bank_status(time.time())["cash"] == pytest.approx(
+        cash0 + s.tax, abs=1.0
+    )  # 税は全額、帝愛銀行の手元へ
     assert any(
         "キャピタルゲイン税" in x["reason"]
         for x in eco.db.conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))

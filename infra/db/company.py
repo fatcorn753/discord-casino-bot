@@ -173,7 +173,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
             if bal < cost:
                 return False, fail("company_found_short", cost=cost, balance=bal)
             self._account.apply(gid, user_id, -cost, f"会社設立:{name}（設立費・建設費）")
-            self._bank.bank_income_for(gid, company_mod.FOUND_FEE, 0.0, now)
+            self._bank.bank_income_for(gid, company_mod.FOUND_FEE, now)
             self._house.house_receive_for(gid, company_mod.BUILD_COSTS[0])
             self._conn.execute(
                 "INSERT INTO companies (guild_id, user_id, name, kind, stock_ts, upkeep_day, created) "

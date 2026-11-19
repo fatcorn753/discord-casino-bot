@@ -249,5 +249,5 @@ class HorseRepo(ScopedRepo, IHorseRepo):
                 )
             self._account.apply(gid, user_id, -price, f"競売:競走馬（{row['name']}）")
             self._conn.execute("UPDATE horses SET owner_id=?, listed_at=NULL WHERE id=?", (user_id, horse_id))
-            self._bank.bank_income_for(gid, price, teiai.AUCTION_YIELD_SHARE, now)
+            self._bank.bank_income_for(gid, price, now)
             return PurchaseResult(True, balance=self._account.raw_balance(gid, user_id))

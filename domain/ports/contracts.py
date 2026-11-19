@@ -67,9 +67,13 @@ class BankStatus(TypedDict):
     deposits: int
     locks: float
     available: float
-    ratio: Optional[float]  # available ÷ 預金総額（預金がなければ None）
+    ratio: Optional[float]  # available ÷ 信託総額（信託がなければ None）
     level: str  # safe / warn / danger / frozen
     thermostat: BankThermostat
+    trust_rate: float  # 帝愛信託の利率（1日あたり。r_f + 上乗せ）
+    risk_free: float  # 無リスク金利 r_f（1日あたり）
+    trust_paid: float  # これまでに払った信託の利息の累計
+    excess_unpaid: float  # 信託でも熱浴・共済でも払えなかった超過損失の累計
 
 
 class LoanCredit(TypedDict):

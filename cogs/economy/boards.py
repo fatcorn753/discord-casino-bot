@@ -37,7 +37,7 @@ class RankingView(ui.OwnerView):
             None,
             "🏆 このサーバーのランキング（純資産）",
             self.user_id,
-            footer="純資産 = 現金 − 借金 + 預金・株・債券・オプションの評価額 ｜ ペリカはサーバーごとに別々です",
+            footer="純資産 = 現金 − 借金 + 信託・株・債券・オプションの評価額 ｜ ペリカはサーバーごとに別々です",
         )
 
     async def _switch(self, interaction: discord.Interaction, mode: str) -> None:

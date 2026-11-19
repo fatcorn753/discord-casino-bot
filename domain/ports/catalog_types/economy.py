@@ -57,7 +57,6 @@ class TeiaiCatalogContract:
     auction_start: float
     auction_step: float
     auction_floor: float
-    auction_yield_share: float
     market_slots_per_day: int
     market_auction_prob: float
     market_auction_rate: tuple[float, float]
@@ -79,9 +78,7 @@ class TeiaiCatalogContract:
     loan_recovery_per_hour: float
     lock_debt_rate: float
     loss_share: float
-    premium_yield_share: float
-    tax_yield_share: float
-    skim_yield_share: float
+    trust_premium_per_day: float
     run_warn_ratio: float
     run_danger_ratio: float
     cds_min_stake: int

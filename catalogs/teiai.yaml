@@ -17,7 +17,6 @@ escape_cooldown_hours: 24
 auction_start: 0.90
 auction_step: 0.10
 auction_floor: 0.70
-auction_yield_share: 0.5
 
 # 帝愛の出品（#72）。差し押さえ品とは別に、帝愛が1日に何回か、期間限定でショップの品を出す。
 # 売上は差し押さえ品の競売と同じく帝愛銀行の収入になる。品物そのものは新しく作られる（ペリカは増えない）
@@ -44,9 +43,8 @@ reserve_ratio: 0.20
 loan_recovery_per_hour: 0.02
 lock_debt_rate: 0.05
 loss_share: 0.03
-premium_yield_share: 0.5
-tax_yield_share: 1.0
-skim_yield_share: 0.5
+# 帝愛信託（#33）の利息: r_trust = 無リスク金利 r_f + trust_premium_per_day（1日あたり。連続複利）
+trust_premium_per_day: 0.001
 run_warn_ratio: 0.15
 run_danger_ratio: 0.05
 

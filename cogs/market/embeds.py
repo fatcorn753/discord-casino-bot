@@ -24,7 +24,7 @@ def tax_line(res: Any) -> str:
     """利益にかかった税（キャピタルゲイン税）の一行。税がなければ空。"""
     if not getattr(res, "tax", 0):
         return ""
-    return f"🕴️ 帝愛の税（利益の累進課税）: **−{res.tax:,}ペリカ**（預金者の利回りになります）\n"
+    return f"🕴️ 帝愛の税（利益の累進課税）: **−{res.tax:,}ペリカ**（帝愛銀行の収入になります）\n"
 
 
 def margin_position_text(side: str, units: int, entry_value: float, margin: int, price: float) -> str:

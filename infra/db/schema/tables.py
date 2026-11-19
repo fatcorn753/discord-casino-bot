@@ -372,7 +372,11 @@ def create_tables(conn: sqlite3.Connection) -> None:
             thermo_ts       REAL NOT NULL DEFAULT 0,   -- L・E を、ここまで冷ました時刻
             bailout_debt    REAL NOT NULL DEFAULT 0,   -- 未使用（#32 の見直しで廃止。列だけ残す）
             thermo_burned   REAL NOT NULL DEFAULT 0,   -- 熱浴へ消えた（観測中は、消えるはずだった）額の累計
-            thermo_bailed   REAL NOT NULL DEFAULT 0    -- 熱浴が肩代わりした（観測中は、するはずだった）額の累計
+            thermo_bailed   REAL NOT NULL DEFAULT 0,   -- 熱浴が肩代わりした（観測中は、するはずだった）額の累計
+            trust_ts        REAL NOT NULL DEFAULT 0,   -- 帝愛信託の利息を、ここまで払った時刻（0 は未開始）
+            trust_accrued   REAL NOT NULL DEFAULT 0,   -- まだ払っていない利息の端数
+            trust_paid      REAL NOT NULL DEFAULT 0,   -- これまでに払った信託の利息の累計
+            excess_unpaid   REAL NOT NULL DEFAULT 0    -- 信託でも熱浴・共済でも払えなかった超過損失の累計
         );
         CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛の胴元の口座（サーバーごとに1行）。ピンハネが入る。銀行の手元（預金の準備）とは別
             guild_id INTEGER PRIMARY KEY,

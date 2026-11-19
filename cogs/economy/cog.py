@@ -152,7 +152,7 @@ class EconomyCog(commands.Cog):
             embed=embeds.repaid_embed(result, self._teiai.debt_of(gid, uid)), ephemeral=True
         )
 
-    @group.command(name="帝愛", description="帝愛銀行（預金・準備率）・破産猶予・CDS（破綻保証）・種銭の画面")
+    @group.command(name="帝愛", description="帝愛銀行（帝愛信託・準備率）・破産猶予・CDS（破綻保証）・種銭の画面")
     async def teiai_panel(self, interaction: discord.Interaction):
         gid, uid = ui.guild_id_of(interaction), interaction.user.id
         await interaction.response.send_message(

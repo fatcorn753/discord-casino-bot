@@ -1,20 +1,23 @@
-"""帝愛銀行（預金・準備率・取り付け騒ぎ）、破産猶予、CDS（破綻保証）。
+"""帝愛銀行（帝愛信託・準備率・取り付け騒ぎ）、破産猶予、CDS（破綻保証）。
 
 表の定義は infra/db/schema/tables.py（teiai_bank・teiai_deposits・cds、users.grace_until）。数字と考え方は domain/teiai.py。
 """
 
+import math
 from typing import Any, Optional
 
 from domain import market as market_mod
-from domain import teiai, thermostat
+from domain import rates, teiai, thermostat
 from domain.errors import fail
 from domain.ports.bridges import (
     IBankruptExecutor,
+    IExcessLossSink,
     IGraceEnterHook,
     IMarginRatioReader,
     INoticeSink,
     IStatusReader,
     NoOpBankruptExecutor,
+    NoOpExcessLossSink,
     NoOpGraceEnterHook,
     NoOpMarginRatioReader,
     NoOpNoticeSink,
@@ -38,6 +41,7 @@ class BankRepo(ScopedRepo, IBankRepo):
         margin_ratio_reader: Optional[IMarginRatioReader] = None,
         grace_enter_hook: Optional[IGraceEnterHook] = None,
         bankrupt_executor: Optional[IBankruptExecutor] = None,
+        excess_sink: Optional[IExcessLossSink] = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -48,6 +52,7 @@ class BankRepo(ScopedRepo, IBankRepo):
         self._margin_ratio_reader: IMarginRatioReader = margin_ratio_reader or NoOpMarginRatioReader()
         self._grace_enter_hook: IGraceEnterHook = grace_enter_hook or NoOpGraceEnterHook()
         self._bankrupt_executor: IBankruptExecutor = bankrupt_executor or NoOpBankruptExecutor()
+        self._excess_sink: IExcessLossSink = excess_sink or NoOpExcessLossSink()
 
     # ------------------------------------------------------------------ #
     # 銀行の手元・預金・課税（IBankCashFlow / IHouseAccount / IGainsTaxCollector / IValuationSource）
@@ -186,7 +191,8 @@ class BankRepo(ScopedRepo, IBankRepo):
                 level = "danger"
             thermo = self._thermo_state_for(gid, now)
             totals = self._conn.execute(
-                "SELECT thermo_burned, thermo_bailed FROM teiai_bank WHERE guild_id=?", (gid,)
+                "SELECT thermo_burned, thermo_bailed, trust_paid, excess_unpaid FROM teiai_bank WHERE guild_id=?",
+                (gid,),
             ).fetchone()
             return {
                 "cash": state["cash"],
@@ -204,6 +210,10 @@ class BankRepo(ScopedRepo, IBankRepo):
                     "burned": totals["thermo_burned"],
                     "bailed": totals["thermo_bailed"],
                 },
+                "trust_rate": self.trust_rate_per_day_for(gid, now),
+                "risk_free": self.risk_free_per_day_for(gid, now),
+                "trust_paid": totals["trust_paid"],
+                "excess_unpaid": totals["excess_unpaid"],
             }
 
     def house_income_for(self, guild_id: int, amount: int) -> None:
@@ -269,61 +279,132 @@ class BankRepo(ScopedRepo, IBankRepo):
         self,
         guild_id: int,
         amount: int,
-        share: float,
         now: float,
         needs_depositors: bool = False,
         *,
         thermo: bool = True,
     ) -> None:
-        """銀行に amount が入る。そのうち share の割合を、預金額に応じて預金者へ分配する（残りは手元の現金）。
+        """銀行に amount が入る（手元の現金へ）。信託への分配はしない（信託は、決まった利息を受け取る。#33）。
 
+        needs_depositors=True のときは、信託の残高がなければ何も入らない（カジノの負け分など、もとからの約束）。
         thermo=False は、バッチの純額を bank_thermo_batch_for で別に通すときだけ使う。
         """
         if amount <= 0:
             return
-        deposits = self._deposits_for(guild_id)
-        total = sum(a for _, a in deposits)
-        if needs_depositors and total <= 0:
+        if needs_depositors and sum(a for _, a in self._deposits_for(guild_id)) <= 0:
             return
         state = self.bank_sync_for(guild_id, now)
         received = self._thermo_inflow_for(guild_id, amount, now) if thermo else float(amount)
         self.bank_set_for(guild_id, state["cash"] + received, state["loaned"])
-        distribute = int(received * share)
-        if total <= 0 or distribute <= 0:
-            return
-        for uid, amt in deposits:
-            gain = distribute * amt // total
-            if gain:
-                self._conn.execute(
-                    "UPDATE teiai_deposits SET amount=amount+? WHERE guild_id=? AND user_id=?", (gain, guild_id, uid)
-                )
 
     def bank_pay_for(self, guild_id: int, amount: int, now: float, *, thermo: bool = True) -> int:
-        """銀行が amount を払う。手元の現金から払い、足りない分は、預金者の預金を一律に減らして充てる（AIG ショック）。払えた額を返す。
+        """銀行が amount を払う。払えた額を返す。
 
-        損失の支払いも、プレミアムなどの通常の支払いも、同じ流出としてサーモスタットを通す。
+        払う順番（ウォーターフォール。#33）:
+        1. 手元の現金
+        2. 帝愛信託（第一損失）: 足りない分を、信託の残高に応じて按分して減らす。信託はマイナスにはならない
+        3. 信託でも足りない超過損失だけを熱浴へ: サーモスタットで「熱浴の肩代わり」と「共済の負担」に分ける
+
+        サーモスタットに流出として通すのは「現金で払った分 + 超過損失」だけ（信託の取り崩しで、負側の器を使わない）。
+        損失の支払いも、プレミアムなどの通常の支払いも、同じ流出として扱う。
         thermo=False は、バッチの純額を bank_thermo_batch_for で別に通すときだけ使う。
         """
+        return self._outflow_for(guild_id, amount, now, use_trust=True, thermo=thermo)
+
+    def _outflow_for(self, guild_id: int, amount: int, now: float, *, use_trust: bool, thermo: bool) -> int:
+        """bank_pay_for の本体。use_trust=False は、信託への利息のように、信託から取ると自分で自分に払うことになる流出。"""
         if amount <= 0:
             return 0
         state = self.bank_sync_for(guild_id, now)
-        if thermo:  # 熱浴の肩代わり分は、先に手元へ入れる
-            state["cash"] += self._thermo_shock_for(guild_id, amount, now)
+        cash_pay = min(float(amount), max(state["cash"], 0.0))
+        cash = state["cash"] - cash_pay
+        shortfall = amount - cash_pay
+        trust_take = self._trust_haircut_for(guild_id, shortfall) if use_trust and shortfall > 0 else 0
+        excess = max(0.0, shortfall - trust_take)  # 信託でも受け止めきれない超過損失 Δraw
+        bailout = 0.0
+        if thermo:
+            bailout = self._thermo_shock_for(guild_id, int(round(cash_pay + excess)), now)
+        cover = min(excess, bailout)  # 熱浴の肩代わりは、まず超過損失の穴埋めに使う
+        cash += bailout - cover  # 余った肩代わりは、手元へ
+        charged = 0
+        left = int(excess - cover)
+        if left > 0:  # 残りは共済の負担（#34 まではつながっておらず、払えない）
+            charged = min(left, max(0, self._excess_sink.charge_excess_for(guild_id, left, now)))
+            if left > charged:
+                self._conn.execute(
+                    "UPDATE teiai_bank SET excess_unpaid=excess_unpaid+? WHERE guild_id=?",
+                    (left - charged, guild_id),
+                )
+        self.bank_set_for(guild_id, cash, state["loaned"])
+        return min(amount, int(round(cash_pay + trust_take + cover + charged)))
+
+    def _trust_haircut_for(self, guild_id: int, need: float) -> int:
+        """帝愛信託の残高を、按分して need まで減らす（第一損失）。減らした額を返す（信託の総額が上限）。"""
         deposits = self._deposits_for(guild_id)
         total = sum(a for _, a in deposits)
-        paid = int(min(amount, state["cash"] + total))
-        if paid <= state["cash"]:
-            self.bank_set_for(guild_id, state["cash"] - paid, state["loaned"])
-            return paid
-        shortfall = paid - state["cash"]
-        self.bank_set_for(guild_id, 0.0, state["loaned"])
-        factor = max(0.0, 1 - shortfall / total)
+        if total <= 0:
+            return 0
+        take = min(math.ceil(need - 1e-9), total)  # 払う側に端数の不足を出さないよう、切り上げて取る
+        factor = max(0.0, 1 - take / total)
         for uid, amt in deposits:
             self._conn.execute(
                 "UPDATE teiai_deposits SET amount=? WHERE guild_id=? AND user_id=?",
                 (int(amt * factor), guild_id, uid),
             )
-        return paid
+        return take
+
+    # ------------------------------------------------------------------ #
+    # 帝愛信託の利息（#33。確定した流出として、毎時払う）
+    # ------------------------------------------------------------------ #
+    def risk_free_per_day_for(self, guild_id: int, now: float) -> float:
+        """無リスク金利 r_f（1日あたり。連続複利）。いまは通常債の利率から決まる固定値（#18 で準備率に連動させる）。"""
+        return rates.BASE_RISK_FREE_PER_DAY
+
+    def trust_rate_per_day_for(self, guild_id: int, now: float) -> float:
+        """帝愛信託の利率 r_trust = r_f + 上乗せ（1日あたり。連続複利）。"""
+        return self.risk_free_per_day_for(guild_id, now) + teiai.TRUST_PREMIUM_PER_DAY
+
+    def bank_trust_accrue(self, now: float) -> int:
+        """帝愛信託の利息を、前回からの経過時間ぶん払う（1時間たっていなければ何もしない）。払った額を返す。
+
+        利息は銀行の確定した流出: 手元の現金から払い、足りない分は信託からは取らず（自分で自分に払うことになるため）、
+        超過損失として熱浴・共済へ回す。払えた分を、信託の残高に応じて按分して上乗せする。
+        """
+        with self._db.tx():
+            gid = self._g()
+            self.bank_sync_for(gid, now)
+            row = self._conn.execute(
+                "SELECT trust_ts, trust_accrued FROM teiai_bank WHERE guild_id=?", (gid,)
+            ).fetchone()
+            if row["trust_ts"] <= 0:
+                self._conn.execute("UPDATE teiai_bank SET trust_ts=? WHERE guild_id=?", (now, gid))
+                return 0
+            hours = (now - row["trust_ts"]) / 3600
+            if hours < 1:
+                return 0
+            deposits = self._deposits_for(gid)
+            total = sum(a for _, a in deposits)
+            rate = self.trust_rate_per_day_for(gid, now)
+            due = total * rates.growth(rate, hours / 24) + row["trust_accrued"]
+            paid = self._outflow_for(gid, int(due), now, use_trust=False, thermo=True) if total > 0 else 0
+            credited = 0
+            for uid, amt in deposits:
+                gain = paid * amt // total
+                if gain:
+                    credited += gain
+                    self._conn.execute(
+                        "UPDATE teiai_deposits SET amount=amount+? WHERE guild_id=? AND user_id=?", (gain, gid, uid)
+                    )
+            # 端数（按分の切り捨て）は手元へ戻し、未払いの小数は次回へ持ち越す
+            if paid > credited:
+                cash = self.bank_sync_for(gid, now)
+                self.bank_set_for(gid, cash["cash"] + paid - credited, cash["loaned"])
+            carry = max(0.0, due - int(due)) + (paid - credited if total > 0 else 0)
+            self._conn.execute(
+                "UPDATE teiai_bank SET trust_ts=?, trust_accrued=?, trust_paid=trust_paid+? WHERE guild_id=?",
+                (now, carry, credited, gid),
+            )
+            return credited
 
     def charge_gains_tax_for(self, guild_id: int, user_id: int, profit: int, taxable: bool, what: str) -> int:
         """利益 profit にかかる税を、帝愛の銀行（預金者の利回り）へ納める。納めた額を返す。"""
@@ -336,7 +417,7 @@ class BankRepo(ScopedRepo, IBankRepo):
                 self._account.raw_balance(guild_id, user_id),
                 f"帝愛のキャピタルゲイン税（{what} 利益{profit:,} → 税{tax:,}）",
             )
-            self.bank_income_for(guild_id, tax, teiai.TAX_YIELD_SHARE, self._now())
+            self.bank_income_for(guild_id, tax, self._now())
         return tax
 
     # ------------------------------------------------------------------ #
@@ -517,7 +598,7 @@ class BankRepo(ScopedRepo, IBankRepo):
                         room=room,
                     )
             self._account.apply(gid, buyer_id, -stake, f"CDS の掛け金（対象 {target_id}・{odds}倍）")
-            self.bank_income_for(gid, stake, teiai.PREMIUM_YIELD_SHARE, now)
+            self.bank_income_for(gid, stake, now)
             self._conn.execute(
                 "INSERT INTO cds (guild_id, buyer_id, target_id, stake, odds, ts, expires) VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (gid, buyer_id, target_id, stake, odds, now, now + teiai.CDS_TERM_DAYS * 86400),

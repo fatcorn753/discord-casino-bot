@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from domain import teiai
+from domain import rates, teiai
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import must
@@ -77,28 +77,63 @@ def test_grace_locks_reserve_and_triggers_a_run(eco):
     assert after["ratio"] < before["ratio"]
 
 
-def test_yield_is_shared_by_deposit_size_and_comes_from_skim_losses_and_premiums(eco):
+def test_income_goes_to_the_bank_cash_not_to_the_trust(eco):
     eco.wallet.credit(A, 30_000, "テスト")
-    eco.wallet.credit(B, 30_000, "テスト")
     eco.bank.bank_deposit(A, 20_000, NOW)
-    eco.bank.bank_deposit(B, 10_000, NOW)
+    cash0 = eco.bank.bank_status(NOW)["cash"]
     with eco.db.tx():
-        eco.bank.bank_income_for(G, 3_000, 1.0, NOW, needs_depositors=True)
-    assert eco.bank.deposit_of(A) == 22_000 and eco.bank.deposit_of(B) == 11_000  # 2:1 で分配
+        eco.bank.bank_income_for(G, 3_000, NOW, needs_depositors=True)
+    assert eco.bank.deposit_of(A) == 20_000  # 信託は、収入の分配ではなく決まった利息を受け取る（#33）
+    assert eco.bank.bank_status(NOW)["cash"] == pytest.approx(cash0 + 3_000)
+
+
+def test_trust_interest_is_paid_hourly_by_size_at_the_trust_rate(eco):
+    eco.wallet.credit(A, 300_000, "テスト")
+    eco.wallet.credit(B, 300_000, "テスト")
+    eco.bank.bank_deposit(A, 200_000, NOW)
+    eco.bank.bank_deposit(B, 100_000, NOW)
+    assert eco.bank.bank_trust_accrue(NOW) == 0  # 数え始め
+    assert eco.bank.bank_trust_accrue(NOW + 1800) == 0  # 1時間たっていない
+    cash0 = eco.bank.bank_status(NOW + 86400)["cash"]
+    paid = eco.bank.bank_trust_accrue(NOW + 86400)
+    rate = eco.bank.bank_status(NOW)["trust_rate"]
+    assert rate == pytest.approx(rates.BASE_RISK_FREE_PER_DAY + teiai.TRUST_PREMIUM_PER_DAY)
+    assert paid == pytest.approx(300_000 * rates.growth(rate, 1.0), abs=2)
+    gain_a, gain_b = eco.bank.deposit_of(A) - 200_000, eco.bank.deposit_of(B) - 100_000
+    assert gain_a + gain_b == paid and abs(gain_a - 2 * gain_b) <= 2  # 残高に応じて 2:1
+    s = eco.bank.bank_status(NOW + 86400)
+    assert s["cash"] == pytest.approx(cash0 - paid, abs=2) and s["trust_paid"] == paid  # 手元の現金から払う
+
+
+def test_trust_interest_is_never_taken_from_the_trust_itself(eco):
+    eco.wallet.credit(A, 300_000, "テスト")
+    eco.bank.bank_deposit(A, 100_000, NOW)  # 手元 2万・地下融資 8万
+    eco.bank.bank_trust_accrue(NOW)
+    with eco.db.tx():  # 手元の現金を使い切っておく
+        cash = eco.bank.bank_sync_for(G, NOW)
+        eco.bank.bank_set_for(G, 0.0, cash["loaned"])
+        eco.db.conn.execute("UPDATE teiai_bank SET ts=? WHERE guild_id=?", (NOW + 10 * 86400, G))  # 地下融資は戻さない
+    paid = eco.bank.bank_trust_accrue(NOW + 86400)
+    assert paid == 0 and eco.bank.deposit_of(A) == 100_000  # 信託から利息を払うと、自分で自分に払うことになる
+    assert (
+        eco.bank.bank_status(NOW + 86400)["excess_unpaid"] > 0
+    )  # 払えなかった分は、超過損失として記録（#34 で共済が負う）
 
 
 def test_no_depositors_means_skim_and_losses_vanish_as_before(eco):
     with eco.db.tx():
-        eco.bank.bank_income_for(G, 5_000, 1.0, NOW, needs_depositors=True)
+        eco.bank.bank_income_for(G, 5_000, NOW, needs_depositors=True)
     assert eco.bank.bank_status(NOW)["cash"] == 0  # 預金者がいない銀行に、現金を積み上げない
 
 
-def test_game_losses_and_skim_feed_deposits(eco):
+def test_game_losses_feed_the_bank_only_when_the_trust_has_money(eco):
     eco.wallet.credit(A, 20_000, "テスト")
     eco.bank.bank_deposit(A, 10_000, NOW)
     eid = eco.escrow.place_bet(B, 1_000, "テスト")
+    cash0 = eco.bank.bank_status(time.time())["cash"]
     eco.escrow.settle(eid, 0, "テスト")  # 1,000 負け → 3% = 30
-    assert eco.bank.deposit_of(A) == 10_030
+    assert eco.bank.deposit_of(A) == 10_000
+    assert eco.bank.bank_status(time.time())["cash"] == pytest.approx(cash0 + 30, abs=1.0)
 
 
 def test_deposit_counts_in_ranking(eco):
@@ -168,9 +203,7 @@ def test_cds_on_someone_else_pays_only_on_forced_bankruptcy_and_capped_by_their_
     result = done[0][1]
     assert result["cds_paid"] == int(teiai.CDS_PAYOUT_CAP_RATE * debt)  # 見込み 30,000 でも、借金の半分まで
     assert eco.wallet.balance(B) == balance_before + result["cds_paid"]
-    assert (
-        eco.bank.deposit_of(A) < 10_000 + 2_000 * teiai.PREMIUM_YIELD_SHARE
-    )  # 払い切れず、預金者の預金が減る（AIG ショック）
+    assert eco.bank.deposit_of(A) < 10_000  # 払い切れず、帝愛信託が第一損失を負う
 
 
 def test_cds_pays_nothing_if_the_target_declares_bankruptcy_before_the_grace(eco):
@@ -334,7 +367,7 @@ def test_thermostat_only_observes_by_default_and_leaves_bank_cash_alone(eco):
 
     assert thermostat.ENFORCE is False
     with eco.db.tx():
-        eco.bank.bank_income_for(G, 5_000_000, 0.0, NOW)
+        eco.bank.bank_income_for(G, 5_000_000, NOW)
     s = eco.bank.bank_status(NOW)
     assert s["cash"] == pytest.approx(5_000_000)  # 現金には全額入る
     t = s["thermostat"]
@@ -357,15 +390,15 @@ def test_thermostat_enforced_burns_the_excess_inflow_and_shares_only_what_arrive
     eco.bank.bank_deposit(A, 10_000, NOW)
     cash_before = eco.bank.bank_status(NOW)["cash"]
     with eco.db.tx():
-        eco.bank.bank_income_for(G, 12_000_000, 0.5, NOW)
+        eco.bank.bank_income_for(G, 12_000_000, NOW)
     s = eco.bank.bank_status(NOW)
     net = s["cash"] - cash_before
     assert net == pytest.approx(thermostat.E_MIN, rel=0.001)  # 器の下限で頭打ち。残りは熱浴へ消える
     assert s["thermostat"]["burned"] == pytest.approx(12_000_000 - net)
-    assert eco.bank.deposit_of(A) == 10_000 + int(net * 0.5)  # 預金者への分配は、届いた分だけが元
+    assert eco.bank.deposit_of(A) == 10_000  # 信託には配らない
 
 
-def test_thermostat_enforced_bails_out_a_shock_so_deposits_are_not_wiped(eco, monkeypatch):
+def test_thermostat_enforced_bails_out_only_the_excess_after_the_trust_takes_the_first_loss(eco, monkeypatch):
     from domain import thermostat
 
     monkeypatch.setattr("domain.thermostat.ENFORCE", True)
@@ -374,12 +407,28 @@ def test_thermostat_enforced_bails_out_a_shock_so_deposits_are_not_wiped(eco, mo
     with eco.db.tx():
         paid = eco.bank.bank_pay_for(G, 5_000_000, NOW)
     assert paid == 5_000_000
+    assert eco.bank.deposit_of(A) == 0  # 手元 20万の次に、信託 100万が第一損失で全損（マイナスにはならない）
     t = _thermo(eco)
-    assert t["bailed"] == pytest.approx(5_000_000 - thermostat.E_MIN, rel=0.001)  # 銀行が負うのは、器の分まで
-    assert t["load"] == pytest.approx(-thermostat.E_MIN, rel=0.001)  # 熱量はマイナス（赤字帯）へ
-    # 肩代わりが無ければ預金は全滅する額。負うのは器の分だけで、手元 20万で足りない分だけが預金から減る
-    shortfall = max(0.0, thermostat.E_MIN - 200_000)
-    assert eco.bank.deposit_of(A) == pytest.approx(1_000_000 - shortfall, rel=0.001)
+    # サーモスタットに通るのは、現金で払った 20万 + 超過損失 380万 だけ（信託の取り崩し分は通さない）
+    assert t["bailed"] == pytest.approx(4_000_000 - thermostat.E_MIN, rel=0.001)
+    assert t["load"] == pytest.approx(-thermostat.E_MIN, rel=0.001)
+    # 肩代わりは超過損失 380万を埋め、余りは手元へ
+    assert eco.bank.bank_status(NOW)["cash"] == pytest.approx(t["bailed"] - 3_800_000, rel=0.01)
+
+
+def test_shortfall_within_the_trust_is_shared_by_size_and_never_goes_negative(eco):
+    eco.wallet.credit(A, 300_000, "テスト")
+    eco.wallet.credit(B, 300_000, "テスト")
+    eco.bank.bank_deposit(A, 200_000, NOW)  # 手元 4万
+    eco.bank.bank_deposit(B, 100_000, NOW)  # 手元 計6万
+    with eco.db.tx():
+        paid = eco.bank.bank_pay_for(G, 90_000, NOW)  # 手元 6万 + 信託から 3万
+    assert paid == 90_000
+    assert eco.bank.deposit_of(A) == 180_000 and eco.bank.deposit_of(B) == 90_000  # 1割ずつ按分
+    with eco.db.tx():
+        paid = eco.bank.bank_pay_for(G, 1_000_000, NOW)  # 信託の総額を超える
+    assert paid == 270_000 and eco.bank.deposit_of(A) == 0 and eco.bank.deposit_of(B) == 0
+    assert eco.bank.bank_status(NOW)["excess_unpaid"] == pytest.approx(730_000)  # 共済（#34）が負うはずの分
 
 
 def test_thermostat_bank_bears_the_whole_loss_while_the_load_is_positive(eco, monkeypatch):
@@ -387,7 +436,7 @@ def test_thermostat_bank_bears_the_whole_loss_while_the_load_is_positive(eco, mo
     eco.wallet.credit(A, 200_000, "テスト")
     eco.bank.bank_deposit(A, 100_000, NOW)
     with eco.db.tx():
-        eco.bank.bank_income_for(G, 15_000, 0.0, NOW)  # 熱量をプラスにしておく
+        eco.bank.bank_income_for(G, 15_000, NOW)  # 熱量をプラスにしておく
     load = _thermo(eco)["load"]
     with eco.db.tx():
         eco.bank.bank_pay_for(G, int(load) - 1, NOW)  # 黒字帯の中の支払い
@@ -400,7 +449,7 @@ def test_thermostat_batch_burns_only_the_net_inflow_after_the_cash_arrived(eco, 
 
     monkeypatch.setattr("domain.thermostat.ENFORCE", True)
     with eco.db.tx():
-        eco.bank.bank_income_for(G, 3_000_000, 0.0, NOW, thermo=False)
+        eco.bank.bank_income_for(G, 3_000_000, NOW, thermo=False)
         eco.bank.bank_pay_for(G, 1_000_000, NOW, thermo=False)
         eco.bank.bank_thermo_batch_for(G, 2_000_000, NOW)
     s = eco.bank.bank_status(NOW)
@@ -424,7 +473,7 @@ def test_thermostat_state_cools_down_over_time(eco):
     from domain import thermostat
 
     with eco.db.tx():
-        eco.bank.bank_income_for(G, 100_000, 0.0, NOW)
+        eco.bank.bank_income_for(G, 100_000, NOW)
     hot = _thermo(eco)["load"]
     later = eco.bank.bank_status(NOW + 7 * 86400)["thermostat"]
     assert (
@@ -440,7 +489,7 @@ def test_thermostat_columns_are_added_to_an_existing_database(tmp_path):
     path = str(tmp_path / "old.db")
     repos = open_repositories(path, strict=True).for_guild(G)
     with repos.db.tx():
-        repos.bank.bank_income_for(G, 1_000, 0.0, NOW)
+        repos.bank.bank_income_for(G, 1_000, NOW)
     repos.db.conn.close()
     conn = sqlite3.connect(path)
     for col in ("thermo_load", "thermo_capacity", "thermo_ts", "bailout_debt", "thermo_burned", "thermo_bailed"):
@@ -457,7 +506,7 @@ def test_panel_shows_the_thermostat_and_that_it_is_only_observing(eco):
     from cogs.teiai.panel import panel_embed
 
     with eco.db.tx():
-        eco.bank.bank_income_for(G, 50_000, 0.0, NOW)
+        eco.bank.bank_income_for(G, 50_000, NOW)
     field = next(
         f for f in panel_embed(make_test_bot(repos=eco).services.teiai, G, A).fields if "サーモスタット" in must(f.name)
     )

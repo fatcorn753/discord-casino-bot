@@ -2,7 +2,7 @@
 
 PART_LABELS: dict[str, str] = {
     "cash": "💴 現金",
-    "deposit": "🏦 帝愛への預金",
+    "deposit": "🏦 帝愛信託",
     "crypto": "📈 株・CS（現物と証拠金）",
     "bonds": "📜 債券",
     "options": "🎯 オプション",

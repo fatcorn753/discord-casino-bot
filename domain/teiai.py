@@ -32,7 +32,6 @@ ESCAPE_COOLDOWN_HOURS = _CFG.escape_cooldown_hours  # 失敗のあと、もう�
 AUCTION_START = _CFG.auction_start  # 差し押さえた品を競売に出すときの、最初の値段（定価に対して）
 AUCTION_STEP = _CFG.auction_step  # 1日ごとの値下がり（定価に対して）
 AUCTION_FLOOR = _CFG.auction_floor  # 値下がりの下限
-AUCTION_YIELD_SHARE = _CFG.auction_yield_share  # 競売の売上のうち、預金者の利回りへ回す割合
 # ---- 帝愛の出品（#72。くわしくは domain/teiai_market.py）----
 MARKET_SLOTS_PER_DAY = _CFG.market_slots_per_day
 MARKET_AUCTION_PROB = _CFG.market_auction_prob
@@ -55,15 +54,13 @@ GRACE_DEBT = _CFG.grace_debt  # 帝愛への借金がこの額以上になると
 DEBT_INTEREST_CEILING = GRACE_DEBT - 1  # 利息で借金が増えるのは、ここまで
 GRACE_HOURS = _CFG.grace_hours  # 猶予の長さ
 
-# ---- 帝愛預金（部分準備銀行）----
+# ---- 帝愛信託（部分準備・第一損失。#33）----
 BANK_MIN_DEPOSIT = _CFG.bank_min_deposit
 RESERVE_RATIO = _CFG.reserve_ratio
 LOAN_RECOVERY_PER_HOUR = _CFG.loan_recovery_per_hour
 LOCK_DEBT_RATE = _CFG.lock_debt_rate
 LOSS_SHARE = _CFG.loss_share
-PREMIUM_YIELD_SHARE = _CFG.premium_yield_share
-TAX_YIELD_SHARE = _CFG.tax_yield_share
-SKIM_YIELD_SHARE = _CFG.skim_yield_share
+TRUST_PREMIUM_PER_DAY = _CFG.trust_premium_per_day  # 帝愛信託の上乗せ金利（#33。r_f に足す）
 RUN_WARN_RATIO = _CFG.run_warn_ratio
 RUN_DANGER_RATIO = _CFG.run_danger_ratio
 

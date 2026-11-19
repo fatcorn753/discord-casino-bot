@@ -177,7 +177,6 @@ class IBankCashFlow:
         self,
         guild_id: int,
         amount: int,
-        share: float,
         now: float,
         needs_depositors: bool = False,
         *,
@@ -276,6 +275,21 @@ class IGraceEnterHook:
 
     def on_grace_enter(self, guild_id: int, user_id: int, now: float) -> None:
         raise NotImplementedError
+
+
+class IExcessLossSink:
+    """帝愛信託でも受け止めきれない超過損失のうち、熱浴が肩代わりしない分を負う先（#34 の帝愛共済）。"""
+
+    def charge_excess_for(self, guild_id: int, amount: int, now: float) -> int:
+        """amount を請求し、集められた額を返す（銀行の手元には入れず、そのまま支払いに充てる）。"""
+        raise NotImplementedError
+
+
+class NoOpExcessLossSink(IExcessLossSink):
+    """負う先が無いとき: 何も集めない（超過損失は払われない）。"""
+
+    def charge_excess_for(self, guild_id: int, amount: int, now: float) -> int:
+        return 0
 
 
 class NoOpGraceEnterHook(IGraceEnterHook):

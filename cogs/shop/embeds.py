@@ -172,7 +172,7 @@ def auction_embed(
         "🕴️ 帝愛の競売 — 帝愛の棚",
         "破産で差し押さえた品を、帝愛が売りに出します。**買えるのはカタギだけ**。"
         f"値段は定価の{teiai.AUCTION_START:.0%}から、1日ごとに{teiai.AUCTION_STEP:.0%}ずつ下がり、{teiai.AUCTION_FLOOR:.0%}で止まります。\n"
-        "売上は、帝愛銀行の収入（預金者の利回り）になります。",
+        "売上は、帝愛銀行の収入になります。",
         ui.GOLD,
     )
     if market:

@@ -100,7 +100,6 @@ class OptionsSection(OptionsSectionContract):
     payout_cap_mult: int = Field(gt=0)
     min_premium: int = Field(gt=0)
     max_open_premium: int = Field(gt=0)
-    yield_share: float = Field(ge=0, le=1)
     margin_rate: float = Field(gt=0)
     max_short_margin: int = Field(gt=0)
     kinds: Mapping[str, OptionKindConfig]

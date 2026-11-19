@@ -5,7 +5,6 @@ import math
 from typing import Any, Optional
 
 from domain import market as market_mod
-from domain import teiai
 from domain.errors import Failure, fail
 from domain.market import DEFAULT
 from domain.ports.bridges import (
@@ -461,7 +460,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                             self._account.raw_balance(gid, r["user_id"]),
                             f"帝愛の信用金利（{self.SIDE_NAME[side]} {name}）担保から-{charge:,}",
                         )
-                        self._bank.bank_income_for(gid, charge, teiai.TAX_YIELD_SHARE, now)
+                        self._bank.bank_income_for(gid, charge, now)
                         done.append((gid, r["user_id"], r["symbol"], side, charge))
         return done
 

@@ -222,7 +222,7 @@ def test_margin_interest_base_and_rates():
     assert market.BORROW_RATE_PER_DAY["long"] > market.BORROW_RATE_PER_DAY["short"] > 0
 
 
-def test_long_interest_is_taken_from_the_margin_after_a_day_and_goes_to_depositors(eco):
+def test_long_interest_is_taken_from_the_margin_after_a_day_and_goes_to_the_bank(eco):
     a = eco.for_guild(G)
     a.wallet.credit(U, 100_000, "テスト")
     a.wallet.credit(2, 20_000, "テスト")
@@ -231,12 +231,14 @@ def test_long_interest_is_taken_from_the_margin_after_a_day_and_goes_to_deposito
     margin0 = a.margin.margin_position(U, "cs", "long")[2]
     assert eco.margin.margin_interest(T0) == []  # 数え始め
     deposit0 = a.bank.deposit_of(2)
+    cash0 = a.bank.bank_status(T0 + DAY_S)["cash"]
     done = eco.margin.margin_interest(T0 + DAY_S)
     borrowed = 40_000 - margin0
     expected = int(borrowed * market.BORROW_RATE_PER_DAY["long"])
     assert [(d[0], d[1], d[3], d[4]) for d in done] == [(G, U, "long", expected)]
     assert a.margin.margin_position(U, "cs", "long")[2] == margin0 - expected
-    assert a.bank.deposit_of(2) == deposit0 + expected  # 預金者の利回り
+    assert a.bank.deposit_of(2) == deposit0  # 信託には配らない（#33）
+    assert a.bank.bank_status(T0 + DAY_S)["cash"] == pytest.approx(cash0 + expected)  # 帝愛銀行の手元へ
     assert any(
         "信用金利" in x["reason"] for x in eco.db.conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))
     )

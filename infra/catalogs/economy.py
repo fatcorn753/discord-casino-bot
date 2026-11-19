@@ -83,7 +83,6 @@ class TeiaiCatalog(TeiaiCatalogContract):
     auction_start: float = Field(gt=0)
     auction_step: float = Field(ge=0)
     auction_floor: float = Field(gt=0)
-    auction_yield_share: float = Field(ge=0, le=1)
     market_slots_per_day: int = Field(ge=0)
     market_auction_prob: float = Field(ge=0, le=1)
     market_auction_rate: tuple[float, float]
@@ -105,9 +104,7 @@ class TeiaiCatalog(TeiaiCatalogContract):
     loan_recovery_per_hour: float = Field(ge=0)
     lock_debt_rate: float = Field(ge=0)
     loss_share: float = Field(ge=0, le=1)
-    premium_yield_share: float = Field(ge=0, le=1)
-    tax_yield_share: float = Field(ge=0, le=1)
-    skim_yield_share: float = Field(ge=0, le=1)
+    trust_premium_per_day: float = Field(ge=0, le=0.1)
     run_warn_ratio: float = Field(ge=0)
     run_danger_ratio: float = Field(ge=0)
     cds_min_stake: int = Field(gt=0)

@@ -25,7 +25,6 @@ SPREAD = _CFG.spread  # 買値は公正価格の +1.5%、売値は −1.5%（往
 PAYOUT_CAP_MULT = _CFG.payout_cap_mult  # 配当の上限（掛け金の何倍までか）
 MIN_PREMIUM = _CFG.min_premium  # 1回の掛け金の下限
 MAX_OPEN_PREMIUM = _CFG.max_open_premium  # 1人が同時に持てる、有効なオプションの掛け金の合計の上限
-YIELD_SHARE = _CFG.yield_share  # 掛け金のうち、預金者の利回りへ回す割合（残りは、配当に備えて銀行の手元に残る）
 
 MARGIN_RATE = _CFG.margin_rate  # 裸売りの証拠金（行使価格 × 口数 の、この割合を、売るときに預ける）
 MAX_SHORT_MARGIN = _CFG.max_short_margin  # 1人が同時に預けられる、裸売りの証拠金の合計の上限

@@ -1,4 +1,4 @@
-"""`/ペリカ 帝愛` のパネル: 帝愛銀行の金庫メーター・破産猶予の一覧・預金・種銭・CDS（cogs/economy/cog.py から使う）。
+"""`/ペリカ 帝愛` のパネル: 帝愛銀行の金庫メーター・破産猶予の一覧・帝愛信託・種銭・CDS（cogs/economy/cog.py から使う）。
 
 数字と考え方は domain/teiai.py、処理は services/teiai.py（保存は infra/db/bank.py）。ここは画面の部品だけ（読み込まれる Cog ではない）。
 """
@@ -21,7 +21,7 @@ from services.teiai import TeiaiService
 
 
 def meter(ratio, width: int = 10) -> str:
-    """準備率のメーター（預金総額に対する、利用可能現金の割合。30% で満タン）。"""
+    """準備率のメーター（信託総額に対する、利用可能現金の割合。30% で満タン）。"""
     if ratio is None:
         return "─" * width
     filled = max(0, min(width, round(ratio / 0.30 * width)))
@@ -42,14 +42,17 @@ def thermostat_lines(thermo: BankThermostat) -> str:
 def bank_lines(bank: BankStatus) -> str:
     mark = LEVEL_MARK[bank["level"]]
     if bank["ratio"] is None:
-        ratio_text = "預金はまだありません"
+        ratio_text = "帝愛信託はまだありません"
     else:
         ratio_text = f"準備率 **{bank['ratio']:.0%}**　`{meter(bank['ratio'])}`"
     lines = [
         f"{mark} **{LEVEL_TEXT[bank['level']]}**　{ratio_text}",
-        f"預金総額 {ui.pelica(bank['deposits'])}　手元の現金 {ui.pelica(int(bank['cash']))}　地下融資 {ui.pelica(int(bank['loaned']))}",
+        f"信託総額 {ui.pelica(bank['deposits'])}　手元の現金 {ui.pelica(int(bank['cash']))}　地下融資 {ui.pelica(int(bank['loaned']))}",
         f"引当金のロック {ui.pelica(int(bank['locks']))}　**引き出せる現金 {ui.pelica(max(0, int(bank['available'])))}**",
+        f"信託の利率 **1日 {bank['trust_rate']:.2%}**（無リスク金利 {bank['risk_free']:.2%} + 上乗せ）　これまでの利息 {ui.pelica(int(bank['trust_paid']))}",
     ]
+    if bank["excess_unpaid"] >= 1:
+        lines.append(f"信託でも払いきれなかった超過損失 {ui.pelica(int(bank['excess_unpaid']))}")
     return "\n".join(lines)
 
 
@@ -89,7 +92,7 @@ def render_teiai_panel_embed(
     if claims:
         e.add_field(name="💀 掛けられている CDS（配当見込みの合計）", value=ui.pelica(claims), inline=False)
     shown_status = display_status if status == teiai.KATAGI else status
-    me = [f"身分: {teiai.STATUS_LABEL[shown_status]}　預金: **{ui.pelica(deposit)}**"]
+    me = [f"身分: {teiai.STATUS_LABEL[shown_status]}　帝愛信託: **{ui.pelica(deposit)}**"]
     if debt:
         me.append(
             f"帝愛への借金: **{ui.pelica(debt)}**（利息: 1日 {teiai.DEBT_RATE_PER_DAY:.0%}・{teiai.DEBT_INTEREST_CEILING:,}ペリカまで）"
@@ -111,7 +114,8 @@ def render_teiai_panel_embed(
         me.append(f"あなたに掛けられている CDS: {cds['on_me']}件")
     e.add_field(name="あなた", value="\n".join(me), inline=False)
     e.set_footer(
-        text=f"預金はカタギだけ。利回りは、ピンハネ・CDS の掛け金・カジノの負け分から。CDS は、対象が時間切れで強制破産したときだけ配当（{teiai.CDS_TERM_DAYS}日で失効）"
+        text="帝愛信託はカタギだけ。いつでも出し入れでき、決まった利息が毎時つく。ただし銀行が払いきれない損失を最初に負う（元本割れあり・借金にはならない）。"
+        f"元本保証がほしいなら /証券 の債券。CDS は、対象が時間切れで強制破産したときだけ配当（{teiai.CDS_TERM_DAYS}日で失効）"
     )
     return e
 
@@ -217,23 +221,23 @@ class TeiaiPanel(ui.OwnerView):
         self._shop_bridge: IShopTitleBridge = shop_bridge if shop_bridge is not None else NoOpShopTitleBridge()
         self.uid = uid
 
-    @discord.ui.button(label="預ける", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="信託に入れる", style=discord.ButtonStyle.success)
     async def deposit(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
-            AmountModal(title="帝愛に預ける", label="金額（ペリカ）", required=True, on_amount=self._deposit)
+            AmountModal(title="帝愛信託に入れる", label="金額（ペリカ）", required=True, on_amount=self._deposit)
         )
 
-    @discord.ui.button(label="引き出す", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="信託から引き出す", style=discord.ButtonStyle.primary)
     async def withdraw(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
             AmountModal(
-                title="帝愛から引き出す", label="金額（空欄なら全額）", required=False, on_amount=self._withdraw
+                title="帝愛信託から引き出す", label="金額（空欄なら全額）", required=False, on_amount=self._withdraw
             )
         )
 
     async def _deposit(self, interaction: discord.Interaction, amount: Optional[int]) -> None:
         ok, result = self.teiai.deposit(ui.guild_id_of(interaction), interaction.user.id, amount or 0)
-        text = f"帝愛に預けました。いまの預金: **{ui.pelica(result)}**" if ok else format_failure(result)
+        text = f"帝愛信託に入れました。いまの信託: **{ui.pelica(result)}**" if ok else format_failure(result)
         await self._reply_bank(interaction, ok, text)
 
     async def _withdraw(self, interaction: discord.Interaction, amount: Optional[int]) -> None:

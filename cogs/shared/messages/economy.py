@@ -79,11 +79,11 @@ ECONOMY_FAILURES: dict[str, FailureFormatter] = {
     "insider_already_bought": "この決算の裏情報メモは、もう買っています。",
     "insider_sold_out": "この決算の裏情報メモは、売り切れです（サーバーで5枚まで）。",
     # 帝愛銀行・借金・CDS・逃亡・破産
-    "bank_katagi_only": "帝愛に預けられるのは、🟢 カタギだけです（借金か延滞がある人、破産者は預けられません）。",
-    "bank_min_deposit": lambda p: f"預金は {p['min_deposit']:,}ペリカ 以上からです。",
-    "bank_no_deposit": "預金がありません。",
-    "bank_withdraw_range": lambda p: f"引き出せるのは 1〜{p['max_amount']:,}ペリカ です（いまの預金）。",
-    "bank_frozen": "🚨 帝愛は支払停止中です（預金封鎖）。手元の現金が、引当金のロックで尽きています。",
+    "bank_katagi_only": "帝愛信託に入れられるのは、🟢 カタギだけです（借金か延滞がある人、破産者は入れられません）。",
+    "bank_min_deposit": lambda p: f"帝愛信託は {p['min_deposit']:,}ペリカ 以上からです。",
+    "bank_no_deposit": "帝愛信託の残高がありません。",
+    "bank_withdraw_range": lambda p: f"引き出せるのは 1〜{p['max_amount']:,}ペリカ です（いまの信託の残高）。",
+    "bank_frozen": "🚨 帝愛は支払停止中です（信託の解約停止）。手元の現金が、引当金のロックで尽きています。",
     "bank_available_limit": lambda p: (
         f"いま引き出せるのは {p['available']:,}ペリカ までです（帝愛の利用可能現金）。残りは、現金が戻ってからです。"
     ),

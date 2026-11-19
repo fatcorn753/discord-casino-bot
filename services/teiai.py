@@ -123,3 +123,7 @@ class TeiaiService:
     def grace_expire(self, guild_id: int, now: float) -> list[Any]:
         """破産猶予の時間切れ（強制破産と、CDS の配当）。(user_id, 結果) の一覧。"""
         return self._bank.for_guild(guild_id).grace_expire(now)
+
+    def trust_accrue(self, guild_id: int, now: float) -> int:
+        """帝愛信託の利息を払う（1時間ごと。払った額を返す）。"""
+        return self._bank.for_guild(guild_id).bank_trust_accrue(now)
