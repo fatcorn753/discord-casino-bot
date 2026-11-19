@@ -51,6 +51,8 @@ def bank_lines(bank: BankStatus) -> str:
         f"引当金のロック {ui.pelica(int(bank['locks']))}　**引き出せる現金 {ui.pelica(max(0, int(bank['available'])))}**",
         f"信託の利率 **1日 {bank['trust_rate']:.2%}**（無リスク金利 {bank['risk_free']:.2%} + 上乗せ）　これまでの利息 {ui.pelica(int(bank['trust_paid']))}",
     ]
+    if bank["bonds"] > 0:
+        lines.append(f"帝愛社債の元本残高 {ui.pelica(bank['bonds'])}（準備率は、信託と社債の合計に対する割合）")
     if bank["excess_unpaid"] >= 1:
         lines.append(f"信託でも払いきれなかった超過損失 {ui.pelica(int(bank['excess_unpaid']))}")
     return "\n".join(lines)

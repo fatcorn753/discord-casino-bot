@@ -439,8 +439,8 @@ class IBondHoldings:
     ) -> tuple[Any, ...]:
         raise NotImplementedError
 
-    def bond_write_off_for(self, bond_id: int) -> None:
-        """解約できない債券を、払い戻しなしで解約済みにする（破産の差し押さえ用）。"""
+    def bond_write_off_for(self, guild_id: int, user_id: int, bond_id: int, payout: int, now: float) -> None:
+        """解約できない債券を、payout だけ払い戻して解約済みにする（破産の換金用。払い戻しは帝愛銀行から）。"""
         raise NotImplementedError
 
 

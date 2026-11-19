@@ -205,8 +205,8 @@ class BondLiquidationStep(ILiquidationStep):
         for bond in self._bonds.active_bonds_for(guild_id, user_id):
             ok, _ = self._bonds.bond_cancel_locked_for(guild_id, user_id, bond.id, now)
             if not ok:  # 解約できない債券は、元本の一部で換金して、差し押さえる
-                self._account.apply(guild_id, user_id, int(bond.principal * teiai.SEIZE_RATE), "破産:債券の差し押さえ")
-                self._bonds.bond_write_off_for(bond.id)
+                payout = int(bond.principal * teiai.SEIZE_RATE)
+                self._bonds.bond_write_off_for(guild_id, user_id, bond.id, payout, now)
 
 
 class OptionLiquidationStep(ILiquidationStep):

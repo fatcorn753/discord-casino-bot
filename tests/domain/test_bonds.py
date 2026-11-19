@@ -237,3 +237,77 @@ def test_no_interest_at_all_when_the_house_has_no_cash(eco):
     eco.bonds.bond_buy(1, "normal", 2000, NOW)
     done = eco.bonds.bond_settle(NOW + 3 * DAY)
     assert done[0]["paid"] == 2000  # 元本だけ。預金者からは一切引かない
+
+
+# ------------------------------------------------------------------ #
+# 帝愛社債（#35）: 発行体は帝愛銀行。元本は銀行の現金に入り、銀行から返す
+# ------------------------------------------------------------------ #
+def _cash(eco, now=NOW):
+    return eco.bank.bank_sync_for(0, now)["cash"]
+
+
+def test_bond_principal_goes_into_the_bank_and_counts_as_a_liability(eco):
+    eco.bonds.bond_buy(1, "normal", 2000, NOW)
+    eco.bonds.bond_buy(2, "junk", 1000, NOW)
+    s = eco.bank.bank_status(NOW)
+    assert s["cash"] == pytest.approx(1_003_000) and s["bonds"] == 3000
+    assert s["ratio"] == pytest.approx(1_003_000 / 3000)  # 信託がなくても、社債の元本に対する準備率が出る
+
+
+def test_maturity_returns_the_principal_from_the_bank_and_only_the_interest_is_the_banks_cost(eco):
+    eco.bonds.bond_buy(1, "normal", 2000, NOW)
+    eco.bonds.bond_settle(NOW + 3 * DAY)
+    assert _cash(eco, NOW + 3 * DAY) == pytest.approx(1_000_000 - 80)
+    assert eco.bank.bank_status(NOW + 3 * DAY)["bonds"] == 0
+
+
+def test_a_sale_pays_the_refund_from_the_bank_and_the_discount_stays_with_the_bank(eco):
+    eco.bonds.bond_buy(1, "normal", 2000, NOW)
+    bond_id = eco.bonds.bond_list(1)["active"][0]["id"]
+    ok, got = eco.bonds.bond_cancel(1, bond_id, NOW)
+    assert ok and got < 2000
+    assert _cash(eco) == pytest.approx(1_000_000 + 2000 - got)  # 銀行の儲けは、元本と手取りの差だけ
+    assert eco.wallet.balance(1) == INITIAL_BALANCE - 2000 + got
+
+
+def test_a_late_sale_above_the_principal_is_paid_by_the_bank(eco):
+    eco.bonds.bond_buy(1, "normal", 2000, NOW)
+    bond_id = eco.bonds.bond_list(1)["active"][0]["id"]
+    late = NOW + 3 * DAY - 3600
+    ok, got = eco.bonds.bond_cancel(1, bond_id, late)
+    assert ok and got > 2000
+    assert _cash(eco, late) == pytest.approx(1_000_000 - (got - 2000))
+
+
+def test_a_default_leaves_the_principal_with_the_bank(eco):
+    eco.bonds.bond_buy(1, "junk", 1000, NOW)
+    eco.bonds.bond_settle(NOW + 3600, Always(0.0))
+    assert _cash(eco, NOW + 3600) == pytest.approx(1_001_000)
+    assert eco.bank.bank_status(NOW + 3600)["bonds"] == 0
+
+
+def test_the_bankruptcy_write_off_pays_the_seize_rate_from_the_bank(eco):
+    eco.bonds.bond_buy(1, "junk", 1000, NOW)
+    bond_id = eco.bonds.bond_list(1)["active"][0]["id"]
+    with eco.db.tx():
+        eco.bonds.bond_write_off_for(0, 1, bond_id, 500, NOW)
+    assert _cash(eco) == pytest.approx(1_000_500)
+    assert eco.wallet.balance(1) == INITIAL_BALANCE - 1000 + 500
+    row = eco.db.conn.execute("SELECT status, paid FROM bonds WHERE id=?", (bond_id,)).fetchone()
+    assert tuple(row) == ("cancelled", 500)
+
+
+def test_bond_flows_net_into_the_thermostat_only_as_the_banks_gain(eco):
+    """元本の出し入れは熱量に数えず、倒産で残った元本だけが流入になる。"""
+    eco.bonds.bond_buy(1, "junk", 1000, NOW)
+    assert eco.bank.bank_status(NOW)["thermostat"]["load"] == pytest.approx(0)
+    eco.bonds.bond_settle(NOW + 3600, Always(0.0))
+    assert eco.bank.bank_status(NOW + 3600)["thermostat"]["load"] > 0
+
+
+def test_panel_shows_the_bond_principal_outstanding(eco):
+    from cogs.teiai.panel import bank_lines
+
+    assert "帝愛社債" not in bank_lines(eco.bank.bank_status(NOW))
+    eco.bonds.bond_buy(1, "normal", 2000, NOW)
+    assert "帝愛社債の元本残高" in bank_lines(eco.bank.bank_status(NOW))

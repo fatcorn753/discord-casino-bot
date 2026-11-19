@@ -127,6 +127,12 @@ class BankRepo(ScopedRepo, IBankRepo):
         if thermostat.ENFORCE:
             self.bank_set_for(guild_id, max(state["cash"] - burn, 0.0) + bailout, state["loaned"])
 
+    def _bonds_outstanding_for(self, guild_id: int) -> int:
+        """帝愛社債（保有中の債券）の元本残高。銀行の負債として準備率に数える（#35）。"""
+        return self._conn.execute(
+            "SELECT COALESCE(SUM(principal), 0) FROM bonds WHERE guild_id=? AND status='active'", (guild_id,)
+        ).fetchone()[0]
+
     def _deposits_for(self, guild_id: int) -> list[tuple[int, int]]:
         return [
             (r["user_id"], r["amount"])
@@ -173,15 +179,17 @@ class BankRepo(ScopedRepo, IBankRepo):
         return locks
 
     def bank_status(self, now: float) -> BankStatus:
-        """銀行の状態（表示用）。available は利用可能現金、ratio は available ÷ 預金総額（預金がなければ None）。"""
+        """銀行の状態（表示用）。available は利用可能現金、ratio は available ÷ (信託総額 + 社債の元本残高)（どちらもなければ None）。"""
         with self._db.tx():
             gid = self._g()
             state = self.bank_sync_for(gid, now)
             total = sum(a for _, a in self._deposits_for(gid))
+            bonds = self._bonds_outstanding_for(gid)
             locks = self.bank_locks_for(gid, now)
             available = state["cash"] - locks
-            ratio = available / total if total > 0 else None
-            if available <= 0 and total > 0:
+            liabilities = total + bonds  # 銀行が返す約束をしている額（信託と、帝愛社債の元本）
+            ratio = available / liabilities if liabilities > 0 else None
+            if available <= 0 and liabilities > 0:
                 level = "frozen"
             elif ratio is None or ratio >= teiai.RUN_WARN_RATIO:
                 level = "safe"
@@ -198,6 +206,7 @@ class BankRepo(ScopedRepo, IBankRepo):
                 "cash": state["cash"],
                 "loaned": state["loaned"],
                 "deposits": total,
+                "bonds": bonds,
                 "locks": locks,
                 "available": available,
                 "ratio": ratio,

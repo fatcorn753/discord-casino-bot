@@ -65,9 +65,10 @@ class BankStatus(TypedDict):
     cash: float
     loaned: float
     deposits: int
+    bonds: int  # 帝愛社債の元本残高（銀行の負債）
     locks: float
     available: float
-    ratio: Optional[float]  # available ÷ 信託総額（信託がなければ None）
+    ratio: Optional[float]  # available ÷ (信託総額 + 社債の元本残高)（どちらもなければ None）
     level: str  # safe / warn / danger / frozen
     thermostat: BankThermostat
     trust_rate: float  # 帝愛信託の利率（1日あたり。r_f + 上乗せ）

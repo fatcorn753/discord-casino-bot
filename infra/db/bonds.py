@@ -1,6 +1,9 @@
 """債券の記録。購入・満期の決着・倒産抽選・売却。
 
 表の定義は infra/db/schema/tables.py にある。利率などの数字は domain/bonds.py。
+帝愛社債（#35）: 発行体は帝愛銀行。購入の元本は銀行の手元の現金に入り、満期・売却・換金で銀行から払う。
+元本は銀行の負債なので、出し入れをサーモスタットに通さない（thermo=False）。銀行が得をした・損をした分
+（ジャンク債の倒産で残った元本、売却の値引き・上乗せ、利息）だけを、サーモスタットに通す。
 満期の利息は、帝愛の手元現金から払う（新しく作らない。現金が足りなければ利息が減る。元本は必ず全額返す）。
 """
 
@@ -68,6 +71,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
                     room=kind.max_total - held,
                 )
             self._account.apply(gid, user_id, -amount, f"債券購入:{kind.name}")
+            self._bank.bank_income_for(gid, amount, now, thermo=False)
             self._conn.execute(
                 "INSERT INTO bonds (guild_id, user_id, kind, principal, due, ts) VALUES (?, ?, ?, ?, ?, ?)",
                 (gid, user_id, kind_key, amount, now + kind.hours * 3600, now),
@@ -125,18 +129,22 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
                 if kind.default_pct and until > since:
                     if rng.random() < bonds_mod.default_probability(kind, (until - since) / 3600):
                         self._conn.execute("UPDATE bonds SET status='defaulted', paid=0 WHERE id=?", (row["id"],))
+                        # 返さなくてよくなった元本は、銀行の儲け（流入）になる
+                        self._bank.bank_thermo_batch_for(gid, row["principal"], now)
                         out.append({**dict(row), "status": "defaulted", "paid": 0})
                         continue
                     self._conn.execute("UPDATE bonds SET checked=? WHERE id=?", (until, row["id"]))
                 if row["due"] > now:
                     continue
                 interest = max(0, bonds_mod.maturity_payout(kind, row["principal"]) - row["principal"])
+                # 元本を先に返す（社債はシニア。現金が足りなければ信託 → 熱浴・共済の順で負担する）
+                self._bank.bank_pay_for(gid, row["principal"], now, thermo=False)
                 got_interest = 0
                 if interest:
                     state = self._bank.bank_sync_for(gid, now)
-                    got_interest = int(min(interest, state["cash"]))
+                    got_interest = int(min(interest, max(state["cash"], 0.0)))
                     if got_interest:
-                        self._bank.bank_set_for(gid, state["cash"] - got_interest, state["loaned"])
+                        self._bank.bank_pay_for(gid, got_interest, now)
                 paid = row["principal"] + got_interest
                 self._account.ensure(gid, row["user_id"])
                 self._account.apply(gid, row["user_id"], paid, f"債券償還:{kind.name}", income=got_interest)
@@ -176,8 +184,31 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
             ).fetchall()
         ]
 
-    def bond_write_off_for(self, bond_id: int) -> None:
-        self._conn.execute("UPDATE bonds SET status='cancelled' WHERE id=?", (bond_id,))
+    def bond_write_off_for(self, guild_id: int, user_id: int, bond_id: int, payout: int, now: float) -> None:
+        row = self._conn.execute(
+            "SELECT principal FROM bonds WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
+            (bond_id, guild_id, user_id),
+        ).fetchone()
+        if row is None:
+            return
+        self._settle_early_for(guild_id, user_id, row["principal"], payout, now, "破産:債券の差し押さえ")
+        self._conn.execute("UPDATE bonds SET status='cancelled', paid=? WHERE id=?", (payout, bond_id))
+
+    def _settle_early_for(
+        self, guild_id: int, user_id: int, principal: int, payout: int, now: float, reason: str
+    ) -> None:
+        """満期の前に payout で払い戻す（売却・破産の換金）。
+
+        払い戻しは thermo=False で銀行から払い、元本との差（値引きなら流入、上乗せなら流出）だけを
+        サーモスタットに通す。流出なら支払いの前、流入なら支払いのあと（bank_thermo_batch_for の約束）。
+        """
+        net = principal - payout
+        if net < 0:
+            self._bank.bank_thermo_batch_for(guild_id, net, now)
+        self._bank.bank_pay_for(guild_id, payout, now, thermo=False)
+        if net > 0:
+            self._bank.bank_thermo_batch_for(guild_id, net, now)
+        self._account.apply(guild_id, user_id, payout, reason)
 
     def bond_cancel_locked_for(
         self, guild_id: int, user_id: int, bond_id: int, now: Optional[float] = None
@@ -192,7 +223,9 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         kind = bonds_mod.KINDS[row["kind"]]
         if not kind.sellable:
             return False, fail("bond_not_sellable", name=kind.name)
-        refund = bonds_mod.sale_value(kind, row["principal"], self._now() if now is None else now, row["due"])
-        self._account.apply(guild_id, user_id, refund, "返金:債券売却")  # もともと自分のお金なので、借金の徴収はしない
+        at = self._now() if now is None else now
+        refund = bonds_mod.sale_value(kind, row["principal"], at, row["due"])
+        # もともと自分のお金なので、借金の徴収はしない
+        self._settle_early_for(guild_id, user_id, row["principal"], refund, at, "返金:債券売却")
         self._conn.execute("UPDATE bonds SET status='cancelled', paid=? WHERE id=?", (refund, bond_id))
         return True, refund
