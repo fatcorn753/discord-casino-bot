@@ -49,7 +49,7 @@ def bank_lines(bank: BankStatus) -> str:
         f"{mark} **{LEVEL_TEXT[bank['level']]}**　{ratio_text}",
         f"信託総額 {ui.pelica(bank['deposits'])}　手元の現金 {ui.pelica(int(bank['cash']))}　地下融資 {ui.pelica(int(bank['loaned']))}",
         f"引当金のロック {ui.pelica(int(bank['locks']))}　**引き出せる現金 {ui.pelica(max(0, int(bank['available'])))}**",
-        f"信託の利率 **1日 {bank['trust_rate']:.2%}**（無リスク金利 {bank['risk_free']:.2%} + 上乗せ）　これまでの利息 {ui.pelica(int(bank['trust_paid']))}",
+        f"信託の利率 **1日 {bank['trust_rate']:.2%}**（無リスク金利 {bank['risk_free']:.2%} + 上乗せ。金利は準備率に連動し、いまの目標は {bank['rf_target']:.2%}）　これまでの利息 {ui.pelica(int(bank['trust_paid']))}",
     ]
     if bank["bonds"] > 0:
         lines.append(f"帝愛社債の元本残高 {ui.pelica(bank['bonds'])}（準備率は、信託と社債の合計に対する割合）")

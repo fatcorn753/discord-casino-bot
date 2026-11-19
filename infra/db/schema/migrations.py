@@ -54,6 +54,8 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         "trust_accrued",
         "trust_paid",
         "excess_unpaid",
+        "rf",
+        "rf_ts",
     ):
         if col not in tb:
             conn.execute(f"ALTER TABLE teiai_bank ADD COLUMN {col} REAL NOT NULL DEFAULT 0")
@@ -88,8 +90,11 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN last_slot INTEGER")
     if "debt" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN debt INTEGER NOT NULL DEFAULT 0")
-    if "checked" not in {r["name"] for r in conn.execute("PRAGMA table_info(bonds)")}:
+    bc = {r["name"] for r in conn.execute("PRAGMA table_info(bonds)")}
+    if "checked" not in bc:
         conn.execute("ALTER TABLE bonds ADD COLUMN checked REAL")
+    if "rate" not in bc:
+        conn.execute("ALTER TABLE bonds ADD COLUMN rate REAL")
     opt_cols = {r["name"] for r in conn.execute("PRAGMA table_info(options)")}
     for col, ddl in (
         ("symbol2", "TEXT"),

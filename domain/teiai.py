@@ -61,6 +61,12 @@ LOAN_RECOVERY_PER_HOUR = _CFG.loan_recovery_per_hour
 LOCK_DEBT_RATE = _CFG.lock_debt_rate
 LOSS_SHARE = _CFG.loss_share
 TRUST_PREMIUM_PER_DAY = _CFG.trust_premium_per_day  # 帝愛信託の上乗せ金利（#33。r_f に足す）
+# 無リスク金利 r_f の動き（#18。式は domain/rates.py）
+RF_MIN_PCT = _CFG.rf_min_pct
+RF_MAX_PCT = _CFG.rf_max_pct
+RF_ALPHA = _CFG.rf_alpha
+RF_KAPPA_PER_DAY = _CFG.rf_kappa_per_day
+RF_SIGMA = _CFG.rf_sigma
 RUN_WARN_RATIO = _CFG.run_warn_ratio
 RUN_DANGER_RATIO = _CFG.run_danger_ratio
 

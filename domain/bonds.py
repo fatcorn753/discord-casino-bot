@@ -8,6 +8,7 @@
 
 import math
 from dataclasses import dataclass
+from typing import Optional
 
 from domain.ports import get_catalogs
 
@@ -34,12 +35,14 @@ NORMAL = KINDS["normal"]
 JUNK = KINDS["junk"]
 
 
-def interest(kind: Kind, principal: int) -> int:
-    return principal * kind.rate // 100
+def interest(kind: Kind, principal: int, rate_pct: Optional[float] = None) -> int:
+    """満期の利息。rate_pct は買ったときに決まった利率（％。#18）。None なら種類の基準の利率。"""
+    rate = kind.rate if rate_pct is None else rate_pct
+    return int(principal * rate / 100)
 
 
-def maturity_payout(kind: Kind, principal: int) -> int:
-    return principal + interest(kind, principal)
+def maturity_payout(kind: Kind, principal: int, rate_pct: Optional[float] = None) -> int:
+    return principal + interest(kind, principal, rate_pct)
 
 
 SALE_DISCOUNT_PER_HOUR = (
@@ -59,10 +62,18 @@ def default_probability(kind: Kind, hours: float) -> float:
     return 1 - math.exp(-hazard_per_hour(kind) * max(0.0, hours))
 
 
-def sale_value(kind: Kind, principal: int, now: float, due: float) -> int:
+def sale_value(
+    kind: Kind,
+    principal: int,
+    now: float,
+    due: float,
+    rate_pct: Optional[float] = None,
+    discount_per_hour: float = SALE_DISCOUNT_PER_HOUR,
+) -> int:
     """満期前に売ったときの手取り（DCF）。満期の受取額を、残り時間 τ だけ割り引く: payout × exp(-割引率 × τ)。切り捨て。
 
-    満期に近づくほど満期の受取額に近づき、買った直後でも元本の約97%（通常債）になる。満期まで待つほうが、必ず多い。
+    割引率は、いまの無リスク金利 + 売却スプレッド（#18。domain/rates.sale_discount_per_hour）。金利が上がると値段が下がる。
+    満期に近づくほど満期の受取額に近づく。同じ金利のままなら、満期まで待つほうが必ず多い。
     """
     remaining = max(0.0, (due - now) / 3600)
-    return int(maturity_payout(kind, principal) * math.exp(-SALE_DISCOUNT_PER_HOUR * remaining))
+    return int(maturity_payout(kind, principal, rate_pct) * math.exp(-discount_per_hour * remaining))

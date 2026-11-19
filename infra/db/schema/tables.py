@@ -376,7 +376,9 @@ def create_tables(conn: sqlite3.Connection) -> None:
             trust_ts        REAL NOT NULL DEFAULT 0,   -- 帝愛信託の利息を、ここまで払った時刻（0 は未開始）
             trust_accrued   REAL NOT NULL DEFAULT 0,   -- まだ払っていない利息の端数
             trust_paid      REAL NOT NULL DEFAULT 0,   -- これまでに払った信託の利息の累計
-            excess_unpaid   REAL NOT NULL DEFAULT 0    -- 信託でも熱浴・共済でも払えなかった超過損失の累計
+            excess_unpaid   REAL NOT NULL DEFAULT 0,   -- 信託でも熱浴・共済でも払えなかった超過損失の累計
+            rf              REAL NOT NULL DEFAULT 0,   -- 無リスク金利 r_f（1日あたり。0 は未開始で、基準の金利。#18）
+            rf_ts           REAL NOT NULL DEFAULT 0    -- r_f を、ここまで進めた時刻
         );
         CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛の胴元の口座（サーバーごとに1行）。ピンハネが入る。銀行の手元（預金の準備）とは別
             guild_id INTEGER PRIMARY KEY,
@@ -519,7 +521,8 @@ def create_tables(conn: sqlite3.Connection) -> None:
             status    TEXT    NOT NULL DEFAULT 'active',   -- active / paid / defaulted / cancelled
             paid      INTEGER NOT NULL DEFAULT 0, -- 満期・売却で戻した額
             ts        REAL    NOT NULL,           -- 買った時刻
-            checked   REAL                        -- ジャンク債の倒産抽選を、ここまで済ませた時刻（NULL なら買った時刻）
+            checked   REAL,                       -- ジャンク債の倒産抽選を、ここまで済ませた時刻（NULL なら買った時刻）
+            rate      REAL                        -- 買ったときに決まった利率（満期までの ％。#18。NULL は種類の基準の利率）
         );
         CREATE TABLE IF NOT EXISTS raffle (             -- 抽選（持ち主が開催。1サーバーに募集中は1つだけ）
             id         INTEGER PRIMARY KEY AUTOINCREMENT,

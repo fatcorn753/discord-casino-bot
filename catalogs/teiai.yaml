@@ -45,6 +45,14 @@ lock_debt_rate: 0.05
 loss_share: 0.03
 # 帝愛信託（#33）の利息: r_trust = 無リスク金利 r_f + trust_premium_per_day（1日あたり。連続複利）
 trust_premium_per_day: 0.001
+# 無リスク金利 r_f（#18）: 帝愛銀行の準備率 θ に連動して動く（CIR 風: dr = κ(μ(θ) − r)dt + σ√r dW、毎分）
+# 目標 μ(θ) = 下限 + (上限 − 下限) × exp(−α θ)。下限・上限は「通常債の満期まで（72時間）の利息 ％」で書く
+# α は、平時の θ ≈ 0.225 で通常債が 4% になる値
+rf_min_pct: 1.5
+rf_max_pct: 8.0
+rf_alpha: 4.25
+rf_kappa_per_day: 2.0     # 平均回帰の速さ（1日あたり。半減期 約8時間）
+rf_sigma: 0.02            # 揺らぎの大きさ（√r に掛ける。1日あたり）
 run_warn_ratio: 0.15
 run_danger_ratio: 0.05
 

@@ -79,6 +79,11 @@ class TeiaiCatalogContract:
     lock_debt_rate: float
     loss_share: float
     trust_premium_per_day: float
+    rf_min_pct: float
+    rf_max_pct: float
+    rf_alpha: float
+    rf_kappa_per_day: float
+    rf_sigma: float
     run_warn_ratio: float
     run_danger_ratio: float
     cds_min_stake: int

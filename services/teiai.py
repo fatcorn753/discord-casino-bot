@@ -124,6 +124,10 @@ class TeiaiService:
         """破産猶予の時間切れ（強制破産と、CDS の配当）。(user_id, 結果) の一覧。"""
         return self._bank.for_guild(guild_id).grace_expire(now)
 
+    def rf_tick(self, guild_id: int, now: float, rng: Any = None) -> float:
+        """無リスク金利を、準備率に応じて進める（毎分。#18）。"""
+        return self._bank.for_guild(guild_id).bank_rf_tick(now, rng)
+
     def trust_accrue(self, guild_id: int, now: float) -> int:
         """帝愛信託の利息を払う（1時間ごと。払った額を返す）。"""
         return self._bank.for_guild(guild_id).bank_trust_accrue(now)

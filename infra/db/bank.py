@@ -4,6 +4,7 @@
 """
 
 import math
+import random
 from typing import Any, Optional
 
 from domain import market as market_mod
@@ -178,17 +179,22 @@ class BankRepo(ScopedRepo, IBankRepo):
                 locks += min(claims, teiai.CDS_PAYOUT_CAP_RATE * r["debt"])
         return locks
 
+    def _reserve_for(self, guild_id: int, cash: float, now: float) -> tuple[int, int, float, float, Optional[float]]:
+        """(信託総額, 社債の元本残高, 引当金, 利用可能現金, 準備率 θ)。θ = 利用可能現金 ÷ (信託 + 社債)（どちらもなければ None）。"""
+        total = sum(a for _, a in self._deposits_for(guild_id))
+        bonds = self._bonds_outstanding_for(guild_id)
+        locks = self.bank_locks_for(guild_id, now)
+        available = cash - locks
+        liabilities = total + bonds  # 銀行が返す約束をしている額（信託と、帝愛社債の元本）
+        return total, bonds, locks, available, (available / liabilities if liabilities > 0 else None)
+
     def bank_status(self, now: float) -> BankStatus:
         """銀行の状態（表示用）。available は利用可能現金、ratio は available ÷ (信託総額 + 社債の元本残高)（どちらもなければ None）。"""
         with self._db.tx():
             gid = self._g()
             state = self.bank_sync_for(gid, now)
-            total = sum(a for _, a in self._deposits_for(gid))
-            bonds = self._bonds_outstanding_for(gid)
-            locks = self.bank_locks_for(gid, now)
-            available = state["cash"] - locks
-            liabilities = total + bonds  # 銀行が返す約束をしている額（信託と、帝愛社債の元本）
-            ratio = available / liabilities if liabilities > 0 else None
+            total, bonds, locks, available, ratio = self._reserve_for(gid, state["cash"], now)
+            liabilities = total + bonds
             if available <= 0 and liabilities > 0:
                 level = "frozen"
             elif ratio is None or ratio >= teiai.RUN_WARN_RATIO:
@@ -221,6 +227,7 @@ class BankRepo(ScopedRepo, IBankRepo):
                 },
                 "trust_rate": self.trust_rate_per_day_for(gid, now),
                 "risk_free": self.risk_free_per_day_for(gid, now),
+                "rf_target": rates.rf_target(ratio),
                 "trust_paid": totals["trust_paid"],
                 "excess_unpaid": totals["excess_unpaid"],
             }
@@ -366,8 +373,23 @@ class BankRepo(ScopedRepo, IBankRepo):
     # 帝愛信託の利息（#33。確定した流出として、毎時払う）
     # ------------------------------------------------------------------ #
     def risk_free_per_day_for(self, guild_id: int, now: float) -> float:
-        """無リスク金利 r_f（1日あたり。連続複利）。いまは通常債の利率から決まる固定値（#18 で準備率に連動させる）。"""
-        return rates.BASE_RISK_FREE_PER_DAY
+        """無リスク金利 r_f（1日あたり。連続複利）。準備率に連動して毎分動く（#18。bank_rf_tick）。未開始なら基準の金利。"""
+        row = self._conn.execute("SELECT rf FROM teiai_bank WHERE guild_id=?", (guild_id,)).fetchone()
+        return row["rf"] if row is not None and row["rf"] > 0 else rates.BASE_RISK_FREE_PER_DAY
+
+    def bank_rf_tick(self, now: float, rng: Any = None) -> float:
+        """r_f を、いまの準備率 θ の目標へ向けて進める（CIR 風。式は domain/rates.py）。新しい r_f を返す。"""
+        rng = rng or random
+        with self._db.tx():
+            gid = self._g()
+            state = self.bank_sync_for(gid, now)
+            row = self._conn.execute("SELECT rf, rf_ts FROM teiai_bank WHERE guild_id=?", (gid,)).fetchone()
+            r = row["rf"] if row["rf"] > 0 else rates.BASE_RISK_FREE_PER_DAY
+            if row["rf_ts"] > 0:
+                ratio = self._reserve_for(gid, state["cash"], now)[4]
+                r = rates.rf_step(r, ratio, (now - row["rf_ts"]) / 86400, rng.gauss(0.0, 1.0))
+            self._conn.execute("UPDATE teiai_bank SET rf=?, rf_ts=? WHERE guild_id=?", (r, now, gid))
+            return r
 
     def trust_rate_per_day_for(self, guild_id: int, now: float) -> float:
         """帝愛信託の利率 r_trust = r_f + 上乗せ（1日あたり。連続複利）。"""

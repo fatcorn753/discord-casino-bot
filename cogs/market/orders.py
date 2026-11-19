@@ -541,13 +541,15 @@ async def bond_buy(cog: "MarketCog", interaction: discord.Interaction, kind_key:
             ephemeral=True,
         )
         return
-    ok, reason = cog._market_svc.bond_buy(gid, interaction.user.id, kind_key, amount, cog._market_svc.clock.now_ts())
+    now = cog._market_svc.clock.now_ts()
+    quote = cog._market_svc.bond_quote(gid, kind_key, amount, now)  # 買う直前の金利（買うときに、この利率で固定される）
+    ok, reason = cog._market_svc.bond_buy(gid, interaction.user.id, kind_key, amount, now)
     if not ok:
         await interaction.response.send_message(
             embed=ui.error_embed("買えません", format_failure(reason)), ephemeral=True
         )
         return
-    await interaction.response.send_message(embed=bond_buy_embed(kind_key, amount, cog._market_svc.clock.now_ts()))
+    await interaction.response.send_message(embed=bond_buy_embed(kind_key, amount, now, quote))
 
 
 async def bond_cancel(cog: "MarketCog", interaction: discord.Interaction, bond_id: int) -> None:

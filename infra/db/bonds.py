@@ -11,6 +11,7 @@ import random
 from typing import Any, Optional
 
 from domain import bonds as bonds_mod
+from domain import rates
 from domain.errors import fail
 from domain.ports.bridges import (
     IBankCashFlow,
@@ -20,7 +21,7 @@ from domain.ports.bridges import (
     NoOpDebtRepayHook,
     NoOpMarginCollateralGuard,
 )
-from domain.ports.contracts import ActiveBond, HoldingBook
+from domain.ports.contracts import ActiveBond, BondQuote, HoldingBook
 from domain.ports.repos import IBondRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -70,11 +71,14 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
                     held=held,
                     room=kind.max_total - held,
                 )
+            rate = rates.bond_rate_pct(
+                kind, self._bank.risk_free_per_day_for(gid, now)
+            )  # 買ったときの金利で固定（#18）
             self._account.apply(gid, user_id, -amount, f"債券購入:{kind.name}")
             self._bank.bank_income_for(gid, amount, now, thermo=False)
             self._conn.execute(
-                "INSERT INTO bonds (guild_id, user_id, kind, principal, due, ts) VALUES (?, ?, ?, ?, ?, ?)",
-                (gid, user_id, kind_key, amount, now + kind.hours * 3600, now),
+                "INSERT INTO bonds (guild_id, user_id, kind, principal, due, ts, rate) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (gid, user_id, kind_key, amount, now + kind.hours * 3600, now, rate),
             )
             return True, ""
 
@@ -136,7 +140,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
                     self._conn.execute("UPDATE bonds SET checked=? WHERE id=?", (until, row["id"]))
                 if row["due"] > now:
                     continue
-                interest = max(0, bonds_mod.maturity_payout(kind, row["principal"]) - row["principal"])
+                interest = max(0, bonds_mod.interest(kind, row["principal"], row["rate"]))
                 # 元本を先に返す（社債はシニア。現金が足りなければ信託 → 熱浴・共済の順で負担する）
                 self._bank.bank_pay_for(gid, row["principal"], now, thermo=False)
                 got_interest = 0
@@ -158,7 +162,26 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
     def bond_price(self, row: dict[str, Any], now: float) -> int:
         """その債券を、いま売ったときの手取り（売れない債券は 0）。表示用。"""
         kind = bonds_mod.KINDS[row["kind"]]
-        return bonds_mod.sale_value(kind, row["principal"], now, row["due"]) if kind.sellable else 0
+        return self._sale_value_for(self._g(), row, now) if kind.sellable else 0
+
+    def bond_quote(self, kind_key: str, amount: int, now: float) -> BondQuote:
+        """いま買うときの利率・満期の受取額・すぐ売ったときの手取り（表示用。#18）。"""
+        kind = bonds_mod.KINDS[kind_key]
+        with self._lock:
+            gid = self._g()
+            rf = self._bank.risk_free_per_day_for(gid, now)
+        rate = rates.bond_rate_pct(kind, rf)
+        due = now + kind.hours * 3600
+        sale = (
+            bonds_mod.sale_value(kind, amount, now, due, rate, rates.sale_discount_per_hour(rf)) if kind.sellable else 0
+        )
+        return BondQuote(rate=rate, payout=bonds_mod.maturity_payout(kind, amount, rate), sale=sale)
+
+    def _sale_value_for(self, guild_id: int, row: Any, now: float) -> int:
+        """DCF の売値。割引率は、いまの r_f + 売却スプレッド（金利が上がると下がる。#18）。"""
+        kind = bonds_mod.KINDS[row["kind"]]
+        discount = rates.sale_discount_per_hour(self._bank.risk_free_per_day_for(guild_id, now))
+        return bonds_mod.sale_value(kind, row["principal"], now, row["due"], row["rate"], discount)
 
     def bond_cancel(self, user_id: int, bond_id: int, now: Optional[float] = None) -> tuple[Any, ...]:
         """満期前に、DCF の値段で売る（通常債だけ）。(成功か, 理由か受け取った額) を返す。"""
@@ -224,7 +247,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         if not kind.sellable:
             return False, fail("bond_not_sellable", name=kind.name)
         at = self._now() if now is None else now
-        refund = bonds_mod.sale_value(kind, row["principal"], at, row["due"])
+        refund = self._sale_value_for(guild_id, row, at)
         # もともと自分のお金なので、借金の徴収はしない
         self._settle_early_for(guild_id, user_id, row["principal"], refund, at, "返金:債券売却")
         self._conn.execute("UPDATE bonds SET status='cancelled', paid=? WHERE id=?", (refund, bond_id))

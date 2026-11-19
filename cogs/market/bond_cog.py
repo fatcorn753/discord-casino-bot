@@ -63,6 +63,7 @@ class BondCog(commands.Cog):
         now = self._market_svc.clock.now_ts()
 
         def handle_guild(guild) -> None:
+            self._teiai.rf_tick(guild.id, now, RNG)  # 無リスク金利（準備率に連動。#18）
             self._market_svc.settle_maturities(guild.id, now, RNG)  # 満期の債券と、満期のオプションの決済
             self._teiai.trust_accrue(guild.id, now)  # 帝愛信託の利息（1時間ごと）
             for user_id, result in self._teiai.grace_expire(

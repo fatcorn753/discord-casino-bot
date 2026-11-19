@@ -7,7 +7,7 @@ from domain import bonds
 
 KIND_CHOICES = [
     app_commands.Choice(
-        name=f"{k.emoji} {k.name}（{k.hours // 24}日・利息+{k.rate}%"
+        name=f"{k.emoji} {k.name}（{k.hours // 24}日・利息 約{k.rate}%（金利で変わる）"
         + (f"・満期までに{k.default_pct}%倒産）" if k.default_pct else "・元本保証）"),
         value=k.key,
     )

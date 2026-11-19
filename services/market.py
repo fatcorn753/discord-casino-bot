@@ -7,6 +7,7 @@ from domain import bonds, earnings, market, market_events
 from domain import options as opt
 from domain.options import name_of
 from domain.ports.clock import IClock
+from domain.ports.contracts import BondQuote
 from domain.ports.repos import (
     IBondRepo,
     ICryptoRepo,
@@ -290,6 +291,9 @@ class MarketService:
 
     def bond_buy(self, guild_id: int, uid: int, kind: str, amount: int, now: float) -> tuple[Any, ...]:
         return self._bonds.for_guild(guild_id).bond_buy(uid, kind, amount, now)
+
+    def bond_quote(self, guild_id: int, kind: str, amount: int, now: float) -> BondQuote:
+        return self._bonds.for_guild(guild_id).bond_quote(kind, amount, now)
 
     def bond_cancel(self, guild_id: int, uid: int, bond_id: int) -> tuple[Any, ...]:
         return self._bonds.for_guild(guild_id).bond_cancel(uid, bond_id)

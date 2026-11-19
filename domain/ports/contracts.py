@@ -59,6 +59,14 @@ class BankThermostat(TypedDict):
     bailed: float
 
 
+class BondQuote(TypedDict):
+    """いま債券を買うときの見積もり（#18）。"""
+
+    rate: float  # 満期までの利率（％。買ったときに固定）
+    payout: int  # 満期の受取額
+    sale: int  # 買ってすぐ売ったときの手取り（売れない債券は 0）
+
+
 class BankStatus(TypedDict):
     """帝愛銀行の状態（表示用）。"""
 
@@ -73,6 +81,7 @@ class BankStatus(TypedDict):
     thermostat: BankThermostat
     trust_rate: float  # 帝愛信託の利率（1日あたり。r_f + 上乗せ）
     risk_free: float  # 無リスク金利 r_f（1日あたり）
+    rf_target: float  # いまの準備率での r_f の目標（1日あたり。#18）
     trust_paid: float  # これまでに払った信託の利息の累計
     excess_unpaid: float  # 信託でも熱浴・共済でも払えなかった超過損失の累計
 

@@ -11,7 +11,7 @@ from cogs.shared.messages.market import PIN_ACTION_TEXT
 from domain import bonds, market, market_events
 from domain import options as opt
 from domain.options import name_of
-from domain.ports.contracts import MarginStatus
+from domain.ports.contracts import BondQuote, MarginStatus
 
 TICK_MINUTES = 1
 HOLDER_ROWS = 10  # チャートに載せる保有者の数
@@ -355,7 +355,7 @@ def holdings_embed(
         for r in bond_data["active"]:
             k = bonds.KINDS[r["kind"]]
             lines.append(
-                f"`#{r['id']}` {k.emoji} {k.name} 元本 {ui.pelica(r['principal'])} → 満期 {due_text(r['due'])}（受取 {ui.pelica(bonds.maturity_payout(k, r['principal']))}）"
+                f"`#{r['id']}` {k.emoji} {k.name} 元本 {ui.pelica(r['principal'])} → 満期 {due_text(r['due'])}（受取 {ui.pelica(bonds.maturity_payout(k, r['principal'], r.get('rate')))}）"
                 + (f"　いま売ると {ui.pelica(bond_quotes[r['id']])}" if k.sellable else "　⚠️ 倒産しうる・売れない")
             )
         parts.append("🏦 **債券**\n" + "\n".join(lines))
@@ -434,20 +434,20 @@ def option_target_text(
     return "\n".join(lines)
 
 
-def bond_buy_embed(kind_key: str, amount: int, now: float) -> discord.Embed:
-    """債券購入の完了埋め込み。"""
+def bond_buy_embed(kind_key: str, amount: int, now: float, quote: BondQuote) -> discord.Embed:
+    """債券購入の完了埋め込み。利率は買ったときの金利で固定される（#18）。"""
     k = bonds.KINDS[kind_key]
     lines = [
         f"元本: **{ui.pelica(amount)}**　満期: {k.hours // 24}日後（{due_text(now + k.hours * 3600)}）",
-        f"満期に受け取る額: **{ui.pelica(bonds.maturity_payout(k, amount))}**（利息 +{k.rate}%）",
+        f"満期に受け取る額: **{ui.pelica(quote['payout'])}**（利息 +{quote['rate']:g}%。いまの金利で固定）",
     ]
     if k.default_pct:
         lines.append(
             f"⚠️ 満期までに **{k.default_pct}%の確率で倒産**します（満期を待たず、**途中のどの瞬間にも**起こります）。倒産すると元本は戻りません。売ることもできません。"
         )
     else:
-        sold = bonds.sale_value(k, amount, now, now + k.hours * 3600)
         lines.append(
-            f"元本保証です。満期の前でも、残り時間で割り引いた値段で売れます（`/証券 決済`。いま売ると {ui.pelica(sold)}、待つほど満期の額に近づきます）。"
+            f"元本保証です。満期の前でも、残り時間で割り引いた値段で売れます（`/証券 決済`。いま売ると {ui.pelica(quote['sale'])}、待つほど満期の額に近づきます。"
+            "金利が下がると高く、上がると安く売れます）。"
         )
     return ui.ok_embed(f"{k.emoji} {k.name}を買いました", "\n".join(lines))

@@ -164,6 +164,10 @@ class NoOpMarketPriceReader(IMarketPriceReader):
 class IBankCashFlow:
     """帝愛銀行の手元現金の同期・入金（配当分配・利子源泉）・払い出しの契約。"""
 
+    def risk_free_per_day_for(self, guild_id: int, now: float) -> float:
+        """いまの無リスク金利 r_f（1日あたり。#18）。"""
+        raise NotImplementedError
+
     def bank_sync_for(self, guild_id: int, now: float) -> dict[str, float]:
         raise NotImplementedError
 

@@ -9,7 +9,7 @@ from domain.ports.bridges import (
     ISpotCollateralReader,
     IValuationSource,
 )
-from domain.ports.contracts import HoldingBook, MarginPosition, MarginStatus, PricePoint, SpotHolding
+from domain.ports.contracts import BondQuote, HoldingBook, MarginPosition, MarginStatus, PricePoint, SpotHolding
 from domain.ports.repos.base import IGuildScopedRepo
 
 if TYPE_CHECKING:
@@ -194,6 +194,9 @@ class IBondRepo(IGuildScopedRepo, IValuationSource):
         raise NotImplementedError
 
     def bond_price(self, row: dict[str, Any], now: float) -> int:
+        raise NotImplementedError
+
+    def bond_quote(self, kind_key: str, amount: int, now: float) -> BondQuote:
         raise NotImplementedError
 
     def bond_cancel(self, user_id: int, bond_id: int, now: Optional[float] = None) -> tuple[Any, ...]:
