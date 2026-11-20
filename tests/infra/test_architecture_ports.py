@@ -79,7 +79,7 @@ def test_repository_bundle_satisfies_nominal_repo_ports():
         assert isinstance(repos, RepositoryBundle)
         hints = typing.get_type_hints(repo_ports.IRepositoryBundle)
         names = [f.name for f in dataclasses.fields(repo_ports.IRepositoryBundle)]
-        assert len(names) == 31, names  # フィールドを足したら、この数も直す（検証漏れを作らないため）
+        assert len(names) == 32, names  # フィールドを足したら、この数も直す（検証漏れを作らないため）
         wrong = []
         for name in names:
             port = typing.get_origin(hints[name]) or hints[name]

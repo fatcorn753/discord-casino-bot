@@ -90,3 +90,12 @@ p2p:
     card_icon: card_icon
     skin_dice: skin_dice
     skin_table: skin_table
+
+# 投票（/投票）。誰でも作れる賛成・反対の二択
+poll:
+  rig_cost: 500            # 票数を書き換える代金（帝愛銀行の収入）
+  default_minutes: 1440    # 期限を省いたとき
+  max_minutes: 43200       # 期限の上限（30日）
+  max_open_per_user: 5     # 1人が同時に開ける投票の数
+  title_max: 200           # 議題の長さ
+  max_count: 1000000       # 書き換えられる票数の上限

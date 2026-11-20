@@ -207,6 +207,16 @@ class P2pSectionContract:
 
 
 @dataclass(frozen=True)
+class PollSectionContract:
+    rig_cost: int
+    default_minutes: int
+    max_minutes: int
+    max_open_per_user: int
+    title_max: int
+    max_count: int
+
+
+@dataclass(frozen=True)
 class EconomyCatalogContract:
     wallet: WalletSectionContract
     transfer: TransferSectionContract
@@ -215,3 +225,4 @@ class EconomyCatalogContract:
     raffle: RaffleSectionContract
     weekly: WeeklySectionContract
     p2p: P2pSectionContract
+    poll: PollSectionContract

@@ -83,6 +83,7 @@ from infra.db.notices import NoticeRepo
 from infra.db.options import OptionRepo
 from infra.db.p2p import P2PRepo
 from infra.db.pachinko import PachinkoRepo
+from infra.db.poll import PollRepo
 from infra.db.quiz import QuizRepo
 from infra.db.race import RaceRepo
 from infra.db.raffle import RaffleRepo
@@ -106,6 +107,7 @@ class RepositoryBundle(IRepositoryBundle):
     market_events: MarketEventRepo
     records: RecordRepo
     raffle: RaffleRepo
+    polls: PollRepo
     guild: GuildRepo
     bank: BankRepo
     debt: DebtRepo
@@ -145,6 +147,7 @@ class RepositoryBundle(IRepositoryBundle):
             market_events=self.market_events.for_guild(guild_id),
             records=self.records.for_guild(guild_id),
             raffle=self.raffle.for_guild(guild_id),
+            polls=self.polls.for_guild(guild_id),
             guild=self.guild.for_guild(guild_id),
             bank=self.bank.for_guild(guild_id),
             debt=self.debt.for_guild(guild_id),
@@ -219,6 +222,7 @@ def open_repositories(
         bankrupt_prep_hook=LazyBankruptPrepHook(lambda: bankrupt_prep_hook),
         strict=strict,
     )
+    polls = PollRepo(db, account, bank, strict=strict)
 
     loans = LoanRepo(db, account, debt, bank, strict=strict)
     shop = ShopRepo(db, account, debt, strict=strict)
@@ -310,6 +314,7 @@ def open_repositories(
         market_events=market_events,
         records=records,
         raffle=raffle,
+        polls=polls,
         guild=guild,
         bank=bank,
         debt=debt,

@@ -25,6 +25,26 @@ class IRaffleRepo(IGuildScopedRepo):
         raise NotImplementedError
 
 
+class IPollRepo(IGuildScopedRepo):
+    def poll_create(self, creator: int, title: str, closes: float, channel_id: int, now: float) -> tuple[Any, ...]:
+        raise NotImplementedError
+
+    def poll_set_message(self, poll_id: int, channel_id: int, message_id: int) -> None:
+        raise NotImplementedError
+
+    def poll_get(self, poll_id: int) -> Optional[dict[str, Any]]:
+        raise NotImplementedError
+
+    def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> tuple[Any, ...]:
+        raise NotImplementedError
+
+    def poll_rig(self, user_id: int, poll_id: int, yes: int, no: int, now: float) -> tuple[Any, ...]:
+        raise NotImplementedError
+
+    def poll_close_due(self, now: float) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+
 class IShopRepo(IGuildScopedRepo):
     SLOTS: tuple[str, ...]
 

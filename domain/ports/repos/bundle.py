@@ -28,6 +28,7 @@ from domain.ports.repos.social import (
     IEscrowRepo,
     ILaborRepo,
     IP2PRepo,
+    IPollRepo,
     IQuizRepo,
     IRaffleRepo,
     IShopRepo,
@@ -48,6 +49,7 @@ class IRepositoryBundle(IGuildScopedRepo):
     market_events: IMarketEventRepo
     records: IRecordRepo
     raffle: IRaffleRepo
+    polls: IPollRepo
     guild: IGuildRepo
     bank: IBankRepo
     debt: IDebtRepo

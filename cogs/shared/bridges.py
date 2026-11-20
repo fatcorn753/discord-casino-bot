@@ -180,6 +180,20 @@ class NoOpQuizButtonBridge(IQuizButtonBridge):
         return None
 
 
+class IPollButtonBridge:
+    """投票の投稿のボタン（PollButton → PollCog）のブリッジ契約（ISP 分離）。"""
+
+    async def handle_button(self, interaction: discord.Interaction, act: str, poll_id: int) -> None:
+        raise NotImplementedError
+
+
+class NoOpPollButtonBridge(IPollButtonBridge):
+    """PollCog 未ロード時の既定ボタンハンドラ（LSP 準拠）。"""
+
+    async def handle_button(self, interaction: discord.Interaction, act: str, poll_id: int) -> None:
+        return None
+
+
 class IP2PListingBridge:
     """P2P 出品カードボタン（ListingButton → P2PCog）のブリッジ契約（ISP 分離）。"""
 

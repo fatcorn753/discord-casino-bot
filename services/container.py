@@ -19,6 +19,7 @@ from services.labor import LaborService
 from services.loan import LoanService
 from services.market import MarketService
 from services.p2p import P2PService
+from services.poll import PollService
 from services.quiz import QuizService
 from services.raffle import RaffleService
 from services.ranking import RankingService
@@ -47,6 +48,7 @@ class ServiceRegistry:
     quiz: QuizService
     p2p: P2PService
     raffle: RaffleService
+    poll: PollService
     event: EventService
     admin: AdminService
 
@@ -119,6 +121,7 @@ def build_services(
         quiz=QuizService(quiz=repos.quiz, clock=clock),
         p2p=P2PService(p2p=repos.p2p, horses=repos.horses, shop=repos.shop, wallet=repos.wallet, clock=clock),
         raffle=RaffleService(raffle=repos.raffle, clock=clock),
+        poll=PollService(polls=repos.polls, clock=clock),
         event=EventService(events=repos.events, clock=clock),
         admin=AdminService(wallet=repos.wallet, rtp=repos.rtp, pachinko=repos.pachinko),
         ranking=RankingService(wallet=repos.wallet, crypto=repos.crypto, bonds=repos.bonds, assets=repos.assets),

@@ -576,6 +576,25 @@ def create_tables(conn: sqlite3.Connection) -> None:
             user_id   INTEGER NOT NULL,
             PRIMARY KEY (raffle_id, user_id)
         );
+        CREATE TABLE IF NOT EXISTS polls (             -- 投票（/投票。誰でも作れる賛成・反対の二択）
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id   INTEGER NOT NULL,
+            creator    INTEGER NOT NULL,
+            title      TEXT    NOT NULL,
+            closes     REAL    NOT NULL,          -- 締切（epoch秒）
+            channel_id INTEGER NOT NULL DEFAULT 0,
+            message_id INTEGER NOT NULL DEFAULT 0,
+            adj_yes    INTEGER NOT NULL DEFAULT 0, -- 票の書き換えで足した数（表示 = 本物の票 + これ）
+            adj_no     INTEGER NOT NULL DEFAULT 0,
+            rigs       INTEGER NOT NULL DEFAULT 0, -- 書き換えられた回数
+            status     TEXT    NOT NULL DEFAULT 'open'   -- open / closed
+        );
+        CREATE TABLE IF NOT EXISTS poll_votes (        -- 投票の票（1人1票。あとから変えられる）
+            poll_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            yes     INTEGER NOT NULL,
+            PRIMARY KEY (poll_id, user_id)
+        );
         CREATE TABLE IF NOT EXISTS chart_posts (       -- /証券 市況 で出したチャート（1チャンネルに1つ。最後に使ってから一定時間だけ自動で更新）
             channel_id INTEGER PRIMARY KEY,
             message_id INTEGER NOT NULL,

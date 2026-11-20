@@ -13,6 +13,7 @@ from domain.ports.catalog_types.economy import (
     KyosaiSectionContract,
     LoansSectionContract,
     P2pSectionContract,
+    PollSectionContract,
     QuizpaySectionContract,
     RaffleSectionContract,
     TeiaiCatalogContract,
@@ -237,6 +238,16 @@ class P2pSection(P2pSectionContract):
 
 
 @pydantic_dataclass(frozen=True, config=STRICT_CONFIG, kw_only=True)
+class PollSection(PollSectionContract):
+    rig_cost: int = Field(gt=0)
+    default_minutes: int = Field(gt=0)
+    max_minutes: int = Field(gt=0)
+    max_open_per_user: int = Field(gt=0)
+    title_max: int = Field(gt=0)
+    max_count: int = Field(gt=0)
+
+
+@pydantic_dataclass(frozen=True, config=STRICT_CONFIG, kw_only=True)
 class EconomyCatalog(EconomyCatalogContract):
     wallet: WalletSection
     transfer: TransferSection
@@ -245,6 +256,7 @@ class EconomyCatalog(EconomyCatalogContract):
     raffle: RaffleSection
     weekly: WeeklySection
     p2p: P2pSection
+    poll: PollSection
 
 
 @lru_cache(maxsize=1)

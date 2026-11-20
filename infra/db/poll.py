@@ -1,0 +1,139 @@
+"""投票（/投票）の記録。票・票数の書き換え（有料）・締切。
+
+表の定義は infra/db/schema/tables.py（polls・poll_votes）。数字は domain/poll.py。
+"""
+
+from typing import Any, Optional
+
+from domain import poll
+from domain.errors import fail
+from domain.ports.repos import IPollRepo
+from infra.db.account import AccountCore
+from infra.db.bank import BankRepo
+from infra.db.base import EcoDb, ScopedRepo
+
+
+class PollRepo(ScopedRepo, IPollRepo):
+    """投票の作成・票・書き換え・締切。"""
+
+    def __init__(
+        self, db: EcoDb, account: AccountCore, bank: BankRepo, guild_id: int = 0, strict: bool = False
+    ) -> None:
+        super().__init__(db, guild_id, strict)
+        self._account = account
+        self._bank = bank
+
+    def _real_for(self, poll_id: int) -> tuple[int, int]:
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(yes), 0), COUNT(*) FROM poll_votes WHERE poll_id=?", (poll_id,)
+        ).fetchone()
+        return row[0], row[1] - row[0]
+
+    def _view_for(self, guild_id: int, poll_id: int) -> Optional[dict[str, Any]]:
+        row = self._conn.execute("SELECT * FROM polls WHERE guild_id=? AND id=?", (guild_id, poll_id)).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        real_yes, real_no = self._real_for(poll_id)
+        d["voters"] = real_yes + real_no
+        d["yes"] = poll.shown(real_yes, d["adj_yes"])
+        d["no"] = poll.shown(real_no, d["adj_no"])
+        return d
+
+    def _open_for(self, guild_id: int, poll_id: int, now: float) -> Any:
+        """受付中の投票の行。締切を過ぎていれば（見回りの前でも）None。"""
+        return self._conn.execute(
+            "SELECT * FROM polls WHERE guild_id=? AND id=? AND status='open' AND closes>?", (guild_id, poll_id, now)
+        ).fetchone()
+
+    def poll_create(self, creator: int, title: str, closes: float, channel_id: int, now: float) -> tuple[Any, ...]:
+        """投票を作る。(成功か, 番号 か Failure)。"""
+        title = title.strip()
+        if not title or len(title) > poll.TITLE_MAX:
+            return False, fail("poll_bad_title", max=poll.TITLE_MAX)
+        if not now < closes <= now + poll.MAX_MINUTES * 60:
+            return False, fail("poll_bad_duration", max_minutes=poll.MAX_MINUTES)
+        with self._db.tx():
+            gid = self._g()
+            mine = self._conn.execute(
+                "SELECT COUNT(*) FROM polls WHERE guild_id=? AND creator=? AND status='open'", (gid, creator)
+            ).fetchone()[0]
+            if mine >= poll.MAX_OPEN_PER_USER:
+                return False, fail("poll_too_many", max=poll.MAX_OPEN_PER_USER)
+            cur = self._conn.execute(
+                "INSERT INTO polls (guild_id, creator, title, closes, channel_id) VALUES (?, ?, ?, ?, ?)",
+                (gid, creator, title, closes, channel_id),
+            )
+            return True, cur.lastrowid
+
+    def poll_set_message(self, poll_id: int, channel_id: int, message_id: int) -> None:
+        with self._db.tx():
+            self._conn.execute(
+                "UPDATE polls SET channel_id=?, message_id=? WHERE guild_id=? AND id=?",
+                (channel_id, message_id, self._g(), poll_id),
+            )
+
+    def poll_get(self, poll_id: int) -> Optional[dict[str, Any]]:
+        with self._lock:
+            return self._view_for(self._g(), poll_id)
+
+    def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> tuple[Any, ...]:
+        """1人1票。あとから変えられる。(成功か, 投票 か Failure)。"""
+        with self._db.tx():
+            gid = self._g()
+            if self._open_for(gid, poll_id, now) is None:
+                return False, fail("poll_closed")
+            self._conn.execute(
+                "INSERT INTO poll_votes (poll_id, user_id, yes) VALUES (?, ?, ?) "
+                "ON CONFLICT(poll_id, user_id) DO UPDATE SET yes=excluded.yes",
+                (poll_id, user_id, int(yes)),
+            )
+            return True, self._view_for(gid, poll_id)
+
+    def poll_rig(self, user_id: int, poll_id: int, yes: int, no: int, now: float) -> tuple[Any, ...]:
+        """作った人だけが、RIG_COST を払って、表示する票数を yes・no に書き換えられる。代金は帝愛銀行の収入。
+
+        (成功か, {"poll": 書き換え後, "before": (賛成, 反対)} か Failure)。あとから入る本物の票は、書き換えた数に足される。
+        """
+        if not (0 <= yes <= poll.MAX_COUNT and 0 <= no <= poll.MAX_COUNT):
+            return False, fail("poll_bad_count", max=poll.MAX_COUNT)
+        with self._db.tx():
+            gid = self._g()
+            row = self._open_for(gid, poll_id, now)
+            if row is None:
+                return False, fail("poll_closed")
+            if row["creator"] != user_id:
+                return False, fail("poll_not_creator")
+            self._account.ensure(gid, user_id)
+            bal = self._account.raw_balance(gid, user_id)
+            if bal < poll.RIG_COST:
+                return False, fail("insufficient_balance", balance=bal)
+            before = self._view_for(gid, poll_id)
+            if before is None:
+                return False, fail("poll_closed")
+            self._account.apply(gid, user_id, -poll.RIG_COST, "投票:票の書き換え")
+            self._bank.bank_income_for(gid, poll.RIG_COST, now)
+            real_yes, real_no = self._real_for(poll_id)
+            self._conn.execute(
+                "UPDATE polls SET adj_yes=?, adj_no=?, rigs=rigs+1 WHERE guild_id=? AND id=?",
+                (yes - real_yes, no - real_no, gid, poll_id),
+            )
+            return True, {"poll": self._view_for(gid, poll_id), "before": (before["yes"], before["no"])}
+
+    def poll_close_due(self, now: float) -> list[dict[str, Any]]:
+        """締切を過ぎた投票を締めて、締めたものを返す。"""
+        with self._db.tx():
+            gid = self._g()
+            ids = [
+                r[0]
+                for r in self._conn.execute(
+                    "SELECT id FROM polls WHERE guild_id=? AND status='open' AND closes<=? ORDER BY id", (gid, now)
+                )
+            ]
+            out = []
+            for poll_id in ids:
+                self._conn.execute("UPDATE polls SET status='closed' WHERE id=?", (poll_id,))
+                view = self._view_for(gid, poll_id)
+                if view is not None:
+                    out.append(view)
+            return out
