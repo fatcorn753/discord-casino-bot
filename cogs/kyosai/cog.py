@@ -77,14 +77,21 @@ def status_embed(s: dict[str, Any], offers: list[dict[str, Any]], user_id: int) 
 
 
 def motion_embed(m: dict[str, Any]) -> discord.Embed:
-    """動議の投稿（提案のときに告知チャンネルへ出す。ボタンで投票すると書き換わる）。"""
+    """動議の投稿（提案のときに告知チャンネルへ出す。ボタンで投票すると書き換わり、締めると結果になる）。"""
+    closed = m.get("status", "open") != "open"
     lines = [
         f"<@{m['proposer']}> が、帝愛信託の上乗せ金利を **1日 {m['premium']:.2%}** にする動議を出しました。",
-        f"賛成 **{m.get('yes', 0):,}口** / 反対 **{m.get('no', 0):,}口**（締切のときの口数で数え直します）",
+        f"賛成 **{m.get('yes', 0):,}口** / 反対 **{m.get('no', 0):,}口**"
+        + ("（締切のときの口数）" if closed else "（締切のときの口数で数え直します）"),
         f"可決の条件: 賛成が反対より多く、かつ賛成が **{_need_yes(m.get('circulating', 0)):,}口** 以上"
         f"（流通口数の {kyosai.MOTION_MIN_YES_SHARE:.0%}）",
-        f"締切 <t:{int(m['closes'])}:R>。口を持つ人は、下のボタンか `/共済 投票 番号:{m['id']}` で投票できます（あとから変えられます）。",
     ]
+    if closed:
+        lines.append(f"締め切りました: **{'✅ 可決' if m['status'] == 'passed' else '❌ 否決'}**")
+    else:
+        lines.append(
+            f"締切 <t:{int(m['closes'])}:R>。口を持つ人は、下のボタンか `/共済 投票 番号:{m['id']}` で投票できます（あとから変えられます）。"
+        )
     return ui.embed(f"🗳️ 帝愛共済の動議 #{m['id']}", "\n".join(lines))
 
 
@@ -246,21 +253,24 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         ok, result = self._kyosai.propose(gid, interaction.user.id, premium / 100)
         if not ok:
             return await self._fail(interaction, result)
-        m = self._kyosai.motion(gid, result["id"]) or result
+        motion_id = result["id"]
+        m = self._kyosai.motion(gid, motion_id) or result
         channel = announce_channel(interaction.guild, self._guild_repo) if interaction.guild else None
         if channel is not None and channel.id != interaction.channel_id:
             await interaction.response.send_message(
-                embed=ui.ok_embed("🗳️ 動議を出しました", f"動議 #{result['id']} を {channel.mention} に告知しました。"),
+                embed=ui.ok_embed("🗳️ 動議を出しました", f"動議 #{motion_id} を {channel.mention} に告知しました。"),
                 ephemeral=True,
             )
             try:
-                await ui.send_channel(channel, embed=motion_embed(m), view=motion_view(result["id"]))
-                return
+                msg = await ui.send_channel(channel, embed=motion_embed(m), view=motion_view(motion_id))
             except discord.HTTPException as exc:
                 logthrottle.warn(("kyosai", gid), f"共済の動議を告知できません: guild={gid}: {exc!r}")
-                await interaction.followup.send(embed=motion_embed(m), view=motion_view(result["id"]))
-                return
-        await interaction.response.send_message(embed=motion_embed(m), view=motion_view(result["id"]))
+                msg = await interaction.followup.send(embed=motion_embed(m), view=motion_view(motion_id), wait=True)
+        else:
+            await interaction.response.send_message(embed=motion_embed(m), view=motion_view(motion_id))
+            msg = await interaction.original_response()
+        if msg is not None and getattr(msg, "id", None):
+            self._kyosai.set_motion_message(gid, motion_id, msg.channel.id, msg.id)
 
     @group.command(name="投票", description="投票中の動議に、賛成か反対を入れる（あとから変えられる。口数で数える）")
     @app_commands.rename(choice="賛否", motion_id="番号")
@@ -286,6 +296,12 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         gid = ui.guild_id_of(interaction)
         ok, result = self._kyosai.vote(gid, interaction.user.id, yes, motion_id)
         if not ok:
+            closed = self._kyosai.motion(gid, motion_id)
+            if closed is not None and closed["status"] != "open":
+                # 締めたあとのボタン（再起動の前に出た投稿など）: 投稿を結果に書き換えて、ボタンを外す
+                await interaction.response.edit_message(embed=motion_embed(closed), view=None)
+                await interaction.followup.send(f"動議 #{motion_id} は締め切られています。", ephemeral=True)
+                return
             await interaction.response.send_message(
                 embed=ui.error_embed("できません", format_failure(result)), ephemeral=True
             )
@@ -314,6 +330,8 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         dividend, motions, auctions = self._kyosai.tick(guild.id)
         if dividend:
             _log.info(f"共済の配当: guild={guild.id} {dividend}")
+        for m in motions:
+            await _edit_closed_post(guild, m)
         posts = [_motion_result(m) for m in motions] + [p for p in map(_auction_post, auctions) if p is not None]
         if not posts:
             return
@@ -327,7 +345,20 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
                 logthrottle.warn(("kyosai", guild.id), f"共済の告知を投稿できません: guild={guild.id}: {exc!r}")
 
 
+async def _edit_closed_post(guild: discord.Guild, m: dict[str, Any]) -> None:
+    """締めた動議の告知の投稿を、結果に書き換えてボタンを外す（投稿を覚えていないときは何もしない）。"""
+    channel = guild.get_channel(m.get("channel_id") or 0)
+    msg = ui.partial_message(channel, m["message_id"]) if channel is not None and m.get("message_id") else None
+    if msg is None:
+        return
+    try:
+        await msg.edit(embed=motion_embed(m), view=None)
+    except discord.HTTPException as exc:
+        logthrottle.warn(("kyosai", m["id"]), f"共済の動議の投稿を直せません: motion={m['id']}: {exc!r}")
+
+
 def _motion_result(motion: dict[str, Any]) -> tuple[str, str]:
+
     verdict = "✅ 可決" if motion["status"] == "passed" else "❌ 否決"
     text = (
         f"動議 #{motion['id']}（帝愛信託の上乗せ金利を 1日 {motion['premium']:.2%} にする）は **{verdict}** されました。"

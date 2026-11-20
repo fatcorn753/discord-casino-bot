@@ -480,6 +480,14 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink):
                 out.append({**dict(motion), "status": status, "yes": yes, "no": no, "circulating": circulating})
         return out
 
+    def kyosai_set_motion_message(self, motion_id: int, channel_id: int, message_id: int) -> None:
+        """動議の告知の投稿を覚えておく（締めたときに、結果へ書き換えてボタンを外すため）。"""
+        with self._db.tx():
+            self._conn.execute(
+                "UPDATE kyosai_motions SET channel_id=?, message_id=? WHERE guild_id=? AND id=?",
+                (channel_id, message_id, self._g(), motion_id),
+            )
+
     def kyosai_motion(self, motion_id: int, now: float) -> Optional[dict[str, Any]]:
         """動議1件と、いまの賛成・反対の口数（ボタンの投稿の書き換え用）。"""
         with self._lock:

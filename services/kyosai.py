@@ -40,7 +40,11 @@ class KyosaiService:
     def vote(self, guild_id: int, user_id: int, yes: bool, motion_id: Optional[int] = None) -> tuple[Any, ...]:
         return self._kyosai.for_guild(guild_id).kyosai_vote(user_id, yes, self._now(), motion_id)
 
+    def set_motion_message(self, guild_id: int, motion_id: int, channel_id: int, message_id: int) -> None:
+        self._kyosai.for_guild(guild_id).kyosai_set_motion_message(motion_id, channel_id, message_id)
+
     def motion(self, guild_id: int, motion_id: int) -> Optional[dict[str, Any]]:
+
         return self._kyosai.for_guild(guild_id).kyosai_motion(motion_id, self._now())
 
     def tick(self, guild_id: int) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:

@@ -71,6 +71,10 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     km = {r["name"] for r in conn.execute("PRAGMA table_info(kyosai_motions)")}
     if km and "created" not in km:
         conn.execute("ALTER TABLE kyosai_motions ADD COLUMN created REAL NOT NULL DEFAULT 0")
+    for col in ("channel_id", "message_id"):
+        if km and col not in km:
+            conn.execute(f"ALTER TABLE kyosai_motions ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+
     normalize_kyosai_units(conn)
 
     th = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_house)")}

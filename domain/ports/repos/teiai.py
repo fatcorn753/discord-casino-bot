@@ -196,6 +196,9 @@ class IKyosaiRepo(IGuildScopedRepo):
     def kyosai_close_motions(self, now: float) -> list[dict[str, Any]]:
         raise NotImplementedError
 
+    def kyosai_set_motion_message(self, motion_id: int, channel_id: int, message_id: int) -> None:
+        raise NotImplementedError
+
     def kyosai_motion(self, motion_id: int, now: float) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 

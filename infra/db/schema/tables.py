@@ -452,9 +452,12 @@ def create_tables(conn: sqlite3.Connection) -> None:
 
             status   TEXT    NOT NULL DEFAULT 'open',   -- open / passed / rejected
             yes      INTEGER NOT NULL DEFAULT 0,        -- 締めたときの賛成の口数
-            no       INTEGER NOT NULL DEFAULT 0
+            no       INTEGER NOT NULL DEFAULT 0,
+            channel_id INTEGER NOT NULL DEFAULT 0,      -- 告知の投稿（締めたときに結果へ書き換え、ボタンを外す）
+            message_id INTEGER NOT NULL DEFAULT 0
         );
-        CREATE TABLE IF NOT EXISTS kyosai_votes (      -- 動議への投票（締めるときに、そのときの口数で数える）
+        CREATE TABLE IF NOT EXISTS kyosai_votes (
+      -- 動議への投票（締めるときに、そのときの口数で数える）
             motion_id INTEGER NOT NULL,
             user_id   INTEGER NOT NULL,
             yes       INTEGER NOT NULL,
