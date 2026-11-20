@@ -37,12 +37,17 @@ class KyosaiSectionContract:
     dividend_cap: int
     gate_ratio: float
     dormant_days: int
-    auction_start: int
-    auction_decay: float
-    auction_floor: int
+    total_units: int
+    auction_lot: int
+    auction_hours: int
+    auction_min_bid: int
     offer_hours: int
     motion_hours: int
-    premium_max: float
+    premium_limit: float
+    motion_min_yes_share: float
+    motion_min_units: int
+    motion_max_open_per_user: int
+    motion_cooldown_hours: float
 
 
 @dataclass(frozen=True)

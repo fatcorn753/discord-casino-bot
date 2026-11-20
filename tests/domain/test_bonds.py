@@ -223,20 +223,23 @@ def test_ranking_total_and_display_include_the_bond_principal(eco):
     assert eco.bonds.bond_values() == {}
 
 
-def test_interest_is_capped_by_the_house_cash_but_principal_is_always_paid_in_full(eco):
-    """利息は帝愛の手元現金から払う（新しく作らない）。足りなければ利息だけ減り、元本は必ず全額返る。"""
+def test_interest_is_paid_in_full_even_when_the_house_cash_runs_short(eco):
+    """社債はシニア: 利息も手元の現金で打ち切らず、足りない分は信託・共済が負担する（#35）。"""
     eco.bank.bank_set_for(0, 30, 0)  # 利息の原資がほとんどない
-    eco.bonds.bond_buy(1, "normal", 2000, NOW)  # +4%で、本来の利息は80
+    eco.bonds.bond_buy(1, "normal", 2000, NOW)
     done = eco.bonds.bond_settle(NOW + 3 * DAY)
-    assert [(d["status"], d["paid"]) for d in done] == [("paid", 2000 + 30)]  # 利息は、残っていた30だけ
-    assert eco.wallet.balance(1) == INITIAL_BALANCE - 2000 + 2030
+    paid = done[0]["paid"]
+    assert done[0]["status"] == "paid" and paid > 2000 + 30  # 手元の 30 で打ち切らない
+    assert eco.wallet.balance(1) == INITIAL_BALANCE - 2000 + paid
+    s = eco.bank.bank_status(NOW + 3 * DAY)
+    assert s["cash"] == 0 and s["excess_unpaid"] == paid - 2000 - 30  # 共済の口の持ち主がいなければ、未払いとして残る
 
 
-def test_no_interest_at_all_when_the_house_has_no_cash(eco):
+def test_interest_is_still_paid_when_the_house_has_no_cash(eco):
     eco.bank.bank_set_for(0, 0, 0)
     eco.bonds.bond_buy(1, "normal", 2000, NOW)
     done = eco.bonds.bond_settle(NOW + 3 * DAY)
-    assert done[0]["paid"] == 2000  # 元本だけ。預金者からは一切引かない
+    assert done[0]["paid"] > 2000  # 元本も利息も満額（満期まで持つほうが、途中で売るより得）
 
 
 # ------------------------------------------------------------------ #

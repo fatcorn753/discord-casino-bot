@@ -28,6 +28,10 @@ NOTICE_FORMATTERS: dict[str, NoticeFormatter] = {
     "seize_spot": lambda p: f"💥 保有していた{p['symbol_name']}が差し押さえられました（{p['money']:,}ペリカ）。",
     "seize_option": lambda p: f"💥 オプションが差し押さえられました（{p['got']:,}ペリカ）。",
     "seize_bond": lambda p: f"💥 通常債が強制売却されました（{p['refund']:,}ペリカ）。",
+    "kyosai_outbid": lambda p: (
+        f"🏛️ 帝愛共済の競り（{p['units']:,}口）で、ほかの人が {p['amount']:,}ペリカ で入札しました。"
+        "預けていた入札額は、手元に戻しました。"
+    ),
     "kyosai_charged": lambda p: (
         f"🏛️ 帝愛共済の超過損失の負担として {p['amount']:,}ペリカ を払いました"
         + (f"（手元で足りない {p['debt']:,}ペリカ は借金になりました）。" if p["debt"] else "。")

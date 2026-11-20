@@ -182,13 +182,16 @@ class IBankCashFlow:
         guild_id: int,
         amount: int,
         now: float,
-        needs_depositors: bool = False,
         *,
         thermo: bool = True,
     ) -> None:
         raise NotImplementedError
 
     def bank_pay_for(self, guild_id: int, amount: int, now: float, *, thermo: bool = True) -> int:
+        raise NotImplementedError
+
+    def bank_pay_batch_for(self, guild_id: int, amounts: list[int], now: float, *, offset: float = 0.0) -> list[int]:
+        """バッチの支払いを、流入 offset との純額で1回のウォーターフォールに通す。払えた額をそれぞれ返す。"""
         raise NotImplementedError
 
     def bank_thermo_batch_for(self, guild_id: int, net: float, now: float) -> None:

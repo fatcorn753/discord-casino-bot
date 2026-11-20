@@ -54,10 +54,12 @@ def rf_step(r: float, theta: Optional[float], days: float, z: float) -> float:
 def bond_rate_pct(kind: bonds.Kind, rf: float) -> float:
     """いまの r_f で買う債券の利率（満期までの ％。小数2桁）。
 
-    通常債は r_f を満期までの利率に直したもの。ほかの種類は、基準からのずれ（通常債の利率 − 基準の利率）だけ動かす。
+    その種類の基準の利率を1日あたりの連続複利に直し、基準の r_f との差（スプレッド）を保ったまま、いまの r_f に乗せて
+    満期までの利率に戻す。通常債はスプレッド 0 なので、r_f を満期までの利率に直したものになる。
+    満期の長さが違う種類でも、r_f の動きが満期の長さに比例して効く（3日債の動きを1日債にそのまま足さない）。
     """
-    normal = math.expm1(rf * bonds.NORMAL.hours / 24) * 100
-    return round(max(0.0, kind.rate + normal - bonds.NORMAL.rate), 2)
+    spread = per_day(kind.rate, kind.hours) - BASE_RISK_FREE_PER_DAY
+    return round(max(0.0, math.expm1((rf + spread) * kind.hours / 24) * 100), 2)
 
 
 def sale_discount_per_hour(rf: float) -> float:

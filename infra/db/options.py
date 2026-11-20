@@ -356,11 +356,16 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                     gross = min(gross, r["premium"] * opt.PAYOUT_CAP_MULT)
                 due.append((r, final, gross))
             # 同時刻の満期は、売り手からの入金と買い手への支払いを純額にして、サーモスタットに1回だけ通す
-            # （1件ずつ通すと、建玉の id 順で burn・bailout が変わるため）
-            net = sum(g if r["side"] == "short" else -g for r, _, g in due)
-            if net < 0:
-                self._bank.bank_thermo_batch_for(gid, net, now)
-            for r, final, gross in due:
+            # （1件ずつ通すと、建玉の id 順で burn・bailout が変わるため）。入金を先に済ませ、支払いは
+            # bank_pay_batch_for でまとめて払う（信託の第一損失のあとで、超過損失の分だけ熱浴が肩代わりする。#33）
+            inflow = sum(g for r, _, g in due if r["side"] == "short")
+            longs = [(r, g) for r, _, g in due if r["side"] != "short"]
+            paid_of: dict[int, int] = {}
+            for r, final, gross in sorted(due, key=lambda d: d[0]["side"] != "short"):  # 売り手（入金）が先
+                if r["side"] != "short" and not paid_of:
+                    pays = self._bank.bank_pay_batch_for(gid, [g for _, g in longs], now, offset=inflow)
+                    paid_of = {lr["id"]: p for (lr, _), p in zip(longs, pays)}
+
                 self._account.ensure(gid, r["user_id"])
                 if r["side"] == "short":
                     paid = max(0, r["margin"] - gross)  # 証拠金の戻り
@@ -375,7 +380,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                         self._debt.owe_for(gid, r["user_id"], gross - r["margin"], f"{name_of(r)}の損失")
                     status = "exercised" if gross > 0 else "expired"
                 else:
-                    paid = self._bank.bank_pay_for(gid, gross, now, thermo=False) if gross > 0 else 0
+                    paid = paid_of[r["id"]]
                     if paid:
                         self._account.apply(
                             gid,
@@ -389,6 +394,6 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                     "UPDATE options SET status=?, paid=?, final=? WHERE id=?", (status, paid, final, r["id"])
                 )
                 out.append({**dict(r), "status": status, "paid": paid, "final": final, "gross": gross})
-            if net > 0:
-                self._bank.bank_thermo_batch_for(gid, net, now)
-        return out
+            if not longs and inflow:
+                self._bank.bank_thermo_batch_for(gid, inflow, now)
+        return sorted(out, key=lambda o: o["id"])

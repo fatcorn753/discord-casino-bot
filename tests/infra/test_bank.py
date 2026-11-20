@@ -30,6 +30,19 @@ def go_into_debt(eco, uid, amount):
 
 
 # ----------------------------- 預金と準備率 ----------------------------- #
+def give_units(eco, uid, n):
+    """帝愛の持ち口から uid へ共済の口を n 口移す（口の持ち主が超過損失を負担する場面のため）。"""
+    eco.wallet.balance(uid)
+    with eco.db.tx():
+        eco.kyosai.bank_sync(G, NOW)
+        eco.db.conn.execute("UPDATE kyosai_units SET units=units-? WHERE guild_id=? AND user_id=0", (n, G))
+        eco.db.conn.execute(
+            "INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units",
+            (G, uid, n),
+        )
+
+
 def test_deposit_keeps_only_the_reserve_ratio_as_cash(eco):
     eco.wallet.credit(A, 20_000, "テスト")
     ok, have = eco.bank.bank_deposit(A, 10_000, NOW)
@@ -82,7 +95,7 @@ def test_income_goes_to_the_bank_cash_not_to_the_trust(eco):
     eco.bank.bank_deposit(A, 20_000, NOW)
     cash0 = eco.bank.bank_status(NOW)["cash"]
     with eco.db.tx():
-        eco.bank.bank_income_for(G, 3_000, NOW, needs_depositors=True)
+        eco.bank.bank_income_for(G, 3_000, NOW)
     assert eco.bank.deposit_of(A) == 20_000  # 信託は、収入の分配ではなく決まった利息を受け取る（#33）
     assert eco.bank.bank_status(NOW)["cash"] == pytest.approx(cash0 + 3_000)
 
@@ -95,12 +108,14 @@ def test_trust_interest_is_paid_hourly_by_size_at_the_trust_rate(eco):
     assert eco.bank.bank_trust_accrue(NOW) == 0  # 数え始め
     assert eco.bank.bank_trust_accrue(NOW + 1800) == 0  # 1時間たっていない
     cash0 = eco.bank.bank_status(NOW + 86400)["cash"]
+    a0, b0 = eco.wallet.balance(A), eco.wallet.balance(B)
     paid = eco.bank.bank_trust_accrue(NOW + 86400)
     rate = eco.bank.bank_status(NOW)["trust_rate"]
     assert rate == pytest.approx(rates.BASE_RISK_FREE_PER_DAY + teiai.TRUST_PREMIUM_PER_DAY)
     assert paid == pytest.approx(300_000 * rates.growth(rate, 1.0), abs=2)
-    gain_a, gain_b = eco.bank.deposit_of(A) - 200_000, eco.bank.deposit_of(B) - 100_000
-    assert gain_a + gain_b == paid and abs(gain_a - 2 * gain_b) <= 2  # 残高に応じて 2:1
+    assert eco.bank.deposit_of(A) == 200_000 and eco.bank.deposit_of(B) == 100_000  # 信託の残高は増やさない（#33）
+    gain_a, gain_b = eco.wallet.balance(A) - a0, eco.wallet.balance(B) - b0
+    assert gain_a + gain_b == paid and abs(gain_a - 2 * gain_b) <= 2  # 残高に応じて 2:1、手元へ払う
     s = eco.bank.bank_status(NOW + 86400)
     assert s["cash"] == pytest.approx(cash0 - paid, abs=2) and s["trust_paid"] == paid  # 手元の現金から払う
 
@@ -113,21 +128,24 @@ def test_trust_interest_is_never_taken_from_the_trust_itself(eco):
         cash = eco.bank.bank_sync_for(G, NOW)
         eco.bank.bank_set_for(G, 0.0, cash["loaned"])
         eco.db.conn.execute("UPDATE teiai_bank SET ts=? WHERE guild_id=?", (NOW + 10 * 86400, G))  # 地下融資は戻さない
+    give_units(eco, B, 10_000)
+    a0 = eco.wallet.balance(A)
     paid = eco.bank.bank_trust_accrue(NOW + 86400)
-    assert eco.bank.deposit_of(A) == 100_000 + paid  # 信託から利息を払うと、自分で自分に払うことになる
+    assert eco.bank.deposit_of(A) == 100_000  # 信託から利息を払うと、自分で自分に払うことになる
+    assert eco.wallet.balance(A) == a0 + paid
     s = eco.bank.bank_status(NOW + 86400)
     assert paid > 0 and s["excess_unpaid"] == 0  # 手元で払えない分は、帝愛共済の口の持ち主が負担する（#34）
     charged = eco.db.conn.execute("SELECT kyosai_charged FROM teiai_bank WHERE guild_id=?", (G,)).fetchone()[0]
     assert charged == paid
 
 
-def test_no_depositors_means_skim_and_losses_vanish_as_before(eco):
+def test_income_goes_to_the_bank_even_without_depositors(eco):
     with eco.db.tx():
-        eco.bank.bank_income_for(G, 5_000, NOW, needs_depositors=True)
-    assert eco.bank.bank_status(NOW)["cash"] == 0  # 預金者がいない銀行に、現金を積み上げない
+        eco.bank.bank_income_for(G, 5_000, NOW)
+    assert eco.bank.bank_status(NOW)["cash"] == 5_000  # 社債の償還と共済の配当の原資になる（#33 のレビュー）
 
 
-def test_game_losses_feed_the_bank_only_when_the_trust_has_money(eco):
+def test_game_losses_feed_the_bank(eco):
     eco.wallet.credit(A, 20_000, "テスト")
     eco.bank.bank_deposit(A, 10_000, NOW)
     eid = eco.escrow.place_bet(B, 1_000, "テスト")
@@ -422,6 +440,8 @@ def test_shortfall_within_the_trust_is_shared_by_size_and_never_goes_negative(ec
     eco.wallet.credit(B, 300_000, "テスト")
     eco.bank.bank_deposit(A, 200_000, NOW)  # 手元 4万
     eco.bank.bank_deposit(B, 100_000, NOW)  # 手元 計6万
+    give_units(eco, A, 5_000)
+    give_units(eco, B, 5_000)
     with eco.db.tx():
         paid = eco.bank.bank_pay_for(G, 90_000, NOW)  # 手元 6万 + 信託から 3万
     assert paid == 90_000
@@ -429,7 +449,7 @@ def test_shortfall_within_the_trust_is_shared_by_size_and_never_goes_negative(ec
     with eco.db.tx():
         paid = eco.bank.bank_pay_for(G, 1_000_000, NOW)  # 信託の総額を超える
     assert paid == 1_000_000 and eco.bank.deposit_of(A) == 0 and eco.bank.deposit_of(B) == 0
-    # 信託の総額を超えた 73万は、帝愛共済（#34）の口の持ち主が 1口ずつ負担する
+    # 信託の総額を超えた 73万は、帝愛共済（#34）の口の持ち主が口数に応じて負担する
     assert eco.bank.bank_status(NOW)["excess_unpaid"] == 0
     charged = eco.db.conn.execute("SELECT kyosai_charged FROM teiai_bank WHERE guild_id=?", (G,)).fetchone()[0]
     assert charged == 730_000

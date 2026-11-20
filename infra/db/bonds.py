@@ -122,6 +122,8 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         """ジャンク債の倒産抽選と、満期を過ぎた債券の決着（このサーバー全員分）。決着した行（status と paid つき）を返す。"""
         rng = rng or random
         out = []
+        offset = 0  # このバッチの流入（倒産で返さなくてよくなった元本と、満期で返す元本）
+        matured = []
         with self._db.tx():
             gid = self._g()
             for row in self._conn.execute(
@@ -134,30 +136,30 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
                     if rng.random() < bonds_mod.default_probability(kind, (until - since) / 3600):
                         self._conn.execute("UPDATE bonds SET status='defaulted', paid=0 WHERE id=?", (row["id"],))
                         # 返さなくてよくなった元本は、銀行の儲け（流入）になる
-                        self._bank.bank_thermo_batch_for(gid, row["principal"], now)
+                        offset += row["principal"]
                         out.append({**dict(row), "status": "defaulted", "paid": 0})
                         continue
                     self._conn.execute("UPDATE bonds SET checked=? WHERE id=?", (until, row["id"]))
                 if row["due"] > now:
                     continue
                 interest = max(0, bonds_mod.interest(kind, row["principal"], row["rate"]))
-                # 元本を先に返す（社債はシニア。現金が足りなければ信託 → 熱浴・共済の順で負担する）
-                self._bank.bank_pay_for(gid, row["principal"], now, thermo=False)
-                got_interest = 0
-                if interest:
-                    state = self._bank.bank_sync_for(gid, now)
-                    got_interest = int(min(interest, max(state["cash"], 0.0)))
-                    if got_interest:
-                        self._bank.bank_pay_for(gid, got_interest, now)
-                paid = row["principal"] + got_interest
+                # 元本の返済は負債が減るだけなので、サーモスタットには利息だけが流出として残る
+                offset += row["principal"]
+                matured.append((row, kind, interest))
+            # 満期の元本と利息は、社債（シニア）の確定した債務: 倒産の流入と純額にして、まとめて
+            # 現金 → 信託 → 熱浴・共済の順で払う（#35）。利息も手元の現金で打ち切らない
+            self._bank.bank_pay_batch_for(gid, [r["principal"] + i for r, _, i in matured], now, offset=offset)
+            for row, kind, interest in matured:
+                # 帝愛の持ち口の分が払われずに残っても、社債は元本と利息を満額払う（シニアの保証。未払いは excess_unpaid）
+                paid = row["principal"] + interest
                 self._account.ensure(gid, row["user_id"])
-                self._account.apply(gid, row["user_id"], paid, f"債券償還:{kind.name}", income=got_interest)
+                self._account.apply(gid, row["user_id"], paid, f"債券償還:{kind.name}", income=interest)
                 self._debt_repay.repay_all_of_for(
                     gid, row["user_id"], row["principal"], f"帝愛への返済（債券の元本:{kind.name}）"
                 )
                 self._conn.execute("UPDATE bonds SET status='paid', paid=? WHERE id=?", (paid, row["id"]))
                 out.append({**dict(row), "status": "paid", "paid": paid})
-        return out
+        return sorted(out, key=lambda o: o["id"])
 
     def bond_price(self, row: dict[str, Any], now: float) -> int:
         """その債券を、いま売ったときの手取り（売れない債券は 0）。表示用。"""
@@ -222,15 +224,10 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
     ) -> None:
         """満期の前に payout で払い戻す（売却・破産の換金）。
 
-        払い戻しは thermo=False で銀行から払い、元本との差（値引きなら流入、上乗せなら流出）だけを
-        サーモスタットに通す。流出なら支払いの前、流入なら支払いのあと（bank_thermo_batch_for の約束）。
+        元本の返済は負債が減るだけなので、元本を流入（offset）として純額にし、元本との差（値引きなら流入、
+        上乗せなら流出）だけをサーモスタットに通す。払えない分は 現金 → 信託 → 熱浴・共済 の順で負担する（#33・#35）。
         """
-        net = principal - payout
-        if net < 0:
-            self._bank.bank_thermo_batch_for(guild_id, net, now)
-        self._bank.bank_pay_for(guild_id, payout, now, thermo=False)
-        if net > 0:
-            self._bank.bank_thermo_batch_for(guild_id, net, now)
+        self._bank.bank_pay_batch_for(guild_id, [payout], now, offset=principal)
         self._account.apply(guild_id, user_id, payout, reason)
 
     def bond_cancel_locked_for(

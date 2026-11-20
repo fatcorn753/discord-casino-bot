@@ -6,7 +6,7 @@ import sqlite3
 import time
 from typing import Optional
 
-from domain import labor
+from domain import kyosai, labor
 from domain.types import INITIAL_BALANCE
 from infra.db.schema.tables import INVENTORY_DDL, PROFILE_DDL, USERS_DDL, new_quiz_order
 
@@ -65,8 +65,14 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE teiai_bank ADD COLUMN {col} REAL NOT NULL DEFAULT 0")
     if tb and "trust_premium" not in tb:
         conn.execute("ALTER TABLE teiai_bank ADD COLUMN trust_premium REAL")
-    # 帝愛共済（#34）: 口をまだ持ったことのない人に、1口ずつ配る（行が残るので、2回目からは何もしない）
-    conn.execute("INSERT OR IGNORE INTO kyosai_units (guild_id, user_id, units) SELECT guild_id, user_id, 1 FROM users")
+    ko = {r["name"] for r in conn.execute("PRAGMA table_info(kyosai_offers)")}
+    if ko and "done_at" not in ko:
+        conn.execute("ALTER TABLE kyosai_offers ADD COLUMN done_at REAL NOT NULL DEFAULT 0")
+    km = {r["name"] for r in conn.execute("PRAGMA table_info(kyosai_motions)")}
+    if km and "created" not in km:
+        conn.execute("ALTER TABLE kyosai_motions ADD COLUMN created REAL NOT NULL DEFAULT 0")
+    normalize_kyosai_units(conn)
+
     th = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_house)")}
     if "grant_day" not in th:
         conn.execute("ALTER TABLE teiai_house ADD COLUMN grant_day TEXT NOT NULL DEFAULT ''")
@@ -382,3 +388,26 @@ def retire_autoplay(conn: sqlite3.Connection, now: Optional[float] = None) -> No
                 (gid, uid, pot, after, "自動プレイ精算", ts),
             )
     conn.execute("DROP TABLE autoplay")
+
+
+def normalize_kyosai_units(conn: sqlite3.Connection) -> None:
+    """帝愛共済の総口数を、サーバーごとに固定の総口数へそろえる（#93。何度実行しても同じ）。
+
+    1人1口ずつ配っていた頃の口を、帝愛の持ち口も含めた保有の比率を保ったまま、最大剰余法で合計がちょうど
+    総口数になるよう配り直す。すでに総口数のサーバーは何もしない。口の行がないサーバーは、口を持ってから
+    （KyosaiRepo が帝愛の持ち口として総口数を用意する）。
+    """
+    for g in conn.execute(
+        "SELECT guild_id, SUM(units) AS total FROM kyosai_units GROUP BY guild_id HAVING SUM(units) > 0"
+    ).fetchall():
+        if g["total"] == kyosai.TOTAL_UNITS:
+            continue
+        rows = conn.execute(
+            "SELECT user_id, units FROM kyosai_units WHERE guild_id=? AND units>0", (g["guild_id"],)
+        ).fetchall()
+        new = kyosai.split(kyosai.TOTAL_UNITS, [(r["user_id"], r["units"]) for r in rows])
+        for r in rows:
+            conn.execute(
+                "UPDATE kyosai_units SET units=? WHERE guild_id=? AND user_id=?",
+                (new.get(r["user_id"], 0), g["guild_id"], r["user_id"]),
+            )

@@ -194,6 +194,20 @@ class NoOpPollButtonBridge(IPollButtonBridge):
         return None
 
 
+class IKyosaiVoteBridge:
+    """共済の動議の投稿のボタン（MotionButton → KyosaiCog）のブリッジ契約（ISP 分離）。"""
+
+    async def handle_vote(self, interaction: discord.Interaction, yes: bool, motion_id: int) -> None:
+        raise NotImplementedError
+
+
+class NoOpKyosaiVoteBridge(IKyosaiVoteBridge):
+    """KyosaiCog 未ロード時の既定ボタンハンドラ（LSP 準拠）。"""
+
+    async def handle_vote(self, interaction: discord.Interaction, yes: bool, motion_id: int) -> None:
+        return None
+
+
 class IP2PListingBridge:
     """P2P 出品カードボタン（ListingButton → P2PCog）のブリッジ契約（ISP 分離）。"""
 

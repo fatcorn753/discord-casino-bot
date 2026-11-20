@@ -158,7 +158,7 @@ class IDebtRepo(
 
 
 class IKyosaiRepo(IGuildScopedRepo):
-    """帝愛共済（#34）: 口・配当・回収と帝愛の持ち口の販売・譲渡・動議。"""
+    """帝愛共済（#34）: 口・配当・回収と帝愛の持ち口の競り・譲渡・動議。"""
 
     def units_of_for(self, guild_id: int, user_id: int) -> int:
         raise NotImplementedError
@@ -169,7 +169,10 @@ class IKyosaiRepo(IGuildScopedRepo):
     def kyosai_daily(self, now: float) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def kyosai_buy_house(self, user_id: int, units: int, now: float) -> tuple[Any, ...]:
+    def kyosai_auction_tick(self, now: float) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def kyosai_bid(self, user_id: int, amount: int, now: float) -> tuple[Any, ...]:
         raise NotImplementedError
 
     def kyosai_offer(self, seller: int, buyer: int, units: int, price: int, now: float) -> tuple[Any, ...]:
@@ -187,10 +190,13 @@ class IKyosaiRepo(IGuildScopedRepo):
     def kyosai_propose(self, user_id: int, premium: float, now: float) -> tuple[Any, ...]:
         raise NotImplementedError
 
-    def kyosai_vote(self, user_id: int, yes: bool, now: float) -> tuple[Any, ...]:
+    def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: Optional[int] = None) -> tuple[Any, ...]:
         raise NotImplementedError
 
-    def kyosai_close_motion(self, now: float) -> Optional[dict[str, Any]]:
+    def kyosai_close_motions(self, now: float) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
+    def kyosai_motion(self, motion_id: int, now: float) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
     def kyosai_status(self, user_id: int, now: float) -> dict[str, Any]:

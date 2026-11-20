@@ -419,8 +419,17 @@ def create_tables(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS kyosai_units (      -- 帝愛共済の口（人ごと。user_id=0 は帝愛の持ち口。#34）
             guild_id INTEGER NOT NULL,
             user_id  INTEGER NOT NULL,
-            units    INTEGER NOT NULL DEFAULT 0,        -- 0 の行も残す（配り直さないため）
+            units    INTEGER NOT NULL DEFAULT 0,        -- サーバーの合計は常に総口数（10,000。#93）。0 の行も残る
             PRIMARY KEY (guild_id, user_id)
+        );
+        CREATE TABLE IF NOT EXISTS kyosai_auctions (   -- 帝愛の持ち口の競り（入札で値段が決まる。#93）
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id   INTEGER NOT NULL,
+            units      INTEGER NOT NULL,                -- 出した口数（帝愛の持ち口から、落札のときに移す）
+            top_bid    INTEGER NOT NULL DEFAULT 0,      -- いまの最高値（入札した人の手元から預かっている）
+            top_bidder INTEGER,
+            ends       REAL    NOT NULL,
+            status     TEXT    NOT NULL DEFAULT 'open'  -- open / sold / unsold
         );
         CREATE TABLE IF NOT EXISTS kyosai_offers (     -- 口の譲渡の申し出（売り手 → 買い手。買い手が受けると成立）
             id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -430,14 +439,17 @@ def create_tables(conn: sqlite3.Connection) -> None:
             units    INTEGER NOT NULL,
             price    INTEGER NOT NULL,                  -- 全部でいくら
             expires  REAL    NOT NULL,
-            status   TEXT    NOT NULL DEFAULT 'open'    -- open / done / cancelled
+            status   TEXT    NOT NULL DEFAULT 'open',   -- open / done / cancelled
+            done_at  REAL    NOT NULL DEFAULT 0         -- 成立した時刻（同じ2人の、24時間の取引額の上限に使う）
         );
-        CREATE TABLE IF NOT EXISTS kyosai_motions (    -- 動議（信託の上乗せ金利を premium にする）。1サーバーに投票中は1つだけ
+        CREATE TABLE IF NOT EXISTS kyosai_motions (    -- 動議（信託の上乗せ金利を premium にする）。いくつも並行できる（#94）
             id       INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER NOT NULL,
             proposer INTEGER NOT NULL,
             premium  REAL    NOT NULL,
+            created  REAL    NOT NULL DEFAULT 0,        -- 出した時刻（同じ人のクールダウンに使う）
             closes   REAL    NOT NULL,
+
             status   TEXT    NOT NULL DEFAULT 'open',   -- open / passed / rejected
             yes      INTEGER NOT NULL DEFAULT 0,        -- 締めたときの賛成の口数
             no       INTEGER NOT NULL DEFAULT 0

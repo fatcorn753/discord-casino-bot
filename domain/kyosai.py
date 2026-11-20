@@ -1,11 +1,13 @@
 """帝愛共済（#34）の数字と計算。調整は catalogs/teiai.yaml の kyosai。
 
 帝愛銀行の多層資本の最下層（最後に損をかぶる持分）。
-- 口: 口座を作った人に 1 口ずつ配る。破産・休眠で帝愛が回収し、帝愛の持ち口として売りに出す
+- 口: サーバーごとに総口数 TOTAL_UNITS で固定（新しく発行も消却もしない。#93）。新しい人は、譲渡か帝愛の競りで手に入れる。
+  破産・休眠で帝愛が回収し、帝愛の持ち口として入札の競りに出す（値段は入札で決まる）
 - 配当: 銀行の準備率が目標を超えた分（余剰）の一部を、毎日、口数に応じて配る
 - 超過損失 Δ: 帝愛信託でも払えず、熱浴も肩代わりしない分を、口数に応じて請求する（手元が足りなければ借金）
 - 売買: 口は、ほかの人へ値段をつけて譲れる。準備率が低いとき・破産猶予中の人がいるときは止める（流動性ゲート）
-- 動議: 口を持つ人が、帝愛信託の上乗せ金利を変える動議を出せる。賛成・反対を口数で数え、多いほうに決まる
+- 動議: 口を一定以上持つ人が、帝愛信託の上乗せ金利を変える動議を出せる（いくつも並行できる。#94）。
+  賛成・反対を口数で数え、賛成が反対より多く、かつ賛成が流通口数の一定割合以上なら可決。締めた順に後勝ちで決まる
 """
 
 from domain.ports import get_catalogs
@@ -18,12 +20,17 @@ DIVIDEND_SHARE = _CFG.dividend_share
 DIVIDEND_CAP = _CFG.dividend_cap
 GATE_RATIO = _CFG.gate_ratio
 DORMANT_DAYS = _CFG.dormant_days
-AUCTION_START = _CFG.auction_start
-AUCTION_DECAY = _CFG.auction_decay
-AUCTION_FLOOR = _CFG.auction_floor
+TOTAL_UNITS = _CFG.total_units
+AUCTION_LOT = _CFG.auction_lot
+AUCTION_HOURS = _CFG.auction_hours
+AUCTION_MIN_BID = _CFG.auction_min_bid
 OFFER_HOURS = _CFG.offer_hours
 MOTION_HOURS = _CFG.motion_hours
-PREMIUM_MAX = _CFG.premium_max
+PREMIUM_LIMIT = _CFG.premium_limit
+MOTION_MIN_YES_SHARE = _CFG.motion_min_yes_share
+MOTION_MIN_UNITS = _CFG.motion_min_units
+MOTION_MAX_OPEN_PER_USER = _CFG.motion_max_open_per_user
+MOTION_COOLDOWN_HOURS = _CFG.motion_cooldown_hours
 
 
 def split(amount: int, holdings: list[tuple[int, int]]) -> dict[int, int]:
@@ -47,17 +54,23 @@ def dividend_pool(available: float, liabilities: int) -> int:
     return min(DIVIDEND_CAP, int(surplus * DIVIDEND_SHARE))
 
 
-def auction_price(since: float, now: float) -> int:
-    """帝愛の持ち口 1 口の値段。回収した時刻 since から、1日ごとに始値の AUCTION_DECAY ずつ下がる（下限 AUCTION_FLOOR）。"""
-    days = max(0.0, (now - since) / 86400)
-    return max(AUCTION_FLOOR, int(AUCTION_START * (1 - AUCTION_DECAY * int(days))))
-
-
 def gate_locked(theta: float | None, grace_debtors: int) -> bool:
     """口の売買を止めるか（流動性ゲート）。準備率が GATE_RATIO 未満か、破産猶予中の人がいるとき。"""
     return grace_debtors > 0 or (theta is not None and theta < GATE_RATIO)
 
 
-def motion_passes(yes_units: int, no_units: int) -> bool:
-    """賛成の口数が反対より多ければ可決（同数は否決）。"""
-    return yes_units > no_units
+def motion_passes(yes_units: int, no_units: int, circulating: int) -> bool:
+    """可決か。賛成が反対より多く（同数は否決）、かつ賛成が流通口数 circulating の MOTION_MIN_YES_SHARE 以上。
+
+    最低「投票率」ではなく最低「賛成率」にするのは、反対票を入れると定足数を満たして可決を助けてしまう
+    （棄権したほうが否決できる）逆転を起こさないため。流通口数は帝愛の持ち口を除く（帝愛は投票しないため）。
+    """
+    return yes_units > no_units and yes_units >= MOTION_MIN_YES_SHARE * circulating
+
+
+def premium_ok(premium: float) -> bool:
+    """動議で出せる上乗せ金利か（0 より大きい。上限は計算の桁あふれを防ぐためだけ）。
+
+    0 以下を認めないのは、元本保証のない信託が、元本保証の通常債（r_f）と同じ利率にならないようにするため。
+    """
+    return 0 < premium <= PREMIUM_LIMIT

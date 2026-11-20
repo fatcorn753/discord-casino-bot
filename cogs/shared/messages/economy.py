@@ -57,7 +57,8 @@ ECONOMY_FAILURES: dict[str, FailureFormatter] = {
     "kyosai_bad_units": lambda p: "口数は1以上を指定してください。",
     "kyosai_bad_price": lambda p: "値段は0以上を指定してください。",
     "kyosai_bad_buyer": lambda p: "自分や帝愛には譲れません。",
-    "kyosai_house_short": lambda p: f"帝愛が売りに出している口は {p['have']}口 です。",
+    "kyosai_no_auction": lambda p: "いま競りに出ている口はありません。",
+    "kyosai_bid_low": lambda p: f"入札は {p['need']:,}ペリカ 以上にしてください。",
     "kyosai_units_short": lambda p: f"譲れる口は {p['have']}口 です（ほかの申し出に出している口は数えません）。",
     "kyosai_gate_locked": lambda p: (
         "いまは口の売買が止まっています（帝愛銀行の準備率が低いか、破産猶予中の人がいます）。"
@@ -65,10 +66,15 @@ ECONOMY_FAILURES: dict[str, FailureFormatter] = {
     "kyosai_offer_not_found": lambda p: (
         "その申し出は見つかりません（期限切れか、取り消されたか、自分あてではありません）。"
     ),
-    "kyosai_bad_premium": lambda p: f"上乗せ金利は 0〜{p['max_pct']:.2f}%/日 で指定してください。",
+    "kyosai_bad_premium": lambda p: f"上乗せ金利は 0%/日 より大きく、{p['max_pct']:g}%/日 以下で指定してください。",
     "kyosai_no_units": lambda p: "共済の口を持っている人だけができます。",
-    "kyosai_motion_open": lambda p: "投票中の動議があります。締め切られてから出してください。",
-    "kyosai_no_motion": lambda p: "投票中の動議はありません。",
+    "kyosai_motion_units": lambda p: (
+        f"動議を出せるのは、共済の口を {p['need']:,}口 以上持っている人だけです（いま {p['have']:,}口）。"
+    ),
+    "kyosai_motion_open": lambda p: f"投票中の動議は、1人 {p['max']}件 までです。締め切られてから出してください。",
+    "kyosai_motion_cooldown": lambda p: f"次の動議は <t:{int(p['until'])}:R> から出せます。",
+    "kyosai_motion_ambiguous": lambda p: f"投票中の動議が複数あります。番号（{p['ids']}）を指定してください。",
+    "kyosai_no_motion": lambda p: "その動議は投票中ではありません（締め切られたか、番号が違います）。",
     "poll_bad_title": lambda p: f"議題は 1〜{p['max']}文字 で書いてください。",
     "poll_bad_duration": lambda p: f"期限は 1分〜{p['max_minutes'] // 1440}日 で指定してください。",
     "poll_too_many": lambda p: f"受付中の投票は、1人 {p['max']}個 までです。締め切られてから作ってください。",

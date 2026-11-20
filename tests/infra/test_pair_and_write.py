@@ -355,8 +355,9 @@ def test_settle_passes_the_net_of_the_batch_through_the_thermostat_once(eco, mon
     set_price(eco, "cs", price, max(short["expiry"], long["expiry"]) - 10)
     calls = []
     bank = eco.options._bank  # 満期の精算が使う銀行
-    real = bank.bank_thermo_batch_for
-    monkeypatch.setattr(bank, "bank_thermo_batch_for", lambda g, net, now: (calls.append(net), real(g, net, now)))
+    real_in, real_out = bank._thermo_inflow_for, bank._thermo_shock_for
+    monkeypatch.setattr(bank, "_thermo_inflow_for", lambda g, a, now: (calls.append(a), real_in(g, a, now))[1])
+    monkeypatch.setattr(bank, "_thermo_shock_for", lambda g, a, now: (calls.append(-a), real_out(g, a, now))[1])
     bailed = eco.bank.bank_status(time.time())["thermostat"]["bailed"]
     done = eco.options.option_settle(max(short["expiry"], long["expiry"]) + 1)
     gross = {d["side"]: d["gross"] for d in done}

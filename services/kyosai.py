@@ -22,8 +22,8 @@ class KyosaiService:
     def offers(self, guild_id: int, user_id: int) -> list[dict[str, Any]]:
         return self._kyosai.for_guild(guild_id).kyosai_offers_of(user_id, self._now())
 
-    def buy_house(self, guild_id: int, user_id: int, units: int) -> tuple[Any, ...]:
-        return self._kyosai.for_guild(guild_id).kyosai_buy_house(user_id, units, self._now())
+    def bid(self, guild_id: int, user_id: int, amount: int) -> tuple[Any, ...]:
+        return self._kyosai.for_guild(guild_id).kyosai_bid(user_id, amount, self._now())
 
     def offer(self, guild_id: int, seller: int, buyer: int, units: int, price: int) -> tuple[Any, ...]:
         return self._kyosai.for_guild(guild_id).kyosai_offer(seller, buyer, units, price, self._now())
@@ -37,11 +37,17 @@ class KyosaiService:
     def propose(self, guild_id: int, user_id: int, premium: float) -> tuple[Any, ...]:
         return self._kyosai.for_guild(guild_id).kyosai_propose(user_id, premium, self._now())
 
-    def vote(self, guild_id: int, user_id: int, yes: bool) -> tuple[Any, ...]:
-        return self._kyosai.for_guild(guild_id).kyosai_vote(user_id, yes, self._now())
+    def vote(self, guild_id: int, user_id: int, yes: bool, motion_id: Optional[int] = None) -> tuple[Any, ...]:
+        return self._kyosai.for_guild(guild_id).kyosai_vote(user_id, yes, self._now(), motion_id)
 
-    def tick(self, guild_id: int) -> tuple[Optional[dict[str, Any]], Optional[dict[str, Any]]]:
-        """毎分: 1日ごとの配当（と休眠の回収）と、締切を過ぎた動議の締め。(配当の結果, 動議の結果)。"""
+    def motion(self, guild_id: int, motion_id: int) -> Optional[dict[str, Any]]:
+        return self._kyosai.for_guild(guild_id).kyosai_motion(motion_id, self._now())
+
+    def tick(self, guild_id: int) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        """毎分: 1日ごとの配当（と休眠の回収）、締切を過ぎた動議の締め、帝愛の持ち口の競り。
+
+        (配当の結果, 締めた動議の結果, 競りで起きたこと)。
+        """
         repo = self._kyosai.for_guild(guild_id)
         now = self._now()
-        return repo.kyosai_daily(now), repo.kyosai_close_motion(now)
+        return repo.kyosai_daily(now), repo.kyosai_close_motions(now), repo.kyosai_auction_tick(now)

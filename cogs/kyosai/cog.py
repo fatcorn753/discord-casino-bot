@@ -1,13 +1,18 @@
 """帝愛共済（#34）— `/共済`。帝愛銀行の最後の損を負う代わりに、余剰から配当を受け取る持分。
 
-- 口は、口座を作った人に 1 口ずつ配られる。破産・休眠で帝愛が回収し、値下がりしながら売りに出す（`/共済 買う`）
-- 口は、値段をつけてほかの人へ譲れる（`譲渡` → 相手が `受諾`）。準備率が低いとき・破産猶予中の人がいるときは止まる
-- 動議（`提案`）で、帝愛信託の上乗せ金利を変えられる。口数で数えた賛成が反対より多ければ可決
-- 配当と動議の締めは、1分ごとの見回りで行う
+- 総口数はサーバーごとに 10,000口で固定（#93）。新しい人は、譲渡か帝愛の競り（`/共済 入札`）で手に入れる
+- 破産・休眠で帝愛が回収した口は、入札の競りに出す（値段は入札で決まる）
+- 口は、値段をつけてほかの人へ譲れる（`譲渡` → 相手が `受諾`。手数料と、同じ相手との1日の上限は P2P と同じ）。
+  準備率が低いとき・破産猶予中の人がいるときは止まる
+- 動議（`提案`）で、帝愛信託の上乗せ金利を変えられる。いくつも並行でき、告知チャンネルにボタンつきで出る（#94）。
+  賛成が反対より多く、かつ流通口数の一定割合以上なら可決し、締めた順に後勝ちで決まる
+- 配当・動議の締め・競りは、1分ごとの見回りで行う
 """
 
 import logging
-from typing import TYPE_CHECKING, Any
+import math
+import re
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import discord
 from discord import app_commands
@@ -15,9 +20,10 @@ from discord.ext import commands, tasks
 
 from cogs.shared import logthrottle, ui
 from cogs.shared.announce import announce_channel
+from cogs.shared.bridges import BotBridges, IKyosaiVoteBridge, NoOpKyosaiVoteBridge
 from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
-from domain import kyosai
+from domain import kyosai, p2p
 from domain.ports.repos import IGuildRepo
 from services.kyosai import KyosaiService
 
@@ -27,30 +33,41 @@ if TYPE_CHECKING:
     from cogs.shared.bot import CasinoBot
 
 
+def _need_yes(circulating: int) -> int:
+    """可決に要る賛成の口数の下限（流通口数 × 最低賛成率。切り上げ）。"""
+    return math.ceil(circulating * kyosai.MOTION_MIN_YES_SHARE)
+
+
 def status_embed(s: dict[str, Any], offers: list[dict[str, Any]], user_id: int) -> discord.Embed:
     share = s["units"] / s["total"] if s["total"] else 0.0
     lines = [
-        f"あなたの口: **{s['units']}口**（全 {s['total']}口 の {share:.1%}）　持っている人 {s['holders']}人",
+        f"あなたの口: **{s['units']:,}口**（全 {s['total']:,}口 の {share:.2%}）　持っている人 {s['holders']}人",
         f"次の配当の見込み: 全体で {ui.pelica(s['pool'])}"
         + (f"（<t:{int(s['next_dividend'])}:R>）" if s["next_dividend"] else "")
         + f"　これまでの配当 {ui.pelica(int(s['paid']))}　これまでの負担 {ui.pelica(int(s['charged']))}",
-        f"帝愛の持ち口: {s['house']}口（1口 {ui.pelica(s['house_price'])}。`/共済 買う`）",
-        "口の売買: " + ("🔒 **停止中**（準備率が低いか、破産猶予中の人がいます）" if s["locked"] else "🟢 できます"),
+    ]
+    a = s["auction"]
+    if a is not None:
+        top = f"いまの最高値 {ui.pelica(a['top_bid'])}（<@{a['top_bidder']}>）" if a["top_bidder"] else "まだ入札なし"
+        lines.append(
+            f"🔨 帝愛の競り: **{a['units']:,}口**　{top}　締切 <t:{int(a['ends'])}:R>（`/共済 入札`）"
+            f"　帝愛の持ち口 {s['house']:,}口"
+        )
+    lines += [
+        "口の譲渡: " + ("🔒 **停止中**（準備率が低いか、破産猶予中の人がいます）" if s["locked"] else "🟢 できます"),
         f"帝愛信託の上乗せ金利: **1日 {s['premium']:.2%}**",
     ]
-    if s["motion"]:
-        m = s["motion"]
-        yes, no = s["tally"]
+    for m in s["motions"]:
         lines.append(
-            f"🗳️ 動議 #{m['id']}: 上乗せ金利を **1日 {m['premium']:.2%}** にする　賛成 {yes}口 / 反対 {no}口"
-            f"（締切 <t:{int(m['closes'])}:R>。`/共済 投票`）"
+            f"🗳️ 動議 #{m['id']}: 上乗せ金利を **1日 {m['premium']:.2%}** にする　賛成 {m['yes']:,}口 / 反対 {m['no']:,}口"
+            f"（可決には賛成 {_need_yes(s['circulating']):,}口 以上も必要。締切 <t:{int(m['closes'])}:R>）"
         )
     for o in offers:
         if o["seller"] == user_id:
-            lines.append(f"📤 申し出 #{o['id']}: <@{o['buyer']}> へ {o['units']}口 を {ui.pelica(o['price'])} で")
+            lines.append(f"📤 申し出 #{o['id']}: <@{o['buyer']}> へ {o['units']:,}口 を {ui.pelica(o['price'])} で")
         else:
             lines.append(
-                f"📥 申し出 #{o['id']}: <@{o['seller']}> から {o['units']}口 を {ui.pelica(o['price'])} で（`/共済 受諾`）"
+                f"📥 申し出 #{o['id']}: <@{o['seller']}> から {o['units']:,}口 を {ui.pelica(o['price'])} で（`/共済 受諾`）"
             )
     embed = ui.embed("🏛️ 帝愛共済", "\n".join(lines))
     embed.set_footer(
@@ -59,7 +76,51 @@ def status_embed(s: dict[str, Any], offers: list[dict[str, Any]], user_id: int) 
     return embed
 
 
-class KyosaiCog(commands.Cog):
+def motion_embed(m: dict[str, Any]) -> discord.Embed:
+    """動議の投稿（提案のときに告知チャンネルへ出す。ボタンで投票すると書き換わる）。"""
+    lines = [
+        f"<@{m['proposer']}> が、帝愛信託の上乗せ金利を **1日 {m['premium']:.2%}** にする動議を出しました。",
+        f"賛成 **{m.get('yes', 0):,}口** / 反対 **{m.get('no', 0):,}口**（締切のときの口数で数え直します）",
+        f"可決の条件: 賛成が反対より多く、かつ賛成が **{_need_yes(m.get('circulating', 0)):,}口** 以上"
+        f"（流通口数の {kyosai.MOTION_MIN_YES_SHARE:.0%}）",
+        f"締切 <t:{int(m['closes'])}:R>。口を持つ人は、下のボタンか `/共済 投票 番号:{m['id']}` で投票できます（あとから変えられます）。",
+    ]
+    return ui.embed(f"🗳️ 帝愛共済の動議 #{m['id']}", "\n".join(lines))
+
+
+class MotionButton(discord.ui.DynamicItem[discord.ui.Button], template=r"kyosai:(?P<act>yes|no):(?P<id>\d+)"):
+    """動議の投稿の賛成・反対ボタン。再起動しても動くよう、動議の番号を custom_id に入れている。"""
+
+    def __init__(self, yes: bool, motion_id: int):
+        act = "yes" if yes else "no"
+        super().__init__(
+            discord.ui.Button(
+                label="賛成" if yes else "反対",
+                emoji="👍" if yes else "👎",
+                style=discord.ButtonStyle.success if yes else discord.ButtonStyle.danger,
+                custom_id=f"kyosai:{act}:{motion_id}",
+            )
+        )
+        self.yes, self.motion_id = yes, motion_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction: discord.Interaction, item: discord.ui.Item[Any], match: re.Match):
+        return cls(match["act"] == "yes", int(match["id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        bot = cast("CasinoBot", interaction.client)
+        bridge = bot.bridges.resolve_or(IKyosaiVoteBridge, NoOpKyosaiVoteBridge())
+        await bridge.handle_vote(interaction, self.yes, self.motion_id)
+
+
+def motion_view(motion_id: int) -> discord.ui.View:
+    view = discord.ui.View(timeout=None)
+    view.add_item(MotionButton(True, motion_id))
+    view.add_item(MotionButton(False, motion_id))
+    return view
+
+
+class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
     def __init__(self, bot: commands.Bot, config: dict[str, Any], kyosai_svc: KyosaiService, guild_repo: IGuildRepo):
         self.bot = bot
         self._config = config
@@ -67,13 +128,17 @@ class KyosaiCog(commands.Cog):
         self._guild_repo = guild_repo
 
     async def cog_load(self) -> None:
+        self.bot.add_dynamic_items(MotionButton)
         self.tick.start()
 
     async def cog_unload(self) -> None:
         self.tick.cancel()
+        bridges = getattr(self.bot, "bridges", None)
+        if isinstance(bridges, BotBridges):
+            bridges.unregister(IKyosaiVoteBridge, self)
 
     group = app_commands.Group(
-        name="共済", description="🏛️ 帝愛共済（配当と、最後の損の負担・口の売買・動議）", guild_only=True
+        name="共済", description="🏛️ 帝愛共済（配当と、最後の損の負担・口の競りと譲渡・動議）", guild_only=True
     )
 
     async def _fail(self, interaction: discord.Interaction, reason: Any) -> None:
@@ -81,7 +146,7 @@ class KyosaiCog(commands.Cog):
             embed=ui.error_embed("できません", format_failure(reason)), ephemeral=True
         )
 
-    @group.command(name="状況", description="自分の口・配当・帝愛の持ち口・動議・申し出を見る")
+    @group.command(name="状況", description="自分の口・配当・帝愛の競り・動議・申し出を見る")
     async def status(self, interaction: discord.Interaction):
         gid = ui.guild_id_of(interaction)
         uid = interaction.user.id
@@ -90,27 +155,35 @@ class KyosaiCog(commands.Cog):
             embed=status_embed(s, self._kyosai.offers(gid, uid), uid), ephemeral=True
         )
 
-    @group.command(name="買う", description="帝愛が持っている口を買う（値段は日ごとに下がる）")
-    @app_commands.rename(units="口数")
-    @app_commands.describe(units="買う口数（1以上）")
-    async def buy(self, interaction: discord.Interaction, units: app_commands.Range[int, 1, 1000]):
-        ok, result = self._kyosai.buy_house(ui.guild_id_of(interaction), interaction.user.id, units)
+    @group.command(name="入札", description="帝愛が競りに出している口に入札する（入札額は預かり、負けたら返す）")
+    @app_commands.rename(amount="金額")
+    @app_commands.describe(amount="入札額（ペリカ。いまの最高値より 5%・最低100 以上高く）")
+    async def bid(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1, 1_000_000_000]):
+        ok, result = self._kyosai.bid(ui.guild_id_of(interaction), interaction.user.id, amount)
         if not ok:
             return await self._fail(interaction, result)
         await interaction.response.send_message(
-            embed=ui.ok_embed("🏛️ 共済の口を買いました", f"{units}口 を {ui.pelica(result)} で買いました。"),
+            embed=ui.ok_embed(
+                "🔨 入札しました",
+                f"共済の口 **{result['units']:,}口** に {ui.pelica(amount)} で入札しました（締切 <t:{int(result['ends'])}:R>）。\n"
+                "入札額は預かります。ほかの人に上回られたら、手元に戻ります。",
+            ),
             ephemeral=True,
         )
 
     @group.command(name="譲渡", description="自分の口を、値段をつけて相手へ譲る申し出をする（相手が受けると成立）")
     @app_commands.rename(member="相手", units="口数", price="値段")
-    @app_commands.describe(member="譲る相手", units="譲る口数（1以上）", price="全部でいくら（ペリカ。0なら無償）")
+    @app_commands.describe(
+        member="譲る相手",
+        units="譲る口数（1以上）",
+        price=f"全部でいくら（ペリカ。0なら無償。同じ相手とは1日 {p2p.PAIR_DAILY_LIMIT:,} まで）",
+    )
     async def offer(
         self,
         interaction: discord.Interaction,
         member: discord.Member,
-        units: app_commands.Range[int, 1, 1000],
-        price: app_commands.Range[int, 0, 1_000_000_000],
+        units: app_commands.Range[int, 1, kyosai.TOTAL_UNITS],
+        price: app_commands.Range[int, 0, p2p.PAIR_DAILY_LIMIT],
     ):
         if member.bot:
             return await interaction.response.send_message(
@@ -123,8 +196,9 @@ class KyosaiCog(commands.Cog):
             content=member.mention,
             embed=ui.embed(
                 "🏛️ 共済の口の譲渡の申し出",
-                f"{interaction.user.mention} が {member.mention} に、共済の口 **{units}口** を **{ui.pelica(price)}** で譲ると申し出ました。\n"
-                f"受けるなら `/共済 受諾 番号:{result}`（{kyosai.OFFER_HOURS}時間以内）。",
+                f"{interaction.user.mention} が {member.mention} に、共済の口 **{units:,}口** を **{ui.pelica(price)}** で譲ると申し出ました。\n"
+                f"受けるなら `/共済 受諾 番号:{result}`（{kyosai.OFFER_HOURS}時間以内）。"
+                f"成立すると、売り手の受け取りから手数料 {p2p.FEE_RATE:.0%} を引きます。",
             ),
             allowed_mentions=discord.AllowedMentions(users=[member], roles=False, everyone=False),
         )
@@ -139,7 +213,8 @@ class KyosaiCog(commands.Cog):
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "🏛️ 譲渡が成立しました",
-                f"<@{result['seller']}> から {result['units']}口 を {ui.pelica(result['price'])} で受け取りました。",
+                f"<@{result['seller']}> から {result['units']:,}口 を {ui.pelica(result['price'])} で受け取りました"
+                f"（売り手の手数料 {ui.pelica(result['fee'])}）。",
             )
         )
 
@@ -155,37 +230,74 @@ class KyosaiCog(commands.Cog):
             embed=ui.ok_embed("取り消しました", f"申し出 #{offer_id}"), ephemeral=True
         )
 
-    @group.command(name="提案", description="帝愛信託の上乗せ金利を変える動議を出す（口を持つ人の投票で決まる）")
+    @group.command(
+        name="提案", description="帝愛信託の上乗せ金利を変える動議を出す（告知チャンネルに出て、口数で決まる）"
+    )
     @app_commands.rename(premium="上乗せ金利")
-    @app_commands.describe(premium=f"1日あたりの上乗せ金利（％。0〜{kyosai.PREMIUM_MAX * 100:g}）")
+    @app_commands.describe(
+        premium=f"1日あたりの上乗せ金利（％。0より大きく。出せるのは口を {kyosai.MOTION_MIN_UNITS:,}口 以上持つ人）"
+    )
     async def propose(
-        self, interaction: discord.Interaction, premium: app_commands.Range[float, 0.0, kyosai.PREMIUM_MAX * 100]
+        self,
+        interaction: discord.Interaction,
+        premium: app_commands.Range[float, 0.001, kyosai.PREMIUM_LIMIT * 100],
     ):
-        ok, result = self._kyosai.propose(ui.guild_id_of(interaction), interaction.user.id, premium / 100)
+        gid = ui.guild_id_of(interaction)
+        ok, result = self._kyosai.propose(gid, interaction.user.id, premium / 100)
         if not ok:
             return await self._fail(interaction, result)
-        await interaction.response.send_message(
-            embed=ui.embed(
-                "🗳️ 帝愛共済の動議",
-                f"{interaction.user.mention} が、帝愛信託の上乗せ金利を **1日 {premium:.2f}%** にする動議 #{result} を出しました。\n"
-                f"口を持つ人は `/共済 投票` で賛成か反対を選べます（{kyosai.MOTION_HOURS}時間後に、口数で数えます）。",
+        m = self._kyosai.motion(gid, result["id"]) or result
+        channel = announce_channel(interaction.guild, self._guild_repo) if interaction.guild else None
+        if channel is not None and channel.id != interaction.channel_id:
+            await interaction.response.send_message(
+                embed=ui.ok_embed("🗳️ 動議を出しました", f"動議 #{result['id']} を {channel.mention} に告知しました。"),
+                ephemeral=True,
             )
-        )
+            try:
+                await ui.send_channel(channel, embed=motion_embed(m), view=motion_view(result["id"]))
+                return
+            except discord.HTTPException as exc:
+                logthrottle.warn(("kyosai", gid), f"共済の動議を告知できません: guild={gid}: {exc!r}")
+                await interaction.followup.send(embed=motion_embed(m), view=motion_view(result["id"]))
+                return
+        await interaction.response.send_message(embed=motion_embed(m), view=motion_view(result["id"]))
 
     @group.command(name="投票", description="投票中の動議に、賛成か反対を入れる（あとから変えられる。口数で数える）")
-    @app_commands.rename(choice="賛否")
-    @app_commands.describe(choice="賛成か反対")
+    @app_commands.rename(choice="賛否", motion_id="番号")
+    @app_commands.describe(choice="賛成か反対", motion_id="動議の番号（投票中が1件だけなら省略できます）")
     @app_commands.choices(
         choice=[app_commands.Choice(name="賛成", value="yes"), app_commands.Choice(name="反対", value="no")]
     )
-    async def vote(self, interaction: discord.Interaction, choice: app_commands.Choice[str]):
-        ok, result = self._kyosai.vote(ui.guild_id_of(interaction), interaction.user.id, choice.value == "yes")
+    async def vote(
+        self, interaction: discord.Interaction, choice: app_commands.Choice[str], motion_id: Optional[int] = None
+    ):
+        ok, result = self._kyosai.vote(
+            ui.guild_id_of(interaction), interaction.user.id, choice.value == "yes", motion_id
+        )
         if not ok:
             return await self._fail(interaction, result)
         await interaction.response.send_message(
             embed=ui.ok_embed("投票しました", f"動議 #{result} に **{choice.name}**（締切のときの口数で数えます）"),
             ephemeral=True,
         )
+
+    # ------------------------------ ボタン ------------------------------ #
+    async def handle_vote(self, interaction: discord.Interaction, yes: bool, motion_id: int) -> None:
+        gid = ui.guild_id_of(interaction)
+        ok, result = self._kyosai.vote(gid, interaction.user.id, yes, motion_id)
+        if not ok:
+            await interaction.response.send_message(
+                embed=ui.error_embed("できません", format_failure(result)), ephemeral=True
+            )
+            return
+        m = self._kyosai.motion(gid, motion_id)
+        if m is not None:
+            await interaction.response.edit_message(embed=motion_embed(m))
+            await interaction.followup.send(
+                f"動議 #{motion_id} に **{'賛成' if yes else '反対'}** を入れました。", ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(f"**{'賛成' if yes else '反対'}** を入れました。", ephemeral=True)
 
     # ------------------------------ 見回り（毎分） ------------------------------ #
     @tasks.loop(minutes=1)
@@ -199,24 +311,47 @@ class KyosaiCog(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _tick_guild(self, guild: discord.Guild) -> None:
-        dividend, motion = self._kyosai.tick(guild.id)
+        dividend, motions, auctions = self._kyosai.tick(guild.id)
         if dividend:
             _log.info(f"共済の配当: guild={guild.id} {dividend}")
-        if motion is None:
+        posts = [_motion_result(m) for m in motions] + [p for p in map(_auction_post, auctions) if p is not None]
+        if not posts:
             return
         channel = announce_channel(guild, self._guild_repo)
         if channel is None:
             return
-        verdict = "✅ 可決" if motion["status"] == "passed" else "❌ 否決"
-        text = (
-            f"動議 #{motion['id']}（帝愛信託の上乗せ金利を 1日 {motion['premium']:.2%} にする）は **{verdict}** されました。"
-            f"\n賛成 {motion['yes']}口 / 反対 {motion['no']}口"
+        for title, text in posts:
+            try:
+                await ui.send_channel(channel, embed=ui.embed(title, text))
+            except discord.HTTPException as exc:
+                logthrottle.warn(("kyosai", guild.id), f"共済の告知を投稿できません: guild={guild.id}: {exc!r}")
+
+
+def _motion_result(motion: dict[str, Any]) -> tuple[str, str]:
+    verdict = "✅ 可決" if motion["status"] == "passed" else "❌ 否決"
+    text = (
+        f"動議 #{motion['id']}（帝愛信託の上乗せ金利を 1日 {motion['premium']:.2%} にする）は **{verdict}** されました。"
+        f"\n賛成 {motion['yes']:,}口 / 反対 {motion['no']:,}口（可決には賛成 {_need_yes(motion['circulating']):,}口 以上も必要）"
+    )
+    return "🗳️ 帝愛共済の動議の結果", text
+
+
+def _auction_post(event: dict[str, Any]) -> Optional[tuple[str, str]]:
+    if event["event"] == "sold":
+        return (
+            "🔨 帝愛共済の競りの結果",
+            f"共済の口 **{event['units']:,}口** を <@{event['top_bidder']}> が {ui.pelica(event['top_bid'])} で落札しました。",
         )
-        try:
-            await ui.send_channel(channel, embed=ui.embed("🗳️ 帝愛共済の動議の結果", text))
-        except discord.HTTPException as exc:
-            logthrottle.warn(("kyosai", guild.id), f"共済の動議の結果を投稿できません: guild={guild.id}: {exc!r}")
+    if event["event"] == "listed":
+        return (
+            "🔨 帝愛共済の口の競り",
+            f"帝愛が回収した共済の口 **{event['units']:,}口** を競りに出しました（締切 <t:{int(event['ends'])}:R>）。\n"
+            f"`/共済 入札` で入札できます（借金がある人は入札できません）。",
+        )
+    return None
 
 
 async def setup(bot: "CasinoBot") -> None:
-    await bot.add_cog(KyosaiCog(bot, bot.config, bot.services.kyosai, bot.repos.guild))
+    cog = KyosaiCog(bot, bot.config, bot.services.kyosai, bot.repos.guild)
+    await bot.add_cog(cog)
+    bot.bridges.register(IKyosaiVoteBridge, cog)

@@ -128,7 +128,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                 )
             self._conn.execute("DELETE FROM escrow WHERE id=? AND guild_id=?", (escrow_id, gid))
             self._bank.bank_income_for(
-                gid, int(max(0, amount - total) * teiai.LOSS_SHARE), self._now(), needs_depositors=True
+                gid, int(max(0, amount - total) * teiai.LOSS_SHARE), self._now()
             )  # 負けた額の一部が、帝愛銀行の収入になる
             taken = -self._account.apply(gid, user_id, -penalty, f"追加の支払い:{game}") if penalty > 0 else 0
             if penalty > taken:  # 残高で足りない分は、強制執行したうえで、残りを帝愛の借金にする

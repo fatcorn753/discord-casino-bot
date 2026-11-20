@@ -1,5 +1,7 @@
 """無リスク金利 r_f の動き（#18）。準備率 θ に連動し、債券の利率は買ったときに固定される。"""
 
+import math
+
 import pytest
 
 from domain import bonds, rates, teiai
@@ -44,9 +46,15 @@ def test_the_step_reverts_to_the_target_and_stays_in_the_band():
     assert rates.rf_step(r, 0.0, 0, 5.0) == r
 
 
-def test_the_junk_rate_moves_with_the_normal_rate():
+def test_the_junk_rate_keeps_its_spread_and_scales_with_its_own_maturity():
+    """ジャンク債（1日）には、通常債（3日）の利率の動きをそのまま足さず、満期の長さに比例して効かせる（#18）。"""
+    assert rates.bond_rate_pct(bonds.JUNK, rates.BASE_RISK_FREE_PER_DAY) == pytest.approx(bonds.JUNK.rate)
     rf = rates.rf_target(0.0)
-    assert rates.bond_rate_pct(bonds.JUNK, rf) == pytest.approx(bonds.JUNK.rate + normal_pct(rf) - bonds.NORMAL.rate)
+    spread = rates.per_day(bonds.JUNK.rate, bonds.JUNK.hours) - rates.BASE_RISK_FREE_PER_DAY
+    expected = math.expm1((rf + spread) * bonds.JUNK.hours / 24) * 100
+    assert rates.bond_rate_pct(bonds.JUNK, rf) == pytest.approx(round(expected, 2))
+    naive = bonds.JUNK.rate + normal_pct(rf) - bonds.NORMAL.rate  # 3日分の動きを1日債に足した、直す前の値
+    assert rates.bond_rate_pct(bonds.JUNK, rf) - bonds.JUNK.rate < (naive - bonds.JUNK.rate) / 2
 
 
 def test_the_sale_discount_equals_the_old_constant_at_the_base_rate():

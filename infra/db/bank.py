@@ -296,18 +296,15 @@ class BankRepo(ScopedRepo, IBankRepo):
         guild_id: int,
         amount: int,
         now: float,
-        needs_depositors: bool = False,
         *,
         thermo: bool = True,
     ) -> None:
         """銀行に amount が入る（手元の現金へ）。信託への分配はしない（信託は、決まった利息を受け取る。#33）。
 
-        needs_depositors=True のときは、信託の残高がなければ何も入らない（カジノの負け分など、もとからの約束）。
-        thermo=False は、バッチの純額を bank_thermo_batch_for で別に通すときだけ使う。
+        信託の残高が 0 でも入れる（社債の償還と共済の配当の原資になるため）。
+        thermo=False は、バッチの純額を bank_thermo_batch_for や bank_pay_batch_for で別に通すときだけ使う。
         """
         if amount <= 0:
-            return
-        if needs_depositors and sum(a for _, a in self._deposits_for(guild_id)) <= 0:
             return
         state = self.bank_sync_for(guild_id, now)
         received = self._thermo_inflow_for(guild_id, amount, now) if thermo else float(amount)
@@ -323,12 +320,38 @@ class BankRepo(ScopedRepo, IBankRepo):
 
         サーモスタットに流出として通すのは「現金で払った分 + 超過損失」だけ（信託の取り崩しで、負側の器を使わない）。
         損失の支払いも、プレミアムなどの通常の支払いも、同じ流出として扱う。
-        thermo=False は、バッチの純額を bank_thermo_batch_for で別に通すときだけ使う。
+        thermo=False は、サーモスタットに通さない（いまは使っていない。バッチは bank_pay_batch_for で通す）。
         """
         return self._outflow_for(guild_id, amount, now, use_trust=True, thermo=thermo)
 
-    def _outflow_for(self, guild_id: int, amount: int, now: float, *, use_trust: bool, thermo: bool) -> int:
-        """bank_pay_for の本体。use_trust=False は、信託への利息のように、信託から取ると自分で自分に払うことになる流出。"""
+    def bank_pay_batch_for(self, guild_id: int, amounts: list[int], now: float, *, offset: float = 0.0) -> list[int]:
+        """入金と支払いが混ざるバッチの支払い amounts を、まとめて1回のウォーターフォールで払う。払えた額を、それぞれ返す。
+
+        offset は、このバッチの流入（現金は動かさない。入金は先に thermo=False で済ませておく）。サーモスタットには
+        「offset −（現金で払った分 + 超過損失）」の純額を1回だけ通す。信託の取り崩しは通さないので、
+        ジュニアの信託が第一損失を負ってから、超過損失の分だけ熱浴が肩代わりする（#33）。
+        払い切れないとき（帝愛の持ち口の分が残ったとき）は、払えた額を額に応じて按分する。
+        """
+        total = sum(a for a in amounts if a > 0)
+        if total <= 0:
+            if offset:
+                self.bank_thermo_batch_for(guild_id, offset, now)
+            return [0 for _ in amounts]
+        paid = self._outflow_for(guild_id, total, now, use_trust=True, thermo=True, offset=offset)
+        if paid >= total:
+            return [max(0, a) for a in amounts]
+        out = [max(0, a) * paid // total for a in amounts]
+        for i in sorted(range(len(amounts)), key=lambda i: -(max(0, amounts[i]) * paid % total))[: paid - sum(out)]:
+            out[i] += 1
+        return out
+
+    def _outflow_for(
+        self, guild_id: int, amount: int, now: float, *, use_trust: bool, thermo: bool, offset: float = 0.0
+    ) -> int:
+        """bank_pay_for の本体。use_trust=False は、信託への利息のように、信託から取ると自分で自分に払うことになる流出。
+
+        offset は、同じバッチの流入（bank_pay_batch_for）。サーモスタットには offset との純額を通す。
+        """
         if amount <= 0:
             return 0
         state = self.bank_sync_for(guild_id, now)
@@ -339,7 +362,11 @@ class BankRepo(ScopedRepo, IBankRepo):
         excess = max(0.0, shortfall - trust_take)  # 信託でも受け止めきれない超過損失 Δraw
         bailout = 0.0
         if thermo:
-            bailout = self._thermo_shock_for(guild_id, int(round(cash_pay + excess)), now)
+            flow = offset - (cash_pay + excess)  # 流入がプラス
+            if flow < 0:
+                bailout = self._thermo_shock_for(guild_id, int(round(-flow)), now)
+            elif flow > 0:  # 純額が流入: 入れてよい額を超えた分（burn）は、手元から消える
+                cash -= flow - self._thermo_inflow_for(guild_id, int(round(flow)), now)
         cover = min(excess, bailout)  # 熱浴の肩代わりは、まず超過損失の穴埋めに使う
         cash += bailout - cover  # 余った肩代わりは、手元へ
         charged = 0
@@ -412,7 +439,8 @@ class BankRepo(ScopedRepo, IBankRepo):
         """帝愛信託の利息を、前回からの経過時間ぶん払う（1時間たっていなければ何もしない）。払った額を返す。
 
         利息は銀行の確定した流出: 手元の現金から払い、足りない分は信託からは取らず（自分で自分に払うことになるため）、
-        超過損失として熱浴・共済へ回す。払えた分を、信託の残高に応じて按分して上乗せする。
+        超過損失として熱浴・共済へ回す。払えた分を、信託の残高に応じて按分し、預けた人の手元へ払う。
+        信託の残高へ上乗せすると、現金（資産）を減らしたうえに負債も増やす二重計上になるため、手元へ払う。
         """
         with self._db.tx():
             gid = self._g()
@@ -436,9 +464,9 @@ class BankRepo(ScopedRepo, IBankRepo):
                 gain = paid * amt // total
                 if gain:
                     credited += gain
-                    self._conn.execute(
-                        "UPDATE teiai_deposits SET amount=amount+? WHERE guild_id=? AND user_id=?", (gain, gid, uid)
-                    )
+                    self._account.ensure(gid, uid)
+                    self._account.apply(gid, uid, gain, "帝愛信託:利息", income=gain)
+
             # 端数（按分の切り捨て）は手元へ戻し、未払いの小数は次回へ持ち越す
             if paid > credited:
                 cash = self.bank_sync_for(gid, now)
