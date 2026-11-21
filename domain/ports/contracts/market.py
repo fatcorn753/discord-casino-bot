@@ -110,3 +110,58 @@ class ChartBoardRow(TypedDict):
     guild_id: int
     channel_id: int
     message_id: int
+
+
+class EarningsJump(TypedDict):
+    """決算の発表による価格ジャンプ（オプションの値付け用。earnings_jumps の返り値）。"""
+
+    symbol: str
+    jump_at: float
+    jump_var: float
+
+
+class EarningsAnnouncement(TypedDict):
+    """告知ずみの発表前の決算（earnings_upcoming の返り値。方向・大きさはまだ秘密）。"""
+
+    id: int
+    symbol: str
+    announce_at: float
+    release_at: float
+
+
+class EarningsAnnounceRow(TypedDict):
+    """告知すべき決算（earnings_to_announce の返り値）。"""
+
+    id: int
+    symbol: str
+    release_at: float
+
+
+class OptionBuyResult(TypedDict):
+    """オプションを買った結果（option_buy の成功ペイロード）。"""
+
+    id: int
+    units: int
+    cost: int
+    strike: float
+    expiry: float
+    spot: float
+    spot2: Optional[float]
+
+
+class OptionWriteResult(TypedDict):
+    """裸売りした結果（option_write の成功ペイロード）。"""
+
+    id: int
+    units: int
+    premium: int
+    margin: int
+    strike: float
+    expiry: float
+    spot: float
+
+
+class OptionSettleRow(OptionRow):
+    """決済したオプションの行（option_settle の返り値の要素）。"""
+
+    gross: int

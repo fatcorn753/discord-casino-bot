@@ -5,7 +5,11 @@ domain/types.py は catalogs を読むため、ポート（domain/ports）から
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional, TypedDict
+from typing import Generic, Optional, TypedDict, TypeVar
+
+from .teiai import CdsRow
+
+RowT = TypeVar("RowT")
 
 
 @dataclass(frozen=True)
@@ -100,11 +104,11 @@ class LoanCredit(TypedDict):
     bankrupt_at: Optional[float]
 
 
-class LoanBook(TypedDict):
+class LoanBook(TypedDict, Generic[RowT]):
     """自分が借りている／貸している、終了前の貸付（loans 表の行）。"""
 
-    borrowed: list[dict[str, Any]]
-    lent: list[dict[str, Any]]
+    borrowed: list[RowT]
+    lent: list[RowT]
 
 
 class CdsQuote(TypedDict):
@@ -115,7 +119,7 @@ class CdsQuote(TypedDict):
 
 
 class CdsHoldings(TypedDict):
-    bought: list[dict[str, Any]]  # 自分が買っている有効な CDS（cds 表の行）
+    bought: list[CdsRow]  # 自分が買っている有効な CDS（cds 表の行）
     on_me: int  # 自分に掛けられている件数
 
 
@@ -128,8 +132,8 @@ class MarginStatus(TypedDict):
     ratio: Optional[float]
 
 
-class HoldingBook(TypedDict):
+class HoldingBook(TypedDict, Generic[RowT]):
     """債券・オプションの一覧（表の行）。保有中（期限が近い順）と、直近に決着したもの（新しい順）。"""
 
-    active: list[dict[str, Any]]
-    done: list[dict[str, Any]]
+    active: list[RowT]
+    done: list[RowT]

@@ -17,7 +17,22 @@ from domain.ports.bridges import (
     IStatusReader,
     IValuationSource,
 )
-from domain.ports.contracts import BankStatus, CdsHoldings, CdsQuote, HouseAccount, LoanBook, LoanCredit
+from domain.ports.contracts import (
+    BankStatus,
+    CdsHoldings,
+    CdsQuote,
+    HouseAccount,
+    KyosaiAuctionEventRow,
+    KyosaiAuctionRow,
+    KyosaiMotionProposeRow,
+    KyosaiMotionViewRow,
+    KyosaiOfferDoneRow,
+    KyosaiOfferRow,
+    LoanBook,
+    LoanCollectRow,
+    LoanCredit,
+    LoanRow,
+)
 from domain.ports.repos.base import IGuildScopedRepo
 
 
@@ -48,7 +63,7 @@ class ILoanRepo(IGuildScopedRepo, IOverdueLoanCollector):
     def loan_set_message(self, loan_id: int, message_id: int) -> None:
         raise NotImplementedError
 
-    def loan_get(self, loan_id: int) -> Optional[dict[str, Any]]:
+    def loan_get(self, loan_id: int) -> Optional[LoanRow]:
         raise NotImplementedError
 
     def loan_accept(self, loan_id: int, user_id: int, now: float) -> Outcome[str]:
@@ -63,16 +78,16 @@ class ILoanRepo(IGuildScopedRepo, IOverdueLoanCollector):
     def loan_repay(self, loan_id: int, user_id: int, amount: Optional[int], now: float) -> Outcome[int]:
         raise NotImplementedError
 
-    def loan_collect_due(self, now: float) -> list[Any]:
+    def loan_collect_due(self, now: float) -> list[LoanCollectRow]:
         raise NotImplementedError
 
-    def loan_due_soon(self, now: float) -> list[Any]:
+    def loan_due_soon(self, now: float) -> list[LoanRow]:
         raise NotImplementedError
 
-    def loan_expire_offers(self, now: float) -> list[Any]:
+    def loan_expire_offers(self, now: float) -> list[LoanRow]:
         raise NotImplementedError
 
-    def loan_list(self, user_id: int) -> LoanBook:
+    def loan_list(self, user_id: int) -> LoanBook[LoanRow]:
         raise NotImplementedError
 
 
@@ -171,37 +186,37 @@ class IKyosaiRepo(IGuildScopedRepo):
     def kyosai_daily(self, now: float) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def kyosai_auction_tick(self, now: float) -> list[dict[str, Any]]:
+    def kyosai_auction_tick(self, now: float) -> list[KyosaiAuctionEventRow]:
         raise NotImplementedError
 
-    def kyosai_bid(self, user_id: int, amount: int, now: float) -> Outcome[dict[str, Any]]:
+    def kyosai_bid(self, user_id: int, amount: int, now: float) -> Outcome[KyosaiAuctionRow]:
         raise NotImplementedError
 
     def kyosai_offer(self, seller: int, buyer: int, units: int, price: int, now: float) -> Outcome[int]:
         raise NotImplementedError
 
-    def kyosai_accept(self, buyer: int, offer_id: int, now: float) -> Outcome[dict[str, Any]]:
+    def kyosai_accept(self, buyer: int, offer_id: int, now: float) -> Outcome[KyosaiOfferDoneRow]:
         raise NotImplementedError
 
     def kyosai_cancel(self, user_id: int, offer_id: int) -> bool:
         raise NotImplementedError
 
-    def kyosai_offers_of(self, user_id: int, now: float) -> list[dict[str, Any]]:
+    def kyosai_offers_of(self, user_id: int, now: float) -> list[KyosaiOfferRow]:
         raise NotImplementedError
 
-    def kyosai_propose(self, user_id: int, premium: float, now: float) -> Outcome[dict[str, Any]]:
+    def kyosai_propose(self, user_id: int, premium: float, now: float) -> Outcome[KyosaiMotionProposeRow]:
         raise NotImplementedError
 
     def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: Optional[int] = None) -> Outcome[int]:
         raise NotImplementedError
 
-    def kyosai_close_motions(self, now: float) -> list[dict[str, Any]]:
+    def kyosai_close_motions(self, now: float) -> list[KyosaiMotionViewRow]:
         raise NotImplementedError
 
     def kyosai_set_motion_message(self, motion_id: int, channel_id: int, message_id: int) -> None:
         raise NotImplementedError
 
-    def kyosai_motion(self, motion_id: int, now: float) -> Optional[dict[str, Any]]:
+    def kyosai_motion(self, motion_id: int, now: float) -> Optional[KyosaiMotionViewRow]:
         raise NotImplementedError
 
     def kyosai_status(self, user_id: int, now: float) -> dict[str, Any]:

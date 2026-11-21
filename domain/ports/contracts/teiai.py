@@ -82,3 +82,37 @@ class CdsRow(TypedDict):
     expires: float
     status: str  # active / paid / expired / void
     paid: int
+
+
+class KyosaiAuctionEventRow(KyosaiAuctionRow):
+    """競りで起きたこと（kyosai_auction_tick の返り値の要素）。"""
+
+    event: str  # sold / unsold / listed
+
+
+class KyosaiOfferDoneRow(KyosaiOfferRow):
+    """譲渡の申し出を受けた結果（kyosai_accept の成功ペイロード）。"""
+
+    fee: int
+
+
+class KyosaiMotionProposeRow(TypedDict):
+    """動議を出した結果（kyosai_propose の成功ペイロード）。"""
+
+    id: int
+    proposer: int
+    premium: float
+    closes: float
+
+
+class KyosaiMotionViewRow(KyosaiMotionRow):
+    """動議1件と流通口数（締め結果・ボタン書き換え用。kyosai_close_motions / kyosai_motion の返り値）。"""
+
+    circulating: int
+
+
+class LoanCollectRow(LoanRow):
+    """期日の自動回収の結果（loan_collect_due の返り値の要素）。"""
+
+    collected: int
+    left: int
