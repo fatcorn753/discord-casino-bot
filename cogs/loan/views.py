@@ -1,6 +1,7 @@
 """/貸付 のボタン View とボタン押下ハンドラ。"""
 
 import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 import discord
@@ -58,7 +59,7 @@ def request_view(loan_id: int) -> discord.ui.View:
     return view
 
 
-def _accepted_embed(loan: dict[str, Any]) -> discord.Embed:
+def _accepted_embed(loan: Mapping[str, Any]) -> discord.Embed:
     return state_embed(
         loan,
         "成立",

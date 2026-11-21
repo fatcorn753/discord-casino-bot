@@ -3,7 +3,8 @@
 数字と考え方は domain/teiai.py、処理は services/teiai.py（保存は infra/db/bank.py）。ここは画面の部品だけ（読み込まれる Cog ではない）。
 """
 
-from typing import Optional
+from collections.abc import Mapping
+from typing import Any, Optional
 
 import discord
 
@@ -106,7 +107,7 @@ def render_teiai_panel_embed(
         )
     if cds["bought"]:
 
-        def who(c: dict) -> str:
+        def who(c: Mapping[str, Any]) -> str:
             return "自分" if c["target_id"] == uid else f"<@{c['target_id']}>"
 
         me.append(

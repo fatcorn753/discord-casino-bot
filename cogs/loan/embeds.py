@@ -1,5 +1,6 @@
 """/貸付 の Embed 生成と整形ヘルパー。"""
 
+from collections.abc import Mapping
 from typing import Any
 
 import discord
@@ -13,7 +14,7 @@ def who(user_id: int) -> str:
     return f"<@{user_id}>"
 
 
-def terms_lines(loan: dict[str, Any]) -> list[str]:
+def terms_lines(loan: Mapping[str, Any]) -> list[str]:
     p, r, t = loan["principal"], loan["rate_tenths"], loan["term_days"]
     lender = who(loan["lender_id"]) if loan["lender_id"] else "（募集中）"
     return [
@@ -41,7 +42,7 @@ def borrower_note(credit: LoanCredit) -> str:
     return "\n".join(lines)
 
 
-def request_embed(loan: dict[str, Any], note: str = "") -> discord.Embed:
+def request_embed(loan: Mapping[str, Any], note: str = "") -> discord.Embed:
     lines = (
         terms_lines(loan)
         + ([note] if note else [])
@@ -53,7 +54,7 @@ def request_embed(loan: dict[str, Any], note: str = "") -> discord.Embed:
     return ui.embed(f"🙋 貸付の募集 #{loan['id']}", "\n".join(lines), ui.GOLD)
 
 
-def offer_embed(loan: dict[str, Any], note: str = "") -> discord.Embed:
+def offer_embed(loan: Mapping[str, Any], note: str = "") -> discord.Embed:
     lines = (
         terms_lines(loan)
         + ([note] if note else [])
@@ -65,5 +66,5 @@ def offer_embed(loan: dict[str, Any], note: str = "") -> discord.Embed:
     return ui.embed(f"🤝 貸付の提案 #{loan['id']}", "\n".join(lines), ui.GOLD)
 
 
-def state_embed(loan: dict[str, Any], title: str, note: str, color: int = ui.INFO) -> discord.Embed:
+def state_embed(loan: Mapping[str, Any], title: str, note: str, color: int = ui.INFO) -> discord.Embed:
     return ui.embed(f"🤝 貸付 #{loan['id']} {title}", "\n".join(terms_lines(loan) + ([note] if note else [])), color)
