@@ -107,7 +107,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
         """{出資者: 出資額}。"""
         return {
             r["investor_id"]: r["amount"]
-            for r in self._conn.execute(
+            for r in self._all(
                 "SELECT investor_id, amount FROM company_stakes WHERE guild_id=? AND owner_id=?", (guild_id, owner_id)
             )
         }
@@ -341,10 +341,10 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
         """自分の出資先。[{owner_id, name, kind, amount, dividends, share, dividend_rate}]（share は持分の割合）。"""
         with self._db.tx():
             gid = self._g()
-            rows = self._conn.execute(
+            rows = self._all(
                 "SELECT owner_id, amount, dividends FROM company_stakes WHERE guild_id=? AND investor_id=?",
                 (gid, investor_id),
-            ).fetchall()
+            )
             out = []
             for r in rows:
                 c = self._current(gid, r["owner_id"], now)
@@ -383,7 +383,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
         bankrupt = []
         with self._db.tx():
             gid = self._g()
-            rows = self._conn.execute("SELECT * FROM companies WHERE guild_id=?", (gid,)).fetchall()
+            rows = self._all("SELECT * FROM companies WHERE guild_id=?", (gid,))
             for row in rows:
                 c = dict(row)
                 if not self._settle(c, now):
@@ -395,7 +395,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
     # ------------------------------------------------------------------ #
     def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
         """純資産に数える額: 会社資金と、事業所（建設費の累計）。出資を受けていれば、社長と出資者で分ける。"""
-        for r in self._conn.execute("SELECT user_id, funds, level FROM companies WHERE guild_id=?", (guild_id,)):
+        for r in self._all("SELECT user_id, funds, level FROM companies WHERE guild_id=?", (guild_id,)):
             owner_value, investors = company_mod.stake_values(
                 r["funds"] + company_mod.invested(r["level"]), self._stakes(guild_id, r["user_id"])
             )
