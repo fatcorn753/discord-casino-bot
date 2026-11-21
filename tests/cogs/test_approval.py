@@ -369,6 +369,7 @@ def test_owner_commands_are_dm_only_and_not_in_other_groups():
         "クイズ",
         "イベント",
         "還元率",
+        "機能",
         "パチンコ統計",
         "クリック履歴",
     }

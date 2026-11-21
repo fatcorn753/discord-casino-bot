@@ -122,6 +122,9 @@ async def handle_button(
 ) -> None:
     if not await approval_guard.allow_component(interaction, guild_repo, config):
         return
+    # 新しい貸し借りになる操作だけを止める（断る・取り消すは、止めていてもできる）
+    if act in ("lend", "accept") and not await approval_guard.feature_guard(interaction, guild_repo, "loan"):
+        return
     guild_id = ui.guild_id_of(interaction)
     if act == "lend":
         return await handle_lend(loan_svc, interaction, loan_id)

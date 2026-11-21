@@ -41,7 +41,7 @@ async def record_answer(
     if quiz is None:
         await interaction.response.send_message(embed=ui.error_embed("この問題は終了しました"), ephemeral=True)
         return
-    if not await approval_guard.allow_component(interaction, guild_repo, config):
+    if not await approval_guard.allow_component(interaction, guild_repo, config, feature="quiz"):
         return
     guild_id = ui.guild_id_of(interaction)
     ok, result = quiz_svc.answer(guild_id, interaction.user.id, quiz_id, quiz["order"][pos])

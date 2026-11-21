@@ -514,3 +514,14 @@ def test_retire_view_charges_or_pays_and_updates_the_stable(setup):
 
 def desk(eco, guild_id=0):
     return make_test_bot(repos=eco).services.horse.desk(guild_id)
+
+
+def test_no_new_race_is_scheduled_while_horse_racing_is_off(setup, monkeypatch):
+    eco, chan, guild, bot, cog = setup
+    bot.repos.guild.set_feature(guild.id, "horse", False)
+    freeze_time(monkeypatch, bot.services.clock, 1_700_000_000.0)
+    asyncio.run(cog.run_once())
+    assert eco.races.race_open() == [] and not chan.sent
+    bot.repos.guild.set_feature(guild.id, "horse", True)
+    asyncio.run(cog.run_once())
+    assert len(eco.races.race_open()) == 1

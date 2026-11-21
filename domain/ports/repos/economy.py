@@ -126,8 +126,18 @@ class IProfileDisplayReader(IGuildScopedRepo):
         raise NotImplementedError
 
 
-class IGuildRepo(IGuildApprovalRepo, ILeaderboardConfigRepo, INickPrefRepo, IProfileDisplayReader):
-    """サーバー単位の設定（承認・掲示板・ニックネーム・表示）をまとめた契約。利用側は必要な部分契約だけに依存する。"""
+class IFeatureSwitchRepo(IGuildScopedRepo):
+    """機能のオン・オフ（サーバーごと。止めた機能のキーを持つ）。"""
+
+    def features_off(self, guild_id: int) -> set[str]:
+        raise NotImplementedError
+
+    def set_feature(self, guild_id: int, feature: str, on: bool) -> None:
+        raise NotImplementedError
+
+
+class IGuildRepo(IGuildApprovalRepo, ILeaderboardConfigRepo, INickPrefRepo, IProfileDisplayReader, IFeatureSwitchRepo):
+    """サーバー単位の設定（承認・掲示板・ニックネーム・表示・機能のオン・オフ）をまとめた契約。利用側は必要な部分契約だけに依存する。"""
 
 
 class IWalletBalanceRepo(IGuildScopedRepo):

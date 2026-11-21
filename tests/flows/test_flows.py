@@ -472,6 +472,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
         "クイズ",
         "イベント",
         "還元率",
+        "機能",
         "パチンコ統計",
         "クリック履歴",
     }

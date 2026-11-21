@@ -18,7 +18,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from cogs.shared import logthrottle, ui
+from cogs.shared import approval_guard, logthrottle, ui
 from cogs.shared.announce import announce_channel
 from cogs.shared.bridges import BotBridges, IKyosaiVoteBridge, NoOpKyosaiVoteBridge
 from cogs.shared.messages import format_failure
@@ -293,7 +293,10 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
 
     # ------------------------------ ボタン ------------------------------ #
     async def handle_vote(self, interaction: discord.Interaction, yes: bool, motion_id: int) -> None:
+        if not await approval_guard.feature_guard(interaction, self._guild_repo, "kyosai"):
+            return
         gid = ui.guild_id_of(interaction)
+
         ok, result = self._kyosai.vote(gid, interaction.user.id, yes, motion_id)
         if not ok:
             closed = self._kyosai.motion(gid, motion_id)

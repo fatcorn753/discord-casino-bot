@@ -293,7 +293,13 @@ def create_tables(conn: sqlite3.Connection) -> None:
             updated_at  REAL NOT NULL,
             notified_at REAL
         );
+        CREATE TABLE IF NOT EXISTS features_off (       -- 管理者が止めた機能（行があるあいだ止まる。domain/features.py）
+            guild_id INTEGER NOT NULL,
+            feature  TEXT    NOT NULL,
+            PRIMARY KEY (guild_id, feature)
+        );
         CREATE TABLE IF NOT EXISTS leaderboards (
+
             guild_id   INTEGER PRIMARY KEY,
             channel_id INTEGER NOT NULL,
             message_id INTEGER NOT NULL

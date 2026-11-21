@@ -5,7 +5,7 @@ from typing import Any, Optional
 import discord
 
 from cogs.arena.embeds import tournament_embed
-from cogs.shared import ui
+from cogs.shared import approval_guard, ui
 from cogs.shared.amount import reject_bad_amount, typed_amount
 from cogs.shared.messages import format_failure
 from domain import arena as arena_mod
@@ -29,6 +29,8 @@ class StakeModal(discord.ui.Modal):
         self.add_item(self.stake)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not await approval_guard.client_feature_guard(interaction, "arena"):
+            return
         stake = typed_amount(self.stake.value)
         if stake is None:
             await reject_bad_amount(interaction)
@@ -62,7 +64,10 @@ class FighterSelect(discord.ui.Select["BetPanel"]):
         self.panel = panel
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if not await approval_guard.client_feature_guard(interaction, "arena"):
+            return
         self.panel.message = interaction.message  # 賭け後に書き換えるメッセージを覚えておく
+
         fid = int(ui.selected_values(interaction)[0])
         fighter = next(f for f in self.panel.tournament["fighters"] if f["id"] == fid)
         await interaction.response.send_modal(StakeModal(self.panel, fighter))

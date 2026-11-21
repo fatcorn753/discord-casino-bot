@@ -1,4 +1,4 @@
-"""サーバー承認・持ち主 DM コマンドの Discord 入口ガード（cogs 共通基盤）。"""
+"""サーバー承認・持ち主 DM コマンド・機能のオン・オフの Discord 入口ガード（cogs 共通基盤）。"""
 
 from typing import TYPE_CHECKING, Any, Optional, cast
 
@@ -6,7 +6,7 @@ import discord
 
 from cogs.shared import ui
 from cogs.shared.bridges import IApprovalBridge, NoOpApprovalBridge
-from domain import approval
+from domain import approval, features
 from domain.approval import DENIED, DM_GROUP, is_allowed, owner_ids, requires_approval
 from domain.ports.repos import IGuildRepo
 
@@ -60,14 +60,52 @@ async def allow_component(
     *,
     title: str = "利用できません",
     text: Optional[str] = None,
+    feature: Optional[str] = None,
 ) -> bool:
     """ボタン・Select の操作の入口の検査（スラッシュコマンドの guard とは別に、押された時点の許可を見る）。
 
     許可されていないサーバー（や DM）なら、本人だけに断りを返して False を返す。
+    feature を渡すと、その機能が止められているときも断る（新しく始める操作のボタンだけに渡す）。
     """
     guild_id = interaction.guild_id
     if guild_id is not None and approval.is_allowed(guild_repo, config, guild_id, interaction.user.id):
-        return True
+        return feature is None or await feature_guard(interaction, guild_repo, feature)
     embed = ui.error_embed(title, text) if text is not None else ui.error_embed(title)
     await interaction.response.send_message(embed=embed, ephemeral=True)
     return False
+
+
+def feature_off(guild_repo: IGuildRepo, guild_id: Optional[int], feature: str) -> bool:
+    """その機能が、このサーバーで止められているか。"""
+    return guild_id is not None and feature in guild_repo.features_off(guild_id)
+
+
+async def feature_guard(interaction: discord.Interaction, guild_repo: IGuildRepo, feature: str) -> bool:
+    """機能が止められていれば、本人だけに断りを返して False を返す（止まっていなければ True）。"""
+    if not feature_off(guild_repo, interaction.guild_id, feature):
+        return True
+    embed = ui.error_embed(
+        "⏸️ 停止中",
+        f"**{features.label(feature)}** は、いま管理者が止めています。再開まで、お待ちください。\n"
+        "（止める前に始めたものは、いつもどおり精算されます）",
+    )
+    if interaction.response.is_done():
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    else:
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    return False
+
+
+async def client_feature_guard(interaction: discord.Interaction, feature: str) -> bool:
+    """feature_guard を、Bot のサーバー設定で行う（リポジトリを持っていないボタン・Modal 用）。"""
+    repos = getattr(getattr(interaction, "client", None), "repos", None)
+    if repos is None:  # Bot の外（テストの偽の interaction など）では、止めようがない
+        return True
+    return await feature_guard(interaction, cast("CasinoBot", interaction.client).repos.guild, feature)
+
+
+async def command_feature_guard(interaction: discord.Interaction) -> bool:
+    """スラッシュコマンドの入口で、そのコマンドの機能が止められていないかを見る。"""
+    cmd = interaction.command
+    key = features.feature_of_command(cmd.qualified_name) if cmd is not None else None
+    return key is None or await client_feature_guard(interaction, key)

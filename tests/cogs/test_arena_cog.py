@@ -245,3 +245,26 @@ def test_run_once_refreshes_the_auto_posted_panel_after_semis(setup, monkeypatch
     _at(monkeypatch, bot, jst(a.SEMI_HOUR + 1))
     asyncio.run(cog.run_once())
     assert refreshed == [True]
+
+
+# ----------------------------- 管理者が闘技場を止めたとき ----------------------------- #
+def test_run_once_does_not_create_a_tournament_while_the_arena_is_off(setup, monkeypatch):
+    repos, chan, guild, bot, cog = setup
+    bot.repos.guild.set_feature(guild.id, "arena", False)
+    _at(monkeypatch, bot, DAY_START)
+    asyncio.run(cog.run_once())
+    day = repos.arena.arena_today(DAY_START, TZ)
+    assert repos.arena.arena_tournament_get_by_day(day, "duel") is None and not chan.sent
+
+
+def test_a_tournament_created_before_stopping_still_runs_to_the_end(setup, monkeypatch):
+    repos, chan, guild, bot, cog = setup
+    _at(monkeypatch, bot, DAY_START)
+    asyncio.run(cog.run_once())
+    bot.repos.guild.set_feature(guild.id, "arena", False)  # 賭けを受けたあとで止めても、精算までは進める
+    _at(monkeypatch, bot, jst(a.SEMI_HOUR + 1))
+    asyncio.run(cog.run_once())
+    _at(monkeypatch, bot, jst(a.FINAL_HOUR + 1))
+    asyncio.run(cog.run_once())
+    day = repos.arena.arena_today(DAY_START, TZ)
+    assert repos.arena.arena_tournament_get_by_day(day, "duel")["status"] == "done"

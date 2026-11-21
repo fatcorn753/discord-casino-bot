@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.admin import approval_ops, content_ops, economy_ops
+from cogs.admin import approval_ops, content_ops, economy_ops, feature_ops
 from cogs.admin.embeds import LEVEL_NAME as LEVEL_NAME  # noqa: F401
 from cogs.admin.embeds import bulk_preview_lines as bulk_preview_lines  # noqa: F401
 from cogs.admin.embeds import pachinko_stats_embed as pachinko_stats_embed  # noqa: F401
@@ -30,7 +30,7 @@ from cogs.shared.bridges import (
     IRaffleAdminBridge,
 )
 from cogs.shared.tasks import allowed_guilds
-from domain import approval, events
+from domain import approval, events, features
 from domain.games import rtplevel
 from domain.ports.repos import IGuildRepo
 from services.admin import AdminService
@@ -130,6 +130,9 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     )
     rtp_group = app_commands.Group(
         name="還元率", description="[管理者] ゲームごとの還元率のレベル（1〜6。3が標準）を変える", parent=group
+    )
+    feature_group = app_commands.Group(
+        name="機能", description="[管理者] 賭け事や仕組みを、サーバーごとに止める・再開する", parent=group
     )
 
     async def _owner_only(self, interaction: discord.Interaction) -> bool:
@@ -278,6 +281,41 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
             await economy_ops.rtp_list(self, interaction, guild_id)
 
     rtp_list.autocomplete("guild_id")(guild_autocomplete)
+
+    _FEATURE_CHOICES = [app_commands.Choice(name="すべて", value="*")] + [
+        app_commands.Choice(name=name, value=key) for key, name in features.FEATURES.items()
+    ]
+
+    @feature_group.command(
+        name="停止", description="[管理者] 機能を止める（新しく始めることだけ。途中のものは精算する）"
+    )
+    @app_commands.rename(guild_id="サーバー", feature="機能")
+    @app_commands.describe(guild_id="止めるサーバー（候補から選ぶ）", feature="止める機能")
+    @app_commands.choices(feature=_FEATURE_CHOICES)
+    async def feature_off(self, interaction: discord.Interaction, guild_id: str, feature: app_commands.Choice[str]):
+        if await self._owner_only(interaction):
+            await feature_ops.feature_set(self, interaction, guild_id, feature.value, on=False)
+
+    feature_off.autocomplete("guild_id")(guild_autocomplete)
+
+    @feature_group.command(name="再開", description="[管理者] 止めた機能を再開する")
+    @app_commands.rename(guild_id="サーバー", feature="機能")
+    @app_commands.describe(guild_id="再開するサーバー（候補から選ぶ）", feature="再開する機能")
+    @app_commands.choices(feature=_FEATURE_CHOICES)
+    async def feature_on(self, interaction: discord.Interaction, guild_id: str, feature: app_commands.Choice[str]):
+        if await self._owner_only(interaction):
+            await feature_ops.feature_set(self, interaction, guild_id, feature.value, on=True)
+
+    feature_on.autocomplete("guild_id")(guild_autocomplete)
+
+    @feature_group.command(name="一覧", description="[管理者] 機能ごとの稼働・停止を見る")
+    @app_commands.rename(guild_id="サーバー")
+    @app_commands.describe(guild_id="見るサーバー（候補から選ぶ。空なら全サーバー）")
+    async def feature_list(self, interaction: discord.Interaction, guild_id: Optional[str] = None):
+        if await self._owner_only(interaction):
+            await feature_ops.feature_list(self, interaction, guild_id)
+
+    feature_list.autocomplete("guild_id")(guild_autocomplete)
 
     @group.command(name="パチンコ統計", description="[管理者] パチンコの当たり率を、設計した数字と実際の記録で比べる")
     @app_commands.rename(guild_id="サーバー", days="日数")

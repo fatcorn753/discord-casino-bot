@@ -17,7 +17,7 @@ from discord.ext import commands, tasks
 
 from cogs.arena.embeds import FORMAT_NAME, STAGE_LABEL, battle_embed, final_result_embed, semis_result_embed
 from cogs.arena.views import BetPanel
-from cogs.shared import logthrottle, ui
+from cogs.shared import approval_guard, logthrottle, ui
 from cogs.shared.announce import announce_channel
 from cogs.shared.bridges import BotBridges, IArenaAdminBridge
 from cogs.shared.tasks import run_for_allowed_guilds
@@ -193,8 +193,16 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
         return "　".join(results)
 
     async def _process(self, guild: discord.Guild, now: float, fmt: str, tz_hour: int) -> None:
-        """1形式ぶんの、告知・準決勝・決勝の定時進行。"""
+        """1形式ぶんの、告知・準決勝・決勝の定時進行。
+
+        止めているあいだは、新しい大会を作らない（作ってあった大会は、最後まで進めて精算する）。
+        """
+        if approval_guard.feature_off(self._guild_repo, guild.id, "arena"):
+            current = self._arena.current_tournament(guild.id, fmt, now)
+            if current is None:
+                return
         t = self._arena.ensure_tournament(guild.id, fmt, now)
+
         day_key = (guild.id, t["day"], fmt)
         if t["created"] == now:  # このBotプロセスで初めてではなく、大会そのものが今できたときだけ告知する
             channel = await self._channel(guild)

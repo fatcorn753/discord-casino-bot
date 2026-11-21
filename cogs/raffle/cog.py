@@ -144,10 +144,11 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
 
     # ------------------------------ 参加ボタン ------------------------------ #
     async def on_join(self, interaction: discord.Interaction) -> None:
-        if not await approval_guard.allow_component(interaction, self._guild_repo, self._config):
+        if not await approval_guard.allow_component(interaction, self._guild_repo, self._config, feature="raffle"):
             return
         gid = ui.guild_id_of(interaction)
         raffle = self._raffle.current(gid)
+
         if raffle is None or interaction.message is None or raffle["message_id"] != interaction.message.id:
             await interaction.response.send_message(embed=ui.error_embed("募集は終わりました"), ephemeral=True)
             return

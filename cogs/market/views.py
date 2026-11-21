@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Optional
 import discord
 
 from cogs.market import orders
-from cogs.shared import ui
+from cogs.shared import approval_guard, ui
 from cogs.shared.amount import typed_amount
 from domain import market, market_events
 from domain import options as opt
@@ -165,6 +165,8 @@ class OptionAmountModal(discord.ui.Modal):
         self.add_item(self.amount)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not await approval_guard.client_feature_guard(interaction, "market"):
+            return
         premium = typed_amount(self.amount.value)
         if premium is None or premium < opt.MIN_PREMIUM:
             await interaction.response.send_message(
@@ -218,6 +220,8 @@ class MarketView(ui.OwnerView):
 
     def _quick_buy(self, kind: str, symbol: str):
         async def callback(interaction: discord.Interaction):
+            if not await approval_guard.client_feature_guard(interaction, "market"):
+                return
             await interaction.response.send_modal(OptionAmountModal(self.cog, kind, symbol))
 
         return callback

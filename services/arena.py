@@ -25,6 +25,12 @@ class ArenaService:
         ts = self.clock.now_ts() if now is None else now
         return self._arena.for_guild(guild_id).arena_tournament_ensure(fmt, ts, self.clock.offset_hours())
 
+    def current_tournament(self, guild_id: int, fmt: str, now: Optional[float] = None) -> Optional[dict[str, Any]]:
+        """今日の大会（無ければ作らずに None）。闘技場を止めているあいだの見回り用。"""
+        ts = self.clock.now_ts() if now is None else now
+        repo = self._arena.for_guild(guild_id)
+        return repo.arena_tournament_get_by_day(repo.arena_today(ts, self.clock.offset_hours()), fmt)
+
     def place_bet(
         self, guild_id: int, user_id: int, fighter_id: int, stake: int, now: Optional[float] = None
     ) -> tuple[Any, ...]:

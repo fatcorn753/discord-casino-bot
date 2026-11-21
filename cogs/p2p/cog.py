@@ -30,7 +30,7 @@ from cogs.p2p.views import (  # noqa: F401
     SellView,
     listing_view,
 )
-from cogs.shared import logthrottle, ui
+from cogs.shared import approval_guard, logthrottle, ui
 from cogs.shared.announce import announce_channel
 from cogs.shared.bridges import BotBridges, IP2PListingBridge, IP2PNavigationBridge
 from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
@@ -179,6 +179,8 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
             await self.refresh_post(getattr(interaction, "guild", None), listing_id)
 
     async def do_buy(self, interaction: discord.Interaction, listing_id: int) -> None:
+        if not await approval_guard.client_feature_guard(interaction, "p2p"):
+            return
         row = self.p2p.get(ui.guild_id_of(interaction), listing_id)
         price = row["price"] if row else 0
         await self._trade_listing(
@@ -197,6 +199,8 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
         )
 
     async def do_bid(self, interaction: discord.Interaction, listing_id: int, amount: int) -> None:
+        if not await approval_guard.client_feature_guard(interaction, "p2p"):
+            return
         await self._trade_listing(
             interaction,
             listing_id,
@@ -230,6 +234,9 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
 
     async def open_sell(self, interaction: discord.Interaction) -> None:
         """出品の画面（品・馬を選んで、定価か競りで出す）。"""
+        if not await approval_guard.client_feature_guard(interaction, "p2p"):
+            return
+
         view = SellView(self, interaction.user.id, ui.guild_id_of(interaction))
         if not view.options:
             await interaction.response.send_message(

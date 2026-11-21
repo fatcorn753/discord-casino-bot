@@ -17,7 +17,7 @@ from discord.ext import commands, tasks
 from cogs.horse.betting import BetPanel
 from cogs.horse.cards import RaceButton, card_embed, card_view, race_title
 from cogs.horse.stable import Stable
-from cogs.shared import logthrottle, ui
+from cogs.shared import approval_guard, logthrottle, ui
 from cogs.shared.announce import announce_channel
 from cogs.shared.bridges import BotBridges, IHorseAdminBridge, IHorseButtonBridge
 from cogs.shared.tasks import run_for_allowed_guilds
@@ -198,6 +198,8 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
         if action == "card":
             await interaction.response.send_message(embed=card_embed(desk, race), ephemeral=True)
             return
+        if not await approval_guard.feature_guard(interaction, self._guild_repo, "horse"):
+            return
         if race["status"] != "betting" or desk.clock.now_ts() >= race["bet_close"]:
             await interaction.response.send_message(
                 embed=ui.error_embed("買えません", "このレースの馬券は、まだ（またはもう）買えません。"), ephemeral=True
@@ -375,7 +377,10 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
         async def _handle(guild: discord.Guild) -> None:
             desk = self._horse_svc.desk(guild.id)
             channel = announce_channel(guild, self._guild_repo)
-            race_id = self._horse_svc.ensure_scheduled(guild.id, now, channel.id if channel else 0)
+            # 止めているあいだは、新しいレースを組まない（組んだレースは、最後まで走らせて精算する）
+            off = approval_guard.feature_off(self._guild_repo, guild.id, "horse")
+            race_id = None if off else self._horse_svc.ensure_scheduled(guild.id, now, channel.id if channel else 0)
+
             if race_id:
                 await self._announce_entry(guild, desk, race_id)
             for race in desk.race_open():

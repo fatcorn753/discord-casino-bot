@@ -74,6 +74,25 @@ class GuildRepo(ScopedRepo, IGuildRepo):
         with self._db.tx():
             self._conn.execute("DELETE FROM leaderboards WHERE guild_id=?", (guild_id,))
 
+    # ------------------------------------------------------------------ #
+    # 機能のオン・オフ                                                    #
+    # ------------------------------------------------------------------ #
+    def features_off(self, guild_id: int) -> set[str]:
+        with self._lock:
+            return {
+                r["feature"]
+                for r in self._conn.execute("SELECT feature FROM features_off WHERE guild_id=?", (guild_id,))
+            }
+
+    def set_feature(self, guild_id: int, feature: str, on: bool) -> None:
+        with self._db.tx():
+            if on:
+                self._conn.execute("DELETE FROM features_off WHERE guild_id=? AND feature=?", (guild_id, feature))
+            else:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO features_off (guild_id, feature) VALUES (?, ?)", (guild_id, feature)
+                )
+
     def set_nick_pref(self, guild_id: int, user_id: int, enabled: bool) -> None:
         """称号をそのサーバーでのニックネームに付けるか（付けると選んだ人だけ）。"""
         with self._db.tx():

@@ -14,7 +14,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs.poll.views import PollButton, RigModal, poll_embed, poll_view, verdict
-from cogs.shared import logthrottle, ui
+from cogs.shared import approval_guard, logthrottle, ui
 from cogs.shared.bridges import BotBridges, IPollButtonBridge
 from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
@@ -88,7 +88,10 @@ class PollCog(commands.Cog, IPollButtonBridge):
 
     # ------------------------------ ボタン ------------------------------ #
     async def handle_button(self, interaction: discord.Interaction, act: str, poll_id: int) -> None:
+        if not await approval_guard.feature_guard(interaction, self._guild_repo, "poll"):
+            return
         gid = ui.guild_id_of(interaction)
+
         if act == "rig":
             p = self._poll.get(gid, poll_id)
             if p is None or p["status"] != "open":

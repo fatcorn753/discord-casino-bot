@@ -9,7 +9,7 @@ import discord
 from cogs.casino.texts import JACKPOT_ART, big_win_line, streak_line
 from cogs.shared import approval_guard, ui
 from cogs.shared.messages import format_notices
-from domain import missions, teiai
+from domain import features, missions, teiai
 from domain.games.rtplevel import MIN_BET as MIN_BET  # noqa: F401
 from domain.ports.repos import IGuildRepo
 from services.casino import CasinoService
@@ -126,9 +126,14 @@ async def start_game(
     factor_reason: str = "",
 ) -> GameContext | None:
     """賭け金を検証して預かる。成功すれば GameContext、失敗すれば理由を返信して None。"""
+    key = features.CASINO_GAMES.get(game)
+    if key is not None and not await approval_guard.feature_guard(interaction, deps.guild_repo, key):
+        return None  # 管理者が止めたゲーム（「もう一度」のボタンからも始めさせない）
+
     uid = interaction.user.id
     guild_id = ui.guild_id_of(interaction)
     res = deps.casino.begin_game(guild_id, uid, bet, game, balance_factor=balance_factor)
+
     if not res.ok:
         if res.reason_kind == "session":
             await interaction.response.send_message(

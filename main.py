@@ -73,7 +73,7 @@ class BotTree(app_commands.CommandTree):
             return False
         if not await approval_guard.guard(interaction):  # 許可リスト・持ち主の承認
             return False
-        return True
+        return await approval_guard.command_feature_guard(interaction)  # 管理者が止めた機能
 
     async def on_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         cause = getattr(error, "original", error)
