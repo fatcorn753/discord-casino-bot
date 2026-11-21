@@ -1,23 +1,32 @@
-"""Composition Root で循環依存を 1 パスの Constructor DI へ解決するための遅延デリゲート群。"""
+"""Composition Root で循環依存を 1 パスの Constructor DI へ解決するための遅延デリゲート群。
+
+住み分け:
+- 複数メソッド・不変条件を持つ名目的ブリッジ契約（IDebtLifecycleHook / IStatusReader /
+  IMarginCollateralGuard / IOverdueLoanCollector）は `LazyBridgeBase` を多重継承した `Lazy*` クラスのまま維持し、
+  各メソッドは明示的に定義して _resolve() 経由で実装へ委譲する（__getattr__ にはしない。
+  Pyright のオーバーライド検証と IDE 補完を落とさないため）。
+- 単一メソッドの純粋コールバック契約（Callable 型エイリアス）は `lazy_*` ファクトリ関数で済む。
+  解決した束縛メソッドを呼ぶだけのクロージャを返す（例: `lazy_excess_sink(lambda: kyosai.charge_excess_for)`）。
+"""
 
 from collections.abc import Callable, Mapping
 from typing import Any, Generic, Optional, TypeVar
 
-from domain.errors import Failure, Outcome
+from domain.errors import Failure
 from domain.ports.bridges import (
-    IAssetSeizureStep,
-    IBankruptExecutor,
-    IBankruptPrepHook,
+    AssetSeizureStep,
+    BankruptExecutor,
+    BankruptPrepHook,
+    ExcessLossSink,
+    GraceEnterHook,
     IDebtLifecycleHook,
-    IExcessLossSink,
-    IGraceEnterHook,
-    ILiquidationStep,
     IMarginCollateralGuard,
-    IMarginRatioReader,
     IOverdueLoanCollector,
-    ISeizureValueStep,
     IStatusReader,
-    IWealthyReader,
+    LiquidationStep,
+    MarginRatioReader,
+    SeizureValueStep,
+    WealthyReader,
 )
 from domain.ports.contracts import LoanRow
 
@@ -61,23 +70,6 @@ class LazyStatusReader(LazyBridgeBase[IStatusReader], IStatusReader):
         return self._resolve().loan_blacklisted_for(guild_id, user_id, now)
 
 
-class LazyBankruptExecutor(LazyBridgeBase[IBankruptExecutor], IBankruptExecutor):
-    def bankrupt_for(
-        self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
-    ) -> Outcome[dict[str, Any]]:
-        return self._resolve().bankrupt_for(guild_id, user_id, forced=forced, escape=escape)
-
-
-class LazyMarginRatioReader(LazyBridgeBase[IMarginRatioReader], IMarginRatioReader):
-    def margin_ratio_for(self, guild_id: int, user_id: int) -> Optional[float]:
-        return self._resolve().margin_ratio_for(guild_id, user_id)
-
-
-class LazyGraceEnterHook(LazyBridgeBase[IGraceEnterHook], IGraceEnterHook):
-    def on_grace_enter(self, guild_id: int, user_id: int, now: float) -> None:
-        self._resolve().on_grace_enter(guild_id, user_id, now)
-
-
 class LazyMarginCollateralGuard(LazyBridgeBase[IMarginCollateralGuard], IMarginCollateralGuard):
     def check_spot_sell(
         self, guild_id: int, user_id: int, symbol: str, units: Optional[int], have: int, price: float
@@ -108,33 +100,38 @@ class LazyOverdueLoanCollector(LazyBridgeBase[IOverdueLoanCollector], IOverdueLo
         self._resolve().finalize_bankrupt_loan_for(loan_id, repaid)
 
 
-class LazyAssetSeizureStep(LazyBridgeBase[IAssetSeizureStep], IAssetSeizureStep):
-    def seize(self, guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
-        return self._resolve().seize(guild_id, user_id, need, reason, now)
+def lazy_bankrupt_executor(resolve: Callable[[], BankruptExecutor]) -> BankruptExecutor:
+    return lambda guild_id, user_id, forced, escape: resolve()(guild_id, user_id, forced, escape)
 
 
-class LazyLiquidationStep(LazyBridgeBase[ILiquidationStep], ILiquidationStep):
-    def liquidate(self, guild_id: int, user_id: int, now: float) -> None:
-        self._resolve().liquidate(guild_id, user_id, now)
+def lazy_margin_ratio_reader(resolve: Callable[[], MarginRatioReader]) -> MarginRatioReader:
+    return lambda guild_id, user_id: resolve()(guild_id, user_id)
 
 
-class LazySeizureValueStep(LazyBridgeBase[ISeizureValueStep], ISeizureValueStep):
-    def seize(self, guild_id: int, user_id: int, now: float) -> int:
-        return self._resolve().seize(guild_id, user_id, now)
+def lazy_grace_enter_hook(resolve: Callable[[], GraceEnterHook]) -> GraceEnterHook:
+    return lambda guild_id, user_id, now: resolve()(guild_id, user_id, now)
 
 
-class LazyBankruptPrepHook(LazyBridgeBase[IBankruptPrepHook], IBankruptPrepHook):
-    def prepare(self, guild_id: int, user_id: int, now: float) -> None:
-        self._resolve().prepare(guild_id, user_id, now)
+def lazy_asset_seizure_step(resolve: Callable[[], AssetSeizureStep]) -> AssetSeizureStep:
+    return lambda guild_id, user_id, need, reason, now: resolve()(guild_id, user_id, need, reason, now)
 
 
-class LazyWealthyReader(LazyBridgeBase[IWealthyReader], IWealthyReader):
-    def wealthy_ids_for(self, guild_id: int) -> set[int]:
-        return self._resolve().wealthy_ids_for(guild_id)
+def lazy_liquidation_step(resolve: Callable[[], LiquidationStep]) -> LiquidationStep:
+    return lambda guild_id, user_id, now: resolve()(guild_id, user_id, now)
 
 
-class LazyExcessLossSink(LazyBridgeBase[IExcessLossSink], IExcessLossSink):
+def lazy_seizure_value_step(resolve: Callable[[], SeizureValueStep]) -> SeizureValueStep:
+    return lambda guild_id, user_id, now: resolve()(guild_id, user_id, now)
+
+
+def lazy_bankrupt_prep_hook(resolve: Callable[[], BankruptPrepHook]) -> BankruptPrepHook:
+    return lambda guild_id, user_id, now: resolve()(guild_id, user_id, now)
+
+
+def lazy_wealthy_reader(resolve: Callable[[], WealthyReader]) -> WealthyReader:
+    return lambda guild_id: resolve()(guild_id)
+
+
+def lazy_excess_loss_sink(resolve: Callable[[], ExcessLossSink]) -> ExcessLossSink:
     """帝愛共済（#34）は銀行より後に組み立てるので、呼ばれたときに解決する。"""
-
-    def charge_excess_for(self, guild_id: int, amount: int, now: float) -> int:
-        return self._resolve().charge_excess_for(guild_id, amount, now)
+    return lambda guild_id, amount, now: resolve()(guild_id, amount, now)
