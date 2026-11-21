@@ -373,7 +373,7 @@ def test_only_the_bettor_can_press_buttons(bot):
 def test_view_error_refunds_bet(bot, monkeypatch):
     ctx, view = make_bj(bot, 800, ("10", "9"), ("10", "7"))
     it = FakeInteraction()
-    monkeypatch.setattr(it, "channel", SimpleNamespace(send=lambda **k: asyncio.sleep(0)))
+    monkeypatch.setattr(it, "channel", SimpleNamespace(send=lambda **k: asyncio.sleep(0)), raising=False)
     run(view.on_error(as_interaction(it), RuntimeError("x"), as_item(None)))
     assert bot.repos.wallet.balance(1) == INITIAL_BALANCE and view.ctx.done
     assert_clean(bot)
@@ -592,7 +592,7 @@ def test_transfer_blocked_while_playing_and_needs_min_games(bot, tmp_path, monke
     cog = make_economy_cog(bot)
     bot.sessions.try_start(1)
     it = FakeInteraction()
-    monkeypatch.setattr(it, "guild", SimpleNamespace(id=10))
+    monkeypatch.setattr(it, "guild", SimpleNamespace(id=10), raising=False)
     member = SimpleNamespace(id=2, bot=False, mention="@b")
     run(invoke(EconomyCog.transfer, cog, it, member, 100))
     assert "遊んでいる" in it.sent[0]["embed"].description
