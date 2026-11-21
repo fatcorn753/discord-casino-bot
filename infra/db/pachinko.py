@@ -53,9 +53,10 @@ class PachinkoRepo(ScopedRepo, IPachinkoRepo):
 
             def group(col: str) -> dict[Any, tuple[int, int]]:
                 return {
-                    r[0]: (r[1], r[2])
-                    for r in self._conn.execute(
-                        f"SELECT {col}, COUNT(*), SUM(hit) FROM pachinko_spins {where} GROUP BY {col}", args
+                    r["k"]: (r["n"], r["h"])
+                    for r in self._all(
+                        f"SELECT {col} AS k, COUNT(*) AS n, SUM(hit) AS h FROM pachinko_spins {where} GROUP BY {col}",
+                        args,
                     )
                 }
 
