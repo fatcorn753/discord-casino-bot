@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 
 async def _error(interaction: discord.Interaction, text: str) -> None:
-    await interaction.response.send_message(embed=ui.error_embed("できません", text), ephemeral=True)
+    await ui.reply_error(interaction, text, title="できません")
 
 
 class PollCog(commands.Cog, IPollButtonBridge):
@@ -68,14 +68,12 @@ class PollCog(commands.Cog, IPollButtonBridge):
         try:
             minutes = parse_duration(duration) if duration else poll.DEFAULT_MINUTES
         except ValueError as exc:
-            return await interaction.response.send_message(embed=ui.error_embed("できません", str(exc)), ephemeral=True)
+            return await ui.reply_error(interaction, str(exc), title="できません")
         gid = ui.guild_id_of(interaction)
         channel_id = interaction.channel_id or 0
         ok, result = self._poll.create(gid, interaction.user.id, title, minutes, channel_id)
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("できません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="できません")
         assert not isinstance(result, Failure)
         p = self._poll.get(gid, result)
         assert p is not None

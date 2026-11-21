@@ -38,8 +38,8 @@ class ListingButton(discord.ui.DynamicItem[discord.ui.Button], template=r"p2p:op
         bot = cast("CasinoBot", interaction.client)
         bridge = bot.bridges.resolve(IP2PListingBridge)
         if bridge is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("いまは使えません", "しばらくしてから、もう一度試してください。"), ephemeral=True
+            return await ui.reply_error(
+                interaction, "しばらくしてから、もう一度試してください。", title="いまは使えません"
             )
         await bridge.open_detail(interaction, self.listing_id)
 
@@ -60,9 +60,7 @@ class BidModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         amount = typed_amount(self.amount.value)
         if amount is None:
-            await interaction.response.send_message(
-                embed=ui.error_embed("入札できません", "数字で入れてください。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "数字で入れてください。", title="入札できません")
             return
         await self.view.cog.do_bid(interaction, self.view.listing_id, amount)
 
@@ -81,9 +79,7 @@ class DetailView(ui.OwnerView):
     async def _on_go(self, interaction: discord.Interaction):
         row = self.cog.p2p.get(ui.guild_id_of(interaction), self.listing_id)
         if row is None or row["status"] != "active":
-            return await interaction.response.send_message(
-                embed=ui.error_embed("もうありません", "その出品は、終わりました。"), ephemeral=True
-            )
+            return await ui.reply_error(interaction, "その出品は、終わりました。", title="もうありません")
         if row["mode"] == "fixed":
             return await self.cog.do_buy(interaction, self.listing_id)
         await interaction.response.send_modal(BidModal(self, p2p.min_next_bid(row["price"], row["bid"])))
@@ -127,14 +123,10 @@ class SellModal(discord.ui.Modal):
         try:
             price, qty, hours = num(self.price), num(self.qty, 1), num(self.hours)
         except ValueError:
-            await interaction.response.send_message(
-                embed=ui.error_embed("出品できません", "数字で入れてください。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "数字で入れてください。", title="出品できません")
             return
         if price is None:
-            await interaction.response.send_message(
-                embed=ui.error_embed("出品できません", "数字で入れてください。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "数字で入れてください。", title="出品できません")
             return
         assert self.view.target is not None
         kind, _, ref = self.view.target.partition(":")
@@ -142,23 +134,19 @@ class SellModal(discord.ui.Modal):
         p2p_svc = self.view.cog.p2p
         ok, result = p2p_svc.list_item(gid, interaction.user.id, kind, ref, qty or 1, self.mode, price, hours)
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("出品できません", format_failure(result)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(result), title="出品できません")
             return
         assert not isinstance(result, Failure)
         row = p2p_svc.get(gid, result)
         assert row is not None
         self.view.stop()
         posted = await self.view.cog.announce(getattr(interaction, "guild", None), result)  # 告知チャンネルに投稿する
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "出品しました",
-                f"{line_of(row, p2p_svc.label(gid, row))}\n売れる（落札される）と、{p2p.FEE_RATE:.0%} の手数料を引いた額が入ります。"
-                "取り消しは、競売の画面の「📋 自分の取引」から。"
-                + ("\n📣 告知チャンネルに、出品を投稿しました。" if posted else ""),
-            ),
-            ephemeral=True,
+        await ui.reply_ok(
+            interaction,
+            f"{line_of(row, p2p_svc.label(gid, row))}\n売れる（落札される）と、{p2p.FEE_RATE:.0%} の手数料を引いた額が入ります。"
+            "取り消しは、競売の画面の「📋 自分の取引」から。"
+            + ("\n📣 告知チャンネルに、出品を投稿しました。" if posted else ""),
+            title="出品しました",
         )
 
 
@@ -207,9 +195,8 @@ class SellView(ui.OwnerView):
     def _make_go(self, mode: str):
         async def callback(interaction: discord.Interaction):
             if self.target is None:
-                return await interaction.response.send_message(
-                    embed=ui.error_embed("先に選んでください", "出す品・馬を、選択肢から選んでください。"),
-                    ephemeral=True,
+                return await ui.reply_error(
+                    interaction, "出す品・馬を、選択肢から選んでください。", title="先に選んでください"
                 )
             await interaction.response.send_modal(SellModal(self, mode))
 
@@ -253,12 +240,8 @@ class MineView(ui.OwnerView):
         listing_id = int(ui.selected_values(interaction)[0])
         ok, why = self.cog.p2p.cancel(self.guild_id, self.user_id, listing_id)
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("取り消せません", format_failure(why)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(why), title="取り消せません")
             return
         self.stop()
         await self.cog.refresh_post(getattr(interaction, "guild", None), listing_id)
-        await interaction.response.send_message(
-            embed=ui.ok_embed("取り消しました", "出品を取り消して、品・馬を戻しました。"), ephemeral=True
-        )
+        await ui.reply_ok(interaction, "出品を取り消して、品・馬を戻しました。", title="取り消しました")
