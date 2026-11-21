@@ -3,7 +3,10 @@
 対応する表の定義は infra/db/schema/tables.py。キーは `SELECT *` の列と同じ。
 """
 
-from typing import Optional, TypedDict
+from typing import TYPE_CHECKING, Optional, TypedDict
+
+if TYPE_CHECKING:
+    from domain.horse import Runner, Track
 
 
 class HorseRow(TypedDict):
@@ -152,3 +155,74 @@ class AuctionHorseRow(HorseRow):
 
     price: int
     rate: float
+
+
+class PachinkoStats(TypedDict):
+    """パチンコの集計（pachinko_stats の返り値）。"""
+
+    omen: dict[str, tuple[int, int]]  # 予告の色ごとの (回転数, 当たり数)
+    tier: dict[str, tuple[int, int]]  # リーチの格ごとの (回転数, 当たり数)
+    spins: tuple[int, int]  # 全体の (回転数, 当たり数)
+    sets: tuple[int, int, int, int, int, int, int]  # (セット数, 当たりセット数, 賭け金合計, 払い戻し合計, 玉数, スタート数, 最大連チャン)
+
+
+class RaceCloseResult(TypedDict):
+    """出走馬の確定（race_close_entries の返り値）。"""
+
+    runners: list["Runner"]  # 出走馬（NPC で埋めた分を含む）
+    track: "Track"  # コース
+
+
+class RaceBetResult(TypedDict):
+    """買った馬券（race_bet の成功ペイロード）。"""
+
+    id: int
+    kind: str
+    lane: int  # 単勝・複勝の枠番（組み合わせでは先頭）
+    lanes: list[int]  # 選んだ枠番の並び
+    stake: int
+    odds: float
+    name: str  # 馬名を区切りで並べた表示名
+
+
+class RetiredHorseRow(HorseRow):
+    """定年引退した馬（race_run の retired の要素。馬の行に引退金を足したもの）。"""
+
+    value: int  # 引退金（マイナスなら引退費用）
+
+
+class RaceRunResult(TypedDict):
+    """レースを走らせた結果（race_run の返り値）。"""
+
+    race: RaceRow
+    entries: list[RaceEntryRow]  # 出走馬（finish が埋まったもの）
+    order: list[int]  # 着順（entries の添字の並び）
+    frames: list[list[float]]  # ティックごとの進み（演出用）
+    finish: list[float]  # ゴール時刻（entries の添字順）
+    bets: list[RaceBetRow]  # 精算ずみの馬券（payout が埋まったもの）
+    prizes: dict[int, int]  # {オーナーID: 手取り賞金の合計}
+    track: "Track"
+    retired: list[RetiredHorseRow]  # 定年引退した馬
+    is_major: bool  # 重賞か
+    styles: dict[int, str]  # {枠番: 脚質}
+
+
+class ArenaGroupResult(TypedDict):
+    """準決勝の1組の結果（arena_run_semis の groups の値）。"""
+
+    winner: str
+    losers: list[str]
+
+
+class ArenaSemiResult(TypedDict):
+    """準決勝の全組の結果（arena_run_semis の返り値）。"""
+
+    groups: dict[int, ArenaGroupResult]  # {組番号: 結果}
+    finalists: list[str]  # 決勝へ進んだ戦士の名前
+
+
+class ArenaFinalResult(TypedDict):
+    """決勝の結果（arena_run_final の返り値）。"""
+
+    champion: str
+    runner_up: list[str]
