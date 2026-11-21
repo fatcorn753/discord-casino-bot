@@ -408,7 +408,7 @@ def _blended_probs(runners: list, track: Optional[Track]) -> tuple:
     )
 
 
-def make_all_odds(runners: list, track: Optional[Track] = None) -> dict:
+def make_all_odds(runners: list[Runner], track: Optional[Track] = None) -> dict[str, dict[str, float]]:
     """全部の馬券のオッズ。{"win": {枠: オッズ}, "place": {枠: オッズ}, "quinella": {キー: オッズ}, …}。
 
     単勝は勝つ確率の見積もり、複勝は3着以内率の見積もり（戦績と、track があればそのコースでの試走を混ぜる）。
@@ -455,7 +455,7 @@ def make_all_odds(runners: list, track: Optional[Track] = None) -> dict:
     return out
 
 
-def make_odds(runners: list) -> list:
+def make_odds(runners: list[Runner]) -> list[tuple[float, float]]:
     """[(単勝のオッズ, 複勝のオッズ)] を、出走馬の並びで返す。"""
     odds = make_all_odds(runners)
     return [(odds["win"][str(r.lane)], odds["place"][str(r.lane)]) for r in runners]

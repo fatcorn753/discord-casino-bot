@@ -25,7 +25,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
         self._account = account
 
     def record_play(
-        self, user_id: int, game: str, bet: int, net: int, day: datetime.date, tags: Iterable[Any] = ()
+        self, user_id: int, game: str, bet: int, net: int, day: datetime.date, tags: Iterable[str] = ()
     ) -> dict[str, Any]:
         """1回遊んだ結果を記録する。連勝を更新し、デイリーミッションを進めて、達成した分の報酬を渡す。"""
         with self._db.tx():

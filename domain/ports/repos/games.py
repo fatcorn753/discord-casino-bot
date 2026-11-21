@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any, Optional
 from domain.ports.repos.base import IGuildScopedRepo
 
 if TYPE_CHECKING:
+    from domain.games.pachinko import SetResult
+
+if TYPE_CHECKING:
     from domain.types import PurchaseResult
 
 
@@ -42,7 +45,9 @@ class IEventRepo(IGuildScopedRepo):
 
 
 class IPachinkoRepo(IGuildScopedRepo):
-    def pachinko_record_set(self, user_id: int, bet: int, balls: int, result: Any, now: Optional[float] = None) -> None:
+    def pachinko_record_set(
+        self, user_id: int, bet: int, balls: int, result: "SetResult", now: Optional[float] = None
+    ) -> None:
         raise NotImplementedError
 
     def pachinko_stats(self, guild_id: Optional[int] = None, since: Optional[float] = None) -> dict[str, Any]:
@@ -131,7 +136,7 @@ class IRaceRepo(IGuildScopedRepo):
     def race_close_entries(self, race_id: int, rng: Optional[random.Random] = None) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def race_set_odds(self, race_id: int, odds: Any) -> None:
+    def race_set_odds(self, race_id: int, odds: dict[str, Any] | list[tuple[float, float]]) -> None:
         raise NotImplementedError
 
     def race_odds(self, race_id: int, kind: str, lanes: list[int]) -> Optional[float]:

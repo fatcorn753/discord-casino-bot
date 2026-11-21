@@ -1,6 +1,7 @@
 """ゲーム共通の流れ: 賭け金の検証と預かり、精算、ボタンの持ち主確認、結果の表示。"""
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -71,7 +72,7 @@ class GameContext:
         payout: int,
         penalty: int = 0,
         keep_session: bool = False,
-        tags: Any = (),
+        tags: Iterable[str] = (),
         rtp_kind: str | None = None,
         rtp_done: bool = False,
     ) -> int:

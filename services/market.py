@@ -277,10 +277,10 @@ class MarketService:
     def active_options(self, guild_id: int, uid: int) -> list[Any]:
         return self._options.for_guild(guild_id).option_list(uid)["active"]
 
-    def option_close_cost(self, guild_id: int, row: Any, now: float, prices: dict[str, float]) -> int:
+    def option_close_cost(self, guild_id: int, row: dict[str, Any], now: float, prices: dict[str, float]) -> int:
         return self._options.for_guild(guild_id).option_close_cost(row, now, prices)
 
-    def option_value(self, guild_id: int, row: Any, now: float, prices: dict[str, float]) -> int:
+    def option_value(self, guild_id: int, row: dict[str, Any], now: float, prices: dict[str, float]) -> int:
         return self._options.for_guild(guild_id).option_value(row, now, prices)
 
     def option_sell(self, guild_id: int, uid: int, option_id: int) -> tuple[Any, ...]:

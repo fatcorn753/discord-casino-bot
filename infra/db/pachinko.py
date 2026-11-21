@@ -7,6 +7,7 @@
 
 from typing import Any, Optional
 
+from domain.games.pachinko import SetResult
 from domain.ports.repos import IPachinkoRepo
 from infra.db.base import EcoDb, ScopedRepo
 
@@ -17,7 +18,9 @@ class PachinkoRepo(ScopedRepo, IPachinkoRepo):
     def __init__(self, db: EcoDb, guild_id: int = 0, strict: bool = False) -> None:
         super().__init__(db, guild_id, strict)
 
-    def pachinko_record_set(self, user_id: int, bet: int, balls: int, result: Any, now: Optional[float] = None) -> None:
+    def pachinko_record_set(
+        self, user_id: int, bet: int, balls: int, result: SetResult, now: Optional[float] = None
+    ) -> None:
         """1セット（SetResult）を記録する。bet はそのセットの賭け金。"""
         ts = now if now is not None else self._now()
         with self._db.tx():

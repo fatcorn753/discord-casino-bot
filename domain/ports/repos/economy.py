@@ -19,7 +19,7 @@ class INoticeRepo(IGuildScopedRepo, INoticeSink):
 
 class IRecordRepo(IGuildScopedRepo):
     def record_play(
-        self, user_id: int, game: str, bet: int, net: int, day: datetime.date, tags: Iterable[Any] = ()
+        self, user_id: int, game: str, bet: int, net: int, day: datetime.date, tags: Iterable[str] = ()
     ) -> dict[str, Any]:
         raise NotImplementedError
 

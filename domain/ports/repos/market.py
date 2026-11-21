@@ -230,10 +230,10 @@ class IOptionRepo(IGuildScopedRepo, IValuationSource):
     ) -> tuple[Any, ...]:
         raise NotImplementedError
 
-    def option_close_cost(self, row: Any, now: float, prices: dict[str, Any]) -> int:
+    def option_close_cost(self, row: dict[str, Any], now: float, prices: dict[str, Any]) -> int:
         raise NotImplementedError
 
-    def option_value(self, row: Any, now: float, prices: dict[str, Any]) -> int:
+    def option_value(self, row: dict[str, Any], now: float, prices: dict[str, Any]) -> int:
         raise NotImplementedError
 
     def option_values(self) -> dict[int, int]:

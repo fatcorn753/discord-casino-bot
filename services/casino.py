@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from domain import events as events_mod
 from domain import skins
+from domain.games.pachinko import SetResult
 from domain.games.rtplevel import DEFAULT_RTP_POLICY, IRtpPolicy
 from domain.ports.clock import IClock
 from domain.ports.repos import (
@@ -119,7 +120,7 @@ class CasinoService:
         *,
         penalty: int = 0,
         keep_session: bool = False,
-        tags: Iterable[Any] = (),
+        tags: Iterable[str] = (),
         rtp_kind: Optional[str] = None,
         rtp_done: bool = False,
         now: Optional[datetime.datetime] = None,
@@ -192,7 +193,7 @@ class CasinoService:
     def rtp_level(self, guild_id: int, game: str) -> int:
         return self._rtp.for_guild(guild_id).rtp_level_get(game)
 
-    def record_pachinko_set(self, guild_id: int, user_id: int, bet: int, balls: int, result: Any) -> None:
+    def record_pachinko_set(self, guild_id: int, user_id: int, bet: int, balls: int, result: SetResult) -> None:
         """パチンコの統計用の記録（記録先が無い構成では何もしない）。"""
         if self._pachinko is not None:
             self._pachinko.for_guild(guild_id).pachinko_record_set(user_id, bet, balls, result)
