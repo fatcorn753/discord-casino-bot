@@ -39,8 +39,7 @@ def _entries_oldest_first(rows: list[dict[str, Any]]) -> list[HistoryEntry]:
                 and rows[j]["reason"].endswith(":" + game)
                 and any(rows[j]["reason"].startswith(p) for p in _GAME_ROWS)
             ):
-                if rows[j]["reason"].startswith("追加の賭け:"):
-                    bet += -rows[j]["delta"]
+                bet += -rows[j]["delta"] if rows[j]["reason"].startswith("追加の賭け:") else 0
                 net += rows[j]["delta"]
                 last = rows[j]
                 j += 1

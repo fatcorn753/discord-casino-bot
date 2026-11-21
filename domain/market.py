@@ -145,13 +145,13 @@ def cholesky(matrix: list[list[float]]) -> list[list[float]]:
     for i in range(n):
         for j in range(i + 1):
             total = sum(low[i][k] * low[j][k] for k in range(j))
-            if i == j:
-                diag = matrix[i][i] - total
-                if diag <= 0:
-                    raise ValueError("相関の数字が正しくありません（行列が正定値ではありません）")
-                low[i][j] = math.sqrt(diag)
-            else:
+            if i != j:
                 low[i][j] = (matrix[i][j] - total) / low[j][j]
+                continue
+            diag = matrix[i][i] - total
+            if diag <= 0:
+                raise ValueError("相関の数字が正しくありません（行列が正定値ではありません）")
+            low[i][j] = math.sqrt(diag)
     return low
 
 

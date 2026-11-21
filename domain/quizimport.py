@@ -54,6 +54,9 @@ def _int(text: str) -> Optional[int]:
         return None
 
 
+_DURATION_UNIT = {"duration": "時間", "hours": "時間", "days": "日", "mins": "分"}
+
+
 def _parse_block(lines: list[tuple[int, str]], number: int, errors: list[str]) -> Optional[QuizImportItem]:
     """1問分。lines は (元ファイルの行番号, 文字列) の並び。誤りは errors に足す。"""
     fields: dict[str, Any] = {"wrong": []}
@@ -64,26 +67,30 @@ def _parse_block(lines: list[tuple[int, str]], number: int, errors: list[str]) -
         if line.lstrip().startswith("#"):
             continue
         m = KEY_LINE.match(line)
-        if m:
-            key = KEYS[m.group(1)]
-            value = m.group(2).strip()
-            current = key
-            where.setdefault(key, lineno)
-            if key == "wrong":
+        if m is None:
+            if not line.strip():
+                continue
+            match current:  # 見出しに続く本文行。問題文と解説だけは次の行に続けられる
+                case "question" | "explanation":
+                    fields[current] += "\n" + line.strip()
+                case None:
+                    problems.append(f"{lineno}行目: 「問題:」「正解:」などの見出しで始めてください。")
+                case _:
+                    problems.append(
+                        f"{lineno}行目: 「{[k for k, v in KEYS.items() if v == current][0]}」は1行で書いてください。"
+                    )
+            continue
+        key = KEYS[m.group(1)]
+        value = m.group(2).strip()
+        where.setdefault(key, lineno)
+        match key:  # 見出し行（問題: など）を fields へ反映する
+            case "wrong":
                 fields["wrong"].append(value)
-            elif key in fields:
+            case _ if key in fields:
                 problems.append(f"{lineno}行目: 「{m.group(1)}」が2回あります。")
-            else:
+            case _:
                 fields[key] = value
-        elif line.strip():
-            if current in ("question", "explanation"):
-                fields[current] += "\n" + line.strip()  # 問題文と解説は、次の行に続けられる
-            elif current is None:
-                problems.append(f"{lineno}行目: 「問題:」「正解:」などの見出しで始めてください。")
-            else:
-                problems.append(
-                    f"{lineno}行目: 「{[k for k, v in KEYS.items() if v == current][0]}」は1行で書いてください。"
-                )
+        current = key
     if (
         not fields.get("question")
         and not problems
@@ -124,12 +131,10 @@ def _parse_block(lines: list[tuple[int, str]], number: int, errors: list[str]) -
     given = [k for k in ("duration", "hours", "days", "mins") if k in fields]
     if len(given) > 1:
         errors.append(head + "期間は「期間」「時間」「日数」「分」のどれか1つだけで書いてください。")
-    elif given:
+    if len(given) == 1:
         key = given[0]
         try:
-            minutes = parse_duration(
-                fields[key], {"duration": "時間", "hours": "時間", "days": "日", "mins": "分"}[key]
-            )
+            minutes = parse_duration(fields[key], _DURATION_UNIT[key])
             if not 1 <= minutes <= MAX_MINUTES:
                 raise ValueError("期間は 1分〜365日 の範囲で書いてください。")
         except ValueError as exc:

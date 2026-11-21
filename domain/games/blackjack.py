@@ -28,13 +28,14 @@ def value(cards) -> int:
     """手札の合計。Aは1か11のうち、バーストしない最大の方。"""
     total, aces = 0, 0
     for rank, _ in cards:
-        if rank == "A":
-            aces += 1
-            total += 11
-        elif rank in ("J", "Q", "K"):
-            total += 10
-        else:
-            total += int(rank)
+        match rank:
+            case "A":
+                aces += 1
+                total += 11
+            case "J" | "Q" | "K":
+                total += 10
+            case _:
+                total += int(rank)
     while total > 21 and aces:
         total -= 10
         aces -= 1
