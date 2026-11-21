@@ -7,7 +7,7 @@ import json
 from typing import Any, Optional
 
 from domain import quizpay as quizpay_mod
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.bridges import IDebtOps
 from domain.ports.repos import IQuizRepo
 from infra.db.account import AccountCore
@@ -114,7 +114,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             self._conn.execute("DELETE FROM quiz_answers WHERE question_id=?", (quiz_id,))
             return self._conn.execute("DELETE FROM quiz_questions WHERE id=?", (quiz_id,)).rowcount > 0
 
-    def quiz_next(self, user_id: int, now: float) -> tuple[Any, ...]:
+    def quiz_next(self, user_id: int, now: float) -> tuple[Optional[dict[str, Any]], int]:
         """まだ答えていない、期限内の一番古い問題と、その残り数（その問題を含む）を返す。無ければ (None, 0)。
 
         ユーザーの問題は、このサーバーのもので、自分の問題ではないものだけ出る（出題者の残高が尽きても、借金で報酬を払うので出続ける）。
@@ -129,7 +129,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             )
         return (_quiz_dict(rows[0]), len(rows)) if rows else (None, 0)
 
-    def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> tuple[Any, ...]:
+    def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> Outcome[dict[str, Any]]:
         """答えを記録する。(成功か, 理由か結果) を返す。結果は correct / reward（実際に入った額）/ answer / explanation。
 
         ユーザーの問題の報酬は、出題者の残高から引いて渡す。残高が報酬に足りないときは、足りない分を出題者の借金にして、
@@ -226,7 +226,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         creator_name: str = "",
         msg_right: str = "",
         msg_wrong: str = "",
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         """ユーザーが問題を出す。(成功か, 理由か問題の番号) を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -262,7 +262,9 @@ class QuizRepo(ScopedRepo, IQuizRepo):
                     msg_wrong,
                 ),
             )
-            return True, cur.lastrowid
+            lastrowid = cur.lastrowid
+            assert lastrowid is not None
+            return True, lastrowid
 
     def quiz_own_open(self, user_id: int, now: float) -> list[dict[str, Any]]:
         """このサーバーで自分が出した、終了前の問題（古い順）。取り下げの候補に使う。"""

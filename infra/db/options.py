@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 from domain import market as market_mod
 from domain import options as opt
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.options import name_of as name_of
 from domain.ports.bridges import IBankCashFlow, IDebtOps, IOptionHoldings, NoOpDebtOps
 from domain.ports.contracts import HoldingBook
@@ -80,7 +80,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         now: float,
         symbol2: Optional[str] = None,
         strike_pct: Optional[float] = None,
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[dict[str, Any]]:
         """amount（掛け金）の範囲で、買えるだけ買う。ペア・ワラントは、symbol が symbol2 より上がると当たり。"""
         if kind not in opt.KINDS or symbol not in market_mod.BY_KEY:
             return False, fail("invalid_spec")
@@ -151,7 +151,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         amount: int,
         now: float,
         strike_pct: Optional[float] = None,
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[dict[str, Any]]:
         """帝愛に売って、プレミアムを先にもらう（裸売り）。amount は預ける証拠金の上限。(成功か, 理由か {...}) を返す。"""
         if kind not in opt.SHORT_NAMES or symbol not in market_mod.BY_KEY:
             return False, fail("invalid_spec")
@@ -287,7 +287,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
             )
         ]
 
-    def option_close_locked_for(self, guild_id: int, user_id: int, option_id: int, now: float) -> tuple[Any, ...]:
+    def option_close_locked_for(self, guild_id: int, user_id: int, option_id: int, now: float) -> Outcome[int]:
         row = self._one(
             "SELECT * FROM options WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
             (option_id, guild_id, user_id),
@@ -313,7 +313,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         self._conn.execute("UPDATE options SET status='sold', paid=? WHERE id=?", (paid, option_id))
         return True, paid
 
-    def option_sell(self, user_id: int, option_id: int, now: float) -> tuple[Any, ...]:
+    def option_sell(self, user_id: int, option_id: int, now: float) -> Outcome[int]:
         """満期の前に手放す。買いは売値で売り、裸売りは買値で買い戻す。(成功か, 理由か 受け取った額（裸売りは、証拠金の戻り。マイナスは、借金にした額）) を返す。"""
         with self._db.tx():
             gid = self._g()

@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from domain import horse as horse_mod
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import IBankCashFlow
 from domain.ports.repos import IRaceRepo
 from infra.db.account import AccountCore
@@ -121,7 +121,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 (race_id,),
             )
 
-    def race_register(self, user_id: int, horse_id: int, race_id: int, now: float) -> tuple[Any, ...]:
+    def race_register(self, user_id: int, horse_id: int, race_id: int, now: float) -> Outcome[str]:
         """馬を出走させる（出走料がかかる）。(成功か, 理由)。1人1レースに1頭まで。"""
         with self._db.tx():
             gid = self._g()
@@ -165,7 +165,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             )
             return True, ""
 
-    def race_withdraw(self, user_id: int, horse_id: int, race_id: int, now: float) -> tuple[Any, ...]:
+    def race_withdraw(self, user_id: int, horse_id: int, race_id: int, now: float) -> Outcome[str]:
         """締切前なら、申し込みを取り下げて、出走料を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -293,7 +293,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
 
     def race_bet(
         self, user_id: int, race_id: int, kind: str, lane: int | list[int], stake: int, now: float
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[dict[str, Any]]:
         """馬券を買う。賭けた時点のオッズで確定する。(成功か, 理由か馬券の辞書)。賭け金は、その場で引かれる。
 
         lane は、単勝・複勝なら枠番、組み合わせの馬券（馬連・ワイド・馬単・三連複）なら、選んだ枠番の並び
@@ -356,7 +356,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
 
     def race_bet_many(
         self, user_id: int, race_id: int, kind: str, lanes: list[int], stake: int, now: float
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[list[dict[str, Any]]]:
         """単勝・複勝を、何頭かまとめて買う（1頭ごとに stake ずつ、別々の馬券になる）。(成功か, 理由か馬券の辞書の並び)。
 
         先に、合計の賭け金（レースの上限・残高）を確かめてから買う。それでも途中で買えなくなったら、そこまでの馬券は残る。
@@ -389,7 +389,11 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             for lane in lanes:
                 ok, result = self.race_bet(user_id, race_id, kind, lane, stake, now)
                 if not ok:
-                    return False, fail("race_partial_bought", inner=result, bought=len(bought)) if bought else result
+                    if bought:
+                        return False, fail("race_partial_bought", inner=result, bought=len(bought))
+                    assert isinstance(result, Failure)
+                    return False, result
+                assert not isinstance(result, Failure)
                 bought.append(result)
             return True, bought
 

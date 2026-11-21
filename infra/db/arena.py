@@ -9,7 +9,7 @@ from typing import Any, Optional
 
 from domain import arena as arena_mod
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.bridges import IBankCashFlow
 from domain.ports.repos import IArenaRepo
 from infra.db.account import AccountCore
@@ -105,7 +105,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
         if spent:
             self._bank.bank_set_for(guild_id, state["cash"] - spent, state["loaned"])
 
-    def arena_bet(self, user_id: int, fighter_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def arena_bet(self, user_id: int, fighter_id: int, amount: int, now: float) -> Outcome[str]:
         """戦士に賭ける。(成功か, Failure か空文字)。"""
         if amount < arena_mod.MIN_STAKE or amount > arena_mod.MAX_STAKE:
             return False, fail("arena_stake_range", lo=arena_mod.MIN_STAKE, hi=arena_mod.MAX_STAKE)

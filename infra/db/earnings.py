@@ -9,7 +9,7 @@ from typing import Any, Optional
 from domain import earnings as ea
 from domain import market as market_mod
 from domain import shop as shop_mod
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.bridges import IBankCashFlow
 from domain.ports.repos import IEarningsRepo
 from infra.db.account import AccountCore
@@ -125,7 +125,7 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
             sold = self._scalar("SELECT COUNT(*) FROM earnings_shop WHERE event_id=? AND guild_id=?", (ev["id"], gid))
             return {"left": max(0, ea.SHOP_STOCK - sold), "total": ea.SHOP_STOCK}
 
-    def insider_buy(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> tuple[Any, ...]:
+    def insider_buy(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Outcome[ea.MemoInfo]:
         """帝愛市で、裏情報メモを買う。(成功か, 理由かメモの文)。決算ごとに1人1枚、サーバーで SHOP_STOCK 枚まで。"""
         rng = rng or random.SystemRandom()
         price = shop_mod.BY_ID[shop_mod.INSIDER_MEMO].price

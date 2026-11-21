@@ -11,7 +11,7 @@ from typing import Any, Optional, cast
 from domain import market as market_mod
 from domain import shop as shop_mod
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.bridges import (
     IAssetSeizureStep,
     IBankCdsBridge,
@@ -143,7 +143,7 @@ class OptionSeizureStep(IAssetSeizureStep):
             if covered >= need:
                 break
             ok, got = self._options.option_close_locked_for(guild_id, user_id, option_id, now)
-            if ok and got > 0:
+            if ok and isinstance(got, int) and got > 0:
                 self._notices.note_for(guild_id, user_id, "seize_option", got=got)
                 covered += _take_cash(self._account, guild_id, user_id, need - covered, reason)
         return covered
@@ -436,7 +436,7 @@ class DebtRepo(ScopedRepo, IDebtRepo):
         self._bank.grace_update_for(guild_id, user_id, self._now())
         self._notices.note_for(guild_id, user_id, "seed_loan", amount=amount)
 
-    def borrow_seed_for(self, guild_id: int, user_id: int) -> tuple[Any, ...]:
+    def borrow_seed_for(self, guild_id: int, user_id: int) -> Outcome[int]:
         """（いつでも）手元が種銭の枠に満たなければ、枠まで帝愛から借りる。(成功か, 理由か借りた額)。"""
         with self._db.tx():
             self._account.ensure(guild_id, user_id)
@@ -450,10 +450,10 @@ class DebtRepo(ScopedRepo, IDebtRepo):
             self.seed_for(guild_id, user_id, short)
             return True, short
 
-    def borrow_seed(self, user_id: int) -> tuple[Any, ...]:
+    def borrow_seed(self, user_id: int) -> Outcome[int]:
         return self.borrow_seed_for(self._g(), user_id)
 
-    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> tuple[Any, ...]:
+    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> Outcome[str]:
         """手元が足りない need を、帝愛の信用で借りて賭けられるか。(可否, Failure | "")。"""
         with self._lock:
             if need <= 0:
@@ -466,7 +466,7 @@ class DebtRepo(ScopedRepo, IDebtRepo):
                 return False, fail("credit_limit_exceeded", seed=teiai.SEED, need=need)
             return True, ""
 
-    def can_borrow_for_bet(self, user_id: int, need: int) -> tuple[Any, ...]:
+    def can_borrow_for_bet(self, user_id: int, need: int) -> Outcome[str]:
         return self.can_borrow_for_bet_for(self._g(), user_id, need)
 
     def _seed_if_empty_for(self, guild_id: int, user_id: int) -> int:
@@ -503,7 +503,7 @@ class DebtRepo(ScopedRepo, IDebtRepo):
     # ------------------------------------------------------------------ #
     # 返済（自分から）                                                    #
     # ------------------------------------------------------------------ #
-    def repay_debt(self, user_id: int, amount: Optional[int] = None) -> tuple[Any, ...]:
+    def repay_debt(self, user_id: int, amount: Optional[int] = None) -> Outcome[int]:
         """手元の現金から、帝愛の借金を返す（amount が None なら、返せる限り全額）。(成功か, 理由か返した額)。"""
         with self._db.tx():
             gid = self._g()
@@ -548,7 +548,7 @@ class DebtRepo(ScopedRepo, IDebtRepo):
             v = self._scalar("SELECT escape_tries FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id))
         return max(0, teiai.ESCAPE_MAX_TRIES - (v if v is not None else 0))
 
-    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> tuple[Any, ...]:
+    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Outcome[dict[str, Any]]:
         """海外逃亡。(成功か, 理由か結果の辞書) を返す。"""
         rng = rng or cast("random.Random", random)
         with self._db.tx():
@@ -592,7 +592,9 @@ class DebtRepo(ScopedRepo, IDebtRepo):
             self.after_debt_change(gid, user_id)
             return True, {"escaped": False, "fine": fine, "debt": self._account.debt(gid, user_id), "bankrupt": None}
 
-    def bankrupt_for(self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False) -> tuple[Any, ...]:
+    def bankrupt_for(
+        self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
+    ) -> Outcome[dict[str, Any]]:
         """自己破産。全財産とショップの全品を差し押さえて換金し、帝愛 → 貸付の順に配当する。"""
         with self._db.tx():
             self._account.ensure(guild_id, user_id)
@@ -659,5 +661,5 @@ class DebtRepo(ScopedRepo, IDebtRepo):
                 "seed": seed,
             }
 
-    def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> tuple[Any, ...]:
+    def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> Outcome[dict[str, Any]]:
         return self.bankrupt_for(self._g(), user_id, forced=forced, escape=escape)

@@ -9,7 +9,7 @@ from typing import Any, Optional, cast
 
 from domain import market as market_mod
 from domain import rates, teiai, thermostat
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.bridges import (
     IBankruptExecutor,
     IExcessLossSink,
@@ -493,7 +493,7 @@ class BankRepo(ScopedRepo, IBankRepo):
     # ------------------------------------------------------------------ #
     # 預金
     # ------------------------------------------------------------------ #
-    def bank_deposit(self, user_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def bank_deposit(self, user_id: int, amount: int, now: float) -> Outcome[int]:
         """帝愛に預ける（カタギだけ）。(成功か, 理由か預金残高) を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -516,7 +516,7 @@ class BankRepo(ScopedRepo, IBankRepo):
             self.bank_set_for(gid, state["cash"] + reserve, state["loaned"] + amount - reserve)
             return True, self.deposit_of_for(gid, user_id)
 
-    def bank_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> tuple[Any, ...]:
+    def bank_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> Outcome[int]:
         """預金を引き出す（amount が None なら全額）。利用可能現金の範囲まで。(成功か, 理由か引き出した額) を返す。"""
         now = self._now() if now is None else now
         with self._db.tx():
@@ -628,7 +628,7 @@ class BankRepo(ScopedRepo, IBankRepo):
             "grace": self.grace_until_for(gid, target_id) is not None,
         }
 
-    def cds_buy(self, buyer_id: int, target_id: int, stake: int, now: float) -> tuple[Any, ...]:
+    def cds_buy(self, buyer_id: int, target_id: int, stake: int, now: float) -> Outcome[float]:
         """CDS を買う（自分にも、他人にも）。(成功か, 理由かオッズ) を返す。"""
         with self._db.tx():
             gid = self._g()

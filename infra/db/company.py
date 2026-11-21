@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from domain import company as company_mod
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.bridges import (
     IAssetSeizureStep,
     IBankCashFlow,
@@ -151,7 +151,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
             c = self._current(self._g(), user_id, now)
             return self._view(c, now) if c else None
 
-    def company_found(self, user_id: int, name: str, kind: str, now: float) -> tuple[Any, ...]:
+    def company_found(self, user_id: int, name: str, kind: str, now: float) -> Outcome[str | dict[str, Any]]:
         """会社を設立する（設立費と、Lv1 の建設費を払う）。(成功か, Failure か会社)。"""
         ok, name = company_mod.check_name(name)
         if not ok:
@@ -181,7 +181,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
             assert c is not None
             return True, self._view(c, now)
 
-    def company_invest(self, user_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def company_invest(self, user_id: int, amount: int, now: float) -> Outcome[int]:
         """個人の残高から、会社資金へ出資する。(成功か, Failure か会社資金)。"""
         if amount <= 0:
             return False, fail("company_amount_invalid")
@@ -200,9 +200,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
             self._save(c)
             return True, c["funds"]
 
-    def company_withdraw(
-        self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None
-    ) -> tuple[Any, ...]:
+    def company_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> Outcome[int]:
         """会社資金を、個人の残高へ引き出す（amount が None なら全額）。(成功か, Failure か引き出した額)。"""
         now = self._now() if now is None else now
         if amount is not None and amount <= 0:
@@ -229,7 +227,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
             self._account.apply(gid, user_id, take, f"会社から引き出し:{c['name']}")
             return True, take
 
-    def company_ship(self, user_id: int, now: float) -> tuple[Any, ...]:
+    def company_ship(self, user_id: int, now: float) -> Outcome[dict[str, Any]]:
         """倉庫の在庫を、今日の相場で帝愛に売る。(成功か, Failure か {paid, pinhane, price, left})。"""
         with self._db.tx():
             gid = self._g()
@@ -265,7 +263,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
                 "dividends": sum(shares.values()),
             }
 
-    def company_upgrade(self, user_id: int, now: float) -> tuple[Any, ...]:
+    def company_upgrade(self, user_id: int, now: float) -> Outcome[int]:
         """会社資金で、事業所を1レベル増築する。(成功か, Failure か新しいレベル)。"""
         with self._db.tx():
             gid = self._g()
@@ -283,7 +281,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
             self._save(c)
             return True, c["level"]
 
-    def company_change_kind(self, user_id: int, kind: str, now: float) -> tuple[Any, ...]:
+    def company_change_kind(self, user_id: int, kind: str, now: float) -> Outcome[str]:
         """事業所の種類を変える。それまでの建設費と在庫を失い、会社資金で Lv1 から建て直す。(成功か, Failure か空文字)。"""
         if kind not in company_mod.KINDS:
             return False, fail("company_kind_unknown")
@@ -306,7 +304,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
     # ------------------------------------------------------------------ #
     # ほかの人の会社への出資（#71）
     # ------------------------------------------------------------------ #
-    def stake_invest(self, investor_id: int, owner_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def stake_invest(self, investor_id: int, owner_id: int, amount: int, now: float) -> Outcome[dict[str, Any]]:
         """owner_id の会社へ出資する。お金は会社資金に入り、払い戻しはできない。(成功か, Failure か {amount, total})。"""
         if investor_id == owner_id:
             return False, fail("stake_self")
@@ -364,7 +362,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
                 )
             return out
 
-    def company_set_dividend(self, user_id: int, rate: float, now: float) -> tuple[Any, ...]:
+    def company_set_dividend(self, user_id: int, rate: float, now: float) -> Outcome[float]:
         """自分の会社の配当率を決める（0〜DIVIDEND_MAX）。(成功か, Failure か率)。"""
         if not 0.0 <= rate <= company_mod.DIVIDEND_MAX:
             return False, fail("dividend_rate_range", max=company_mod.DIVIDEND_MAX)

@@ -5,7 +5,7 @@ from typing import Any, Optional
 from domain import horse as horse_mod
 from domain import p2p, teiai
 from domain import shop as shop_mod
-from domain.errors import Failure, fail
+from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import (
     IBankCashFlow,
     IBankruptPrepHook,
@@ -110,7 +110,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         price: int,
         hours: Optional[int] = None,
         now: Optional[float] = None,
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         """出品する。(成功か, Failure か出品の番号)。品・馬は、出品の間、預かる。"""
         now = self._now() if now is None else now
         if kind not in ("item", "horse") or mode not in ("fixed", "auction"):
@@ -180,7 +180,9 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (gid, user_id, kind, str(ref), qty, mode, price, now, end_at),
             )
-            return True, cur.lastrowid
+            lastrowid = cur.lastrowid
+            assert lastrowid is not None
+            return True, lastrowid
 
     def _p2p_give(self, guild_id: int, user_id: int, row: Any) -> None:
         if row["kind"] == "horse":
@@ -235,7 +237,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 (channel_id, message_id, listing_id, self._g()),
             )
 
-    def p2p_buy(self, buyer_id: int, listing_id: int, now: float) -> tuple[Any, ...]:
+    def p2p_buy(self, buyer_id: int, listing_id: int, now: float) -> Outcome[int]:
         """定価の出品を買う。(成功か, 理由か支払った額)。"""
         with self._db.tx():
             gid = self._g()
@@ -253,7 +255,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
             self._p2p_sell(gid, row, buyer_id, row["price"], now)
             return True, row["price"]
 
-    def p2p_bid(self, bidder_id: int, listing_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def p2p_bid(self, bidder_id: int, listing_id: int, amount: int, now: float) -> Outcome[float]:
         """競りに入札する。お金は、残高から預かる（抜かれたら、返る）。(成功か, Failure か新しい締切)。"""
         with self._db.tx():
             gid = self._g()
@@ -287,7 +289,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
             )
             return True, end_at
 
-    def p2p_cancel(self, user_id: int, listing_id: int, now: float) -> tuple[Any, ...]:
+    def p2p_cancel(self, user_id: int, listing_id: int, now: float) -> Outcome[str]:
         """自分の出品を取り消して、品・馬を戻す。競りは、入札が入ったら取り消せない。"""
         with self._db.tx():
             gid = self._g()

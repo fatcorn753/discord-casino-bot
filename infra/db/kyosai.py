@@ -7,7 +7,7 @@ teiai_bank の kyosai_* と trust_premium）。数字と考え方は domain/kyos
 from typing import Any, Optional
 
 from domain import kyosai, p2p
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.bridges import IBankruptPrepHook, IExcessLossSink, IGraceEnterHook
 from domain.ports.repos import IKyosaiRepo
 from infra.db.account import AccountCore
@@ -244,7 +244,7 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
                     events.append({**listed, "event": "listed"})
         return events
 
-    def kyosai_bid(self, user_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def kyosai_bid(self, user_id: int, amount: int, now: float) -> Outcome[dict[str, Any]]:
         """出ている競りに入札する（入札額は手元から預かり、前の最高値の人へ返す）。(成功か, Failure か競りの行)。"""
         with self._db.tx():
             gid = self._g()
@@ -300,7 +300,7 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
         )
         return kyosai_sum + market_sum
 
-    def kyosai_offer(self, seller: int, buyer: int, units: int, price: int, now: float) -> tuple[Any, ...]:
+    def kyosai_offer(self, seller: int, buyer: int, units: int, price: int, now: float) -> Outcome[int]:
         """口の譲渡を申し出る（相手が受けると成立）。(成功か, Failure か申し出の番号)。
 
         送金の抜け道（高値で譲って、あとで 0 で返す）をふさぐため、P2P と同じく、売り手の受け取りから手数料を引き、
@@ -326,9 +326,11 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
                 "INSERT INTO kyosai_offers (guild_id, seller, buyer, units, price, expires) VALUES (?, ?, ?, ?, ?, ?)",
                 (gid, seller, buyer, units, price, now + kyosai.OFFER_HOURS * 3600),
             )
-            return True, cur.lastrowid
+            lastrowid = cur.lastrowid
+            assert lastrowid is not None
+            return True, lastrowid
 
-    def kyosai_accept(self, buyer: int, offer_id: int, now: float) -> tuple[Any, ...]:
+    def kyosai_accept(self, buyer: int, offer_id: int, now: float) -> Outcome[dict[str, Any]]:
         """自分あての申し出を受ける。(成功か, Failure か申し出の行)。"""
         with self._db.tx():
             gid = self._g()
@@ -391,7 +393,7 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
             "SELECT * FROM kyosai_motions WHERE guild_id=? AND status='open' ORDER BY closes, id", (guild_id,)
         )
 
-    def kyosai_propose(self, user_id: int, premium: float, now: float) -> tuple[Any, ...]:
+    def kyosai_propose(self, user_id: int, premium: float, now: float) -> Outcome[dict[str, Any]]:
         """動議を出す。(成功か, Failure か動議の行)。
 
         通知の荒らしを防ぐため、口が MOTION_MIN_UNITS 以上の人だけが、1人 MOTION_MAX_OPEN_PER_USER 件まで、
@@ -424,7 +426,7 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
             )
             return True, {"id": motion_id, "proposer": user_id, "premium": premium, "closes": closes}
 
-    def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: Optional[int] = None) -> tuple[Any, ...]:
+    def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: Optional[int] = None) -> Outcome[int]:
         """投票中の動議に投票する（あとから変えられる）。番号を省けるのは、投票中が1件だけのとき。
 
         (成功か, Failure か動議の番号)。

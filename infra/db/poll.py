@@ -6,7 +6,7 @@
 from typing import Any, Optional
 
 from domain import poll
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.repos import IPollRepo
 from infra.db.account import AccountCore
 from infra.db.bank import BankRepo
@@ -46,7 +46,7 @@ class PollRepo(ScopedRepo, IPollRepo):
             "SELECT * FROM polls WHERE guild_id=? AND id=? AND status='open' AND closes>?", (guild_id, poll_id, now)
         )
 
-    def poll_create(self, creator: int, title: str, closes: float, channel_id: int, now: float) -> tuple[Any, ...]:
+    def poll_create(self, creator: int, title: str, closes: float, channel_id: int, now: float) -> Outcome[int]:
         """投票を作る。(成功か, 番号 か Failure)。"""
         title = title.strip()
         if not title or len(title) > poll.TITLE_MAX:
@@ -64,7 +64,9 @@ class PollRepo(ScopedRepo, IPollRepo):
                 "INSERT INTO polls (guild_id, creator, title, closes, channel_id) VALUES (?, ?, ?, ?, ?)",
                 (gid, creator, title, closes, channel_id),
             )
-            return True, cur.lastrowid
+            lastrowid = cur.lastrowid
+            assert lastrowid is not None
+            return True, lastrowid
 
     def poll_set_message(self, poll_id: int, channel_id: int, message_id: int) -> None:
         with self._db.tx():
@@ -77,7 +79,7 @@ class PollRepo(ScopedRepo, IPollRepo):
         with self._lock:
             return self._view_for(self._g(), poll_id)
 
-    def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> tuple[Any, ...]:
+    def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> Outcome[dict[str, Any]]:
         """1人1票。あとから変えられる。(成功か, 投票 か Failure)。"""
         with self._db.tx():
             gid = self._g()
@@ -88,9 +90,11 @@ class PollRepo(ScopedRepo, IPollRepo):
                 "ON CONFLICT(poll_id, user_id) DO UPDATE SET yes=excluded.yes",
                 (poll_id, user_id, int(yes)),
             )
-            return True, self._view_for(gid, poll_id)
+            view = self._view_for(gid, poll_id)
+            assert view is not None  # 直前に open を確認済み
+            return True, view
 
-    def poll_rig(self, user_id: int, poll_id: int, yes: int, no: int, now: float) -> tuple[Any, ...]:
+    def poll_rig(self, user_id: int, poll_id: int, yes: int, no: int, now: float) -> Outcome[dict[str, Any]]:
         """作った人だけが、RIG_COST を払って、表示する票数を yes・no に書き換えられる。代金は帝愛銀行の収入。
 
         (成功か, {"poll": 書き換え後, "before": (賛成, 反対)} か Failure)。あとから入る本物の票は、書き換えた数に足される。

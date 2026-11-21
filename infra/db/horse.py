@@ -5,7 +5,7 @@ from typing import Any, Optional
 from domain import horse as horse_mod
 from domain import shop as shop_mod
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.bridges import IBankCashFlow, IStatusReader
 from domain.ports.repos import IHorseRepo
 from domain.shop import CARROT, GOLD_CARROT, HORSE_VOUCHER
@@ -57,7 +57,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
         """馬1頭の評価額: 購入価格に、いま引退したときの引退金（成績が悪ければ引退費用）を足す。0 未満にはしない。"""
         return max(0, self.HORSE_PRICE + horse_mod.retire_value(races, wins, places))
 
-    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> tuple[Any, ...]:
+    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> Outcome[str | int]:
         """購入券を1枚使って、競走馬を迎える。(成功か, 理由か馬の番号)。ステータスは、全部 50 から始まる。"""
         ok, name = horse_mod.check_name(name)
         if not ok:
@@ -78,7 +78,9 @@ class HorseRepo(ScopedRepo, IHorseRepo):
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (gid, user_id, name, coat, silks, s["speed"], s["stamina"], s["power"], s["guts"], self._now()),
             )
-            return True, cur.lastrowid
+            lastrowid = cur.lastrowid
+            assert lastrowid is not None
+            return True, lastrowid
 
     def horse_list(self, user_id: int) -> list[dict[str, Any]]:
         with self._lock:
@@ -87,7 +89,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
     def horse_get(self, horse_id: int) -> Optional[dict[str, Any]]:
         return self.horse_get_for(self._g(), horse_id)
 
-    def horse_carrot(self, user_id: int, horse_id: int, src: str, dst: str) -> tuple[Any, ...]:
+    def horse_carrot(self, user_id: int, horse_id: int, src: str, dst: str) -> Outcome[dict[str, int]]:
         """にんじん1本で、ステータスを CARROT_POINTS 点、src から dst へ動かす。(成功か, 理由か新しいステータス)。"""
         with self._db.tx():
             gid = self._g()
@@ -105,7 +107,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             )
             return True, result
 
-    def horse_retire(self, user_id: int, horse_id: int) -> tuple[Any, ...]:
+    def horse_retire(self, user_id: int, horse_id: int) -> Outcome[int]:
         """馬を引退させる。成績に応じて、引退金をもらう（成績が悪いと、引退費用を払う）。(成功か, 理由かもらった額（払ったらマイナス）)。
 
         出走予定（申し込み中・発売中）の馬は、引退できない。引退した馬は、持ち馬から消える（owner_id=-2）。
@@ -138,7 +140,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             self._conn.execute("UPDATE horses SET owner_id=-2 WHERE id=?", (horse_id,))
             return True, value
 
-    def horse_set_style(self, user_id: int, horse_id: int, style: Optional[str]) -> tuple[Any, ...]:
+    def horse_set_style(self, user_id: int, horse_id: int, style: Optional[str]) -> Outcome[str]:
         """脚質を選ぶ（style=None で、ステータスからの自動判定に戻す）。(成功か, Failure | "")。"""
         if style is not None and style not in horse_mod.STYLE_NAMES:
             return False, fail("horse_select_style")
@@ -149,7 +151,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             self._conn.execute("UPDATE horses SET style=? WHERE id=?", (style, horse_id))
             return True, ""
 
-    def horse_gold_carrot(self, user_id: int, horse_id: int, first: str, second: str) -> tuple[Any, ...]:
+    def horse_gold_carrot(self, user_id: int, horse_id: int, first: str, second: str) -> Outcome[dict[str, int]]:
         """金にんじん1本で、first と second に5点ずつ足す（ステータスの合計が10点増える。1頭に GOLD_CARROT_MAX 本まで）。"""
         with self._db.tx():
             gid = self._g()

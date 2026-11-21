@@ -12,7 +12,7 @@ from domain import labor as labor_mod
 from domain import relics as relics_mod
 from domain import shop as shop_mod
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.bridges import IHouseAccount
 from domain.ports.repos import ILaborRepo
 from infra.db.account import AccountCore
@@ -332,7 +332,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         where = "AND day=?" if day else ""
         with self._lock:
             gid = self._g()
-            args: tuple[Any, ...] = (gid, day) if day else (gid,)
+            args: tuple[object, ...] = (gid, day) if day else (gid,)
             ranked = self._all(
                 f"SELECT user_id, {col} AS earned, clicks FROM labor WHERE guild_id=? {where} AND {col}>0 "
                 f"ORDER BY {col} DESC, clicks ASC, user_id ASC",
@@ -474,7 +474,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 "relics": relics,
             }
 
-    def labor_drink(self, user_id: int, now: float, day: str = "") -> tuple[Any, ...]:
+    def labor_drink(self, user_id: int, now: float, day: str = "") -> Outcome[str]:
         """栄養ドリンコを1本飲んで、疲労を DRINK_RECOVER 回復する。(ok, 理由) を返す。疲れていなければ、減らさない。"""
         with self._db.tx():
             gid = self._g()
@@ -489,7 +489,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             self._labor_save(gid, user_id, row)
             return True, ""
 
-    def labor_upgrade(self, user_id: int, tool: str, now: float, day: str = "") -> tuple[Any, ...]:
+    def labor_upgrade(self, user_id: int, tool: str, now: float, day: str = "") -> Outcome[str]:
         """工具を1段強化する（ペリカを払う）。(ok, Failure | "") を返す。"""
         if tool not in labor_mod.TOOLS:
             return False, fail("labor_unknown_tool")
@@ -507,7 +507,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             self._labor_save(gid, user_id, row)
             return True, ""
 
-    def labor_hire(self, user_id: int, kind: str, now: float, day: str = "") -> tuple[Any, ...]:
+    def labor_hire(self, user_id: int, kind: str, now: float, day: str = "") -> Outcome[str]:
         """作業員を1人雇う（契約料を払う。契約は CONTRACT_DAYS 日）。(ok, Failure | "") を返す。"""
         if kind not in labor_mod.WORKERS:
             return False, fail("labor_unknown_worker")
@@ -530,7 +530,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             self._labor_save(gid, user_id, row)
             return True, ""
 
-    def labor_dismiss(self, user_id: int, kind: str, now: float, day: str = "") -> tuple[Any, ...]:
+    def labor_dismiss(self, user_id: int, kind: str, now: float, day: str = "") -> Outcome[str]:
         """作業員を1人解雇する（契約料は戻らない）。契約がいちばん早く切れる人から。(ok, Failure | "") を返す。"""
         if kind not in labor_mod.WORKERS:
             return False, fail("labor_unknown_worker")
@@ -544,7 +544,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             self._conn.execute("DELETE FROM labor_workers WHERE id=?", (target["id"],))
             return True, ""
 
-    def labor_dorm(self, user_id: int, now: float, day: str = "") -> tuple[Any, ...]:
+    def labor_dorm(self, user_id: int, now: float, day: str = "") -> Outcome[str]:
         """寮を1段強化する（雇える人数が +1）。(ok, Failure | "") を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -562,7 +562,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             self._labor_save(gid, user_id, row)
             return True, ""
 
-    def labor_set_renew(self, user_id: int, on: bool, now: float, day: str = "") -> tuple[Any, ...]:
+    def labor_set_renew(self, user_id: int, on: bool, now: float, day: str = "") -> Outcome[str]:
         """契約の自動更新を、オン・オフにする。(ok, 理由) を返す。"""
         with self._db.tx():
             gid = self._g()

@@ -9,7 +9,7 @@
 from typing import Any, Optional
 
 from domain import loans as loans_mod
-from domain.errors import Failure, fail
+from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import IGraceReader, IStatusReader, NoOpGraceReader, NoOpStatusReader
 from domain.ports.contracts import LoanBook, LoanCredit
 from domain.ports.repos import ILoanRepo
@@ -136,7 +136,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
 
     def loan_request(
         self, borrower_id: int, principal: int, rate_tenths: int, term_days: int, channel_id: int, now: float
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         """借りたい人の募集を出す（貸す人はまだ決まっていない）。(成功か, Failure か貸付の番号) を返す。"""
         low = loans_mod.USER_MIN_PRINCIPAL
         if principal < low:
@@ -171,9 +171,11 @@ class LoanRepo(ScopedRepo, ILoanRepo):
                     channel_id,
                 ),
             )
-            return True, cur.lastrowid
+            lastrowid = cur.lastrowid
+            assert lastrowid is not None
+            return True, lastrowid
 
-    def loan_lend(self, loan_id: int, lender_id: int, now: float) -> tuple[Any, ...]:
+    def loan_lend(self, loan_id: int, lender_id: int, now: float) -> Outcome[str]:
         """募集に応じて貸す（早い者勝ち）。貸す人の残高から借りる人へ、その場でお金が移る。(成功か, 理由) を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -217,7 +219,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         term_days: int,
         channel_id: int,
         now: float,
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         """貸す提案を作る。(成功か, 理由か貸付の番号) を返す。"""
         low = loans_mod.USER_MIN_PRINCIPAL
         if lender_id == borrower_id:
@@ -260,7 +262,9 @@ class LoanRepo(ScopedRepo, ILoanRepo):
                     channel_id,
                 ),
             )
-            return True, cur.lastrowid
+            lastrowid = cur.lastrowid
+            assert lastrowid is not None
+            return True, lastrowid
 
     def loan_set_message(self, loan_id: int, message_id: int) -> None:
         with self._db.tx():
@@ -270,7 +274,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         with self._lock:
             return self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
 
-    def loan_accept(self, loan_id: int, user_id: int, now: float) -> tuple[Any, ...]:
+    def loan_accept(self, loan_id: int, user_id: int, now: float) -> Outcome[str]:
         """借りる人が承諾して、お金を受け取る。(成功か, 理由) を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -298,7 +302,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
             )
             return True, ""
 
-    def loan_decline(self, loan_id: int, user_id: int) -> tuple[Any, ...]:
+    def loan_decline(self, loan_id: int, user_id: int) -> Outcome[str]:
         """借りる人が断る。"""
         with self._db.tx():
             loan = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
@@ -309,7 +313,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
             self._conn.execute("UPDATE loans SET status='declined' WHERE id=?", (loan_id,))
             return True, ""
 
-    def loan_cancel(self, loan_id: int, user_id: int) -> tuple[Any, ...]:
+    def loan_cancel(self, loan_id: int, user_id: int) -> Outcome[str]:
         """貸す側が提案を取り下げる。"""
         with self._db.tx():
             loan = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
@@ -323,7 +327,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
             self._conn.execute("UPDATE loans SET status='cancelled' WHERE id=?", (loan_id,))
             return True, ""
 
-    def loan_repay(self, loan_id: int, user_id: int, amount: Optional[int], now: float) -> tuple[Any, ...]:
+    def loan_repay(self, loan_id: int, user_id: int, amount: Optional[int], now: float) -> Outcome[int]:
         """借りた人が返す。amount が None なら全額（残高の範囲で）。(成功か, Failure か返した額) を返す。"""
         with self._db.tx():
             gid = self._g()

@@ -6,7 +6,7 @@
 import random
 from typing import Any, Optional, cast
 
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.repos import IRaffleRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -34,7 +34,7 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
         ]
         return d
 
-    def raffle_open(self, host_id: int, fee: int, closes: float, channel_id: int) -> tuple[Any, ...]:
+    def raffle_open(self, host_id: int, fee: int, closes: float, channel_id: int) -> Outcome[str]:
         """抽選を始める。(成功か, 理由) を返す。募集中のものがあれば始められない。"""
         if fee < 1:
             return False, fail("raffle_min_fee")
@@ -60,7 +60,7 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
             if channel_id is not None:
                 self._conn.execute("UPDATE raffle SET channel_id=? WHERE id=?", (channel_id, raffle_id))
 
-    def raffle_join(self, user_id: int, now: float) -> tuple[Any, ...]:
+    def raffle_join(self, user_id: int, now: float) -> Outcome[str]:
         """参加する。参加費を先に引く。(成功か, 理由) を返す。"""
         with self._db.tx():
             gid = self._g()

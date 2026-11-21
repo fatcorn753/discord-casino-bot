@@ -148,7 +148,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         guild_id: int,
         user_id: int,
         prices: dict[str, Any],
-        add: Optional[tuple[Any, ...]] = None,
+        add: Optional[tuple[str, str, float, float]] = None,
         drop_collateral: float = 0.0,
     ) -> MarginStatus:
         """口座の維持率。add=(side, 銘柄, 建玉額, 預ける担保) を足した場合、drop_collateral を担保から引いた場合の仮の値も出せる。"""
