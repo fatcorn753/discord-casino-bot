@@ -418,7 +418,9 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                 notional = units * spot / market_mod.UNIT
                 sign = -1 if side == "long" else 1  # 買い建ては下へ、空売りは上へ動くと損
 
-                def broken(move: float) -> bool:
+                def broken(
+                    move: float, uid: int = uid, symbol: str = symbol, spot: float = spot, sign: int = sign
+                ) -> bool:
                     status = self._margin_status_locked_for(gid, uid, {**prices, symbol: spot * (1 + sign * move)})
                     return status["ratio"] is not None and status["ratio"] < market_mod.LOSSCUT_RATIO
 
