@@ -1,19 +1,36 @@
 """ショップ・競売・P2P・クイズ・抽選・地下作業・エスクローのリポジトリポート契約。"""
 
 import random
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Literal, Optional, overload
 
 from domain.errors import Outcome
 from domain.ports.contracts import (
+    AuctionListing,
+    CompanyBankrupt,
+    CompanyShipResult,
+    CompanyView,
+    LaborClick,
     LaborClickHourRow,
+    LaborCollectDetail,
     LaborFindSummary,
+    LaborState,
+    LaborTop,
     ListingRow,
     P2PMine,
+    PollRigResult,
     PollView,
+    ProfileView,
     QuizAdminView,
+    QuizAnswerResult,
+    QuizImportItem,
+    QuizSettleRow,
     QuizView,
     RaffleResult,
     RaffleView,
+    ShopStockInfo,
+    StakeHolding,
+    StakeInvestResult,
+    TeiaiMarketListing,
 )
 from domain.ports.repos.base import IGuildScopedRepo
 
@@ -51,7 +68,7 @@ class IPollRepo(IGuildScopedRepo):
     def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> Outcome[PollView]:
         raise NotImplementedError
 
-    def poll_rig(self, user_id: int, poll_id: int, yes: int, no: int, now: float) -> Outcome[dict[str, Any]]:
+    def poll_rig(self, user_id: int, poll_id: int, yes: int, no: int, now: float) -> Outcome[PollRigResult]:
         raise NotImplementedError
 
     def poll_close_due(self, now: float) -> list[PollView]:
@@ -61,7 +78,7 @@ class IPollRepo(IGuildScopedRepo):
 class IShopRepo(IGuildScopedRepo):
     SLOTS: tuple[str, ...]
 
-    def shop_stock(self, user_id: int, item_id: str, now: float) -> Optional[dict[str, Any]]:
+    def shop_stock(self, user_id: int, item_id: str, now: float) -> Optional[ShopStockInfo]:
         raise NotImplementedError
 
     def purchase(
@@ -79,7 +96,7 @@ class IShopRepo(IGuildScopedRepo):
     def inventory(self, user_id: int) -> dict[str, int]:
         raise NotImplementedError
 
-    def get_profile(self, user_id: int, raw: bool = False) -> dict[str, Any]:
+    def get_profile(self, user_id: int, raw: bool = False) -> ProfileView:
         raise NotImplementedError
 
     def equip(self, user_id: int, slot: str, item_id: Optional[str]) -> bool:
@@ -93,13 +110,13 @@ class IAuctionRepo(IGuildScopedRepo):
     def auction_price(self, item_id: str, listed_at: float, now: float) -> int:
         raise NotImplementedError
 
-    def auction_list(self, now: float) -> list[dict[str, Any]]:
+    def auction_list(self, now: float) -> list[AuctionListing]:
         raise NotImplementedError
 
     def auction_buy(self, user_id: int, item_id: str, qty: int = 1, now: Optional[float] = None) -> "PurchaseResult":
         raise NotImplementedError
 
-    def market_list(self, now: float, rng: Optional[random.Random] = None) -> list[dict[str, Any]]:
+    def market_list(self, now: float, rng: Optional[random.Random] = None) -> list[TeiaiMarketListing]:
         raise NotImplementedError
 
     def market_buy(
@@ -161,7 +178,7 @@ class IQuizAdminRepo(IGuildScopedRepo):
     ) -> int:
         raise NotImplementedError
 
-    def quiz_add_many(self, items: list[dict[str, Any]], now: float, creator_name: str = "") -> list[int]:
+    def quiz_add_many(self, items: list[QuizImportItem], now: float, creator_name: str = "") -> list[int]:
         raise NotImplementedError
 
     def quiz_existing_questions(self) -> set[str]:
@@ -183,7 +200,7 @@ class IQuizPlayRepo(IGuildScopedRepo):
     def quiz_next(self, user_id: int, now: float) -> tuple[Optional[QuizView], int]:
         raise NotImplementedError
 
-    def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> Outcome[dict[str, Any]]:
+    def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> Outcome[QuizAnswerResult]:
         raise NotImplementedError
 
     def quiz_post(
@@ -208,10 +225,10 @@ class IQuizPlayRepo(IGuildScopedRepo):
     def quiz_set_message(self, quiz_id: int, message_id: int) -> None:
         raise NotImplementedError
 
-    def quiz_settle(self, now: float) -> list[dict[str, Any]]:
+    def quiz_settle(self, now: float) -> list[QuizSettleRow]:
         raise NotImplementedError
 
-    def quiz_withdraw(self, user_id: int, quiz_id: int, now: float) -> Optional[dict[str, Any]]:
+    def quiz_withdraw(self, user_id: int, quiz_id: int, now: float) -> Optional[QuizSettleRow]:
         raise NotImplementedError
 
 
@@ -226,21 +243,25 @@ class ILaborRepo(IGuildScopedRepo):
     def labor_finds(self, user_id: int, limit: int = 6) -> list[LaborFindSummary]:
         raise NotImplementedError
 
-    def labor_state(self, user_id: int, now: float, day: str = "") -> dict[str, Any]:
+    def labor_state(self, user_id: int, now: float, day: str = "") -> LaborState:
         raise NotImplementedError
 
-    def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> dict[str, Any]:
+    def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> LaborTop:
         raise NotImplementedError
 
     def labor_click(
         self, user_id: int, now: float, day: str = "", rng: Optional[random.Random] = None
-    ) -> dict[str, Any]:
+    ) -> LaborClick:
         raise NotImplementedError
 
     def labor_click_hours(self, user_id: int, since: float) -> list[LaborClickHourRow]:
         raise NotImplementedError
 
-    def labor_collect(self, user_id: int, now: float, day: str = "", detail: bool = False) -> int | dict[str, Any]:
+    @overload
+    def labor_collect(self, user_id: int, now: float, day: str = "", detail: Literal[False] = False) -> int: ...
+    @overload
+    def labor_collect(self, user_id: int, now: float, day: str = "", detail: Literal[True] = ...) -> LaborCollectDetail: ...
+    def labor_collect(self, user_id: int, now: float, day: str = "", detail: bool = False) -> int | LaborCollectDetail:
         raise NotImplementedError
 
     def labor_drink(self, user_id: int, now: float, day: str = "") -> Outcome[str]:
@@ -324,10 +345,10 @@ class IP2PRepo(IGuildScopedRepo):
 
 
 class ICompanyRepo(IGuildScopedRepo):
-    def company_get(self, user_id: int, now: float) -> Optional[dict[str, Any]]:
+    def company_get(self, user_id: int, now: float) -> Optional[CompanyView]:
         raise NotImplementedError
 
-    def company_found(self, user_id: int, name: str, kind: str, now: float) -> Outcome[dict[str, Any]]:
+    def company_found(self, user_id: int, name: str, kind: str, now: float) -> Outcome[CompanyView]:
         raise NotImplementedError
 
     def company_invest(self, user_id: int, amount: int, now: float) -> Outcome[int]:
@@ -336,7 +357,7 @@ class ICompanyRepo(IGuildScopedRepo):
     def company_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> Outcome[int]:
         raise NotImplementedError
 
-    def company_ship(self, user_id: int, now: float) -> Outcome[dict[str, Any]]:
+    def company_ship(self, user_id: int, now: float) -> Outcome[CompanyShipResult]:
         raise NotImplementedError
 
     def company_upgrade(self, user_id: int, now: float) -> Outcome[int]:
@@ -345,14 +366,14 @@ class ICompanyRepo(IGuildScopedRepo):
     def company_change_kind(self, user_id: int, kind: str, now: float) -> Outcome[str]:
         raise NotImplementedError
 
-    def stake_invest(self, investor_id: int, owner_id: int, amount: int, now: float) -> Outcome[dict[str, Any]]:
+    def stake_invest(self, investor_id: int, owner_id: int, amount: int, now: float) -> Outcome[StakeInvestResult]:
         raise NotImplementedError
 
-    def stake_holdings(self, investor_id: int, now: float) -> list[dict[str, Any]]:
+    def stake_holdings(self, investor_id: int, now: float) -> list[StakeHolding]:
         raise NotImplementedError
 
     def company_set_dividend(self, user_id: int, rate: float, now: float) -> Outcome[float]:
         raise NotImplementedError
 
-    def company_settle_all(self, now: float) -> list[dict[str, Any]]:
+    def company_settle_all(self, now: float) -> list[CompanyBankrupt]:
         raise NotImplementedError

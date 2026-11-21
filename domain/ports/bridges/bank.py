@@ -194,7 +194,7 @@ class IBankruptExecutor:
 
     def bankrupt_for(
         self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[BankruptResult]:
         raise NotImplementedError
 
 
@@ -203,5 +203,5 @@ class NoOpBankruptExecutor(IBankruptExecutor):
 
     def bankrupt_for(
         self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[BankruptResult]:
         return False, fail("unavailable")
