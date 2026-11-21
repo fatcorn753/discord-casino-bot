@@ -182,7 +182,7 @@ class CasinoService:
             jackpot_pool=pool,
         )
 
-    def _draw_jackpot(self, escrow_repo: Any, user_id: int, bet: int) -> tuple[int, int]:
+    def _draw_jackpot(self, escrow_repo: IEscrowRepo, user_id: int, bet: int) -> tuple[int, int]:
         """共有ジャックポットの抽選。(当てた額, 抽選のあとの積み立て)。失敗しても、精算そのものは済んでいる。"""
         try:
             pool = escrow_repo.jackpot_pool()
