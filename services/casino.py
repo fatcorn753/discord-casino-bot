@@ -14,6 +14,7 @@ from domain.games import jackpot
 from domain.games.pachinko import SetResult
 from domain.games.rtplevel import DEFAULT_RTP_POLICY, IRtpPolicy
 from domain.ports.clock import IClock
+from domain.ports.contracts import PlayRecord
 from domain.ports.repos import (
     IEscrowRepo,
     IEventRepo,
@@ -48,7 +49,7 @@ class SettleGameResult:
     event_bonus: int = 0
     rtp_shift: int = 0
     notices: tuple[Notice, ...] = ()
-    events: dict[str, Any] | None = None
+    events: Optional[PlayRecord] = None
     jackpot_won: int = 0  # 共有ジャックポットを当てた額（当たらなければ 0）
     jackpot_pool: int = 0  # 精算のあとの、ジャックポットの積み立て
 
@@ -163,7 +164,7 @@ class CasinoService:
             return SettleGameResult(duplicate=True, event_bonus=event_bonus, rtp_shift=rtp_shift)
         net, penalty_taken, insured_refund = result
         notices = tuple(notice_repo.take_notices(user_id))
-        ev_result: dict[str, Any] = {}
+        ev_result: Optional[PlayRecord] = None
         try:
             ev_result = record_repo.record_play(user_id, game, bet, net, current_now.date(), tags)
         except Exception:

@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
 from domain.ports import get_catalogs
+from domain.ports.contracts import LaborClickReport
 
 _CFG = get_catalogs().labor()
 
@@ -386,7 +387,7 @@ def auto_click_suspected(hour_rows: Sequence[Mapping[str, Any]], current_hour: i
     return all(h in by_hour and is_mechanical_hour(by_hour[h]) for h in watch)
 
 
-def click_report(hours: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def click_report(hours: Sequence[Mapping[str, Any]]) -> LaborClickReport:
     """1時間ごとの記録 [{hour, clicks, pay, gaps, sum_gap, sum_gap2, min_gap}]（古い順）を、画面用に集計する。
 
     {clicks, pay, active_hours（押した時間の数）, longest_run（休まず押し続けた連続の時間数）, rows: [{hour, clicks, pay, mean_gap, cv, min_gap}]}。

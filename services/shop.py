@@ -1,13 +1,23 @@
 """ショップ・帝愛の競売・装備・称号のアプリケーションサービス。"""
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from domain import shop, teiai
 from domain.earnings import MemoInfo
 from domain.errors import Outcome
 from domain.ports.clock import IClock
-from domain.ports.contracts import AuctionHorseRow, ListingRow
+from domain.ports.contracts import (
+    AuctionHorseRow,
+    AuctionListing,
+    AuctionSnapshot,
+    CatalogSnapshot,
+    InsiderStock,
+    ListingRow,
+    ProfileView,
+    ShopStockInfo,
+    TeiaiMarketListing,
+)
 from domain.ports.repos import (
     IAuctionRepo,
     IDebtRepo,
@@ -18,14 +28,14 @@ from domain.ports.repos import (
     IShopRepo,
     IWalletRepo,
 )
-from domain.types import CONSUMABLE_EFFECTS, MarketPurchase
+from domain.types import CONSUMABLE_EFFECTS, MarketPurchase, PurchaseResult
 
 
 @dataclass(frozen=True)
 class BuyItemPrecheck:
     ok: bool
     status: str = ""
-    stock: Optional[dict[str, Any]] = None
+    stock: Optional[ShopStockInfo] = None
     balance: int = 0
     total: int = 0
 
@@ -59,10 +69,10 @@ class ShopService:
         me = self._wallet.for_guild(guild_id).peek_stats(user_id)
         return me["balance"] if me else 0
 
-    def stocks_for_items(self, guild_id: int, user_id: int, items: list[shop.Item]) -> dict[str, dict[str, Any]]:
+    def stocks_for_items(self, guild_id: int, user_id: int, items: list[shop.Item]) -> dict[str, ShopStockInfo]:
         repo = self._shop.for_guild(guild_id)
         now = self._clock.now_ts()
-        out: dict[str, dict[str, Any]] = {}
+        out: dict[str, ShopStockInfo] = {}
         for item in items:
             if item.id in shop.STOCK_RULES:
                 st = repo.shop_stock(user_id, item.id, now)
@@ -90,7 +100,7 @@ class ShopService:
             return None
         return int(repo.get_profile(user_id)[CONSUMABLE_EFFECTS[item_id]])
 
-    def catalog_snapshot(self, guild_id: int, user_id: int, tab: str, items: list[shop.Item]) -> dict[str, Any]:
+    def catalog_snapshot(self, guild_id: int, user_id: int, tab: str, items: list[shop.Item]) -> CatalogSnapshot:
         """カタログ画面描画・選択肢構築用のスナップショットを 1 回の取得で組む。"""
         inv = self._shop.for_guild(guild_id).inventory(user_id)
         balance = self.peek_balance(guild_id, user_id)
@@ -113,7 +123,7 @@ class ShopService:
         mode: Optional[str],
         order: str,
         limit: int,
-    ) -> dict[str, Any]:
+    ) -> AuctionSnapshot:
         """競売画面描画・選択肢構築用のスナップショット（二重クエリ防止）。"""
         now = self._clock.now_ts()
         listed = self._auction.for_guild(guild_id).auction_list(now)
@@ -139,7 +149,8 @@ class ShopService:
         }
 
     def equipped_title(self, guild_id: int, user_id: int) -> Optional[str]:
-        item = shop.BY_ID.get(self._shop.for_guild(guild_id).get_profile(user_id)["title"])
+        title = self._shop.for_guild(guild_id).get_profile(user_id)["title"]
+        item = shop.BY_ID.get(title) if title is not None else None
         return item.name if item else None
 
     def nick_tag(self, guild_id: int, user_id: int) -> Optional[str]:
@@ -155,13 +166,13 @@ class ShopService:
         )
 
     # ------------------------------ 買う・身につける（Cog から使う） ------------------------------ #
-    def inventory(self, guild_id: int, user_id: int) -> dict[str, Any]:
+    def inventory(self, guild_id: int, user_id: int) -> dict[str, int]:
         return self._shop.for_guild(guild_id).inventory(user_id)
 
-    def profile(self, guild_id: int, user_id: int) -> dict[str, Any]:
+    def profile(self, guild_id: int, user_id: int) -> ProfileView:
         return self._shop.for_guild(guild_id).get_profile(user_id)
 
-    def purchase(self, guild_id: int, user_id: int, item: shop.Item, qty: int) -> Any:
+    def purchase(self, guild_id: int, user_id: int, item: shop.Item, qty: int) -> PurchaseResult:
         return self._shop.for_guild(guild_id).purchase(
             user_id, item.id, shop.label(item), item.price, item.unique, qty=qty, now=self._clock.now_ts()
         )
@@ -170,14 +181,14 @@ class ShopService:
         """slot に item_id を身につける（None なら外す）。"""
         return self._shop.for_guild(guild_id).equip(user_id, slot, item_id)
 
-    def auction_list(self, guild_id: int) -> list[dict[str, Any]]:
+    def auction_list(self, guild_id: int) -> list[AuctionListing]:
         return self._auction.for_guild(guild_id).auction_list(self._clock.now_ts())
 
-    def auction_buy(self, guild_id: int, user_id: int, item_id: str, qty: int) -> Any:
+    def auction_buy(self, guild_id: int, user_id: int, item_id: str, qty: int) -> PurchaseResult:
         return self._auction.for_guild(guild_id).auction_buy(user_id, item_id, qty, self._clock.now_ts())
 
     # ---- 帝愛の出品（#72） ----
-    def market_list(self, guild_id: int) -> list[dict[str, Any]]:
+    def market_list(self, guild_id: int) -> list[TeiaiMarketListing]:
         return self._auction.for_guild(guild_id).market_list(self._clock.now_ts())
 
     def market_buy(self, guild_id: int, user_id: int, listing_id: int, qty: int) -> MarketPurchase:
@@ -186,10 +197,10 @@ class ShopService:
     def auction_horses(self, guild_id: int) -> list[AuctionHorseRow]:
         return self._horses.for_guild(guild_id).auction_horses(self._clock.now_ts())
 
-    def auction_buy_horse(self, guild_id: int, user_id: int, horse_id: int) -> Any:
+    def auction_buy_horse(self, guild_id: int, user_id: int, horse_id: int) -> PurchaseResult:
         return self._horses.for_guild(guild_id).auction_buy_horse(user_id, horse_id, self._clock.now_ts())
 
-    def insider_stock(self, guild_id: int) -> Optional[dict[str, Any]]:
+    def insider_stock(self, guild_id: int) -> Optional[InsiderStock]:
         return self._earnings.for_guild(guild_id).insider_stock(self._clock.now_ts())
 
     def insider_buy(self, guild_id: int, user_id: int) -> Outcome[MemoInfo]:

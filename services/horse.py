@@ -2,12 +2,19 @@
 
 import datetime
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Optional
 
 from domain import horse as horse_mod
 from domain.errors import Outcome
 from domain.ports.clock import IClock
-from domain.ports.contracts import HorseRow, RaceBetRow, RaceEntryRow, RaceRow
+from domain.ports.contracts import (
+    HorseRow,
+    RaceBetResult,
+    RaceBetRow,
+    RaceEntryRow,
+    RaceRow,
+    RaceRunResult,
+)
 from domain.ports.repos import IHorseRepo, IRaceRepo, IShopRepo
 
 
@@ -44,12 +51,12 @@ class HorseDesk:
 
     def race_bet(
         self, user_id: int, race_id: int, kind: str, lane: int | list[int], stake: int, now: float
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[RaceBetResult]:
         return self._races.race_bet(user_id, race_id, kind, lane, stake, now)
 
     def race_bet_many(
         self, user_id: int, race_id: int, kind: str, lanes: list[int], stake: int, now: float
-    ) -> Outcome[list[dict[str, Any]]]:
+    ) -> Outcome[list[RaceBetResult]]:
         return self._races.race_bet_many(user_id, race_id, kind, lanes, stake, now)
 
     def race_set_message(self, race_id: int, channel_id: int, message_id: int) -> None:
@@ -86,7 +93,7 @@ class HorseDesk:
     def horse_retire(self, user_id: int, horse_id: int) -> Outcome[int]:
         return self._horses.horse_retire(user_id, horse_id)
 
-    def is_major_race(self, race: Mapping[str, Any]) -> bool:
+    def is_major_race(self, race: RaceRow) -> bool:
         """重賞か（発走時刻を、設定の時差の現地時間で見る）。"""
         return horse_mod.is_major_race(race, self.clock.offset_hours())
 
@@ -96,7 +103,7 @@ class HorseDesk:
             ts, datetime.timezone(datetime.timedelta(hours=self.clock.offset_hours()))
         )
 
-    def inventory(self, user_id: int) -> dict[str, Any]:
+    def inventory(self, user_id: int) -> dict[str, int]:
         """にんじんなど、馬に使う持ち物を見るための持ち物一覧。"""
         return self._shop.inventory(user_id)
 
@@ -143,6 +150,6 @@ class HorseService:
         races.race_set_odds(race_id, horse_mod.make_all_odds(field["runners"], field["track"]))
         return races.race_get(race_id)
 
-    def run_race(self, guild_id: int, race_id: int) -> Optional[dict[str, Any]]:
+    def run_race(self, guild_id: int, race_id: int) -> Optional[RaceRunResult]:
         """レースを実行して賞金・馬券を精算し、演出結果辞書を返す。"""
         return self._races.for_guild(guild_id).race_run(race_id, self.clock.offset_hours())

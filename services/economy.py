@@ -2,12 +2,19 @@
 
 import datetime
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from domain import missions as missions_mod
 from domain.earnings import MemoInfo
 from domain.ports.clock import IClock
-from domain.ports.contracts import RankEntry
+from domain.ports.contracts import (
+    LedgerEntry,
+    PlaySummary,
+    ProfileView,
+    RankEntry,
+    UserRow,
+    WeeklyAward,
+)
 from domain.ports.repos import (
     IBondRepo,
     ICryptoRepo,
@@ -24,15 +31,15 @@ from domain.types import INITIAL_BALANCE, DailyResult, TransferResult
 class BalanceCard:
     """`/ペリカ 残高` に出す値（表示の組み立ては cogs/economy/embeds.py）。"""
 
-    stats: dict[str, Any]
+    stats: UserRow
     rank: Optional[RankEntry]
     display_status: str
-    profile: dict[str, Any]
+    profile: ProfileView
     has_frozen_equipment: bool  # 差し押さえ中の称号・カード・演出を、元は装備していたか
-    inventory: dict[str, Any]
+    inventory: dict[str, int]
     crypto_held: int
     bonds_held: int
-    play: dict[str, Any]
+    play: PlaySummary
 
 
 @dataclass(frozen=True)
@@ -83,7 +90,7 @@ class EconomyService:
         stats = self._wallet.for_guild(guild_id).peek_stats(user_id)
         return stats["balance"] if stats else INITIAL_BALANCE
 
-    def history(self, guild_id: int, user_id: int, limit: int) -> list[dict[str, Any]]:
+    def history(self, guild_id: int, user_id: int, limit: int) -> list[LedgerEntry]:
         return self._wallet.for_guild(guild_id).history(user_id, limit)
 
     def balance_card(self, guild_id: int, viewer_id: int, target_id: int) -> Optional[BalanceCard]:
@@ -153,7 +160,7 @@ class EconomyService:
     def set_weekly_announced(self, guild_id: int, week: str) -> None:
         self._records.for_guild(guild_id).set_weekly_announced(week)
 
-    def weekly_award(self, guild_id: int, week: str) -> Optional[dict[str, Any]]:
+    def weekly_award(self, guild_id: int, week: str) -> Optional[WeeklyAward]:
         """その週の王者に限定称号を贈り、順位を返す（発表済みなら None）。"""
         return self._records.for_guild(guild_id).weekly_award(week)
 

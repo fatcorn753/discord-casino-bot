@@ -1,10 +1,10 @@
 """投票（/投票）のアプリケーションサービス。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain.errors import Outcome
 from domain.ports.clock import IClock
-from domain.ports.contracts import PollView
+from domain.ports.contracts import PollRigResult, PollView
 from domain.ports.repos import IPollRepo
 
 
@@ -31,7 +31,7 @@ class PollService:
     def vote(self, guild_id: int, user_id: int, poll_id: int, yes: bool) -> Outcome[PollView]:
         return self._polls.for_guild(guild_id).poll_vote(user_id, poll_id, yes, self._now())
 
-    def rig(self, guild_id: int, user_id: int, poll_id: int, yes: int, no: int) -> Outcome[dict[str, Any]]:
+    def rig(self, guild_id: int, user_id: int, poll_id: int, yes: int, no: int) -> Outcome[PollRigResult]:
         return self._polls.for_guild(guild_id).poll_rig(user_id, poll_id, yes, no, self._now())
 
     def close_due(self, guild_id: int) -> list[PollView]:

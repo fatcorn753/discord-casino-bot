@@ -2,7 +2,8 @@
 
 import logging
 import random
-from typing import Any, Optional
+from collections.abc import Mapping
+from typing import Optional
 
 from domain import bonds, earnings, market, market_events
 from domain import options as opt
@@ -16,7 +17,9 @@ from domain.ports.contracts import (
     EarningsAnnouncement,
     EarningsAnnounceRow,
     EarningsRow,
+    HoldingsSnapshot,
     MarginPosition,
+    MarginStatus,
     MarketEventRow,
     OptionBuyResult,
     OptionRow,
@@ -33,6 +36,7 @@ from domain.ports.repos import (
     IMarketEventRepo,
     IOptionRepo,
 )
+from domain.types import CryptoResult
 
 _log = logging.getLogger(__name__)
 
@@ -133,7 +137,7 @@ class MarketService:
                 out.append((f"bond:{r['id']}", f"{k.emoji} {k.name} #{r['id']} 売却"))
         return out
 
-    def holdings_snapshot(self, guild_id: int, uid: int, rng: random.Random) -> dict[str, Any]:
+    def holdings_snapshot(self, guild_id: int, uid: int, rng: random.Random) -> HoldingsSnapshot:
         """保有画面表示用に満期債券・オプションを決済したうえで全保有スナップショットを返す。"""
         now = self.clock.now_ts()
         crypto_g = self._crypto.for_guild(guild_id)
@@ -240,10 +244,10 @@ class MarketService:
     def crypto_holding(self, guild_id: int, uid: int, symbol: str) -> SpotHolding:
         return self._crypto.for_guild(guild_id).crypto_holding(uid, symbol)
 
-    def crypto_buy(self, guild_id: int, uid: int, amount: int, price: float, symbol: str) -> Any:
+    def crypto_buy(self, guild_id: int, uid: int, amount: int, price: float, symbol: str) -> CryptoResult:
         return self._crypto.for_guild(guild_id).crypto_buy(uid, amount, price, symbol)
 
-    def crypto_sell(self, guild_id: int, uid: int, units: Optional[int], price: float, symbol: str) -> Any:
+    def crypto_sell(self, guild_id: int, uid: int, units: Optional[int], price: float, symbol: str) -> CryptoResult:
         return self._crypto.for_guild(guild_id).crypto_sell(uid, units, price, symbol)
 
     # ------------------------------ 信用取引 ------------------------------ #
@@ -252,15 +256,15 @@ class MarketService:
 
     def margin_open(
         self, guild_id: int, uid: int, side: str, units: int, price: float, leverage: int, symbol: str
-    ) -> Any:
+    ) -> CryptoResult:
         """side が "short" なら空売り、それ以外は信用買いを建てる。"""
         repo = self._margin.for_guild(guild_id)
         return (repo.short_open if side == "short" else repo.long_open)(uid, units, price, leverage, symbol)
 
-    def margin_close(self, guild_id: int, uid: int, side: str, units: Optional[int], price: float, symbol: str) -> Any:
+    def margin_close(self, guild_id: int, uid: int, side: str, units: Optional[int], price: float, symbol: str) -> CryptoResult:
         return self._margin.for_guild(guild_id).margin_close(uid, side, units, price, symbol)
 
-    def margin_status(self, guild_id: int, uid: int, prices: dict[str, float]) -> Any:
+    def margin_status(self, guild_id: int, uid: int, prices: Mapping[str, float]) -> MarginStatus:
         return self._margin.for_guild(guild_id).margin_status(uid, prices)
 
     # ------------------------------ オプション ------------------------------ #
