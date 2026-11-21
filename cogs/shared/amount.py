@@ -39,9 +39,7 @@ def optional_amount(raw: str) -> tuple[bool, Optional[int]]:
 
 async def reject_bad_amount(interaction: discord.Interaction) -> None:
     """金額の欄に数字以外が入っていたときの返事（Modal 共通）。"""
-    await interaction.response.send_message(
-        embed=ui.error_embed("金額が正しくありません", "半角の数字で入れてください。"), ephemeral=True
-    )
+    await ui.reply_error(interaction, "半角の数字で入れてください。", title="金額が正しくありません")
 
 
 class AmountModal(discord.ui.Modal):
