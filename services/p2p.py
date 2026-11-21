@@ -2,6 +2,7 @@
 
 from typing import Any, Optional
 
+from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.repos import IHorseRepo, IP2PRepo, IShopRepo, IWalletRepo
 
@@ -53,16 +54,16 @@ class P2PService:
         mode: str,
         price: int,
         hours: Optional[int],
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         return self._repo(guild_id).p2p_list(user_id, kind, ref, qty, mode, price, hours, self._clock.now_ts())
 
-    def buy(self, guild_id: int, user_id: int, listing_id: int) -> tuple[Any, ...]:
+    def buy(self, guild_id: int, user_id: int, listing_id: int) -> Outcome[int]:
         return self._repo(guild_id).p2p_buy(user_id, listing_id, self._clock.now_ts())
 
-    def bid(self, guild_id: int, user_id: int, listing_id: int, amount: int) -> tuple[Any, ...]:
+    def bid(self, guild_id: int, user_id: int, listing_id: int, amount: int) -> Outcome[float]:
         return self._repo(guild_id).p2p_bid(user_id, listing_id, amount, self._clock.now_ts())
 
-    def cancel(self, guild_id: int, user_id: int, listing_id: int) -> tuple[Any, ...]:
+    def cancel(self, guild_id: int, user_id: int, listing_id: int) -> Outcome[str]:
         return self._repo(guild_id).p2p_cancel(user_id, listing_id, self._clock.now_ts())
 
     def settle(self, guild_id: int) -> list[tuple[dict[str, Any], str]]:

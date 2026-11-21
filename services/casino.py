@@ -9,6 +9,7 @@ from typing import Any, Optional
 
 from domain import events as events_mod
 from domain import skins
+from domain.errors import Notice
 from domain.games import jackpot
 from domain.games.pachinko import SetResult
 from domain.games.rtplevel import DEFAULT_RTP_POLICY, IRtpPolicy
@@ -46,7 +47,7 @@ class SettleGameResult:
     insured_refund: int = 0
     event_bonus: int = 0
     rtp_shift: int = 0
-    notices: tuple[Any, ...] = ()
+    notices: tuple[Notice, ...] = ()
     events: dict[str, Any] | None = None
     jackpot_won: int = 0  # 共有ジャックポットを当てた額（当たらなければ 0）
     jackpot_pool: int = 0  # 精算のあとの、ジャックポットの積み立て
