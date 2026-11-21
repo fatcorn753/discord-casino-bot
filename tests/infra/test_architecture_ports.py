@@ -309,6 +309,33 @@ def test_production_code_has_no_tuple_any_ellipsis_annotation():
     assert not violations, "\n".join(violations)
 
 
+def test_ports_repos_no_dict_any():
+    """domain/ports/repos/ の型注釈に `dict[str, Any]`（大文字 Dict 含む）が 0 件である。
+
+    リポジトリポートの引数・戻り値の辞書契約は domain/ports/contracts/ の TypedDict か
+    正確な組み込み型で表す（ネストした list[dict[str, Any]] 等も検出する）。
+    """
+    violations: list[str] = []
+    for path in _iter_py("domain/ports/repos"):
+        rel = path.relative_to(ROOT)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        annotations: list[tuple[int, ast.expr]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.returns is not None:
+                    annotations.append((node.lineno, node.returns))
+                for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+                    if arg.annotation is not None:
+                        annotations.append((arg.lineno, arg.annotation))
+            elif isinstance(node, ast.AnnAssign) and node.annotation is not None:
+                annotations.append((node.lineno, node.annotation))
+        for lineno, ann in annotations:
+            text = ast.unparse(ann)
+            if "dict[str, Any]" in text or "Dict[str, Any]" in text:
+                violations.append(f"{rel}:{lineno} {text}")
+    assert not violations, "dict[str, Any] が残っています:\\n" + "\\n".join(violations)
+
+
 def test_cogs_have_no_untyped_cog_parameter():
     """`cog` 引数に型が無いと Pyright が Unknown 扱いにし、消えたメソッドの呼び出しを見逃す(#61)。"""
     found = []
