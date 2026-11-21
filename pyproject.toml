@@ -23,19 +23,19 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py311"
 extend-exclude = [".venv"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
-ignore = ["E501"]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "PIE"]
+ignore = ["E501", "UP045"]
 
 [tool.ruff.format]
 quote-style = "double"
 
 [tool.pyright]
 include = ["domain", "services", "infra", "cogs", "tests", "main.py", "manage.py"]
-pythonVersion = "3.12"
+pythonVersion = "3.11"
 executionEnvironments = [
   { root = "tests", extraPaths = ["."] },
 ]
