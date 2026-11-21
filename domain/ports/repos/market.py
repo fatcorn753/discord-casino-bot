@@ -6,10 +6,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from domain.errors import Outcome
 from domain.ports.bridges import (
     IMarginCollateralGuard,
-    IMarginRatioReader,
-    IMarketPriceReader,
     ISpotCollateralReader,
-    IValuationSource,
 )
 from domain.ports.contracts import (
     BondQuote,
@@ -38,7 +35,10 @@ if TYPE_CHECKING:
     from domain.types import CryptoResult
 
 
-class IMarketDataRepo(IGuildScopedRepo, IMarketPriceReader):
+class IMarketDataRepo(IGuildScopedRepo):
+    def latest_prices(self) -> dict[str, float]:
+        raise NotImplementedError
+
     def market_latest(self, symbol: str = "cs") -> Optional[PricePoint]:
         raise NotImplementedError
 
@@ -128,7 +128,10 @@ class IEarningsRepo(IGuildScopedRepo):
         raise NotImplementedError
 
 
-class ICryptoRepo(IGuildScopedRepo, ISpotCollateralReader, IValuationSource):
+class ICryptoRepo(IGuildScopedRepo, ISpotCollateralReader):
+    def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
+        raise NotImplementedError
+
     def crypto_holding(self, user_id: int, symbol: str = "cs") -> SpotHolding:
         raise NotImplementedError
 
@@ -148,7 +151,13 @@ class ICryptoRepo(IGuildScopedRepo, ISpotCollateralReader, IValuationSource):
         raise NotImplementedError
 
 
-class IMarginRepo(IGuildScopedRepo, IMarginCollateralGuard, IMarginRatioReader, IValuationSource):
+class IMarginRepo(IGuildScopedRepo, IMarginCollateralGuard):
+    def margin_ratio_for(self, guild_id: int, user_id: int) -> Optional[float]:
+        raise NotImplementedError
+
+    def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
+        raise NotImplementedError
+
     def margin_position(self, user_id: int, symbol: str, side: str) -> MarginPosition:
         raise NotImplementedError
 
@@ -203,7 +212,10 @@ class IMarginRepo(IGuildScopedRepo, IMarginCollateralGuard, IMarginRatioReader, 
         raise NotImplementedError
 
 
-class IBondRepo(IGuildScopedRepo, IValuationSource):
+class IBondRepo(IGuildScopedRepo):
+    def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
+        raise NotImplementedError
+
     def bond_buy(self, user_id: int, kind_key: str, amount: int, now: float) -> Outcome[str]:
         raise NotImplementedError
 
@@ -226,7 +238,10 @@ class IBondRepo(IGuildScopedRepo, IValuationSource):
         raise NotImplementedError
 
 
-class IOptionRepo(IGuildScopedRepo, IValuationSource):
+class IOptionRepo(IGuildScopedRepo):
+    def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
+        raise NotImplementedError
+
     def option_buy(
         self,
         user_id: int,

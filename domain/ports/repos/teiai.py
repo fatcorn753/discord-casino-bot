@@ -7,15 +7,11 @@ from domain.errors import Outcome
 from domain.ports.bridges import (
     IBankCashFlow,
     IBankCdsBridge,
-    IBankruptExecutor,
     IDebtLifecycleHook,
     IDebtOps,
-    IDebtRepayHook,
-    IGainsTaxCollector,
     IHouseAccount,
     IOverdueLoanCollector,
     IStatusReader,
-    IValuationSource,
 )
 from domain.ports.contracts import (
     BankStatus,
@@ -91,7 +87,13 @@ class ILoanRepo(IGuildScopedRepo, IOverdueLoanCollector):
         raise NotImplementedError
 
 
-class IBankRepo(IGuildScopedRepo, IBankCashFlow, IHouseAccount, IGainsTaxCollector, IBankCdsBridge, IValuationSource):
+class IBankRepo(IGuildScopedRepo, IBankCashFlow, IHouseAccount, IBankCdsBridge):
+    def charge_gains_tax_for(self, guild_id: int, user_id: int, profit: int, taxable: bool, what: str) -> int:
+        raise NotImplementedError
+
+    def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
+        raise NotImplementedError
+
     def deposit_of(self, user_id: int) -> int:
         raise NotImplementedError
 
@@ -142,10 +144,16 @@ class IDebtRepo(
     IGuildScopedRepo,
     IDebtLifecycleHook,
     IStatusReader,
-    IBankruptExecutor,
     IDebtOps,
-    IDebtRepayHook,
 ):
+    def bankrupt_for(
+        self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
+    ) -> Outcome[dict[str, Any]]:
+        raise NotImplementedError
+
+    def repay_all_of_for(self, guild_id: int, user_id: int, amount: int, label: str) -> int:
+        raise NotImplementedError
+
     def status(self, user_id: int, now: Optional[float] = None) -> str:
         raise NotImplementedError
 
