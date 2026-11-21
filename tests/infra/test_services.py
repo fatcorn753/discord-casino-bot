@@ -5,6 +5,7 @@
 """
 
 import datetime
+import random
 from typing import Any, Optional, Self, cast
 
 from domain import shop as shop_mod
@@ -183,7 +184,7 @@ class StubEarnings(IEarningsRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def earnings_memo(self, user_id: int, now: Optional[float] = None, rng: Any = None):
+    def earnings_memo(self, user_id: int, now: Optional[float] = None, rng: Optional[random.Random] = None):
         return None
 
 

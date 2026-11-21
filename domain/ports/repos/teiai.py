@@ -1,5 +1,6 @@
 """帝愛ファイナンス・銀行・個人間貸付のリポジトリポート契約。"""
 
+import random
 from typing import Any, Optional
 
 from domain.ports.bridges import (
@@ -105,7 +106,7 @@ class IBankRepo(IGuildScopedRepo, IBankCashFlow, IHouseAccount, IGainsTaxCollect
     def bank_trust_accrue(self, now: float) -> int:
         raise NotImplementedError
 
-    def bank_rf_tick(self, now: float, rng: Any = None) -> float:
+    def bank_rf_tick(self, now: float, rng: Optional[random.Random] = None) -> float:
         raise NotImplementedError
 
     def cds_quote(self, target_id: int, now: float) -> CdsQuote:
@@ -150,7 +151,7 @@ class IDebtRepo(
     def escape_left(self, user_id: int) -> int:
         raise NotImplementedError
 
-    def escape_attempt(self, user_id: int, now: float, rng: Any = None) -> tuple[Any, ...]:
+    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> tuple[Any, ...]:
         raise NotImplementedError
 
     def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> tuple[Any, ...]:

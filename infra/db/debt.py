@@ -6,7 +6,7 @@
 """
 
 import random
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from domain import market as market_mod
 from domain import shop as shop_mod
@@ -552,9 +552,9 @@ class DebtRepo(ScopedRepo, IDebtRepo):
             ).fetchone()
         return max(0, teiai.ESCAPE_MAX_TRIES - (row["escape_tries"] if row else 0))
 
-    def escape_attempt(self, user_id: int, now: float, rng: Any = None) -> tuple[Any, ...]:
+    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> tuple[Any, ...]:
         """海外逃亡。(成功か, 理由か結果の辞書) を返す。"""
-        rng = rng or random
+        rng = rng or cast("random.Random", random)
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, user_id)

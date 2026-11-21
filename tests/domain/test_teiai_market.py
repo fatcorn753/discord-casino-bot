@@ -27,10 +27,11 @@ def eco(tmp_path):
     return open_repositories(str(tmp_path / "t.db"))
 
 
-class Rng:
+class Rng(random.Random):
     """random() は決めた値を順に返す。choice() は先頭、uniform() は下限、randint() は下限を返す。"""
 
     def __init__(self, *values):
+        super().__init__()
         self.values = list(values)
 
     def random(self):
@@ -39,11 +40,11 @@ class Rng:
     def choice(self, seq):
         return seq[0]
 
-    def uniform(self, lo, hi):
-        return lo
+    def uniform(self, a, b):
+        return a
 
-    def randint(self, lo, hi):
-        return lo
+    def randint(self, a, b):
+        return a
 
 
 def _insert(eco, item_id, *, mode="fixed", qty=3, start=100, end=100, black=False, at=DAY, hours=6.0):

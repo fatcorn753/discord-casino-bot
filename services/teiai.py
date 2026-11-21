@@ -1,5 +1,6 @@
 """帝愛ファイナンス（借金・返済・自己破産・海外逃亡・帝愛銀行・CDS・種銭）のアプリケーションサービス。"""
 
+import random
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -124,7 +125,7 @@ class TeiaiService:
         """破産猶予の時間切れ（強制破産と、CDS の配当）。(user_id, 結果) の一覧。"""
         return self._bank.for_guild(guild_id).grace_expire(now)
 
-    def rf_tick(self, guild_id: int, now: float, rng: Any = None) -> float:
+    def rf_tick(self, guild_id: int, now: float, rng: Optional[random.Random] = None) -> float:
         """無リスク金利を、準備率に応じて進める（毎分。#18）。"""
         return self._bank.for_guild(guild_id).bank_rf_tick(now, rng)
 

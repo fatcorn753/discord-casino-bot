@@ -4,7 +4,7 @@
 """
 
 import random
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from domain.errors import fail
 from domain.ports.repos import IRaffleRepo
@@ -84,9 +84,9 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
             self._conn.execute("INSERT INTO raffle_entries (raffle_id, user_id) VALUES (?, ?)", (row["id"], user_id))
             return True, ""
 
-    def raffle_close(self, rng: Any = None, cancel: bool = False) -> Optional[dict[str, Any]]:
+    def raffle_close(self, rng: Optional[random.Random] = None, cancel: bool = False) -> Optional[dict[str, Any]]:
         """募集中の抽選を締める。参加者が2人以上なら1人を選んで集めた参加費の全額を渡し、足りない・中止なら全員に返金する。"""
-        rng = rng or random
+        rng = rng or cast("random.Random", random)
         with self._db.tx():
             gid = self._g()
             raffle = self._raffle_view(self._raffle_open_row(gid))

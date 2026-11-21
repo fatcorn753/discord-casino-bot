@@ -144,7 +144,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
     # ------------------------------------------------------------------ #
     # 帝愛の出品（#72）。期間限定で、帝愛がショップの品を出す（domain/teiai_market.py）
     # ------------------------------------------------------------------ #
-    def _market_plan_locked(self, gid: int, now: float, rng: Any) -> None:
+    def _market_plan_locked(self, gid: int, now: float, rng: random.Random) -> None:
         """その日の出品の計画を、まだ無ければ作る。計画は SystemRandom で決めるので、前もって分からない。"""
         day = tm.day_start(now)
         done = self._conn.execute("SELECT 1 FROM teiai_market_days WHERE guild_id=? AND day=?", (gid, day)).fetchone()
@@ -182,7 +182,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
             "expires_at": r["expires_at"],
         }
 
-    def market_list(self, now: float, rng: Any = None) -> list[dict[str, Any]]:
+    def market_list(self, now: float, rng: Optional[random.Random] = None) -> list[dict[str, Any]]:
         """いま出ている帝愛の出品（売り切れ・期限切れ・まだ出ていないものは除く）。期限の近い順。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():
@@ -196,7 +196,12 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
         return [self._market_row(r, now) for r in rows if r["item_id"] in shop_mod.BY_ID]
 
     def market_buy(
-        self, user_id: int, listing_id: int, qty: int = 1, now: Optional[float] = None, rng: Any = None
+        self,
+        user_id: int,
+        listing_id: int,
+        qty: int = 1,
+        now: Optional[float] = None,
+        rng: Optional[random.Random] = None,
     ) -> MarketPurchase:
         """帝愛の出品を買う。カタギだけ（差し押さえ品の競売と同じ）。闇市品は、買ったときに中身が決まる。"""
         now = self._now() if now is None else now

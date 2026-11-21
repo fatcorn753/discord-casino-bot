@@ -1,6 +1,7 @@
 """証券・債券・オプション市場のアプリケーションサービス（価格進行・集計・スナップショット）。"""
 
 import logging
+import random
 from typing import Any, Optional
 
 from domain import bonds, earnings, market, market_events
@@ -64,7 +65,7 @@ class MarketService:
                 out[sym.key] = hist[0][1]
         return out
 
-    def step_prices(self, earnings_results: list[Any], rng: Any) -> tuple[dict[str, float], int]:
+    def step_prices(self, earnings_results: list[Any], rng: random.Random) -> tuple[dict[str, float], int]:
         """全銘柄の価格を1ステップ進め、(新価格辞書, 有事フラグ) を返す。"""
         current = self.latest_prices()
         fair = {k: self._market.market_fair_get(k) or p for k, p in current.items()}
@@ -117,7 +118,7 @@ class MarketService:
                 out.append((f"bond:{r['id']}", f"{k.emoji} {k.name} #{r['id']} 売却"))
         return out
 
-    def holdings_snapshot(self, guild_id: int, uid: int, rng: Any) -> dict[str, Any]:
+    def holdings_snapshot(self, guild_id: int, uid: int, rng: random.Random) -> dict[str, Any]:
         """保有画面表示用に満期債券・オプションを決済したうえで全保有スナップショットを返す。"""
         now = self.clock.now_ts()
         crypto_g = self._crypto.for_guild(guild_id)
@@ -168,7 +169,7 @@ class MarketService:
         self._market.market_prune(before)
         self._market.prune_chart_posts(before)
 
-    def settle_maturities(self, guild_id: int, now: float, rng: Any) -> None:
+    def settle_maturities(self, guild_id: int, now: float, rng: random.Random) -> None:
         """満期の債券の入金・倒産抽選と、満期のオプションの決済。"""
         self._bonds.for_guild(guild_id).bond_settle(now, rng)
         self._options.for_guild(guild_id).option_settle(now)
@@ -286,7 +287,7 @@ class MarketService:
         return self._options.for_guild(guild_id).option_sell(uid, option_id, self.clock.now_ts())
 
     # ------------------------------ 債券 ------------------------------ #
-    def bond_settle(self, guild_id: int, now: float, rng: Any) -> None:
+    def bond_settle(self, guild_id: int, now: float, rng: random.Random) -> None:
         self._bonds.for_guild(guild_id).bond_settle(now, rng)
 
     def bond_buy(self, guild_id: int, uid: int, kind: str, amount: int, now: float) -> tuple[Any, ...]:

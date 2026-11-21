@@ -38,7 +38,7 @@ class MarketEventRepo(ScopedRepo, IMarketEventRepo):
         return out
 
     def event_step(
-        self, now: float, rng: Any = None, force: Optional[dict[str, Any]] = None
+        self, now: float, rng: Optional[random.Random] = None, force: Optional[dict[str, Any]] = None
     ) -> Optional[dict[str, Any]]:
         """1分ごとに呼ぶ。終わっていないイベントも、終わって COOLDOWN_MIN 分以内のものもなければ、確率で新しい予告を出す。出したらその行を返す。"""
         rng = rng or random.SystemRandom()

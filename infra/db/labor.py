@@ -6,7 +6,7 @@
 
 import json
 import random
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from domain import labor as labor_mod
 from domain import relics as relics_mod
@@ -82,7 +82,9 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         )
         return bool(cur.rowcount)
 
-    def _labor_row(self, guild_id: int, user_id: int, now: float, day: str, rng: Any = None) -> dict[str, Any]:
+    def _labor_row(
+        self, guild_id: int, user_id: int, now: float, day: str, rng: Optional[random.Random] = None
+    ) -> dict[str, Any]:
         """行を読む（無ければ作る）。日が変わっていたら、今日の稼ぎを 0 に戻し、疲労は時間で回復させる。呼び出し側のトランザクション内で使う。
 
         作業員の稼ぎと契約も、ここで決算する（稼ぎは pot に足し、契約が切れた人は、更新か退職）。
@@ -143,7 +145,13 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         ]
 
     def _idle_settle(
-        self, guild_id: int, user_id: int, row: dict[str, Any], now: float, buffs: dict[str, float], rng: Any = None
+        self,
+        guild_id: int,
+        user_id: int,
+        row: dict[str, Any],
+        now: float,
+        buffs: dict[str, float],
+        rng: Optional[random.Random] = None,
     ) -> None:
         """作業員の稼ぎを pot に足し、切れた契約を決算する（更新なら契約料を払い、払えなければ退職）。"""
         workers = self._workers_of(guild_id, user_id)
@@ -350,9 +358,11 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         )
         return {"rows": rows, "me": me}
 
-    def labor_click(self, user_id: int, now: float, day: str = "", rng: Any = None) -> dict[str, Any]:
+    def labor_click(
+        self, user_id: int, now: float, day: str = "", rng: Optional[random.Random] = None
+    ) -> dict[str, Any]:
         """「働く」を1回押す。{ok, reason, pay, crit（鉱脈ヒットか）, ore（手掘りの鉱石。無ければ None）, combo（コンボ達成か）, terrain（今日の地層）}。"""
-        rng = rng or random
+        rng = rng or cast("random.Random", random)
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, user_id)

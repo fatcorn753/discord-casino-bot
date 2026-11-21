@@ -1,5 +1,6 @@
 """ショップ・競売・P2P・クイズ・抽選・地下作業・エスクローのリポジトリポート契約。"""
 
+import random
 from typing import TYPE_CHECKING, Any, Optional
 
 from domain.ports.repos.base import IGuildScopedRepo
@@ -21,7 +22,7 @@ class IRaffleRepo(IGuildScopedRepo):
     def raffle_join(self, user_id: int, now: float) -> tuple[Any, ...]:
         raise NotImplementedError
 
-    def raffle_close(self, rng: Any = None, cancel: bool = False) -> Optional[dict[str, Any]]:
+    def raffle_close(self, rng: Optional[random.Random] = None, cancel: bool = False) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
 
@@ -86,11 +87,16 @@ class IAuctionRepo(IGuildScopedRepo):
     def auction_buy(self, user_id: int, item_id: str, qty: int = 1, now: Optional[float] = None) -> "PurchaseResult":
         raise NotImplementedError
 
-    def market_list(self, now: float, rng: Any = None) -> list[dict[str, Any]]:
+    def market_list(self, now: float, rng: Optional[random.Random] = None) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def market_buy(
-        self, user_id: int, listing_id: int, qty: int = 1, now: Optional[float] = None, rng: Any = None
+        self,
+        user_id: int,
+        listing_id: int,
+        qty: int = 1,
+        now: Optional[float] = None,
+        rng: Optional[random.Random] = None,
     ) -> "MarketPurchase":
         raise NotImplementedError
 
@@ -206,7 +212,9 @@ class ILaborRepo(IGuildScopedRepo):
     def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> dict[str, Any]:
         raise NotImplementedError
 
-    def labor_click(self, user_id: int, now: float, day: str = "", rng: Any = None) -> dict[str, Any]:
+    def labor_click(
+        self, user_id: int, now: float, day: str = "", rng: Optional[random.Random] = None
+    ) -> dict[str, Any]:
         raise NotImplementedError
 
     def labor_click_hours(self, user_id: int, since: float) -> list[Any]:

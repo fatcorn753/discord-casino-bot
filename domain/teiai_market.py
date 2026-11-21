@@ -8,8 +8,10 @@
 DB にも Discord にも触らない。乱数は呼び出し側から渡す。
 """
 
+import random
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from domain import shop as shop_mod
 from domain import teiai
@@ -19,7 +21,7 @@ SAME, WORSE, BETTER = "same", "worse", "better"
 AUCTION, FIXED = "auction", "fixed"
 
 
-def pool(listable: Any) -> list[shop_mod.Item]:
+def pool(listable: Callable[[str], bool]) -> list[shop_mod.Item]:
     """帝愛が出せる品。差し押さえ品の競売と同じ条件（限定品・コレクション・称号は出さない）。"""
     return [it for it in shop_mod.BY_ID.values() if listable(it.id)]
 
@@ -42,7 +44,7 @@ def day_start(now: float) -> float:
     return now - now % DAY
 
 
-def plan_day(day: float, rng: Any, items: list[shop_mod.Item]) -> list[Listing]:
+def plan_day(day: float, rng: random.Random, items: list[shop_mod.Item]) -> list[Listing]:
     """その日（day は UTC の0時の時刻）の出品の計画。時刻の早い順。"""
     if not items:
         return []
@@ -72,7 +74,7 @@ def price_at(start_price: int, end_price: int, listed_at: float, expires_at: flo
     return max(1, round(start_price + (end_price - start_price) * t))
 
 
-def reveal(item_id: str, rng: Any, items: list[shop_mod.Item]) -> tuple[str, str]:
+def reveal(item_id: str, rng: random.Random, items: list[shop_mod.Item]) -> tuple[str, str]:
     """闇市品を買ったときの、本当の中身。(品ID, SAME / WORSE / BETTER)。
 
     安い品・高い品は、同じ種類の中から選ぶ。同じ種類に無ければ、ほかの種類から。それも無ければ表示どおり。
@@ -92,7 +94,7 @@ def reveal(item_id: str, rng: Any, items: list[shop_mod.Item]) -> tuple[str, str
 
 
 def _neighbor(
-    shown: shop_mod.Item, outcome: str, items: list[shop_mod.Item], rng: Any, same_kind: bool
+    shown: shop_mod.Item, outcome: str, items: list[shop_mod.Item], rng: random.Random, same_kind: bool
 ) -> Optional[shop_mod.Item]:
     cands = [
         it

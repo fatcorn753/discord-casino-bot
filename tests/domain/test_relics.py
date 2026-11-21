@@ -58,7 +58,7 @@ def test_chance_round_keeps_the_average_exact():
 
 
 # ----------------------------- 効果 ----------------------------- #
-class _NoCrit:  # 鉱脈ヒットを起こさない（random() が 1.0 なら、しきい値を超えない）
+class _NoCrit(random.Random):  # 鉱脈ヒットを起こさない（random() が 1.0 なら、しきい値を超えない）
     def random(self):
         return 1.0
 

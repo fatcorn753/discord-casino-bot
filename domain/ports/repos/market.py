@@ -1,5 +1,6 @@
 """証券市場・現物・信用・債券・オプション・決算のリポジトリポート契約。"""
 
+import random
 from typing import TYPE_CHECKING, Any, Optional
 
 from domain.ports.bridges import (
@@ -74,13 +75,15 @@ class IMarketEventRepo(IGuildScopedRepo):
         raise NotImplementedError
 
     def event_step(
-        self, now: float, rng: Any = None, force: Optional[dict[str, Any]] = None
+        self, now: float, rng: Optional[random.Random] = None, force: Optional[dict[str, Any]] = None
     ) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
 
 class IEarningsRepo(IGuildScopedRepo):
-    def earnings_ensure(self, now: float, tz_hours: float, rng: Any = None) -> Optional[dict[str, Any]]:
+    def earnings_ensure(
+        self, now: float, tz_hours: float, rng: Optional[random.Random] = None
+    ) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
     def earnings_jumps(self, now: float, seconds: float) -> list[Any]:
@@ -95,13 +98,13 @@ class IEarningsRepo(IGuildScopedRepo):
     def earnings_release_due(self, now: float) -> list[Any]:
         raise NotImplementedError
 
-    def earnings_memo(self, user_id: int, now: float, rng: Any = None) -> Optional["MemoInfo"]:
+    def earnings_memo(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Optional["MemoInfo"]:
         raise NotImplementedError
 
     def insider_stock(self, now: float) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def insider_buy(self, user_id: int, now: float, rng: Any = None) -> tuple[Any, ...]:
+    def insider_buy(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> tuple[Any, ...]:
         raise NotImplementedError
 
 
@@ -190,7 +193,7 @@ class IBondRepo(IGuildScopedRepo, IValuationSource):
     def bond_list(self, user_id: int, recent: int = 5) -> HoldingBook:
         raise NotImplementedError
 
-    def bond_settle(self, now: float, rng: Any = None) -> list[Any]:
+    def bond_settle(self, now: float, rng: Optional[random.Random] = None) -> list[Any]:
         raise NotImplementedError
 
     def bond_price(self, row: dict[str, Any], now: float) -> int:
