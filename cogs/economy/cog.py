@@ -10,7 +10,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs.economy import boards, embeds
-from cogs.economy.boards import RankingView as RankingView  # noqa: F401
+from cogs.economy.boards import RankingView as RankingView
 from cogs.shared import ranking, ui
 from cogs.shared.amount import balance_choices
 from cogs.shared.bridges import DeferredShopTitleBridge, IShopTitleBridge

@@ -13,7 +13,9 @@ from typing import TYPE_CHECKING, Any, Optional
 import discord
 from discord.ext import commands, tasks
 
-from cogs.raffle.embeds import cancelled_embed, raffle_embed, result_embed  # noqa: F401  （result_embed はテストも参照）
+from cogs.raffle.embeds import cancelled_embed as cancelled_embed  # （result_embed はテストも参照）
+from cogs.raffle.embeds import raffle_embed as raffle_embed
+from cogs.raffle.embeds import result_embed as result_embed
 from cogs.raffle.views import JoinView
 from cogs.shared import approval_guard, logthrottle, ui
 from cogs.shared.announce import announce_channel

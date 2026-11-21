@@ -1,6 +1,6 @@
 """競馬の画面部品の集約ファサード（cards / betting / stable の再エクスポート）。"""
 
-import discord as discord  # noqa: F401
+import discord as discord
 
 from cogs.horse.betting import BetPanel, StakeModal
 from cogs.horse.cards import (
@@ -15,8 +15,8 @@ from cogs.horse.cards import (
     when,
 )
 from cogs.horse.stable import AppearanceView, GoldCarrotView, NameModal, RetireView, Stable, StyleView
-from cogs.shared.horse_display import bar as bar  # noqa: F401
-from cogs.shared.horse_display import stat_lines as stat_lines  # noqa: F401
+from cogs.shared.horse_display import bar as bar
+from cogs.shared.horse_display import stat_lines as stat_lines
 
 __all__ = [
     "MEDAL",

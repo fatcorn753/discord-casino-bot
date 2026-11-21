@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING, Any
 
 from discord.ext import commands, tasks
 
-from cogs.market.bond_embeds import KIND_CHOICES, describe_done, due_text  # noqa: F401
+from cogs.market.bond_embeds import KIND_CHOICES as KIND_CHOICES
+from cogs.market.bond_embeds import describe_done as describe_done
+from cogs.market.bond_embeds import due_text as due_text
 from cogs.shared.tasks import run_sync_for_allowed_guilds
 from domain.ports.repos import IGuildRepo
 from services.market import MarketService

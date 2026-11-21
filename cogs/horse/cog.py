@@ -21,7 +21,7 @@ from cogs.shared import approval_guard, logthrottle, ui
 from cogs.shared.announce import announce_channel
 from cogs.shared.bridges import BotBridges, IHorseAdminBridge, IHorseButtonBridge
 from cogs.shared.tasks import run_for_allowed_guilds
-from domain import horse as horse_mod  # noqa: F401
+from domain import horse as horse_mod
 from domain.ports.repos import IGuildRepo
 from services.horse import HorseDesk, HorseService
 

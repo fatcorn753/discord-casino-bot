@@ -14,21 +14,21 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from cogs.loan.embeds import (  # noqa: F401
-    borrower_note,
-    offer_embed,
-    request_embed,
-    state_embed,
-    terms_lines,
-    who,
+from cogs.loan.embeds import (  #
+    borrower_note as borrower_note,
 )
-from cogs.loan.views import (  # noqa: F401
-    LoanButton,
-    handle_button,
-    handle_lend,
-    offer_view,
-    request_view,
+from cogs.loan.embeds import offer_embed as offer_embed
+from cogs.loan.embeds import request_embed as request_embed
+from cogs.loan.embeds import state_embed as state_embed
+from cogs.loan.embeds import terms_lines as terms_lines
+from cogs.loan.embeds import who as who
+from cogs.loan.views import (  #
+    LoanButton as LoanButton,
 )
+from cogs.loan.views import handle_button as handle_button
+from cogs.loan.views import handle_lend as handle_lend
+from cogs.loan.views import offer_view as offer_view
+from cogs.loan.views import request_view as request_view
 from cogs.shared import logthrottle, ui
 from cogs.shared.amount import balance_choices
 from cogs.shared.announce import announce_channel

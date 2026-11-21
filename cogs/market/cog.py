@@ -20,7 +20,7 @@ from cogs.market.embeds import (
     summary_embed,
 )
 from cogs.market.views import HoldingsView, MarketView
-from cogs.market.views import OptionAmountModal as OptionAmountModal  # noqa: F401
+from cogs.market.views import OptionAmountModal as OptionAmountModal
 from cogs.shared import logthrottle, ui
 from cogs.shared.amount import balance_choices, own_balance, typed_amount
 from cogs.shared.announce import announce_channel

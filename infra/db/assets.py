@@ -13,21 +13,23 @@ from domain import labor as labor_mod
 from domain import shop
 from domain.ports.bridges import (
     AddAssetPart,
-    CompositeAssetCollector,  # noqa: F401
     IAssetCollector,
     IOverdueLoanCollector,
     IValuationSource,
 )
+from domain.ports.bridges import (
+    CompositeAssetCollector as CompositeAssetCollector,  #
+)
 from domain.ports.contracts import RankEntry
 from domain.ports.repos import IAssetRepo
 from domain.types import (
-    FIXED_KEYS as FIXED_KEYS,  # noqa: F401
+    FIXED_KEYS as FIXED_KEYS,  #
 )
 from domain.types import (
-    LIABILITY_KEYS as LIABILITY_KEYS,  # noqa: F401
+    LIABILITY_KEYS as LIABILITY_KEYS,  #
 )
 from domain.types import (
-    LIQUID_KEYS as LIQUID_KEYS,  # noqa: F401
+    LIQUID_KEYS as LIQUID_KEYS,  #
 )
 from domain.types import PART_KEYS
 from infra.db.base import EcoDb, ScopedRepo

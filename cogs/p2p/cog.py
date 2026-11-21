@@ -12,24 +12,24 @@ from typing import TYPE_CHECKING, Any, Optional
 import discord
 from discord.ext import commands, tasks
 
-from cogs.p2p.embeds import (  # noqa: F401
-    ENDED_TEXT,
-    detail_embed,
-    entry_text,
-    line_of,
-    post_embed,
-    price_text,
-    when,
+from cogs.p2p.embeds import (  #
+    ENDED_TEXT as ENDED_TEXT,
 )
-from cogs.p2p.views import (  # noqa: F401
-    BidModal,
-    DetailView,
-    ListingButton,
-    MineView,
-    SellModal,
-    SellView,
-    listing_view,
+from cogs.p2p.embeds import detail_embed as detail_embed
+from cogs.p2p.embeds import entry_text as entry_text
+from cogs.p2p.embeds import line_of as line_of
+from cogs.p2p.embeds import post_embed as post_embed
+from cogs.p2p.embeds import price_text as price_text
+from cogs.p2p.embeds import when as when
+from cogs.p2p.views import (  #
+    BidModal as BidModal,
 )
+from cogs.p2p.views import DetailView as DetailView
+from cogs.p2p.views import ListingButton as ListingButton
+from cogs.p2p.views import MineView as MineView
+from cogs.p2p.views import SellModal as SellModal
+from cogs.p2p.views import SellView as SellView
+from cogs.p2p.views import listing_view as listing_view
 from cogs.shared import approval_guard, logthrottle, ui
 from cogs.shared.announce import announce_channel
 from cogs.shared.bridges import BotBridges, IP2PListingBridge, IP2PNavigationBridge

@@ -135,7 +135,10 @@ def pair_variance(a: str, b: str, seconds: float, now: float = 0.0, events=()) -
     saa, sbb, sab = cov[ia][ia], cov[ib][ib], cov[ia][ib]
     lo, hi = market.EVENT_RANGE
     mean_sq = (hi**3 - lo**3) / (3 * (hi - lo))
-    scale = lambda k: min(market.EVENT_SCALE_MAX, market.BY_KEY[k].sigma / market.CS.sigma)  # noqa: E731
+
+    def scale(k: str) -> float:
+        return min(market.EVENT_SCALE_MAX, market.BY_KEY[k].sigma / market.CS.sigma)
+
     jump = market.EVENT_PROB * mean_sq * (scale(a) - scale(b)) ** 2
     total = ticks * (saa + sbb - 2 * sab + jump)
     if a != b and not any(

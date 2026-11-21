@@ -10,18 +10,19 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from cogs.labor.embeds import (  # noqa: F401  テストと他の Cog が cog から参照する
-    MEDALS,
-    fatigue_label,
-    finds_text,
-    hire_embed,
-    ore_text,
-    panel_embed,
-    pot_text,
-    ranking_embed,
-    relic_text,
+from cogs.labor.embeds import (  # テストと他の Cog が cog から参照する
+    MEDALS as MEDALS,
 )
-from cogs.labor.views import VIEW_TIMEOUT, LaborView  # noqa: F401
+from cogs.labor.embeds import fatigue_label as fatigue_label
+from cogs.labor.embeds import finds_text as finds_text
+from cogs.labor.embeds import hire_embed as hire_embed
+from cogs.labor.embeds import ore_text as ore_text
+from cogs.labor.embeds import panel_embed as panel_embed
+from cogs.labor.embeds import pot_text as pot_text
+from cogs.labor.embeds import ranking_embed as ranking_embed
+from cogs.labor.embeds import relic_text as relic_text
+from cogs.labor.views import VIEW_TIMEOUT as VIEW_TIMEOUT
+from cogs.labor.views import LaborView as LaborView
 from cogs.shared import ui
 from services.labor import LaborService
 

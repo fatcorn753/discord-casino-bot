@@ -10,7 +10,7 @@ from cogs.casino.texts import JACKPOT_ART, big_win_line, streak_line
 from cogs.shared import approval_guard, ui
 from cogs.shared.messages import format_notices
 from domain import features, missions, teiai
-from domain.games.rtplevel import MIN_BET as MIN_BET  # noqa: F401
+from domain.games.rtplevel import MIN_BET as MIN_BET
 from domain.ports.repos import IGuildRepo
 from services.casino import CasinoService
 from services.teiai import TeiaiService

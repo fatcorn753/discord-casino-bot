@@ -10,7 +10,7 @@ from typing import Any, Optional
 from domain import market as market_mod
 from domain import options as opt
 from domain.errors import fail
-from domain.options import name_of as name_of  # noqa: F401
+from domain.options import name_of as name_of
 from domain.ports.bridges import IBankCashFlow, IDebtOps, IOptionHoldings, NoOpDebtOps
 from domain.ports.contracts import HoldingBook
 from domain.ports.repos import IOptionRepo

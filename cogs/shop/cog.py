@@ -15,26 +15,26 @@ from cogs.shared import logthrottle, ui
 from cogs.shared.bridges import BotBridges, IP2PNavigationBridge, IShopTitleBridge
 from cogs.shared.tasks import allowed_guilds
 from cogs.shop.discord_ops import ShopError, apply_title_nick, set_color_role
-from cogs.shop.embeds import (  # noqa: F401
-    EFFECT_OF_ITEM,
-    MAX_QTY,
-    P2P_FILTERS,
-    SECTION_NAME,
-    SHOWN,
-    SLOT_OF_KIND,
-    TAB_NOTE,
-    TABS,
-    TIERS,
-    UNEQUIP_NAMES,
-    auction_embed,
-    catalog_embed,
-    inventory_embed,
-    item_line,
-    kind_name,
-    shop_slots,
-    stock_text,
-    tab_items,
+from cogs.shop.embeds import (  #
+    EFFECT_OF_ITEM as EFFECT_OF_ITEM,
 )
+from cogs.shop.embeds import MAX_QTY as MAX_QTY
+from cogs.shop.embeds import P2P_FILTERS as P2P_FILTERS
+from cogs.shop.embeds import SECTION_NAME as SECTION_NAME
+from cogs.shop.embeds import SHOWN as SHOWN
+from cogs.shop.embeds import SLOT_OF_KIND as SLOT_OF_KIND
+from cogs.shop.embeds import TAB_NOTE as TAB_NOTE
+from cogs.shop.embeds import TABS as TABS
+from cogs.shop.embeds import TIERS as TIERS
+from cogs.shop.embeds import UNEQUIP_NAMES as UNEQUIP_NAMES
+from cogs.shop.embeds import auction_embed as auction_embed
+from cogs.shop.embeds import catalog_embed as catalog_embed
+from cogs.shop.embeds import inventory_embed as inventory_embed
+from cogs.shop.embeds import item_line as item_line
+from cogs.shop.embeds import kind_name as kind_name
+from cogs.shop.embeds import shop_slots as shop_slots
+from cogs.shop.embeds import stock_text as stock_text
+from cogs.shop.embeds import tab_items as tab_items
 from cogs.shop.views import ShopView
 from domain import teiai
 from domain.ports import get_catalogs
