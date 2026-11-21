@@ -1,6 +1,7 @@
 """`/証券` の埋め込み・表示文の組み立て。"""
 
 import math
+from collections.abc import Mapping
 from typing import Any, Optional, Sequence
 
 import discord
@@ -86,7 +87,7 @@ def describe_option_done(row: dict) -> str:
     return f"{head} → 外れ（満期の価格 {market.fmt(row['final'])}）"
 
 
-def option_line(row: dict, prices: dict) -> str:
+def option_line(row: Mapping[str, Any], prices: dict) -> str:
     """保有のオプションの1行（種類・銘柄・条件・満期）。"""
     label, sym = name_of(row), market.BY_KEY[row["symbol"]]
     icon = "🎰" if row["side"] == "short" else opt.KINDS[row["kind"]][1]
@@ -150,7 +151,7 @@ def correlation_table(hist_by_symbol: dict[str, list]) -> str:
     return "```\n" + "\n".join(rows) + "\n```"
 
 
-def event_lines(events_rows: list, now: float) -> str:
+def event_lines(events_rows: Sequence[Mapping[str, Any]], now: float) -> str:
     """市場イベント（ボラティリティ予告）。なければ空文字。"""
     ev = market_events.current(events_rows, now)
     if not ev:
@@ -167,7 +168,7 @@ def event_lines(events_rows: list, now: float) -> str:
     )
 
 
-def earnings_lines(ev: Optional[dict]) -> str:
+def earnings_lines(ev: Optional[Mapping[str, Any]]) -> str:
     """今週の決算発表の予告（月曜9:00から、発表まで）。なければ空文字。"""
     if ev is None:
         return ""
@@ -264,8 +265,8 @@ def chart_embed(
 def summary_embed(
     hist_24h: dict[str, list],
     latest: dict[str, float],
-    upcoming_earnings: Optional[dict],
-    event_rows: list,
+    upcoming_earnings: Optional[Mapping[str, Any]],
+    event_rows: Sequence[Mapping[str, Any]],
     alert_histories: dict[str, list[float]],
     cut_rows: list,
     now: float,
@@ -377,7 +378,7 @@ def holdings_embed(
     return e
 
 
-def earnings_announce_embed(row: dict) -> discord.Embed:
+def earnings_announce_embed(row: Mapping[str, Any]) -> discord.Embed:
     """今週の決算発表の予告埋め込み。"""
     sym = market.BY_KEY[row["symbol"]]
     return ui.embed(

@@ -12,6 +12,7 @@
 import logging
 import math
 import re
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Optional, cast
 
 import discord
@@ -39,7 +40,7 @@ def _need_yes(circulating: int) -> int:
     return math.ceil(circulating * kyosai.MOTION_MIN_YES_SHARE)
 
 
-def status_embed(s: dict[str, Any], offers: list[dict[str, Any]], user_id: int) -> discord.Embed:
+def status_embed(s: dict[str, Any], offers: Sequence[Mapping[str, Any]], user_id: int) -> discord.Embed:
     share = s["units"] / s["total"] if s["total"] else 0.0
     lines = [
         f"あなたの口: **{s['units']:,}口**（全 {s['total']:,}口 の {share:.2%}）　持っている人 {s['holders']}人",
@@ -77,7 +78,7 @@ def status_embed(s: dict[str, Any], offers: list[dict[str, Any]], user_id: int) 
     return embed
 
 
-def motion_embed(m: dict[str, Any]) -> discord.Embed:
+def motion_embed(m: Mapping[str, Any]) -> discord.Embed:
     """動議の投稿（提案のときに告知チャンネルへ出す。ボタンで投票すると書き換わり、締めると結果になる）。"""
     closed = m.get("status", "open") != "open"
     lines = [
@@ -341,13 +342,13 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
                 logthrottle.warn(("kyosai", guild.id), f"共済の告知を投稿できません: guild={guild.id}: {exc!r}")
 
 
-def _motion_post(guild: discord.Guild, m: dict[str, Any]) -> Optional[Any]:
+def _motion_post(guild: discord.Guild, m: Mapping[str, Any]) -> Optional[Any]:
     """動議の告知の投稿（覚えているときだけ）。"""
     channel = guild.get_channel(m.get("channel_id") or 0)
     return ui.partial_message(channel, m["message_id"]) if channel is not None and m.get("message_id") else None
 
 
-async def _edit_open_post(guild: discord.Guild, m: dict[str, Any]) -> None:
+async def _edit_open_post(guild: discord.Guild, m: Mapping[str, Any]) -> None:
     """投票中の動議の告知の投稿を、最新の票数の Embed だけで書き換える（ボタンは残す。投稿を覚えていないときは何もしない）。"""
     msg = _motion_post(guild, m)
     if msg is None:
@@ -358,7 +359,7 @@ async def _edit_open_post(guild: discord.Guild, m: dict[str, Any]) -> None:
         logthrottle.warn(("kyosai", m["id"]), f"共済の動議の投稿を直せません: motion={m['id']}: {exc!r}")
 
 
-async def _edit_closed_post(guild: discord.Guild, m: dict[str, Any]) -> None:
+async def _edit_closed_post(guild: discord.Guild, m: Mapping[str, Any]) -> None:
     """締めた動議の告知の投稿を、結果に書き換えてボタンを外す（投稿を覚えていないときは何もしない）。"""
     msg = _motion_post(guild, m)
     if msg is None:
@@ -369,7 +370,7 @@ async def _edit_closed_post(guild: discord.Guild, m: dict[str, Any]) -> None:
         logthrottle.warn(("kyosai", m["id"]), f"共済の動議の投稿を直せません: motion={m['id']}: {exc!r}")
 
 
-def _motion_result(motion: dict[str, Any]) -> tuple[str, str]:
+def _motion_result(motion: Mapping[str, Any]) -> tuple[str, str]:
 
     verdict = "✅ 可決" if motion["status"] == "passed" else "❌ 否決"
     text = (
@@ -379,7 +380,7 @@ def _motion_result(motion: dict[str, Any]) -> tuple[str, str]:
     return "🗳️ 帝愛共済の動議の結果", text
 
 
-def _auction_post(event: dict[str, Any]) -> Optional[tuple[str, str]]:
+def _auction_post(event: Mapping[str, Any]) -> Optional[tuple[str, str]]:
     if event["event"] == "sold":
         return (
             "🔨 帝愛共済の競りの結果",

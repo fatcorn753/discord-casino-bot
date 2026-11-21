@@ -8,6 +8,7 @@
 """
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Optional
 
 import discord
@@ -183,7 +184,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
         note = (
             "返済が終わりました。"
             if loan["status"] == "repaid"
-            else f"残り {ui.pelica(left)}（期限は <t:{int(loan['due'])}:R>）。"
+            else f"残り {ui.pelica(left)}（期限は <t:{int(loan['due'] or 0)}:R>）。"
         )
         await interaction.response.send_message(
             embed=ui.ok_embed(
@@ -204,7 +205,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
             if loan["status"] in ("offer", "request"):
                 continue
             left = self._loans.remaining(guild_id, loan, now)
-            label = f"#{loan['id']} 残り{left:,}（{'延滞中' if loan['status'] == 'overdue' else '期限 ' + format_minutes(max(1, int((loan['due'] - now) // 60))) + '後'}）"
+            label = f"#{loan['id']} 残り{left:,}（{'延滞中' if loan['status'] == 'overdue' else '期限 ' + format_minutes(max(1, int(((loan['due'] or 0) - now) // 60))) + '後'}）"
             if not current or current in label:
                 out.append(app_commands.Choice(name=label[:100], value=loan["id"]))
         return out[:25]
@@ -215,7 +216,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
         now = self._loans.now_ts()
         data = self._loans.list_for(guild_id, interaction.user.id)
 
-        def line(loan: dict[str, Any], mine_is_borrower: bool) -> str:
+        def line(loan: Mapping[str, Any], mine_is_borrower: bool) -> str:
             other = (
                 who(loan["lender_id"] if mine_is_borrower else loan["borrower_id"])
                 if loan["lender_id"]
@@ -269,7 +270,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
                 await self._say(
                     guild,
                     loan,
-                    f"⏰ 貸付 #{loan['id']} の返済の期限は <t:{int(loan['due'])}:R> です。<@{loan['borrower_id']}> さん、`/貸付 返済` で返せます（期限には、残高から自動で回収します）。",
+                    f"⏰ 貸付 #{loan['id']} の返済の期限は <t:{int(loan['due'] or 0)}:R> です。<@{loan['borrower_id']}> さん、`/貸付 返済` で返せます（期限には、残高から自動で回収します）。",
                 )
             for loan in outcome.collected:
                 if loan["status"] == "repaid":
@@ -293,7 +294,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
             error_label="貸付を処理できません",
         )
 
-    async def _edit_offer(self, guild: discord.Guild, loan: dict[str, Any], embed: discord.Embed) -> None:
+    async def _edit_offer(self, guild: discord.Guild, loan: Mapping[str, Any], embed: discord.Embed) -> None:
         channel = guild.get_channel(loan["channel_id"]) if loan["channel_id"] else None
         if channel is None or not loan["message_id"]:
             return
@@ -305,7 +306,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
         except discord.HTTPException:
             pass
 
-    async def _say(self, guild: discord.Guild, loan: dict[str, Any], text: str) -> None:
+    async def _say(self, guild: discord.Guild, loan: Mapping[str, Any], text: str) -> None:
         channel = (guild.get_channel(loan["channel_id"]) if loan["channel_id"] else None) or announce_channel(
             guild, self._guild_repo
         )
