@@ -10,6 +10,7 @@ import pytest
 from cogs.admin.cog import RENOTIFY_AFTER, ApprovalButton, ApprovalCog
 from cogs.shared import approval_guard
 from domain import approval
+from domain.ports.contracts import PachinkoStats
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_guild, as_interaction, as_item, fake_response, invoke, must
@@ -831,7 +832,7 @@ def test_pachinko_stats_embed_compares_actual_to_design():
 
     empty = pachinko_stats_embed({"omen": {}, "tier": {}, "spins": (0, 0), "sets": (0, 0, 0, 0, 0, 0, 0)}, "全サーバー")
     assert "まだ記録がありません" in must(empty.description)
-    data = {
+    data: PachinkoStats = {
         "omen": {"gold": (200, 110), "": (50, 5)},
         "tier": {"super": (100, 45)},
         "spins": (250, 115),

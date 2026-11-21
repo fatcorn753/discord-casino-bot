@@ -1,12 +1,14 @@
 """発掘品の効果（持っている間、1個ごとに +1%）。"""
 
 import random
+from typing import cast
 
 import pytest
 
 from domain import horse as horse_mod
 from domain import labor as lab
 from domain import p2p, relics, shop, teiai
+from domain.ports.contracts import LaborClickOk
 from infra.db.repositories import open_repositories
 
 pytestmark = pytest.mark.real_scope
@@ -71,11 +73,15 @@ def test_fossil_raises_click_pay_by_one_percent_on_average(eco, monkeypatch):
     monkeypatch.setattr(lab, "MAX_CLICKS_PER_DAY", 10**9)  # 1日の上限で頭打ちにならないようにする
     plain = 0
     for k in range(1000):
-        plain += eco.labor.labor_click(U, T0 + k * 2000, DAY, rng=_NoCrit())["pay"]  # 疲労が回復するほど、間をあける
+        r = eco.labor.labor_click(U, T0 + k * 2000, DAY, rng=_NoCrit())  # 疲労が回復するほど、間をあける
+        assert r["ok"] is True
+        plain += r["pay"]
     other = open_repositories(eco.db.db_path, strict=True).for_guild(G)
     give(other, "relic_fossil", uid=2)
     other.wallet.credit(2, 1_000, "テスト")
-    buffed = sum(other.labor.labor_click(2, T0 + k * 2000, DAY, rng=_NoCrit())["pay"] for k in range(1000))
+    buffed = sum(
+        cast("LaborClickOk", other.labor.labor_click(2, T0 + k * 2000, DAY, rng=_NoCrit()))["pay"] for k in range(1000)
+    )
     assert plain == 10 * 1000  # 工具なし・疲労なしで、1回10
     assert 10_020 < buffed < 10_200  # 平均で +1%（確率で切り上げる）
 

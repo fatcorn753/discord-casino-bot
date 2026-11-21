@@ -794,7 +794,7 @@ def test_human_like_gaps_have_a_large_variation_and_rejected_clicks_are_not_logg
         t += gap
     assert not eco.labor.labor_click(U, t - 6.0 + 0.2, DAY)["ok"]  # 直前の押下から0.2秒後の連打は、記録しない
     report = lab.click_report(eco.labor.labor_click_hours(U, T0 - 10))
-    assert report["clicks"] == 6 and report["rows"][0]["cv"] > 0.3
+    assert report["clicks"] == 6 and (report["rows"][0]["cv"] or 0) > 0.3
 
 
 def test_click_report_finds_the_longest_unbroken_run_and_ignores_long_gaps():
