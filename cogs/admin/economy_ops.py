@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Optional
 import discord
 
 from cogs.admin.embeds import LEVEL_NAME, click_history_embed, pachinko_stats_embed, rtp_table_embed
-from cogs.admin.targets import pick_channel, pick_guild, pick_member
+from cogs.admin.targets import event_targets, pick_channel, pick_guild, pick_member
 from cogs.shared import ui
 from cogs.shared.bridges import IEventAdminBridge, require_bridge
 from cogs.shared.tasks import allowed_guilds
@@ -65,7 +65,7 @@ async def event_start(
     ok, channel = await pick_channel(interaction, picked, channel_id)
     if not ok:
         return
-    targets = cog._event_targets(guild_id)
+    targets = event_targets(cog.bot, cog._guild_repo, cog._config, guild_id)
     if not targets:
         await ui.reply_error(interaction, "許可されているサーバーがありません。", title="開く先がありません")
         return
@@ -87,7 +87,9 @@ async def event_stop(cog: "ApprovalCog", interaction: discord.Interaction, guild
     if event_bridge is None:
         return
     await interaction.response.defer(ephemeral=True)
-    lines = [(await event_bridge.stop_manual(g))[1] for g in cog._event_targets(guild_id)]
+    lines = [
+        (await event_bridge.stop_manual(g))[1] for g in event_targets(cog.bot, cog._guild_repo, cog._config, guild_id)
+    ]
     await interaction.followup.send(
         embed=ui.embed("特別イベントを終わらせました", "\n".join(lines)[:3900] or "対象がありません。", ui.INFO),
         ephemeral=True,

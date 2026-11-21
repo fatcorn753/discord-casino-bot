@@ -20,7 +20,6 @@ from cogs.admin.targets import parse_user_id as parse_user_id
 from cogs.admin.targets import postable as postable
 from cogs.admin.views import AnnounceModal as AnnounceModal
 from cogs.admin.views import ApprovalButton
-from cogs.shared import ui
 from cogs.shared.bridges import (
     BotBridges,
     IApprovalBridge,
@@ -29,7 +28,6 @@ from cogs.shared.bridges import (
     IQuizAdminBridge,
     IRaffleAdminBridge,
 )
-from cogs.shared.tasks import allowed_guilds
 from domain import approval, events, features
 from domain.games import rtplevel
 from domain.ports.repos import IGuildRepo
@@ -89,25 +87,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         await approval_ops.announce_approved(guild)
 
     async def handle_button(self, interaction: discord.Interaction, allow: bool, guild_id: int) -> None:
-        guild = self.bot.get_guild(guild_id)
-        row = self._guild_repo.get_guild_status(guild_id) or {}
-        name = guild.name if guild else row.get("name") or str(guild_id)
-        if allow:
-            self._guild_repo.set_guild_status(guild_id, approval.APPROVED, name, interaction.user.id)
-            embed = ui.ok_embed("許可しました", f"**{name}**（`{guild_id}`）で遊べるようになりました。")
-            if guild is not None:
-                await self.announce_approved(guild)
-        else:
-            self._guild_repo.set_guild_status(guild_id, approval.DENIED, name, interaction.user.id)
-            left = ""
-            if guild is not None:
-                try:
-                    await guild.leave()
-                    left = "Bot はそのサーバーから退出しました。"
-                except discord.HTTPException:
-                    left = "退出はできませんでした（コマンドは使えないままです）。"
-            embed = ui.warn_embed("断りました", f"**{name}**（`{guild_id}`）の利用を断りました。{left}")
-        await interaction.response.edit_message(embed=embed, view=None)
+        await approval_ops.handle_button(self, interaction, allow, guild_id)
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild: discord.Guild):
@@ -134,17 +114,6 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     feature_group = app_commands.Group(
         name="機能", description="[管理者] 賭け事や仕組みを、サーバーごとに止める・再開する", parent=group
     )
-
-    async def _owner_only(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id not in approval.owner_ids(self._config):
-            await ui.reply_error(interaction, "このコマンドは Bot の持ち主だけが使えます。", title="権限がありません")
-            return False
-        return True
-
-    def _event_targets(self, guild_id: Optional[str]) -> list:
-        if guild_id:
-            return [self.bot.get_guild(int(guild_id))]
-        return allowed_guilds(self.bot, self._guild_repo, self._config)
 
     async def guild_autocomplete(self, interaction: discord.Interaction, current: str):
         return guild_choices(self.bot, current) if interaction.user.id in approval.owner_ids(self._config) else []
@@ -178,7 +147,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         amount: app_commands.Range[int, 1, 10_000_000],
         reason: str = "",
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await economy_ops.grant(self, interaction, guild_id, user_id, amount, reason)
 
     grant.autocomplete("guild_id")(guild_autocomplete)
@@ -200,7 +169,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         amount: app_commands.Range[int, -1_000_000_000, 1_000_000_000],
         reason: str = "",
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await economy_ops.set_balance(self, interaction, guild_id, user_id, amount, reason)
 
     set_balance.autocomplete("guild_id")(guild_autocomplete)
@@ -227,7 +196,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         guild_id: Optional[str] = None,
         channel_id: Optional[str] = None,
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await economy_ops.event_start(self, interaction, game.value, minutes, boost, guild_id, channel_id)
 
     event_start.autocomplete("guild_id")(guild_autocomplete)
@@ -237,7 +206,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     @app_commands.rename(guild_id="サーバー")
     @app_commands.describe(guild_id="終わらせるサーバー（候補から選ぶ。空なら全サーバー）")
     async def event_stop(self, interaction: discord.Interaction, guild_id: Optional[str] = None):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await economy_ops.event_stop(self, interaction, guild_id)
 
     event_stop.autocomplete("guild_id")(guild_autocomplete)
@@ -266,7 +235,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         game: app_commands.Choice[str],
         level: app_commands.Choice[int],
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await economy_ops.rtp_set(self, interaction, guild_id, game.value, level.value)
 
     rtp_set.autocomplete("guild_id")(guild_autocomplete)
@@ -275,7 +244,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     @app_commands.rename(guild_id="サーバー")
     @app_commands.describe(guild_id="見るサーバー（候補から選ぶ。空なら全サーバー）")
     async def rtp_list(self, interaction: discord.Interaction, guild_id: Optional[str] = None):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await economy_ops.rtp_list(self, interaction, guild_id)
 
     rtp_list.autocomplete("guild_id")(guild_autocomplete)
@@ -291,7 +260,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     @app_commands.describe(guild_id="止めるサーバー（候補から選ぶ）", feature="止める機能")
     @app_commands.choices(feature=_FEATURE_CHOICES)
     async def feature_off(self, interaction: discord.Interaction, guild_id: str, feature: app_commands.Choice[str]):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await feature_ops.feature_set(self, interaction, guild_id, feature.value, on=False)
 
     feature_off.autocomplete("guild_id")(guild_autocomplete)
@@ -301,7 +270,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     @app_commands.describe(guild_id="再開するサーバー（候補から選ぶ）", feature="再開する機能")
     @app_commands.choices(feature=_FEATURE_CHOICES)
     async def feature_on(self, interaction: discord.Interaction, guild_id: str, feature: app_commands.Choice[str]):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await feature_ops.feature_set(self, interaction, guild_id, feature.value, on=True)
 
     feature_on.autocomplete("guild_id")(guild_autocomplete)
@@ -310,7 +279,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     @app_commands.rename(guild_id="サーバー")
     @app_commands.describe(guild_id="見るサーバー（候補から選ぶ。空なら全サーバー）")
     async def feature_list(self, interaction: discord.Interaction, guild_id: Optional[str] = None):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await feature_ops.feature_list(self, interaction, guild_id)
 
     feature_list.autocomplete("guild_id")(guild_autocomplete)
@@ -326,7 +295,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         guild_id: Optional[str] = None,
         days: Optional[app_commands.Range[int, 1, 365]] = None,
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await economy_ops.pachinko_stats(self, interaction, guild_id, days)
 
     pachinko_stats.autocomplete("guild_id")(guild_autocomplete)
@@ -347,7 +316,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         user_id: str,
         hours: app_commands.Range[int, 1, 336] = 24,
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await economy_ops.click_history(self, interaction, guild_id, user_id, hours)
 
     click_history.autocomplete("guild_id")(guild_autocomplete)
@@ -372,7 +341,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         bet_min: app_commands.Range[int, 1, 120] = 5,
         channel_id: Optional[str] = None,
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await content_ops.special_race(self, interaction, guild_id, entry_min, bet_min, channel_id)
 
     special_race.autocomplete("guild_id")(guild_autocomplete)
@@ -397,7 +366,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         fmt: Optional[app_commands.Choice[str]] = None,
         channel_id: Optional[str] = None,
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await content_ops.host_arena(self, interaction, guild_id, advance, fmt.value if fmt else None, channel_id)
 
     host_arena.autocomplete("guild_id")(guild_autocomplete)
@@ -419,7 +388,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         title: Optional[str] = None,
         channel_id: Optional[str] = None,
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await content_ops.announce(self, interaction, guild_id, image, title, channel_id)
 
     announce.autocomplete("guild_id")(guild_autocomplete)
@@ -433,7 +402,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         guild_id="消すサーバー（候補から選ぶ）", channel_id="消すチャンネル（サーバーを選んでから、候補から選ぶ）"
     )
     async def purge_own_messages(self, interaction: discord.Interaction, guild_id: str, channel_id: str):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await content_ops.purge_own_messages(self, interaction, guild_id, channel_id)
 
     purge_own_messages.autocomplete("guild_id")(guild_autocomplete)
@@ -457,7 +426,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         minutes: app_commands.Range[int, 1, 1440] = 60,
         channel_id: Optional[str] = None,
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await content_ops.raffle_start(self, interaction, guild_id, fee, minutes, channel_id)
 
     raffle_start.autocomplete("guild_id")(guild_autocomplete)
@@ -472,7 +441,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         channel_id="出し直すチャンネル（候補から選ぶ。空なら告知チャンネル）",
     )
     async def raffle_repost(self, interaction: discord.Interaction, guild_id: str, channel_id: Optional[str] = None):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await content_ops.raffle_repost(self, interaction, guild_id, channel_id)
 
     raffle_repost.autocomplete("guild_id")(guild_autocomplete)
@@ -482,7 +451,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     @app_commands.rename(guild_id="サーバー")
     @app_commands.describe(guild_id="抽選を開いているサーバー（候補から選ぶ）")
     async def raffle_cancel(self, interaction: discord.Interaction, guild_id: str):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await content_ops.raffle_cancel(self, interaction, guild_id)
 
     raffle_cancel.autocomplete("guild_id")(guild_autocomplete)
@@ -506,7 +475,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         guild_id: Optional[str] = None,
         channel_id: Optional[str] = None,
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await content_ops.quiz_add(self, interaction, announce is None or announce.value == 1, guild_id, channel_id)
 
     quiz_add.autocomplete("guild_id")(guild_autocomplete)
@@ -533,7 +502,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         guild_id: Optional[str] = None,
         channel_id: Optional[str] = None,
     ):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await content_ops.quiz_bulk(
                 self, interaction, file, announce is not None and announce.value == 1, guild_id, channel_id
             )
@@ -543,34 +512,34 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
 
     @quiz_group.command(name="一覧", description="[管理者] 登録したクイズを見る")
     async def quiz_list(self, interaction: discord.Interaction):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await content_ops.quiz_list(self, interaction)
 
     @quiz_group.command(name="削除", description="[管理者] クイズを削除する（回答の記録も消える）")
     @app_commands.rename(quiz_id="番号")
     @app_commands.describe(quiz_id="`/運営 クイズ 一覧` の # の番号")
     async def quiz_delete(self, interaction: discord.Interaction, quiz_id: int):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await content_ops.quiz_delete(self, interaction, quiz_id)
 
     # ---- サーバー管理 ---- #
     @group.command(name="サーバー一覧", description="[管理者] 許可・承認待ち・断ったサーバーを表示する")
     async def server_list(self, interaction: discord.Interaction):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await approval_ops.server_list(self, interaction)
 
     @group.command(name="サーバー許可", description="[管理者] サーバーIDを指定して、利用を許可する")
     @app_commands.rename(guild_id="サーバーid")
     @app_commands.describe(guild_id="許可するサーバーのID（承認待ちの一覧にあるもの）")
     async def server_allow(self, interaction: discord.Interaction, guild_id: str):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await approval_ops.server_allow(self, interaction, guild_id)
 
     @group.command(name="サーバー取消", description="[管理者] 許可を取り消し、Bot をそのサーバーから退出させる")
     @app_commands.rename(guild_id="サーバーid")
     @app_commands.describe(guild_id="取り消すサーバーのID")
     async def server_revoke(self, interaction: discord.Interaction, guild_id: str):
-        if await self._owner_only(interaction):
+        if await approval_ops.owner_only(self, interaction):
             await approval_ops.server_revoke(self, interaction, guild_id)
 
 

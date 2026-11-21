@@ -65,6 +65,37 @@ async def announce_approved(guild: discord.Guild) -> None:
         pass
 
 
+async def handle_button(cog: "ApprovalCog", interaction: discord.Interaction, allow: bool, guild_id: int) -> None:
+    """承認依頼の DM のボタン（許可する／断って退出させる）の処理。IApprovalBridge から委譲される。"""
+    guild = cog.bot.get_guild(guild_id)
+    row = cog._guild_repo.get_guild_status(guild_id) or {}
+    name = guild.name if guild else row.get("name") or str(guild_id)
+    if allow:
+        cog._guild_repo.set_guild_status(guild_id, approval.APPROVED, name, interaction.user.id)
+        embed = ui.ok_embed("許可しました", f"**{name}**（`{guild_id}`）で遊べるようになりました。")
+        if guild is not None:
+            await announce_approved(guild)
+    else:
+        cog._guild_repo.set_guild_status(guild_id, approval.DENIED, name, interaction.user.id)
+        left = ""
+        if guild is not None:
+            try:
+                await guild.leave()
+                left = "Bot はそのサーバーから退出しました。"
+            except discord.HTTPException:
+                left = "退出はできませんでした（コマンドは使えないままです）。"
+        embed = ui.warn_embed("断りました", f"**{name}**（`{guild_id}`）の利用を断りました。{left}")
+    await interaction.response.edit_message(embed=embed, view=None)
+
+
+async def owner_only(cog: "ApprovalCog", interaction: discord.Interaction) -> bool:
+    """Bot の持ち主だけが使えるコマンドの権限チェック。権限がなければエラー応答して False を返す。"""
+    if interaction.user.id not in approval.owner_ids(cog._config):
+        await ui.reply_error(interaction, "このコマンドは Bot の持ち主だけが使えます。", title="権限がありません")
+        return False
+    return True
+
+
 async def handle_guild_join(cog: "ApprovalCog", guild: discord.Guild) -> None:
     if not approval.requires_approval(cog._config):
         return

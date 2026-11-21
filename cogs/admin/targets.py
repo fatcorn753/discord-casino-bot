@@ -1,12 +1,14 @@
 """運営コマンド（`/運営`）で使うサーバー・チャンネル・ユーザーの指定と候補。"""
 
 import re
-from typing import Optional
+from typing import Any, Optional
 
 import discord
 from discord import app_commands
 
 from cogs.shared import ui
+from cogs.shared.tasks import allowed_guilds
+from domain.ports.repos import IGuildRepo
 
 
 def valid_guild_id(text: str) -> bool:
@@ -62,6 +64,13 @@ def user_choices(guild: discord.Guild, current: str) -> list:
         for m in guild.members
         if not m.bot and (cur in m.display_name.lower() or cur in m.name.lower())
     ][:25]
+
+
+def event_targets(bot, guild_repo: IGuildRepo, config: dict[str, Any], guild_id: Optional[str]) -> list:
+    """特別イベントの開始/終了の対象サーバー。guild_id があればそのサーバーだけ、なければ許可されている全サーバー。"""
+    if guild_id:
+        return [bot.get_guild(int(guild_id))]
+    return allowed_guilds(bot, guild_repo, config)
 
 
 async def pick_guild(bot, interaction: discord.Interaction, guild_id: str) -> Optional[discord.Guild]:
