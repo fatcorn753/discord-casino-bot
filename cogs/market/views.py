@@ -30,9 +30,7 @@ class PercentModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         pct = typed_amount(self.percent.value)
         if pct is None or not 1 <= pct <= 100:
-            await interaction.response.send_message(
-                embed=ui.error_embed("割合が正しくありません", "1〜100の数字で入れてください。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "1〜100の数字で入れてください。", title="割合が正しくありません")
             return
         await self.panel.settle(interaction, self.code, pct)
 
@@ -169,11 +167,8 @@ class OptionAmountModal(discord.ui.Modal):
             return
         premium = typed_amount(self.amount.value)
         if premium is None or premium < opt.MIN_PREMIUM:
-            await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "掛け金が正しくありません", f"{opt.MIN_PREMIUM:,}ペリカ以上の数字で入れてください。"
-                ),
-                ephemeral=True,
+            await ui.reply_error(
+                interaction, f"{opt.MIN_PREMIUM:,}ペリカ以上の数字で入れてください。", title="掛け金が正しくありません"
             )
             return
         await orders.option_buy(self.cog, interaction, self.kind, self.symbol, premium)
