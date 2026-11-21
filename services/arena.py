@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 from domain.errors import Outcome
 from domain.ports.clock import IClock
+from domain.ports.contracts import ArenaBetRow, ArenaTournamentDetailRow
 from domain.ports.repos import IArenaRepo
 
 
@@ -22,11 +23,13 @@ class ArenaService:
         tz = datetime.timezone(datetime.timedelta(hours=self.clock.offset_hours()))
         return datetime.datetime.fromtimestamp(ts, tz).hour
 
-    def ensure_tournament(self, guild_id: int, fmt: str, now: Optional[float] = None) -> dict[str, Any]:
+    def ensure_tournament(self, guild_id: int, fmt: str, now: Optional[float] = None) -> ArenaTournamentDetailRow:
         ts = self.clock.now_ts() if now is None else now
         return self._arena.for_guild(guild_id).arena_tournament_ensure(fmt, ts, self.clock.offset_hours())
 
-    def current_tournament(self, guild_id: int, fmt: str, now: Optional[float] = None) -> Optional[dict[str, Any]]:
+    def current_tournament(
+        self, guild_id: int, fmt: str, now: Optional[float] = None
+    ) -> Optional[ArenaTournamentDetailRow]:
         """今日の大会（無ければ作らずに None）。闘技場を止めているあいだの見回り用。"""
         ts = self.clock.now_ts() if now is None else now
         repo = self._arena.for_guild(guild_id)
@@ -48,8 +51,8 @@ class ArenaService:
     ) -> Optional[dict[str, Any]]:
         return self._arena.for_guild(guild_id).arena_run_final(tournament_id, rng, self.clock.now_ts())
 
-    def tournament_by_day(self, guild_id: int, day: str, fmt: str) -> Optional[dict[str, Any]]:
+    def tournament_by_day(self, guild_id: int, day: str, fmt: str) -> Optional[ArenaTournamentDetailRow]:
         return self._arena.for_guild(guild_id).arena_tournament_get_by_day(day, fmt)
 
-    def bets_breakdown(self, guild_id: int, tournament_id: int) -> dict[int, list[dict[str, Any]]]:
+    def bets_breakdown(self, guild_id: int, tournament_id: int) -> dict[int, list[ArenaBetRow]]:
         return self._arena.for_guild(guild_id).arena_bets_breakdown(tournament_id)

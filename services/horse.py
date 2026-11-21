@@ -1,11 +1,13 @@
 """競馬のレース進行・オッズ計算・スケジュール管理のアプリケーションサービス。"""
 
 import datetime
+from collections.abc import Mapping
 from typing import Any, Optional
 
 from domain import horse as horse_mod
 from domain.errors import Outcome
 from domain.ports.clock import IClock
+from domain.ports.contracts import HorseRow, RaceBetRow, RaceEntryRow, RaceRow
 from domain.ports.repos import IHorseRepo, IRaceRepo, IShopRepo
 
 
@@ -22,22 +24,22 @@ class HorseDesk:
         self._shop = shop
 
     # ------------------------------ レース・馬券 ------------------------------ #
-    def race_get(self, race_id: int) -> Optional[dict[str, Any]]:
+    def race_get(self, race_id: int) -> Optional[RaceRow]:
         return self._races.race_get(race_id)
 
     def race_number(self, race_id: int) -> int:
         return self._races.race_number(race_id)
 
-    def race_open(self) -> list[dict[str, Any]]:
+    def race_open(self) -> list[RaceRow]:
         return self._races.race_open()
 
-    def race_entries(self, race_id: int) -> list[dict[str, Any]]:
+    def race_entries(self, race_id: int) -> list[RaceEntryRow]:
         return self._races.race_entries(race_id)
 
     def race_odds(self, race_id: int, kind: str, lanes: list[int]) -> Optional[float]:
         return self._races.race_odds(race_id, kind, lanes)
 
-    def race_bets(self, user_id: int, race_id: int) -> list[dict[str, Any]]:
+    def race_bets(self, user_id: int, race_id: int) -> list[RaceBetRow]:
         return self._races.race_bets(user_id, race_id)
 
     def race_bet(
@@ -63,10 +65,10 @@ class HorseDesk:
         return self._races.race_withdraw(user_id, horse_id, race_id, now)
 
     # ------------------------------ 厩舎 ------------------------------ #
-    def horse_get(self, horse_id: int) -> Optional[dict[str, Any]]:
+    def horse_get(self, horse_id: int) -> Optional[HorseRow]:
         return self._horses.horse_get(horse_id)
 
-    def horse_list(self, user_id: int) -> list[dict[str, Any]]:
+    def horse_list(self, user_id: int) -> list[HorseRow]:
         return self._horses.horse_list(user_id)
 
     def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> Outcome[int]:
@@ -84,7 +86,7 @@ class HorseDesk:
     def horse_retire(self, user_id: int, horse_id: int) -> Outcome[int]:
         return self._horses.horse_retire(user_id, horse_id)
 
-    def is_major_race(self, race: dict[str, Any]) -> bool:
+    def is_major_race(self, race: Mapping[str, Any]) -> bool:
         """重賞か（発走時刻を、設定の時差の現地時間で見る）。"""
         return horse_mod.is_major_race(race, self.clock.offset_hours())
 
@@ -132,7 +134,7 @@ class HorseService:
     def ensure_scheduled(self, guild_id: int, now: float, channel_id: int) -> Optional[int]:
         return self._races.for_guild(guild_id).race_ensure_scheduled(now, self.clock.offset_hours(), channel_id)
 
-    def close_entries_and_set_odds(self, guild_id: int, race_id: int) -> Optional[dict[str, Any]]:
+    def close_entries_and_set_odds(self, guild_id: int, race_id: int) -> Optional[RaceRow]:
         """出走申込を締め切ってオッズを計算・保存し、最新の race 辞書を返す。"""
         races = self._races.for_guild(guild_id)
         field = races.race_close_entries(race_id)

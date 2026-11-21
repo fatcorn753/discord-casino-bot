@@ -10,6 +10,7 @@
 
 import math
 import random
+from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
 from domain.ports import get_catalogs
@@ -364,7 +365,7 @@ MECH_MIN_CLICKS = _CFG.mech_min_clicks
 SUSPECT_HOURS = _CFG.suspect_hours
 
 
-def is_mechanical_hour(h: dict[str, Any]) -> bool:
+def is_mechanical_hour(h: Mapping[str, Any]) -> bool:
     """1時間の記録（labor_click_hours() の1行）が、機械的に規則正しいか。"""
     if h["gaps"] < 2 or h["clicks"] < MECH_MIN_CLICKS:
         return False
@@ -375,7 +376,7 @@ def is_mechanical_hour(h: dict[str, Any]) -> bool:
     return math.sqrt(var) / mean < MECH_CV_MAX
 
 
-def auto_click_suspected(hour_rows: list[dict[str, Any]], current_hour: int) -> bool:
+def auto_click_suspected(hour_rows: Sequence[Mapping[str, Any]], current_hour: int) -> bool:
     """直近 SUSPECT_HOURS 時間（いまの時間は、まだ集計中なので含めない）、ずっと機械的に規則正しければ True。
 
     hour_rows は、infra/db/labor.py の labor_click_hours() の結果（{hour, clicks, gaps, sum_gap, sum_gap2, ...} の並び）。
@@ -385,7 +386,7 @@ def auto_click_suspected(hour_rows: list[dict[str, Any]], current_hour: int) -> 
     return all(h in by_hour and is_mechanical_hour(by_hour[h]) for h in watch)
 
 
-def click_report(hours: list[dict[str, Any]]) -> dict[str, Any]:
+def click_report(hours: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """1時間ごとの記録 [{hour, clicks, pay, gaps, sum_gap, sum_gap2, min_gap}]（古い順）を、画面用に集計する。
 
     {clicks, pay, active_hours（押した時間の数）, longest_run（休まず押し続けた連続の時間数）, rows: [{hour, clicks, pay, mean_gap, cv, min_gap}]}。

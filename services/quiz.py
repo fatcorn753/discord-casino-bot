@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from domain.errors import Outcome
 from domain.ports.clock import IClock
+from domain.ports.contracts import QuizAdminView, QuizView
 from domain.ports.repos import IQuizRepo
 
 
@@ -18,10 +19,10 @@ class QuizService:
         return self._clock.now_ts()
 
     # ------------------------------ 全サーバー共通の問題（運営） ------------------------------ #
-    def get(self, quiz_id: int) -> Optional[dict[str, Any]]:
+    def get(self, quiz_id: int) -> Optional[QuizView]:
         return self._quiz.quiz_get(quiz_id)
 
-    def list_all(self) -> list[dict[str, Any]]:
+    def list_all(self) -> list[QuizAdminView]:
         return self._quiz.quiz_list()
 
     def delete(self, quiz_id: int) -> bool:
@@ -52,7 +53,7 @@ class QuizService:
         return self._quiz.quiz_add_many(items, self._clock.now_ts(), creator_name)
 
     # ------------------------------ サーバーごとの挑戦・出題 ------------------------------ #
-    def next_for(self, guild_id: int, user_id: int) -> tuple[Optional[dict[str, Any]], int]:
+    def next_for(self, guild_id: int, user_id: int) -> tuple[Optional[QuizView], int]:
         """(次の問題 or None, 残りの問題数)。"""
         return self._quiz.for_guild(guild_id).quiz_next(user_id, self._clock.now_ts())
 
@@ -88,13 +89,13 @@ class QuizService:
             msg_wrong,
         )
 
-    def get_in(self, guild_id: int, quiz_id: int) -> Optional[dict[str, Any]]:
+    def get_in(self, guild_id: int, quiz_id: int) -> Optional[QuizView]:
         return self._quiz.for_guild(guild_id).quiz_get(quiz_id)
 
     def set_message(self, guild_id: int, quiz_id: int, message_id: int) -> None:
         self._quiz.for_guild(guild_id).quiz_set_message(quiz_id, message_id)
 
-    def own_open(self, guild_id: int, user_id: int) -> list[dict[str, Any]]:
+    def own_open(self, guild_id: int, user_id: int) -> list[QuizView]:
         return self._quiz.for_guild(guild_id).quiz_own_open(user_id, self._clock.now_ts())
 
     def withdraw(self, guild_id: int, user_id: int, quiz_id: int) -> Optional[dict[str, Any]]:

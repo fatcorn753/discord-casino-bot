@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from domain.errors import Outcome
 from domain.ports.clock import IClock
+from domain.ports.contracts import PollView
 from domain.ports.repos import IPollRepo
 
 
@@ -24,14 +25,14 @@ class PollService:
     def set_message(self, guild_id: int, poll_id: int, channel_id: int, message_id: int) -> None:
         self._polls.for_guild(guild_id).poll_set_message(poll_id, channel_id, message_id)
 
-    def get(self, guild_id: int, poll_id: int) -> Optional[dict[str, Any]]:
+    def get(self, guild_id: int, poll_id: int) -> Optional[PollView]:
         return self._polls.for_guild(guild_id).poll_get(poll_id)
 
-    def vote(self, guild_id: int, user_id: int, poll_id: int, yes: bool) -> Outcome[dict[str, Any]]:
+    def vote(self, guild_id: int, user_id: int, poll_id: int, yes: bool) -> Outcome[PollView]:
         return self._polls.for_guild(guild_id).poll_vote(user_id, poll_id, yes, self._now())
 
     def rig(self, guild_id: int, user_id: int, poll_id: int, yes: int, no: int) -> Outcome[dict[str, Any]]:
         return self._polls.for_guild(guild_id).poll_rig(user_id, poll_id, yes, no, self._now())
 
-    def close_due(self, guild_id: int) -> list[dict[str, Any]]:
+    def close_due(self, guild_id: int) -> list[PollView]:
         return self._polls.for_guild(guild_id).poll_close_due(self._now())

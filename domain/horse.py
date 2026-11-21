@@ -13,7 +13,7 @@ import datetime
 import itertools
 import math
 import random
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -61,7 +61,7 @@ MAJOR_PRIZES = _CFG.major_prizes
 MAJOR_HOUSE_TOPUP = _CFG.major_house_topup
 
 
-def is_major_race(race: dict[str, Any], tz_hours: float) -> bool:
+def is_major_race(race: Mapping[str, Any], tz_hours: float) -> bool:
     """定時レースで、発走が MAJOR_HOUR（21時）なら重賞。"""
     tz = datetime.timezone(datetime.timedelta(hours=tz_hours))
     return race["kind"] == "regular" and datetime.datetime.fromtimestamp(race["start_at"], tz).hour == MAJOR_HOUR

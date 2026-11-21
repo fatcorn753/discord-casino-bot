@@ -13,6 +13,7 @@
 
 import math
 import random
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from domain.ports import get_catalogs
@@ -56,7 +57,7 @@ def semi_groups(fmt: str) -> int:
     return SEMI_GROUPS[fmt]
 
 
-def win_weights(fighters: list[dict[str, Any]]) -> list[float]:
+def win_weights(fighters: Sequence[Mapping[str, Any]]) -> list[float]:
     """純粋な強さ（武器込み）だけから見積もる、各戦士の勝つ確率（合計1）。賭け総額の人数には左右されない。"""
     weights = [effective_power(f["base_power"], f.get("bet_total", 0)) for f in fighters]
     total = sum(weights) or 1
@@ -70,7 +71,7 @@ def _odds(prob: float, takeout: float, cap: float) -> float:
     return max(1.0, min(cap, math.floor((1 - takeout) / prob * 10) / 10))
 
 
-def match_odds(fighters: list[dict[str, Any]], boost: float = 1.0) -> dict[str, float]:
+def match_odds(fighters: Sequence[Mapping[str, Any]], boost: float = 1.0) -> dict[str, float]:
     """試合に出る戦士ごとの単勝オッズ（{名前: 倍率}）。boost は、決勝で賭けたくなるよう高くする倍率。"""
     probs = win_weights(fighters)
     return {f["name"]: min(MAX_ODDS, _odds(p, TAKEOUT, MAX_ODDS) * boost) for f, p in zip(fighters, probs)}
@@ -102,7 +103,7 @@ def effective_power(base_power: int, bet_total: int) -> float:
     return base_power * (1 + weapon_bonus(bet_total))
 
 
-def simulate_match(fighters: list[dict[str, Any]], bet_totals: dict[str, int], rng: random.Random) -> int:
+def simulate_match(fighters: Sequence[Mapping[str, Any]], bet_totals: dict[str, int], rng: random.Random) -> int:
     """1試合の結果（勝者の添字）を決める。fighters は [{name, base_power}]、bet_totals は {名前: 賭け総額}。
 
     強さが高いほど勝ちやすいが、運（LUCK）で必ずしも勝てるとは限らない。

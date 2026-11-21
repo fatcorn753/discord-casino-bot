@@ -1,9 +1,10 @@
 """突発イベント（日替わりの自動開催）と、持ち主が開く特別イベントのアプリケーションサービス。"""
 
 import datetime
-from typing import Any, Optional
+from typing import Optional
 
 from domain.ports.clock import IClock
+from domain.ports.contracts import ManualEventRow
 from domain.ports.repos import IEventRepo
 
 
@@ -23,7 +24,7 @@ class EventService:
 
     def start_manual(
         self, guild_id: int, game: str, boost_pct: int, minutes: int, channel_id: int
-    ) -> tuple[bool, Optional[dict[str, Any]]]:
+    ) -> tuple[bool, Optional[ManualEventRow]]:
         """特別イベントを開く（開催中のものは置き換える）。(置き換えたか, 開いたイベント) を返す。"""
         repo = self._events.for_guild(guild_id)
         now = self._clock.now_ts()
@@ -31,9 +32,9 @@ class EventService:
         repo.manual_event_start(game, boost_pct, now, now + minutes * 60, channel_id)
         return replaced, repo.manual_event_get(now)
 
-    def stop_manual(self, guild_id: int) -> Optional[dict[str, Any]]:
+    def stop_manual(self, guild_id: int) -> Optional[ManualEventRow]:
         return self._events.for_guild(guild_id).manual_event_stop(self._clock.now_ts())
 
-    def finish_due(self, guild_id: int, now: float) -> Optional[dict[str, Any]]:
+    def finish_due(self, guild_id: int, now: float) -> Optional[ManualEventRow]:
         """時間が来た特別イベントを終える（終了の告知は1回だけ）。"""
         return self._events.for_guild(guild_id).manual_event_finish_due(now)
