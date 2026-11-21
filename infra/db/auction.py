@@ -56,7 +56,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
 
     def purge_unlistable_auctions(self) -> int:
         """競売の棚から、いまは競売に出さない品（称号など）の出品を消す（全サーバー）。消した行数を返す。"""
-        ids = [r["item_id"] for r in self._conn.execute("SELECT DISTINCT item_id FROM seized_items")]
+        ids = [r["item_id"] for r in self._all("SELECT DISTINCT item_id FROM seized_items")]
         gone = [i for i in ids if not listable(i)]
         for item_id in gone:
             self._conn.execute("DELETE FROM seized_items WHERE item_id=?", (item_id,))
@@ -69,10 +69,10 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
     def auction_list(self, now: float) -> list[dict[str, Any]]:
         """競売の棚。品ごとに、残りの数と、いちばん安い（古い）出品の値段。[{item_id, qty, price, rate}]"""
         with self._lock:
-            rows = self._conn.execute(
+            rows = self._all(
                 "SELECT item_id, qty, listed_at FROM seized_items WHERE guild_id=? AND qty>0 ORDER BY listed_at, id",
                 (self._g(),),
-            ).fetchall()
+            )
         out: dict[str, dict[str, Any]] = {}
         for r in rows:
             if r["item_id"] not in shop_mod.BY_ID:
@@ -100,19 +100,19 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
             self._account.ensure(gid, user_id)
             if self._status_reader.status_for(gid, user_id, now) != teiai.KATAGI:
                 return PurchaseResult(False, fail("auction_katagi_only"), self._account.raw_balance(gid, user_id))
-            have = self._conn.execute(
+            have = self._one(
                 "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
                 (gid, user_id, item_id),
-            ).fetchone()
+            )
             if item.unique and have:
                 return PurchaseResult(False, fail("already_owned"), self._account.raw_balance(gid, user_id))
             if item.unique:
                 qty = 1
-            rows = self._conn.execute(
+            rows = self._all(
                 "SELECT id, qty, listed_at FROM seized_items WHERE guild_id=? AND item_id=? AND qty>0 "
                 "ORDER BY listed_at, id",
                 (gid, item_id),
-            ).fetchall()
+            )
             if sum(r["qty"] for r in rows) < qty:
                 return PurchaseResult(False, fail("auction_insufficient_qty"), self._account.raw_balance(gid, user_id))
             take, total, need = [], 0, qty
@@ -147,7 +147,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
     def _market_plan_locked(self, gid: int, now: float, rng: random.Random) -> None:
         """その日の出品の計画を、まだ無ければ作る。計画は SystemRandom で決めるので、前もって分からない。"""
         day = tm.day_start(now)
-        done = self._conn.execute("SELECT 1 FROM teiai_market_days WHERE guild_id=? AND day=?", (gid, day)).fetchone()
+        done = self._one("SELECT 1 FROM teiai_market_days WHERE guild_id=? AND day=?", (gid, day))
         if done:
             return
         self._conn.execute("INSERT INTO teiai_market_days (guild_id, day) VALUES (?, ?)", (gid, day))
@@ -188,11 +188,11 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
         with self._db.tx():
             gid = self._g()
             self._market_plan_locked(gid, now, rng)
-            rows = self._conn.execute(
+            rows = self._all(
                 "SELECT * FROM teiai_market WHERE guild_id=? AND qty>0 AND listed_at<=? AND expires_at>? "
                 "ORDER BY expires_at, id",
                 (gid, now, now),
-            ).fetchall()
+            )
         return [self._market_row(r, now) for r in rows if r["item_id"] in shop_mod.BY_ID]
 
     def market_buy(
@@ -210,10 +210,10 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
             gid = self._g()
             self._account.ensure(gid, user_id)
             bal = self._account.raw_balance(gid, user_id)
-            r = self._conn.execute(
+            r = self._one(
                 "SELECT * FROM teiai_market WHERE id=? AND guild_id=? AND qty>0 AND listed_at<=? AND expires_at>?",
                 (listing_id, gid, now, now),
-            ).fetchone()
+            )
             if r is None or r["item_id"] not in shop_mod.BY_ID or qty < 1:
                 return MarketPurchase(False, fail("auction_item_unavailable"), bal)
             if self._status_reader.status_for(gid, user_id, now) != teiai.KATAGI:
@@ -225,7 +225,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
                 return MarketPurchase(False, fail("auction_insufficient_qty"), bal)
             owned = {
                 x["item_id"]
-                for x in self._conn.execute(
+                for x in self._all(
                     "SELECT item_id FROM inventory WHERE guild_id=? AND user_id=? AND qty>0", (gid, user_id)
                 )
             }
