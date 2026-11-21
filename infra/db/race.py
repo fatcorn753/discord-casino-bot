@@ -274,19 +274,22 @@ class RaceRepo(ScopedRepo, IRaceRepo):
     def race_odds(self, race_id: int, kind: str, lanes: list[int]) -> Optional[float]:
         """その馬券のオッズ（なければ None）。lanes は、選んだ枠の並び（単勝・複勝は1つ）。"""
         with self._lock:
-            if kind in ("win", "place"):
-                r = self._one(
-                    "SELECT odds_win, odds_place FROM horse_entries WHERE race_id=? AND lane=?", (race_id, lanes[0])
-                )
-                if r is None:
-                    return None
-                value = r["odds_win"] if kind == "win" else r["odds_place"]
-                return value if value else None
-            v = self._scalar(
-                "SELECT odds FROM horse_odds WHERE race_id=? AND kind=? AND key=?",
-                (race_id, kind, horse_mod.combo_key(kind, lanes)),
-            )
-            return v if v is not None else None
+            match kind:
+                case "win" | "place":
+                    r = self._one(
+                        "SELECT odds_win, odds_place FROM horse_entries WHERE race_id=? AND lane=?",
+                        (race_id, lanes[0]),
+                    )
+                    if r is None:
+                        return None
+                    value = r["odds_win"] if kind == "win" else r["odds_place"]
+                    return value if value else None
+                case _:
+                    v = self._scalar(
+                        "SELECT odds FROM horse_odds WHERE race_id=? AND kind=? AND key=?",
+                        (race_id, kind, horse_mod.combo_key(kind, lanes)),
+                    )
+                    return v if v is not None else None
 
     def race_bets(self, user_id: int, race_id: int) -> list[RaceBetRow]:
         with self._lock:
