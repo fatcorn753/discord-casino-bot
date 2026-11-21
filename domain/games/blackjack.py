@@ -10,7 +10,7 @@ SUITS = list(_CFG.suits)
 RANKS = list(_CFG.ranks)
 
 
-def new_deck(rng: random.Random) -> list:
+def new_deck(rng: random.Random) -> list[tuple[str, str]]:
     deck = [(r, s) for s in SUITS for r in RANKS]
     rng.shuffle(deck)
     return deck
@@ -48,9 +48,9 @@ def is_blackjack(cards) -> bool:
 @dataclass
 class Game:
     rng: random.Random
-    deck: list = field(default_factory=list)
-    player: list = field(default_factory=list)
-    dealer: list = field(default_factory=list)
+    deck: list[tuple[str, str]] = field(default_factory=list)
+    player: list[tuple[str, str]] = field(default_factory=list)
+    dealer: list[tuple[str, str]] = field(default_factory=list)
     doubled: bool = False
     finished: bool = False
 

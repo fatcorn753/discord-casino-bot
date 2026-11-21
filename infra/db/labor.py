@@ -45,7 +45,7 @@ def _relics_of(row: dict[str, Any]) -> dict[str, int]:
         return {}
 
 
-class _NoRoll:
+class _NoRoll(random.Random):
     """見込みの表示では、鉱石の抽選をしない（random() が 1.0 なら、何も出ない）。"""
 
     def random(self) -> float:

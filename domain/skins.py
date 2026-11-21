@@ -6,7 +6,7 @@
 
 import datetime
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from domain import shop
 from domain.ports import get_catalogs
@@ -18,7 +18,7 @@ CHINCHIRO, PACHINKO, BLACKJACK = "チンチロ", "パチンコ", "ブラック�
 @dataclass(frozen=True)
 class Skin:
     item_id: str
-    games: tuple  # 効くゲーム
+    games: tuple[str, ...]  # 効くゲーム
     title_prefix: str  # 見出しの先頭に付ける飾り
     start_line: str  # ゲームの始まりの地の文
     win_line: str  # 勝ったときの一言
@@ -81,7 +81,7 @@ SEASONS = tuple(
 )
 
 
-def active_skin(profile: dict, game: str) -> Optional[Skin]:
+def active_skin(profile: dict[str, Any], game: str) -> Optional[Skin]:
     """そのゲームで、いま装備している変更品（なければ None）。別のゲーム用のものを装備していても、効かない。"""
     slot = SLOT_OF_GAME.get(game)
     skin_id = profile.get(slot) if slot else None
@@ -106,12 +106,12 @@ def house_horse_icon(now: datetime.datetime) -> str:
     return season.house_horse_icon if season and season.house_horse_icon else ""
 
 
-def skin_for(profile: dict, game: str, now: datetime.datetime) -> Optional[Skin]:
+def skin_for(profile: dict[str, Any], game: str, now: datetime.datetime) -> Optional[Skin]:
     """そのゲームで使う見た目。装備している変更品が優先で、なければ期間中の季節演出。"""
     return active_skin(profile, game) or season_skin(game, now)
 
 
-def check_catalog() -> list:
+def check_catalog() -> list[str]:
     """カタログと見た目が食い違っていないか（商品があるのに見た目がない・その逆）の問題の一覧。"""
     problems = [
         f"見た目がありません: {i.id}"

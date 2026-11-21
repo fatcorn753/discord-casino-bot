@@ -5,6 +5,7 @@
 称号の名前に一致する末尾の【…】だけを外す（利用者が自分で付けた【…】は消さない）。
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Optional
 
@@ -47,7 +48,9 @@ class NickState:
     applied: str  # Bot が実際に設定したニックネーム
 
 
-def plan(current: Optional[str], state: Optional[NickState], default_name: str, titles, title: Optional[str]) -> tuple:
+def plan(
+    current: Optional[str], state: Optional[NickState], default_name: str, titles: Iterable[str], title: Optional[str]
+) -> tuple[Optional[str], Optional[NickState]]:
     """(設定すべきニックネーム, 記録しておく状態) を返す。title=None は、称号を外して元に戻す。
 
     - 前回 Bot が設定したままなら、記録した元のニックネームを使う（長い名前が切り詰められていても戻せる）

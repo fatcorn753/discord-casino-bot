@@ -4,6 +4,7 @@
 報酬は小さめ（デイリーボーナスの半分程度）にして、遊ぶきっかけになっても経済を壊さないようにしている。
 """
 
+import datetime
 import random
 from dataclasses import dataclass
 from typing import Optional
@@ -58,7 +59,7 @@ POOL = UNIVERSAL + OTHER_GAMES + BLACKJACK_MISSIONS + [BIG_WIN]
 BY_ID = {m.id: m for m in POOL}
 
 
-def today_missions(day) -> list:
+def today_missions(day: datetime.date) -> list[Mission]:
     """その日のミッション（全員共通）。日付が同じなら何度呼んでも同じ。
 
     毎日、(1) どのゲームでも進むもの、(2) ブラックジャック向け、(3) 残り全部からランダムに1つ。

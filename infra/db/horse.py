@@ -102,6 +102,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             ok, result = horse_mod.move_points({k: h[k] for k in horse_mod.STAT_KEYS}, src, dst)
             if not ok:
                 return False, result
+            assert not isinstance(result, Failure)
             if not self._consume(gid, user_id, CARROT):
                 return False, fail("horse_no_carrot")
             self._conn.execute(
@@ -166,6 +167,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             ok, result = horse_mod.add_points({k: h[k] for k in horse_mod.STAT_KEYS}, first, second)
             if not ok:
                 return False, result
+            assert not isinstance(result, Failure)
             if not self._consume(gid, user_id, GOLD_CARROT):
                 return False, fail("horse_no_gold_carrot")
             self._conn.execute(
