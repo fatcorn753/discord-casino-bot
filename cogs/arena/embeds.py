@@ -53,7 +53,7 @@ def hp_bar(hp: int, width: int = 10) -> str:
 
 def battle_embed(fighters: list[ArenaFighterRow], hp: list, title: str) -> discord.Embed:
     """試合演出（HPバー）の1コマ。勝敗はすでに決まっており、見た目の攻防だけを表示する。"""
-    lines = [f"**{f['name']}**　{hp_bar(h)} {h}%" for f, h in zip(fighters, hp)]
+    lines = [f"**{f['name']}**　{hp_bar(h)} {h}%" for f, h in zip(fighters, hp, strict=True)]
     return ui.embed(title, "\n".join(lines), ui.GOLD)
 
 

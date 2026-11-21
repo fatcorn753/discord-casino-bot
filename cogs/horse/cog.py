@@ -52,12 +52,12 @@ def display_frames(frames: list, winner: int, finish: Optional[list] = None) -> 
     for row in frames[: end + 1]:
         lead = max(row)
         cur = [max(0.0, lead - (lead - p) * GAP_ZOOM) for p in row]
-        shown = [max(a, b) for a, b in zip(shown, cur)]  # 前のコマより後ろには下がらない
+        shown = [max(a, b) for a, b in zip(shown, cur, strict=True)]  # 前のコマより後ろには下がらない
         out.append(list(shown))
     if finish is not None:
         last = [max(0.0, 1.0 - (f - finish[winner]) / horse_mod.TICKS * GAP_ZOOM) for f in finish]
         before = out[-2] if len(out) > 1 else [0.0] * len(last)
-        out[-1] = [min(1.0, max(a, b)) for a, b in zip(before, last)]  # 前のコマより後ろには下がらない
+        out[-1] = [min(1.0, max(a, b)) for a, b in zip(before, last, strict=True)]  # 前のコマより後ろには下がらない
     out[-1][winner] = 1.0
     return out
 
@@ -85,7 +85,7 @@ def lane_text(entries: list, positions: list, laps: int = 1, now: Optional[datet
     now を渡すと、季節演出の期間中は、帝愛の馬が季節の絵（例: 🦌）で走る。
     """
     rows = []
-    for e, p in zip(entries, positions):
+    for e, p in zip(entries, positions, strict=True):
         lap = min(laps - 1, int(p * laps))
         frac = 1.0 if p >= 1.0 else p * laps - lap
         k = min(TRACK_W, int(frac * TRACK_W))

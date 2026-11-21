@@ -190,7 +190,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
             leftover and now is not None
         ):  # 使われなかった負け分は、カジノの負け分と同じく一部を帝愛銀行の収入にする(残りは消える)
             self._bank.bank_income_for(guild_id, int(leftover * teiai.LOSS_SHARE), now)
-        pay_of = {b["id"]: p for b, p in zip(player_bets, pays)}
+        pay_of = {b["id"]: p for b, p in zip(player_bets, pays, strict=True)}
         for b in win_bets:
             pay = pay_of.get(b["id"], 0)
             if pay:

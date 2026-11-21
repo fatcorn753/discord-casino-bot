@@ -275,13 +275,13 @@ def correlation_from_history(
     pairs = [(a[t], p) for t, p, _ in hist_b if t in a]  # 同じ時刻の価格だけを使う
     if len(pairs) < 30:
         return None
-    ra = [math.log(y[0] / x[0]) for x, y in zip(pairs, pairs[1:])]
-    rb = [math.log(y[1] / x[1]) for x, y in zip(pairs, pairs[1:])]
+    ra = [math.log(y[0] / x[0]) for x, y in zip(pairs, pairs[1:], strict=False)]
+    rb = [math.log(y[1] / x[1]) for x, y in zip(pairs, pairs[1:], strict=False)]
     ma, mb = sum(ra) / len(ra), sum(rb) / len(rb)
     va, vb = sum((x - ma) ** 2 for x in ra), sum((x - mb) ** 2 for x in rb)
     if va <= 0 or vb <= 0:
         return None
-    return sum((x - ma) * (y - mb) for x, y in zip(ra, rb)) / math.sqrt(va * vb)
+    return sum((x - ma) * (y - mb) for x, y in zip(ra, rb, strict=True)) / math.sqrt(va * vb)
 
 
 def describe_correlation(value: Optional[float]) -> str:
