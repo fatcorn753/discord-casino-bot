@@ -29,7 +29,7 @@
 | `catalogs/` | YAML の静的カタログ群（ショップ・スキン・遺物・債券・ミッション・イベント・地下作業・競馬・証券・帝愛・経済・ゲーム・会社・闘技場） |
 | `data/` | 実行時のデータ。`casino.db`（SQLite 本体）と `bot.lock`（二重起動の防止）。**Git に入れない** |
 | `README.md` | 概要・コマンド一覧・導入手順・運用・docs への案内 |
-| `docs/` | 機能ごとの、くわしい仕様（`casino.md`・`stocks.md`・`teiai.md`・`horse.md`・`labor.md`・`arena.md`・`shop.md`・`admin.md`） |
+| `docs/` | 機能ごとの、くわしい仕様（`casino.md`・`stocks.md`・`teiai.md`・`horse.md`・`labor.md`・`arena.md`・`shop.md`・`admin.md`・`company.md`） |
 | `STRUCTURE.md` | このファイル |
 | `pyproject.toml` / `uv.lock` | Python のプロジェクト設定・ruff・pyright・pytest 設定と、依存の固定（uv） |
 | `requirements.txt` / `requirements-dev.txt` | 実行に必要な依存 / 開発（テスト・lint・型検査）に必要な依存 |
@@ -48,6 +48,8 @@
 | `casino/` | `/カジノ`。`cog.py` と進行演出・静的台本（`common.py`・`simple.py`・`blackjack.py`・`chinchiro.py`・`pachinko.py`・`texts.py`） |
 | `economy/` | `/ペリカ`。`cog.py`・`embeds.py`（残高・デイリー・返済・破産・ミッション・履歴の画面）・`boards.py`（ランキング・掲示板自動更新） |
 | `teiai/` | `/ペリカ 帝愛` のパネル（`panel.py`）と海外逃亡の演出（`escape.py`）、静的 AA・状態文言（`texts.py`） |
+| `kyosai/` | `/共済`。帝愛共済（#34）の持ち口の譲渡・競り・動議と配当（`cog.py`） |
+| `poll/` | `/投票`。誰でも作れる賛成・反対の二択投票（`cog.py`・`views.py`） |
 | `shop/` | `/ショップ`。`cog.py`・`actions.py`・`embeds.py`・`texts.py`・`views.py`・`discord_ops.py`（ロール・ニックネーム反映） |
 | `horse/` | `/競馬`。`cog.py`・`cards.py`・`betting.py`・`stable.py`・`views.py`（ファサード） |
 | `market/` | `/証券` と債券定期処理。`cog.py`・`feed.py`・`bond_cog.py`・`embeds.py`・`bond_embeds.py`・`orders.py`・`views.py` |
@@ -55,12 +57,12 @@
 | `p2p/` | プレイヤー間の市場と競り（`cog.py`・`embeds.py`・`views.py`） |
 | `labor/` | `/地下 作業`・`/地下 ランキング`。クリッカー、作業員の雇用、鉱石の掘り出し（`cog.py`・`embeds.py`・`views.py`） |
 | `company/` | `/会社`。会社の設立・事業所の増築・出荷・維持費（`cog.py`・`embeds.py`・`texts.py`・`views.py`） |
-| `arena/` | `/闘技場`。地下闘技場。`cog.py`（進行・掲示）・`views.py`（賭けパネル）・`embeds.py`。**停止中**: `loader.py` の `COG_MODULES` から外してある（コードは残す）。負け側の賭け金だけを配当の原資にしているため、配当が極端に小さくなる問題（#27）を直してから戻す。停止中は `/運営 闘技場開催` が「闘技場が読み込まれていません」と返す |
+| `arena/` | `/闘技場`。地下闘技場。`cog.py`（進行・掲示）・`views.py`（賭けパネル）・`embeds.py`。**再開済み（#88）**: `loader.py` の `COG_MODULES` に含まれている |
 | `quiz/` | `/クイズ`。`cog.py`・`embeds.py`・`texts.py`・`views.py`（4 択クイズと報酬） |
 | `raffle/` | 抽選。参加費を預かり、締切で 1 人に全額を渡す（`cog.py`・`embeds.py`・`views.py`） |
 | `event/` | 突発イベントの告知（`cog.py`・`texts.py`、1 日 1 回、30 分だけ勝ち分が増える） |
 | `weekly/` | 週間ランキングの自動発表（毎週月曜 0 時）と限定称号の付与（`cog.py`・`embeds.py`） |
-| `admin/` | サーバー承認と `/運営` コマンド（`cog.py`・`approval_ops.py`・`economy_ops.py`・`content_ops.py`・`embeds.py`・`texts.py`・`views.py`・`purge.py`・`targets.py`） |
+| `admin/` | サーバー承認と `/運営` コマンド（`cog.py`・`approval_ops.py`・`economy_ops.py`・`content_ops.py`・`feature_ops.py`・`embeds.py`・`texts.py`・`views.py`・`purge.py`・`targets.py`） |
 | `help/` | `/help`。カテゴリ別の案内（`cog.py`・`texts.py`） |
 
 ## `services/` — アプリケーションサービス
@@ -82,10 +84,12 @@
 | `loan.py` | `LoanService`。個人間貸付（提案・募集・承諾・辞退・取り下げ・返済・期日チェック）の調停 |
 | `company.py` | `CompanyService`。会社の設立・出資・引き出し・出荷・増築・種類の変更・定時精算 |
 | `teiai.py` | `TeiaiService`。帝愛への返済・種銭・自己破産・海外逃亡・帝愛銀行（預金・CDS）・破産猶予の時間切れ |
+| `kyosai.py` | `KyosaiService`。帝愛共済（#34）の持ち口の照会・譲渡・競り・動議・配当の調停 |
 | `ranking.py` | `RankingService`。ランキング描画の読み取り専用の問い合わせ（`for_guild` でサーバーを絞る） |
 | `quiz.py` | `QuizService`。クイズの出題・挑戦・回答・取り下げ・期限の精算・運営の追加と削除 |
 | `raffle.py` | `RaffleService`。抽選の募集・参加・中止・締切の精算 |
 | `p2p.py` | `P2PService`。プレイヤー間の出品・購入・入札・取り消し・締切の精算 |
+| `poll.py` | `PollService`。投票（/投票）の作成・投票・票数の書き換え・締切の精算 |
 | `event.py` | `EventService`。突発イベントの告知状態と、持ち主が開く特別イベント |
 | `admin.py` | `AdminService`。運営の付与・残高の設定・還元率・パチンコの集計 |
 | `shop.py` | `ShopService`。ショップ・帝愛の競売・持ち物・称号解決の調停 |
@@ -100,7 +104,8 @@
 | `clock.py` | `IClock`（現在時刻・日付・UTCオフセット・タイムスタンプの抽象契約） |
 | `session.py` | `ISessionGuard`（二重プレイ防止セッション管理の契約） |
 | `repos/` | 領域別 DB リポジトリ用名目的基底クラス群（`base.py`・`economy.py`・`teiai.py`・`market.py`・`social.py`・`games.py`・`bundle.py` / `__init__.py` で `IRepositoryBundle` 等を集約再エクスポート） |
-| `bridges.py` | リポジトリ・サービス間の循環を防ぐ細粒度ブリッジ契約と Null Object / Composite（`NoOp*`・`Composite*`・`IValuationSource`・`IAssetCollector`・`IAssetSeizureStep` 等） |
+| `contracts.py` | ポートの戻り値に使う型付きの値型（`ActiveBond`・`SeizedBelongings` 等。catalogs 非依存） |
+| `bridges/` | リポジトリ・サービス間の循環を防ぐ細粒度ブリッジ契約と Null Object / Composite。責務別サブモジュール（`debt.py`・`bank.py`・`margin.py`・`seizure.py`・`loans.py`）に分割し、`__init__.py` で全シンボル（`NoOp*`・`Composite*`・`IValuationSource`・`IAssetCollector`・`IAssetSeizureStep`・`AddAssetPart` 等）を再エクスポート |
 
 ### `games/` — ゲームのルール（純粋な計算）
 
@@ -120,6 +125,7 @@
 | `types.py` | 結果データクラス（`DailyResult` 等）と共有定数（`INITIAL_BALANCE`・`DAILY_*`・`asset_groups` 等） |
 | `errors.py` | 構造化エラー・通知イベント（`Failure`・`Notice`・`fail`・`notice`） |
 | `approval.py` | サーバー許可リストと承認状態の純粋判定 |
+| `features.py` | 機能のオン・オフ（サーバーごと。#99）。止めるのは「新しく始めること」だけで、進行中のものはいつもどおり精算する |
 | `nick.py` | 称号をニックネームの後ろに付け外しする文字列処理 |
 | `relics.py` | 発掘品の効果（持っている間、種類ごとに +1%） |
 | `labor.py` | 地下作業の数字・鉱石の表・抽選・契約の決済の計算 |
@@ -128,11 +134,15 @@
 | `market.py` / `market_events.py` | 証券の価格変動・売買計算・チャート / ボラティリティ予報と相関崩壊警報 |
 | `options.py` | オプションの値付け・銘柄表示名 |
 | `bonds.py` | 債券の種類・利率・期間 |
+| `rates.py` | 金利の共通計算（1日あたり・連続複利。#33・#18。r_f は帝愛銀行の準備率に連動） |
 | `teiai.py` | 帝愛ファイナンス（借金・身分・銀行）の数字 |
+| `teiai_market.py` | 帝愛の期間限定出品（#72）。1日の出品計画・競売の値下がり・闇市品の開封（乱数は呼び出し側から渡す） |
+| `kyosai.py` | 帝愛共済（#34）の数字と計算（固定総口数の持分・配当・超過損失の負担） |
 | `company.py` | 会社の数字（建設費・生産と倉庫・日替わりの状態と相場・出荷額・維持費） |
 | `thermostat.py` | 帝愛銀行の最前線サーモスタット（熱量と器の時間推移・符号付きの熱量・分割不変な流入/損失の配分・バッチの純額） |
 | `loans.py` | 貸し借りの利息計算（日割りの単利） |
 | `p2p.py` | プレイヤー間取引のルール（値段幅・手数料・入札幅・延長） |
+| `poll.py` | 投票（/投票）の数字と、表示する票数の計算（書き換えの上限など） |
 | `shop.py` | ショップの商品カタログ |
 | `skins.py` | ゲーム演出スキン定義 |
 | `missions.py` / `events.py` / `weekly.py` / `earnings.py` | デイリーミッション / 突発イベント / 週間集計 / 決算ジャンプ |
@@ -157,7 +167,7 @@
 | `lazy_bridges.py` | 初期化時の循環参照を解決する遅延解決ブリッジラッパー（`Lazy*`） |
 | `account.py` | `AccountCore`（口座残高・台帳記帳・借金ライフサイクルフックの共有プリミティブ） |
 | `escrow.py` / `wallet.py` | 賭け金預かり・精算（`EscrowRepo`）と残高・デイリー・ランキング・統計・送金（`WalletRepo`） |
-| `assets.py` / `auction.py` / `bank.py` / `bonds.py` / `company.py` / `crypto.py` / `debt.py` / `earnings.py` / `events.py` / `guild.py` / `horse.py` / `labor.py` / `loans.py` / `margin.py` / `market.py` / `market_events.py` / `notices.py` / `options.py` / `p2p.py` / `pachinko.py` / `quiz.py` / `race.py` / `raffle.py` / `records.py` / `relics.py` / `rtp.py` / `shop.py` / `arena.py` | 機能別の独立リポジトリ群と `IAssetCollector` / `IAssetSeizureStep` / `ILiquidationStep` 戦略群（各 `domain/ports/repos/` 契約を継承実装） |
+| `assets.py` / `auction.py` / `bank.py` / `bonds.py` / `company.py` / `crypto.py` / `debt.py` / `earnings.py` / `events.py` / `guild.py` / `horse.py` / `kyosai.py` / `labor.py` / `loans.py` / `margin.py` / `market.py` / `market_events.py` / `notices.py` / `options.py` / `p2p.py` / `pachinko.py` / `poll.py` / `quiz.py` / `race.py` / `raffle.py` / `records.py` / `relics.py` / `rtp.py` / `shop.py` / `arena.py` | 機能別の独立リポジトリ群と `IAssetCollector` / `IAssetSeizureStep` / `ILiquidationStep` 戦略群（各 `domain/ports/repos/` 契約を継承実装） |
 
 ## `tests/` — 自動テスト
 
