@@ -20,7 +20,7 @@ class RelicRepo(ScopedRepo, IRelicRepo):
         """持っている発掘品の効果 {効果の名前: 上がり幅}（個数ぶん重なる。出品中の品は持ち物にないので、効かない）。"""
         held = {
             r["item_id"]: r["qty"]
-            for r in self._conn.execute(
+            for r in self._all(
                 "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0 AND item_id LIKE 'relic_%'",
                 (guild_id, user_id),
             )
@@ -35,7 +35,7 @@ class RelicRepo(ScopedRepo, IRelicRepo):
         with self._lock:
             return {
                 r["item_id"]: r["qty"]
-                for r in self._conn.execute(
+                for r in self._all(
                     "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0 AND item_id LIKE 'relic_%'",
                     (guild_id, user_id),
                 )

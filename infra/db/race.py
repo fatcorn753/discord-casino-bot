@@ -60,20 +60,15 @@ class RaceRepo(ScopedRepo, IRaceRepo):
     def race_number(self, race_id: int) -> int:
         """このサーバーでの、第何競走か。"""
         with self._lock:
-            return self._conn.execute(
-                "SELECT COUNT(*) FROM horse_races WHERE guild_id=? AND id<=?", (self._g(), race_id)
-            ).fetchone()[0]
+            return self._scalar("SELECT COUNT(*) FROM horse_races WHERE guild_id=? AND id<=?", (self._g(), race_id))
 
     def race_open(self) -> list[dict[str, Any]]:
         """まだ終わっていないレース（申し込み中・発売中）。発走の早い順。"""
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM horse_races WHERE guild_id=? AND status IN ('entry','betting') ORDER BY start_at",
-                    (self._g(),),
-                )
-            ]
+            return self._all(
+                "SELECT * FROM horse_races WHERE guild_id=? AND status IN ('entry','betting') ORDER BY start_at",
+                (self._g(),),
+            )
 
     def race_ensure_scheduled(self, now: float, tz_hours: float, channel_id: int = 0) -> Optional[int]:
         """次の定時レースが、申し込みを始める時刻になっていて、まだ無ければ作る（申し込み受付を始める）。作ったレースの番号を返す。"""
@@ -82,9 +77,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             start = race_slots(now, tz_hours)[0]
             if now < start - horse_mod.ENTRY_OPEN_MIN * 60:  # まだ、申し込みを始める時刻ではない
                 return None
-            if self._conn.execute(
-                "SELECT 1 FROM horse_races WHERE guild_id=? AND kind='regular' AND start_at=?", (gid, start)
-            ).fetchone():
+            if self._one("SELECT 1 FROM horse_races WHERE guild_id=? AND kind='regular' AND start_at=?", (gid, start)):
                 return None
             cur = self._conn.execute(
                 "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, channel_id, created) "
@@ -121,15 +114,12 @@ class RaceRepo(ScopedRepo, IRaceRepo):
 
     def race_entries(self, race_id: int, registered_only: bool = False) -> list[dict[str, Any]]:
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM horse_entries WHERE race_id=?"
-                    + (" AND lane<0" if registered_only else "")
-                    + " ORDER BY CASE WHEN lane<0 THEN 99 ELSE lane END, id",
-                    (race_id,),
-                )
-            ]
+            return self._all(
+                "SELECT * FROM horse_entries WHERE race_id=?"
+                + (" AND lane<0" if registered_only else "")
+                + " ORDER BY CASE WHEN lane<0 THEN 99 ELSE lane END, id",
+                (race_id,),
+            )
 
     def race_register(self, user_id: int, horse_id: int, race_id: int, now: float) -> tuple[Any, ...]:
         """馬を出走させる（出走料がかかる）。(成功か, 理由)。1人1レースに1頭まで。"""
@@ -154,11 +144,11 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             busy = (
                 None
                 if race["kind"] == "special"
-                else self._conn.execute(
+                else self._one(
                     "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
                     "WHERE e.horse_id=? AND r.status IN ('entry','betting') AND r.kind='regular'",
                     (horse_id,),
-                ).fetchone()
+                )
             )
             if busy:
                 return False, fail("race_horse_busy")
@@ -284,25 +274,20 @@ class RaceRepo(ScopedRepo, IRaceRepo):
         """その馬券のオッズ（なければ None）。lanes は、選んだ枠の並び（単勝・複勝は1つ）。"""
         with self._lock:
             if kind in ("win", "place"):
-                r = self._conn.execute(
+                r = self._one(
                     "SELECT odds_win, odds_place FROM horse_entries WHERE race_id=? AND lane=?", (race_id, lanes[0])
-                ).fetchone()
+                )
                 value = r and (r["odds_win"] if kind == "win" else r["odds_place"])
                 return value if value else None
-            r = self._conn.execute(
+            v = self._scalar(
                 "SELECT odds FROM horse_odds WHERE race_id=? AND kind=? AND key=?",
                 (race_id, kind, horse_mod.combo_key(kind, lanes)),
-            ).fetchone()
-            return r["odds"] if r else None
+            )
+            return v if v is not None else None
 
     def race_bets(self, user_id: int, race_id: int) -> list[dict[str, Any]]:
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM horse_bets WHERE race_id=? AND user_id=? ORDER BY id", (race_id, user_id)
-                )
-            ]
+            return self._all("SELECT * FROM horse_bets WHERE race_id=? AND user_id=? ORDER BY id", (race_id, user_id))
 
     def race_bet(
         self, user_id: int, race_id: int, kind: str, lane: int | list[int], stake: int, now: float
@@ -329,9 +314,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 return False, fail("race_bet_closed")
             names = []
             for x in lanes:
-                entry = self._conn.execute(
-                    "SELECT * FROM horse_entries WHERE race_id=? AND lane=?", (race_id, x)
-                ).fetchone()
+                entry = self._one("SELECT * FROM horse_entries WHERE race_id=? AND lane=?", (race_id, x))
                 if entry is None:
                     return False, fail("race_lane_not_running")
                 names.append(entry["name"])
@@ -339,9 +322,9 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             if odds is None:
                 return False, fail("race_odds_pending")
             self._account.ensure(gid, user_id)
-            spent = self._conn.execute(
+            spent = self._scalar(
                 "SELECT COALESCE(SUM(stake), 0) FROM horse_bets WHERE race_id=? AND user_id=?", (race_id, user_id)
-            ).fetchone()[0]
+            )
             if spent + stake > horse_mod.MAX_RACE_STAKE:
                 return False, fail("race_max_stake", max_race_stake=horse_mod.MAX_RACE_STAKE)
             bal = self._account.raw_balance(gid, user_id)
@@ -386,9 +369,9 @@ class RaceRepo(ScopedRepo, IRaceRepo):
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, user_id)
-            spent = self._conn.execute(
+            spent = self._scalar(
                 "SELECT COALESCE(SUM(stake), 0) FROM horse_bets WHERE race_id=? AND user_id=?", (race_id, user_id)
-            ).fetchone()[0]
+            )
             total = stake * len(lanes)
             if spent + total > horse_mod.MAX_RACE_STAKE:
                 return False, fail(
@@ -489,9 +472,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             order_lanes = [entries[i]["lane"] for i in order]
             top_lane, top3 = order_lanes[0], set(order_lanes[:3])
             bets, lost = [], 0
-            for b in self._conn.execute(
-                "SELECT * FROM horse_bets WHERE race_id=? AND settled=0 ORDER BY id", (race_id,)
-            ).fetchall():
+            for b in self._all("SELECT * FROM horse_bets WHERE race_id=? AND settled=0 ORDER BY id", (race_id,)):
                 b = dict(b)
                 if b["kind"] == "win":
                     hit = b["lane"] == top_lane
