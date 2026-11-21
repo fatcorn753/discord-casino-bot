@@ -39,6 +39,14 @@ class EcoDb:
         self.notices: dict[tuple[int, int], list["Notice"]] = {}
         self._tx_depth = 0
 
+    def _tx_yield(self, is_outer: bool) -> Iterator[sqlite3.Connection]:
+        """最外層なら conn のコンテキストマネージャで COMMIT/ROLLBACK しつつ yield する。"""
+        if is_outer:
+            with self.conn:
+                yield self.conn
+        else:
+            yield self.conn
+
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
         """ロック付き再入可能トランザクション。最外層のみで COMMIT / ROLLBACK する。"""
@@ -46,11 +54,7 @@ class EcoDb:
             is_outer = self._tx_depth == 0
             self._tx_depth += 1
             try:
-                if is_outer:
-                    with self.conn:
-                        yield self.conn
-                else:
-                    yield self.conn
+                yield from self._tx_yield(is_outer)
             finally:
                 self._tx_depth -= 1
 

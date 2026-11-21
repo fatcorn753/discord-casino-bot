@@ -337,6 +337,50 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                     return False, reason
             return self.option_close_locked_for(gid, user_id, option_id, now)
 
+    def _due_option_gross(self, r: OptionRow) -> Optional[tuple[float, int]]:
+        """満期のオプションの (最終価格, 払い戻し額) を返す。価格が読めなければ None。"""
+        final = self._price_at(r["symbol"], r["expiry"])
+        symbol2 = r["symbol2"] if r["kind"] == opt.PAIR else None
+        final2 = self._price_at(symbol2, r["expiry"]) if symbol2 is not None else None
+        if final is None or (r["kind"] == opt.PAIR and final2 is None):
+            return None
+        if r["kind"] == opt.PAIR:
+            assert final2 is not None and r["spot2"] is not None
+            gross = opt.pair_intrinsic(r["units"], r["spot"], r["spot2"], final, final2)
+        else:
+            gross = opt.intrinsic(r["kind"], r["units"], final, r["strike"])
+        if r["side"] != "short":
+            gross = min(gross, r["premium"] * opt.PAYOUT_CAP_MULT)
+        return final, gross
+
+    def _settle_due_option(
+        self, gid: int, r: OptionRow, final: float, gross: int, paid_of: dict[int, int], now: float
+    ) -> tuple[str, int]:
+        """決済した建玉の口座処理を行い、(status, paid) を返す。"""
+        self._account.ensure(gid, r["user_id"])
+        if r["side"] == "short":
+            paid = max(0, r["margin"] - gross)  # 証拠金の戻り
+            self._bank.bank_income_for(gid, gross, now, thermo=False)
+            self._conn.execute(  # 先に決済済みにする（損失の支払いで差し押さえが走っても、同じ建玉を、もう一度決済しない）
+                "UPDATE options SET status=?, paid=?, final=? WHERE id=?",
+                ("exercised" if gross > 0 else "expired", paid, final, r["id"]),
+            )
+            if paid:
+                self._account.apply(gid, r["user_id"], paid, f"{name_of(r)}の満期（証拠金の戻り）")
+            if gross > r["margin"]:  # 損失が証拠金を超えた分は、強制執行と借金で払う
+                self._debt.owe_for(gid, r["user_id"], gross - r["margin"], f"{name_of(r)}の損失")
+            return ("exercised" if gross > 0 else "expired"), paid
+        paid = paid_of[r["id"]]
+        if paid:
+            self._account.apply(
+                gid,
+                r["user_id"],
+                paid,
+                f"{name_of(r)}の配当:{market_mod.BY_KEY[r['symbol']].name}",
+                income=max(0, paid - r["premium"]),
+            )
+        return ("exercised" if gross > 0 else "expired"), paid
+
     def option_settle(self, now: float) -> list[OptionSettleRow]:
         """満期を過ぎたオプションを決済する（このサーバー全員分）。決済した行（status と paid つき）を返す。"""
         out: list[OptionSettleRow] = []
@@ -347,19 +391,9 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                 "SELECT * FROM options WHERE guild_id=? AND status='active' AND expiry<=? ORDER BY id", (gid, now)
             )
             for r in rows:
-                final = self._price_at(r["symbol"], r["expiry"])
-                symbol2 = r["symbol2"] if r["kind"] == opt.PAIR else None
-                final2 = self._price_at(symbol2, r["expiry"]) if symbol2 is not None else None
-                if final is None or (r["kind"] == opt.PAIR and final2 is None):
-                    continue
-                if r["kind"] == opt.PAIR:
-                    assert final2 is not None and r["spot2"] is not None
-                    gross = opt.pair_intrinsic(r["units"], r["spot"], r["spot2"], final, final2)
-                else:
-                    gross = opt.intrinsic(r["kind"], r["units"], final, r["strike"])
-                if r["side"] != "short":
-                    gross = min(gross, r["premium"] * opt.PAYOUT_CAP_MULT)
-                due.append((r, final, gross))
+                settled = self._due_option_gross(r)
+                if settled is not None:
+                    due.append((r, *settled))
             # 同時刻の満期は、売り手からの入金と買い手への支払いを純額にして、サーモスタットに1回だけ通す
             # （1件ずつ通すと、建玉の id 順で burn・bailout が変わるため）。入金を先に済ませ、支払いは
             # bank_pay_batch_for でまとめて払う（信託の第一損失のあとで、超過損失の分だけ熱浴が肩代わりする。#33）
@@ -370,31 +404,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                 if r["side"] != "short" and not paid_of:
                     pays = self._bank.bank_pay_batch_for(gid, [g for _, g in longs], now, offset=inflow)
                     paid_of = {lr["id"]: p for (lr, _), p in zip(longs, pays)}
-
-                self._account.ensure(gid, r["user_id"])
-                if r["side"] == "short":
-                    paid = max(0, r["margin"] - gross)  # 証拠金の戻り
-                    self._bank.bank_income_for(gid, gross, now, thermo=False)
-                    self._conn.execute(  # 先に決済済みにする（損失の支払いで差し押さえが走っても、同じ建玉を、もう一度決済しない）
-                        "UPDATE options SET status=?, paid=?, final=? WHERE id=?",
-                        ("exercised" if gross > 0 else "expired", paid, final, r["id"]),
-                    )
-                    if paid:
-                        self._account.apply(gid, r["user_id"], paid, f"{name_of(r)}の満期（証拠金の戻り）")
-                    if gross > r["margin"]:  # 損失が証拠金を超えた分は、強制執行と借金で払う
-                        self._debt.owe_for(gid, r["user_id"], gross - r["margin"], f"{name_of(r)}の損失")
-                    status = "exercised" if gross > 0 else "expired"
-                else:
-                    paid = paid_of[r["id"]]
-                    if paid:
-                        self._account.apply(
-                            gid,
-                            r["user_id"],
-                            paid,
-                            f"{name_of(r)}の配当:{market_mod.BY_KEY[r['symbol']].name}",
-                            income=max(0, paid - r["premium"]),
-                        )
-                    status = "exercised" if gross > 0 else "expired"
+                status, paid = self._settle_due_option(gid, r, final, gross, paid_of, now)
                 self._conn.execute(
                     "UPDATE options SET status=?, paid=?, final=? WHERE id=?", (status, paid, final, r["id"])
                 )

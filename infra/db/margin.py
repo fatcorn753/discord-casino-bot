@@ -2,6 +2,7 @@
 
 import logging
 import math
+from collections.abc import Iterator
 from typing import Any, Optional
 
 from domain import market as market_mod
@@ -122,12 +123,18 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         with self._lock:
             prices = self._market.latest_prices()
             for side, table in self._MARGIN_TABLE.items():
-                for r in self._all(
-                    f"SELECT user_id, symbol, units, entry_value, margin FROM {table} WHERE guild_id=?", (guild_id,)
-                ):
-                    if r["symbol"] in prices:
-                        pnl = market_mod.margin_pnl(side, r["units"], r["entry_value"], prices[r["symbol"]])
-                        totals[r["user_id"]] = totals.get(r["user_id"], 0) + max(0, r["margin"] + pnl)
+                self._collect_table_values(guild_id, side, table, prices, totals)
+
+    def _collect_table_values(
+        self, guild_id: int, side: str, table: str, prices: dict[str, float], totals: dict[int, int]
+    ) -> None:
+        for r in self._all(
+            f"SELECT user_id, symbol, units, entry_value, margin FROM {table} WHERE guild_id=?", (guild_id,)
+        ):
+            if r["symbol"] not in prices:
+                continue
+            pnl = market_mod.margin_pnl(side, r["units"], r["entry_value"], prices[r["symbol"]])
+            totals[r["user_id"]] = totals.get(r["user_id"], 0) + max(0, r["margin"] + pnl)
 
     def _collateral_value_for(self, guild_id: int, user_id: int, prices: dict[str, Any]) -> float:
         """代用有価証券の評価（現物は売った手取り×掛目、債券は元本×掛目）。信用取引の担保には数えない。"""
@@ -390,6 +397,37 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             cut.append((symbol, side, -res.profit))
         return cut
 
+    def _cut_map_for_user(
+        self, gid: int, uid: int, prices: dict[str, Any], out: list[tuple[str, str, float, int]]
+    ) -> None:
+        """1ユーザーの全建玉のロスカット水準を out へ足す。"""
+        for side, symbol, units, _entry, _margin in self.margin_positions_for(gid, uid):
+            if symbol not in prices:
+                continue
+            spot = prices[symbol]
+            losscut = self._losscut_price_for(gid, uid, prices, symbol, side, spot)
+            if losscut is None:
+                continue
+            out.append((symbol, side, losscut, units * spot / market_mod.UNIT))
+
+    def _losscut_price_for(
+        self, gid: int, uid: int, prices: dict[str, Any], symbol: str, side: str, spot: float
+    ) -> Optional[float]:
+        """建玉がロスカットされる価格（二分探索）。範囲外なら None。買い建ては下へ、空売りは上へ動くと損の側。"""
+        sign = -1 if side == "long" else 1
+
+        def broken(move: float) -> bool:
+            status = self._margin_status_locked_for(gid, uid, {**prices, symbol: spot * (1 + sign * move)})
+            return status["ratio"] is not None and status["ratio"] < market_mod.LOSSCUT_RATIO
+
+        if not broken(0.5):
+            return None
+        lo, hi = 0.0, 0.5
+        for _ in range(18):
+            mid = (lo + hi) / 2
+            lo, hi = (lo, mid) if broken(mid) else (mid, hi)
+        return spot * (1 + sign * hi)
+
     def margin_cut_map(self, prices: Optional[dict[str, Any]] = None) -> list[tuple[str, str, float, int]]:
         """このサーバーの、信用建玉のロスカット水準の地図 [(銘柄, 向き, ロスカットされる価格, 建玉額), ...]。"""
         out = []
@@ -401,68 +439,64 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                 for table in self._MARGIN_TABLE.values()
                 for r in self._all(f"SELECT user_id FROM {table} WHERE guild_id=? AND units>0", (gid,))
             }:
-                for side, symbol, units, _entry, _margin in self.margin_positions_for(gid, uid):
-                    if symbol not in prices:
-                        continue
-                    spot = prices[symbol]
-                    notional = units * spot / market_mod.UNIT
-                    sign = -1 if side == "long" else 1  # 買い建ては下へ、空売りは上へ動くと損
-
-                    def broken(move: float) -> bool:
-                        status = self._margin_status_locked_for(gid, uid, {**prices, symbol: spot * (1 + sign * move)})
-                        return status["ratio"] is not None and status["ratio"] < market_mod.LOSSCUT_RATIO
-
-                    if not broken(0.5):
-                        continue
-                    lo, hi = 0.0, 0.5
-                    for _ in range(18):
-                        mid = (lo + hi) / 2
-                        lo, hi = (lo, mid) if broken(mid) else (mid, hi)
-                    out.append((symbol, side, spot * (1 + sign * hi), notional))
+                self._cut_map_for_user(gid, uid, prices, out)
         return out
 
     def margin_interest(self, now: float) -> list[tuple[int, int, str, str, int]]:
         """全サーバーの建玉に、信用金利（信用買いは借入金利、空売りは貸株料）を数えて、貯まった分を担保から引く。[(サーバー, ユーザー, 銘柄, 向き, 引いた額)]。"""
         done: list[tuple[int, int, str, str, int]] = []
         with self._db.tx():
-            for side, table in self._MARGIN_TABLE.items():
-                rate = market_mod.BORROW_RATE_PER_DAY[side]
-                for r in self._all(
-                    f"SELECT guild_id, user_id, symbol, entry_value, margin, interest_at, accrued FROM {table}"
-                ):
-                    key = (r["guild_id"], r["user_id"], r["symbol"])
-                    if r["interest_at"] <= 0:  # 数え始め（金利の列がなかった頃の建玉は、ここから数える）
-                        self._conn.execute(
-                            f"UPDATE {table} SET interest_at=? WHERE guild_id=? AND user_id=? AND symbol=?", (now, *key)
-                        )
-                        continue
-                    base = market_mod.margin_interest_base(side, r["entry_value"], r["margin"])
-                    accrued = r["accrued"] + base * rate * max(0.0, now - r["interest_at"]) / 86400.0
-                    charge = 0
-                    if accrued >= market_mod.INTEREST_MIN_CHARGE:
-                        charge = min(int(accrued), r["margin"])
-                        accrued -= int(accrued)
-                    self._conn.execute(
-                        f"UPDATE {table} SET margin=margin-?, accrued=?, interest_at=? "
-                        "WHERE guild_id=? AND user_id=? AND symbol=?",
-                        (charge, accrued, now, *key),
-                    )
-                    if charge > 0:
-                        try:
-                            gid = validate_guild_id(r["guild_id"])
-                        except ValueError:
-                            continue
-                        name = market_mod.BY_KEY[r["symbol"]].name
-                        self._account.ledger(
-                            gid,
-                            r["user_id"],
-                            0,
-                            self._account.raw_balance(gid, r["user_id"]),
-                            f"帝愛の信用金利（{self.SIDE_NAME[side]} {name}）担保から-{charge:,}",
-                        )
-                        self._bank.bank_income_for(gid, charge, now)
-                        done.append((gid, r["user_id"], r["symbol"], side, charge))
+            for r, side, table, rate in self._margin_interest_rows():
+                charged = self._accrue_margin_interest_row(now, side, table, rate, r)
+                if charged is not None:
+                    done.append(charged)
         return done
+
+    def _margin_interest_rows(self) -> Iterator[tuple[Any, str, str, float]]:
+        """全テーブルの建玉を行ごとに (行, 向き, テーブル, 金利) で返す。"""
+        for side, table in self._MARGIN_TABLE.items():
+            rate = market_mod.BORROW_RATE_PER_DAY[side]
+            for r in self._all(
+                f"SELECT guild_id, user_id, symbol, entry_value, margin, interest_at, accrued FROM {table}"
+            ):
+                yield r, side, table, rate
+
+    def _accrue_margin_interest_row(
+        self, now: float, side: str, table: str, rate: float, r: Any
+    ) -> Optional[tuple[int, int, str, str, int]]:
+        """建玉1行の信用金利を確定し、引いた分を返す（引かなければ None）。"""
+        key = (r["guild_id"], r["user_id"], r["symbol"])
+        if r["interest_at"] <= 0:  # 数え始め（金利の列がなかった頃の建玉は、ここから数える）
+            self._conn.execute(
+                f"UPDATE {table} SET interest_at=? WHERE guild_id=? AND user_id=? AND symbol=?", (now, *key)
+            )
+            return None
+        base = market_mod.margin_interest_base(side, r["entry_value"], r["margin"])
+        accrued = r["accrued"] + base * rate * max(0.0, now - r["interest_at"]) / 86400.0
+        charge = 0
+        if accrued >= market_mod.INTEREST_MIN_CHARGE:
+            charge = min(int(accrued), r["margin"])
+            accrued -= int(accrued)
+        self._conn.execute(
+            f"UPDATE {table} SET margin=margin-?, accrued=?, interest_at=? WHERE guild_id=? AND user_id=? AND symbol=?",
+            (charge, accrued, now, *key),
+        )
+        if charge <= 0:
+            return None
+        try:
+            gid = validate_guild_id(r["guild_id"])
+        except ValueError:
+            return None
+        name = market_mod.BY_KEY[r["symbol"]].name
+        self._account.ledger(
+            gid,
+            r["user_id"],
+            0,
+            self._account.raw_balance(gid, r["user_id"]),
+            f"帝愛の信用金利（{self.SIDE_NAME[side]} {name}）担保から-{charge:,}",
+        )
+        self._bank.bank_income_for(gid, charge, now)
+        return (gid, r["user_id"], r["symbol"], side, charge)
 
     def margin_losscut(self, prices: dict[str, Any]) -> list[tuple[int, int, str, str, int]]:
         """全サーバーの口座を調べ、維持率が LOSSCUT_RATIO を下回る口座を、連鎖ロスカットする。prices は {銘柄: いまの価格}。[(サーバー, ユーザー, 銘柄, 向き, 損失)]。"""

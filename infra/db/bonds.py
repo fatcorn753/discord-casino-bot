@@ -118,6 +118,18 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         done = [r for r in reversed(rows) if r["status"] != "active"][:recent]
         return {"active": active, "done": done}
 
+    def _roll_bond_default(self, row: BondRow, kind: Any, now: float, rng: random.Random) -> bool:
+        """ジャンク債の倒産抽選。倒産したら true（行は defaulted に更新済み）。"""
+        until = min(now, row["due"])
+        since = row["checked"] if row["checked"] is not None else row["ts"]
+        if not kind.default_pct or until <= since:
+            return False
+        if rng.random() < bonds_mod.default_probability(kind, (until - since) / 3600):
+            self._conn.execute("UPDATE bonds SET status='defaulted', paid=0 WHERE id=?", (row["id"],))
+            return True
+        self._conn.execute("UPDATE bonds SET checked=? WHERE id=?", (until, row["id"]))
+        return False
+
     def bond_settle(self, now: float, rng: Optional[random.Random] = None) -> list[BondRow]:
         """ジャンク債の倒産抽選と、満期を過ぎた債券の決着（このサーバー全員分）。決着した行（status と paid つき）を返す。"""
         rng = rng if rng is not None else cast("random.Random", random)
@@ -131,16 +143,10 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
             )
             for row in bond_rows:
                 kind = bonds_mod.KINDS[row["kind"]]
-                until = min(now, row["due"])
-                since = row["checked"] if row["checked"] is not None else row["ts"]
-                if kind.default_pct and until > since:
-                    if rng.random() < bonds_mod.default_probability(kind, (until - since) / 3600):
-                        self._conn.execute("UPDATE bonds SET status='defaulted', paid=0 WHERE id=?", (row["id"],))
-                        # 返さなくてよくなった元本は、銀行の儲け（流入）になる
-                        offset += row["principal"]
-                        out.append({**row, "status": "defaulted", "paid": 0})
-                        continue
-                    self._conn.execute("UPDATE bonds SET checked=? WHERE id=?", (until, row["id"]))
+                if self._roll_bond_default(row, kind, now, rng):
+                    offset += row["principal"]  # 返さなくてよくなった元本は、銀行の儲け（流入）になる
+                    out.append({**row, "status": "defaulted", "paid": 0})
+                    continue
                 if row["due"] > now:
                     continue
                 interest = max(0, bonds_mod.interest(kind, row["principal"], row["rate"]))

@@ -348,6 +348,26 @@ class P2PRepo(ScopedRepo, IP2PRepo):
                 "UPDATE market_listings SET post_done=1 WHERE id=? AND guild_id=?", (listing_id, self._g())
             )
 
+    def _settle_auction_row(self, gid: int, row: ListingRow, label: str, now: float) -> str:
+        """競り出品の落札を処理し、"sold" か "failed" を返す。"""
+        buyer = row["bidder_id"]
+        reason = self._p2p_can_receive(gid, buyer, row)
+        used = self._p2p_pair_total(gid, row["seller_id"], buyer, now)
+        if not reason and used + row["bid"] > p2p.PAIR_DAILY_LIMIT:
+            reason = fail("p2p_pair_limit_short")
+        if not reason:
+            self._p2p_sell(gid, row, buyer, row["bid"], now)
+            self._notices.note_for(gid, buyer, "p2p_won", label=label, bid=row["bid"])
+            return "sold"
+        self._account.apply(
+            gid, buyer, row["bid"], f"取引:入札の返金（{label}）"
+        )  # 受け取れないので、返金して出品も戻す
+        self._notices.note_for(gid, buyer, "p2p_won_failed", label=label, reason=reason, refund=row["bid"])
+        self._p2p_give(gid, row["seller_id"], row)
+        self._p2p_close(row["id"], "expired", now)
+        self._notices.note_for(gid, row["seller_id"], "p2p_buyer_cannot_receive", label=label)
+        return "failed"
+
     def p2p_settle(self, now: float) -> list[tuple[ListingRow, str]]:
         """締切・期限を過ぎた出品を精算する。[(出品の行, 結果)]（結果は sold / expired / failed）を返す。"""
         out: list[tuple[ListingRow, str]] = []
@@ -360,24 +380,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
             for row in rows:
                 label = self._p2p_label_for(gid, row)
                 if row["mode"] == "auction" and row["bidder_id"]:
-                    buyer = row["bidder_id"]
-                    reason = self._p2p_can_receive(gid, buyer, row)
-                    used = self._p2p_pair_total(gid, row["seller_id"], buyer, now)
-                    if not reason and used + row["bid"] > p2p.PAIR_DAILY_LIMIT:
-                        reason = fail("p2p_pair_limit_short")
-                    if not reason:
-                        self._p2p_sell(gid, row, buyer, row["bid"], now)
-                        self._notices.note_for(gid, buyer, "p2p_won", label=label, bid=row["bid"])
-                        out.append((row, "sold"))
-                        continue
-                    self._account.apply(
-                        gid, buyer, row["bid"], f"取引:入札の返金（{label}）"
-                    )  # 受け取れないので、返金して出品も戻す
-                    self._notices.note_for(gid, buyer, "p2p_won_failed", label=label, reason=reason, refund=row["bid"])
-                    self._p2p_give(gid, row["seller_id"], row)
-                    self._p2p_close(row["id"], "expired", now)
-                    self._notices.note_for(gid, row["seller_id"], "p2p_buyer_cannot_receive", label=label)
-                    out.append((row, "failed"))
+                    out.append((row, self._settle_auction_row(gid, row, label, now)))
                     continue
                 self._p2p_give(gid, row["seller_id"], row)  # 売れ残り: 売り手へ戻す
                 self._p2p_close(row["id"], "expired", now)

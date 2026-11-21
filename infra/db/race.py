@@ -389,14 +389,64 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             bought = []
             for lane in lanes:
                 ok, result = self.race_bet(user_id, race_id, kind, lane, stake, now)
-                if not ok:
-                    if bought:
-                        return False, fail("race_partial_bought", inner=result, bought=len(bought))
-                    assert isinstance(result, Failure)
-                    return False, result
-                assert not isinstance(result, Failure)
-                bought.append(result)
+                if ok:
+                    bought.append(result)
+                    continue
+                if bought:
+                    return False, fail("race_partial_bought", inner=result, bought=len(bought))
+                assert isinstance(result, Failure)
+                return False, result
             return True, bought
+
+    def _major_house_topup(self, gid: int, real_entries: int, placed_total: int) -> int:
+        """メジャーレースの賞金不足を、帝愛銀行の手元から穴埋めする額を返す（手元からは引く）。"""
+        shortfall = max(0, placed_total - real_entries * horse_mod.ENTRY_FEE)
+        if not shortfall:
+            return 0
+        state = self._bank.bank_sync_for(gid, self._now())
+        topup = min(shortfall, int(state["cash"]), horse_mod.MAJOR_HOUSE_TOPUP)
+        if topup:
+            self._bank.bank_set_for(gid, state["cash"] - topup, state["loaned"])
+        return topup
+
+    def _pay_race_prize(
+        self,
+        gid: int,
+        e: dict[str, Any],
+        place: int,
+        prize: int,
+        buffs_by_owner: dict[int, dict[str, float]],
+        prizes: dict[int, int],
+    ) -> int:
+        """着順の賞金をオーナーへ支払い、手取り（ピンハネ後）を返す。戦績・earnings には手取りを残す。"""
+        if not prize:
+            return 0
+        if e["owner_id"] not in buffs_by_owner:
+            buffs_by_owner[e["owner_id"]] = self._relics.relic_buffs_for(gid, e["owner_id"])
+        prize = round(prize * (1 + buffs_by_owner[e["owner_id"]].get("prize", 0.0)))  # 発掘品（竜の涙）の効果
+        skim = round(prize * teiai.HORSE_PRIZE_SKIM_RATE)
+        net = prize - skim
+        self._account.apply(gid, e["owner_id"], net, f"競馬賞金:{e['name']}（{place}着）", income=net)
+        prizes[e["owner_id"]] = prizes.get(e["owner_id"], 0) + net
+        return net
+
+    def _retire_race_horse(self, gid: int, e: dict[str, Any], retired: list[dict[str, Any]]) -> None:
+        """定年に達した出走馬を名誉引退させる。"""
+        horse = self._horses.horse_get_for(gid, e["horse_id"])
+        if horse is None or horse["races"] < horse_mod.MAX_RACES:
+            return
+        value = horse_mod.retire_value(horse["races"], horse["wins"], horse["places"])
+        self._account.ensure(gid, e["owner_id"])
+        if value:
+            self._account.apply(
+                gid,
+                e["owner_id"],
+                value,
+                f"競馬:定年引退{'金' if value > 0 else '費用'}（{horse['name']}）",
+                income=max(0, value),
+            )
+        self._conn.execute("UPDATE horses SET owner_id=-2 WHERE id=?", (horse["id"],))
+        retired.append({**horse, "value": value})
 
     def race_run(self, race_id: int, tz_hours: float, rng: Optional[random.Random] = None) -> Optional[dict[str, Any]]:
         """レースを走らせて、結果を決め、賞金と払い戻しを精算する。すでに終わっていれば None。
@@ -429,14 +479,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 for p, idx in enumerate(order, start=1)
                 if p <= len(prizes_table) and entries[idx]["owner_id"]
             )
-            topup = 0
-            if is_major:
-                shortfall = max(0, placed_total - real_entries * horse_mod.ENTRY_FEE)
-                if shortfall:
-                    state = self._bank.bank_sync_for(gid, self._now())
-                    topup = min(shortfall, int(state["cash"]), horse_mod.MAJOR_HOUSE_TOPUP)
-                    if topup:
-                        self._bank.bank_set_for(gid, state["cash"] - topup, state["loaned"])
+            topup = self._major_house_topup(gid, real_entries, placed_total) if is_major else 0
             scale = horse_mod.prize_pool_scale(real_entries, placed_total, topup)
             prizes: dict[int, int] = {}
             retired = []
@@ -446,48 +489,27 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 e["finish"] = place
                 self._conn.execute("UPDATE horse_entries SET finish=? WHERE id=?", (place, e["id"]))
                 prize = round((prizes_table[place - 1] if place <= len(prizes_table) else 0) * scale)
-                if e["owner_id"]:
-                    if prize:
-                        if e["owner_id"] not in buffs_by_owner:
-                            buffs_by_owner[e["owner_id"]] = self._relics.relic_buffs_for(gid, e["owner_id"])
-                        prize = round(
-                            prize * (1 + buffs_by_owner[e["owner_id"]].get("prize", 0.0))
-                        )  # 発掘品（竜の涙）の効果
-                        skim = round(prize * teiai.HORSE_PRIZE_SKIM_RATE)
-                        net = prize - skim
-                        self._account.apply(gid, e["owner_id"], net, f"競馬賞金:{e['name']}（{place}着）", income=net)
-                        prizes[e["owner_id"]] = prizes.get(e["owner_id"], 0) + net
-                        prize = net  # 戦績・earnings には、手取り（ピンハネ後）を残す
-                    self._conn.execute(
-                        "UPDATE horses SET races=races+1, wins=wins+?, places=places+?, earnings=earnings+? WHERE id=?",
-                        (1 if place == 1 else 0, 1 if place <= 3 else 0, prize, e["horse_id"]),
-                    )
-                    horse = self._horses.horse_get_for(gid, e["horse_id"])
-                    if horse is not None and horse["races"] >= horse_mod.MAX_RACES:  # 定年：自動で名誉引退
-                        value = horse_mod.retire_value(horse["races"], horse["wins"], horse["places"])
-                        self._account.ensure(gid, e["owner_id"])
-                        if value:
-                            self._account.apply(
-                                gid,
-                                e["owner_id"],
-                                value,
-                                f"競馬:定年引退{'金' if value > 0 else '費用'}（{horse['name']}）",
-                                income=max(0, value),
-                            )
-                        self._conn.execute("UPDATE horses SET owner_id=-2 WHERE id=?", (horse["id"],))
-                        retired.append({**horse, "value": value})
+                if not e["owner_id"]:
+                    continue
+                prize = self._pay_race_prize(gid, e, place, prize, buffs_by_owner, prizes)
+                self._conn.execute(
+                    "UPDATE horses SET races=races+1, wins=wins+?, places=places+?, earnings=earnings+? WHERE id=?",
+                    (1 if place == 1 else 0, 1 if place <= 3 else 0, prize, e["horse_id"]),
+                )
+                self._retire_race_horse(gid, e, retired)
             order_lanes = [entries[i]["lane"] for i in order]
             top_lane, top3 = order_lanes[0], set(order_lanes[:3])
             bets, lost = [], 0
             for b in self._all("SELECT * FROM horse_bets WHERE race_id=? AND settled=0 ORDER BY id", (race_id,)):
                 b = dict(b)
-                if b["kind"] == "win":
-                    hit = b["lane"] == top_lane
-                elif b["kind"] == "place":
-                    hit = b["lane"] in top3
-                else:
-                    sep = ">" if b["kind"] == "exacta" else "-"
-                    hit = horse_mod.combo_hit(b["kind"], [int(x) for x in b["picks"].split(sep)], order_lanes)
+                match b["kind"]:
+                    case "win":
+                        hit = b["lane"] == top_lane
+                    case "place":
+                        hit = b["lane"] in top3
+                    case kind:
+                        sep = ">" if kind == "exacta" else "-"
+                        hit = horse_mod.combo_hit(kind, [int(x) for x in b["picks"].split(sep)], order_lanes)
                 pay = horse_mod.payout(b["stake"], b["odds"]) if hit else 0
                 if pay:
                     self._account.apply(gid, b["user_id"], pay, "競馬:払い戻し", income=max(0, pay - b["stake"]))
