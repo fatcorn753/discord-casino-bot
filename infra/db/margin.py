@@ -76,9 +76,9 @@ class MarginRepo(ScopedRepo, IMarginRepo):
     def long_position(self, user_id: int, symbol: str = DEFAULT) -> MarginPosition:
         return self.margin_position(user_id, symbol, "long")
 
-    def margin_positions_for(self, guild_id: int, user_id: int) -> list[Any]:
+    def margin_positions_for(self, guild_id: int, user_id: int) -> list[tuple[str, str, int, float, int]]:
         """建てている信用取引すべて [(side, 銘柄, 口数, 建てた総額, 担保), ...]（空売り・信用買いの両方）。"""
-        out = []
+        out: list[tuple[str, str, int, float, int]] = []
         for side, table in self._MARGIN_TABLE.items():
             for r in self._all(
                 f"SELECT symbol, units, entry_value, margin FROM {table} WHERE guild_id=? AND user_id=? AND units>0 ORDER BY symbol",
@@ -87,15 +87,15 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                 out.append((side, r["symbol"], r["units"], r["entry_value"], r["margin"]))
         return out
 
-    def margin_positions(self, user_id: int) -> list[Any]:
+    def margin_positions(self, user_id: int) -> list[tuple[str, str, int, float, int]]:
         with self._lock:
             return self.margin_positions_for(self._g(), user_id)
 
-    def short_positions(self, user_id: int) -> list[Any]:
+    def short_positions(self, user_id: int) -> list[tuple[str, int, float, int]]:
         """建てている空売り [(銘柄, 口数, 建てた総額, 担保), ...]（全銘柄）。"""
         return [row[1:] for row in self.margin_positions(user_id) if row[0] == "short"]
 
-    def long_positions(self, user_id: int) -> list[Any]:
+    def long_positions(self, user_id: int) -> list[tuple[str, int, float, int]]:
         """建てている信用買い [(銘柄, 口数, 建てた総額, 担保), ...]（全銘柄）。"""
         return [row[1:] for row in self.margin_positions(user_id) if row[0] == "long"]
 
@@ -421,9 +421,9 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                     out.append((symbol, side, spot * (1 + sign * hi), notional))
         return out
 
-    def margin_interest(self, now: float) -> list[Any]:
+    def margin_interest(self, now: float) -> list[tuple[int, int, str, str, int]]:
         """全サーバーの建玉に、信用金利（信用買いは借入金利、空売りは貸株料）を数えて、貯まった分を担保から引く。[(サーバー, ユーザー, 銘柄, 向き, 引いた額)]。"""
-        done = []
+        done: list[tuple[int, int, str, str, int]] = []
         with self._db.tx():
             for side, table in self._MARGIN_TABLE.items():
                 rate = market_mod.BORROW_RATE_PER_DAY[side]

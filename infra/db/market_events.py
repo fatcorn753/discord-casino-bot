@@ -4,9 +4,10 @@
 """
 
 import random
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from domain import market_events as ev_mod
+from domain.ports.contracts import MarketEventRow
 from domain.ports.repos import IMarketEventRepo
 from infra.db.base import EcoDb, ScopedRepo
 
@@ -17,7 +18,7 @@ class MarketEventRepo(ScopedRepo, IMarketEventRepo):
     def __init__(self, db: EcoDb, guild_id: int = 0, strict: bool = False) -> None:
         super().__init__(db, guild_id, strict)
 
-    def market_events(self, now: float) -> list[dict[str, Any]]:
+    def market_events(self, now: float) -> list[MarketEventRow]:
         """終わっていないイベントと、直近に終わったもの（古い順）。"""
         with self._lock:
             return self._all(
@@ -36,7 +37,7 @@ class MarketEventRepo(ScopedRepo, IMarketEventRepo):
 
     def event_step(
         self, now: float, rng: Optional[random.Random] = None, force: Optional[dict[str, Any]] = None
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[MarketEventRow]:
         """1分ごとに呼ぶ。終わっていないイベントも、終わって COOLDOWN_MIN 分以内のものもなければ、確率で新しい予告を出す。出したらその行を返す。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():
@@ -49,4 +50,4 @@ class MarketEventRepo(ScopedRepo, IMarketEventRepo):
                 "INSERT INTO market_events (symbol, announce_ts, start_ts, end_ts, factor) VALUES (?, ?, ?, ?, ?)",
                 (plan["symbol"], plan["announce_ts"], plan["start_ts"], plan["end_ts"], plan["factor"]),
             )
-            return {**plan, "id": cur.lastrowid}
+            return cast(MarketEventRow, {**plan, "id": cur.lastrowid})

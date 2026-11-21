@@ -1,9 +1,10 @@
 """口の譲渡（プレイヤー間の売買）: 申し出・承諾・取消と、送金抜け道対策の上限。"""
 
-from typing import Any
+from typing import Optional
 
 from domain import kyosai, p2p
 from domain.errors import Outcome, fail
+from domain.ports.contracts import KyosaiOfferDoneRow, KyosaiOfferRow
 
 from .auction import KyosaiRepo as Base
 from .base import DAY
@@ -61,12 +62,12 @@ class KyosaiRepo(Base):
             assert lastrowid is not None
             return True, lastrowid
 
-    def kyosai_accept(self, buyer: int, offer_id: int, now: float) -> Outcome[dict[str, Any]]:
+    def kyosai_accept(self, buyer: int, offer_id: int, now: float) -> Outcome[KyosaiOfferDoneRow]:
         """自分あての申し出を受ける。(成功か, Failure か申し出の行)。"""
         with self._db.tx():
             gid = self._g()
             self.bank_sync(gid, now)
-            row = self._one(
+            row: Optional[KyosaiOfferRow] = self._one(
                 "SELECT * FROM kyosai_offers WHERE id=? AND guild_id=? AND buyer=? AND status='open' AND expires>?",
                 (offer_id, gid, buyer, now),
             )
@@ -96,7 +97,7 @@ class KyosaiRepo(Base):
                 self._bank.bank_income_for(gid, fee, now)
             self._move_units_for(gid, row["seller"], buyer, row["units"], now)
             self._conn.execute("UPDATE kyosai_offers SET status='done', done_at=? WHERE id=?", (now, offer_id))
-            return True, {**dict(row), "fee": fee}
+            return True, {**row, "fee": fee}
 
     def kyosai_cancel(self, user_id: int, offer_id: int) -> bool:
         """自分が出した（または自分あての）申し出を取り消す。"""
@@ -108,7 +109,7 @@ class KyosaiRepo(Base):
             )
             return cur.rowcount > 0
 
-    def kyosai_offers_of(self, user_id: int, now: float) -> list[dict[str, Any]]:
+    def kyosai_offers_of(self, user_id: int, now: float) -> list[KyosaiOfferRow]:
         with self._lock:
             return self._all(
                 "SELECT * FROM kyosai_offers WHERE guild_id=? AND status='open' AND expires>? "

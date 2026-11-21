@@ -12,7 +12,7 @@ from domain import options as opt
 from domain.errors import Outcome, fail
 from domain.options import name_of as name_of
 from domain.ports.bridges import IBankCashFlow, IDebtOps, IOptionHoldings, NoOpDebtOps
-from domain.ports.contracts import HoldingBook
+from domain.ports.contracts import HoldingBook, OptionBuyResult, OptionRow, OptionSettleRow, OptionWriteResult
 from domain.ports.repos import IOptionRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -80,7 +80,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         now: float,
         symbol2: Optional[str] = None,
         strike_pct: Optional[float] = None,
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[OptionBuyResult]:
         """amount（掛け金）の範囲で、買えるだけ買う。ペア・ワラントは、symbol が symbol2 より上がると当たり。"""
         if kind not in opt.KINDS or symbol not in market_mod.BY_KEY:
             return False, fail("invalid_spec")
@@ -133,8 +133,10 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (gid, user_id, kind, symbol, strike, units, cost, expiry, spot, now, symbol2, spot2),
             )
+            option_id = cur.lastrowid
+            assert option_id is not None
             return True, {
-                "id": cur.lastrowid,
+                "id": option_id,
                 "units": units,
                 "cost": cost,
                 "strike": strike,
@@ -151,7 +153,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         amount: int,
         now: float,
         strike_pct: Optional[float] = None,
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[OptionWriteResult]:
         """帝愛に売って、プレミアムを先にもらう（裸売り）。amount は預ける証拠金の上限。(成功か, 理由か {...}) を返す。"""
         if kind not in opt.SHORT_NAMES or symbol not in market_mod.BY_KEY:
             return False, fail("invalid_spec")
@@ -201,8 +203,10 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'short', ?)",
                 (gid, user_id, kind, symbol, strike, units, paid, expiry, spot, now, margin),
             )
+            option_id = cur.lastrowid
+            assert option_id is not None
             return True, {
-                "id": cur.lastrowid,
+                "id": option_id,
                 "units": units,
                 "premium": paid,
                 "margin": margin,
@@ -211,7 +215,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                 "spot": spot,
             }
 
-    def option_close_cost(self, row: dict[str, Any], now: float, prices: dict[str, Any]) -> int:
+    def option_close_cost(self, row: OptionRow, now: float, prices: dict[str, Any]) -> int:
         """裸売りを、いま買い戻すのにかかる額（買値。満期を過ぎていれば、満期の配当そのもの）。"""
         spot = prices.get(row["symbol"])
         if spot is None:
@@ -223,7 +227,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         )
         return math.ceil(round(ask * row["units"], 6))
 
-    def option_value(self, row: dict[str, Any], now: float, prices: dict[str, Any]) -> int:
+    def option_value(self, row: OptionRow, now: float, prices: dict[str, Any]) -> int:
         """いま手放したときの価値。買いは売値の手取り（満期を過ぎていれば、満期の価格での配当）。裸売りは、証拠金 − 買い戻しの費用（マイナスもある）。"""
         if row["side"] == "short":
             return row["margin"] - self.option_close_cost(row, now, prices)
@@ -231,17 +235,21 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         if spot is None:
             return 0
         if row["kind"] == opt.PAIR:
-            spot2 = prices.get(row["symbol2"])
+            symbol2 = row["symbol2"]
+            row_spot2 = row["spot2"]
+            if symbol2 is None or row_spot2 is None:
+                return 0
+            spot2 = prices.get(symbol2)
             if spot2 is None:
                 return 0
             if row["expiry"] <= now:
-                value = opt.pair_intrinsic(row["units"], row["spot"], row["spot2"], spot, spot2)
+                value = opt.pair_intrinsic(row["units"], row["spot"], row_spot2, spot, spot2)
             else:
                 rate = opt.pair_bid_rate(
                     row["symbol"],
-                    row["symbol2"],
+                    symbol2,
                     spot / row["spot"],
-                    spot2 / row["spot2"],
+                    spot2 / row_spot2,
                     row["expiry"] - now,
                     now,
                     self._option_events(now),
@@ -329,21 +337,23 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                     return False, reason
             return self.option_close_locked_for(gid, user_id, option_id, now)
 
-    def option_settle(self, now: float) -> list[Any]:
+    def option_settle(self, now: float) -> list[OptionSettleRow]:
         """満期を過ぎたオプションを決済する（このサーバー全員分）。決済した行（status と paid つき）を返す。"""
-        out = []
+        out: list[OptionSettleRow] = []
         with self._db.tx():
             gid = self._g()
-            due = []
-            for r in self._all(
+            due: list[tuple[OptionRow, float, int]] = []
+            rows: list[OptionRow] = self._all(
                 "SELECT * FROM options WHERE guild_id=? AND status='active' AND expiry<=? ORDER BY id", (gid, now)
-            ):
+            )
+            for r in rows:
                 final = self._price_at(r["symbol"], r["expiry"])
-                final2 = self._price_at(r["symbol2"], r["expiry"]) if r["kind"] == opt.PAIR else None
+                symbol2 = r["symbol2"] if r["kind"] == opt.PAIR else None
+                final2 = self._price_at(symbol2, r["expiry"]) if symbol2 is not None else None
                 if final is None or (r["kind"] == opt.PAIR and final2 is None):
                     continue
                 if r["kind"] == opt.PAIR:
-                    assert final2 is not None
+                    assert final2 is not None and r["spot2"] is not None
                     gross = opt.pair_intrinsic(r["units"], r["spot"], r["spot2"], final, final2)
                 else:
                     gross = opt.intrinsic(r["kind"], r["units"], final, r["strike"])
@@ -388,7 +398,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                 self._conn.execute(
                     "UPDATE options SET status=?, paid=?, final=? WHERE id=?", (status, paid, final, r["id"])
                 )
-                out.append({**dict(r), "status": status, "paid": paid, "final": final, "gross": gross})
+                out.append({**r, "status": status, "paid": paid, "final": final, "gross": gross})
             if not longs and inflow:
                 self._bank.bank_thermo_batch_for(gid, inflow, now)
         return sorted(out, key=lambda o: o["id"])

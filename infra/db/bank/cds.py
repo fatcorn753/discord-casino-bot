@@ -2,7 +2,7 @@
 
 from domain import teiai
 from domain.errors import Outcome, fail
-from domain.ports.contracts import CdsHoldings, CdsQuote
+from domain.ports.contracts import CdsHoldings, CdsQuote, CdsRow
 
 from .grace import BankRepo as Base
 
@@ -64,7 +64,7 @@ class BankRepo(Base):
         """自分が買っている CDS（有効なもの）と、自分に掛けられている件数。"""
         with self._lock:
             gid = self._g()
-            mine = self._all(
+            mine: list[CdsRow] = self._all(
                 "SELECT * FROM cds WHERE guild_id=? AND buyer_id=? AND status='active' ORDER BY id",
                 (gid, user_id),
             )

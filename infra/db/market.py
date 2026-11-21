@@ -1,11 +1,11 @@
 """証券の市場価格・ストップ高安・チャート掲示。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain import market as market_mod
 from domain.errors import Failure
 from domain.market import DEFAULT
-from domain.ports.contracts import PricePoint
+from domain.ports.contracts import ChartBoardRow, ChartPostRow, PricePoint
 from domain.ports.repos import IMarketDataRepo
 from infra.db.base import EcoDb, ScopedRepo
 
@@ -87,7 +87,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
             )
             return prev["message_id"] if prev else None
 
-    def live_chart_posts(self) -> list[dict[str, Any]]:
+    def live_chart_posts(self) -> list[ChartPostRow]:
         """自動で更新中のチャート。"""
         with self._lock:
             return self._all("SELECT * FROM chart_posts WHERE live=1")
@@ -108,7 +108,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
         with self._db.tx():
             self._conn.execute("DELETE FROM chart_posts WHERE ts<? AND live=0", (before_ts,))
 
-    def list_chart_boards(self) -> list[dict[str, Any]]:
+    def list_chart_boards(self) -> list[ChartBoardRow]:
         with self._lock:
             return self._all("SELECT * FROM chart_boards")
 
