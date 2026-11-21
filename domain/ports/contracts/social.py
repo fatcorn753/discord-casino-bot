@@ -3,7 +3,7 @@
 対応する表の定義は infra/db/schema/tables.py。キーは `SELECT *` の列と同じ。
 """
 
-from typing import Literal, NotRequired, Optional, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 from .games import AuctionHorseRow
 
@@ -26,7 +26,7 @@ class ListingRow(TypedDict):
     status: str  # active / sold / cancelled / expired
     buyer_id: int
     sold_price: int
-    closed_at: Optional[float]
+    closed_at: float | None
     channel_id: int
     message_id: int
     post_done: int
@@ -79,7 +79,7 @@ class QuizRow(TypedDict):
     msg_right: str
     msg_wrong: str
     reward: int
-    expires: Optional[float]
+    expires: float | None
     created: float
 
 
@@ -136,7 +136,7 @@ class LaborClickHourRow(TypedDict):
     gaps: int
     sum_gap: float
     sum_gap2: float
-    min_gap: Optional[float]
+    min_gap: float | None
 
 
 class LaborWorkerRow(TypedDict):
@@ -165,11 +165,11 @@ class ProfileRow(TypedDict):
 
     guild_id: int
     user_id: int
-    title: Optional[str]
-    card_color: Optional[str]
-    card_icon: Optional[str]
-    skin_dice: Optional[str]
-    skin_table: Optional[str]
+    title: str | None
+    card_color: str | None
+    card_icon: str | None
+    skin_dice: str | None
+    skin_table: str | None
     daily_boost: int
     insurance: int
 
@@ -249,7 +249,7 @@ class QuizView(TypedDict):
     msg_right: str
     msg_wrong: str
     reward: int
-    expires: Optional[float]
+    expires: float | None
     created: float
     order: list[str]
 
@@ -264,7 +264,7 @@ class QuizAdminView(QuizView):
 class RaffleResult(RaffleView):
     """締めた抽選の結果（募集中の抽選に、当選者・賞金・返金フラグを足したもの）。"""
 
-    winner: Optional[int]
+    winner: int | None
     prize: int
     refunded: bool
 
@@ -282,18 +282,18 @@ class ShopStockInfo(TypedDict):
     stock: int  # 買える数（小数を切り上げた数）
     exact: float  # 正確な在庫（小数。時間で補充された分を含む）
     max: int
-    next_at: Optional[float]  # 次に1つ増える時刻（満タンなら None）
+    next_at: float | None  # 次に1つ増える時刻（満タンなら None）
 
 
 class ProfileView(TypedDict):
     """プロフィールの表示用（get_profile の返り値）。行がなければ guild_id キーは無い。"""
 
     user_id: int
-    title: Optional[str]
-    card_color: Optional[str]
-    card_icon: Optional[str]
-    skin_dice: Optional[str]
-    skin_table: Optional[str]
+    title: str | None
+    card_color: str | None
+    card_icon: str | None
+    skin_dice: str | None
+    skin_table: str | None
     daily_boost: int
     insurance: int
     status: str  # 身分（カタギ・借金など）
@@ -351,7 +351,7 @@ class QuizImportItem(TypedDict):
     choices: list[str]  # 先頭が正解
     explanation: str
     reward: int
-    minutes: Optional[int]  # None なら無期限
+    minutes: int | None  # None なら無期限
 
 
 class QuizAnswerResult(TypedDict):
@@ -430,7 +430,7 @@ class LaborTop(TypedDict):
     """採掘ランキング（labor_top の返り値）。"""
 
     rows: list[tuple[int, int, int, int]]  # (順位, ユーザーID, 稼ぎ, 押した回数)
-    me: Optional[tuple[int, int, int, int]]  # 自分の (順位, 稼ぎ, 押した回数, 人数)。まだ稼いでいなければ None
+    me: tuple[int, int, int, int] | None  # 自分の (順位, 稼ぎ, 押した回数, 人数)。まだ稼いでいなければ None
 
 
 class LaborClickOk(TypedDict):
@@ -439,7 +439,7 @@ class LaborClickOk(TypedDict):
     ok: Literal[True]
     pay: int
     crit: bool  # 鉱脈ヒットか
-    ore: Optional[str]  # 手掘りで出た鉱石（なければ None）
+    ore: str | None  # 手掘りで出た鉱石（なければ None）
     combo: bool  # コンボ達成か
     terrain: str  # 今日の地層
 
@@ -473,9 +473,9 @@ class LaborClickReportRow(TypedDict):
     hour: int
     clicks: int
     pay: int
-    mean_gap: Optional[float]  # 押す間隔の平均（秒）
-    cv: Optional[float]  # 間隔の変動係数
-    min_gap: Optional[float]
+    mean_gap: float | None  # 押す間隔の平均（秒）
+    cv: float | None  # 間隔の変動係数
+    min_gap: float | None
 
 
 class LaborClickReport(TypedDict):
@@ -495,7 +495,7 @@ class CompanyView(CompanyRow):
     daily_output: float  # 1日の生産量
     storage_cap: float  # 倉庫の容量
     upkeep: int  # 1日の維持費
-    upgrade_cost: Optional[int]  # 次の増築費（最大なら None）
+    upgrade_cost: int | None  # 次の増築費（最大なら None）
     condition: str  # きょうの調子
     yield_mult: float
     price: float  # きょうの買取価格（倍率）

@@ -8,7 +8,7 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord.ext import commands, tasks
@@ -68,10 +68,10 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
         self,
         guild: discord.Guild,
         host_id: int,
-        fee: Optional[int] = None,
+        fee: int | None = None,
         minutes: int = DEFAULT_MINUTES,
-        channel: Optional[discord.abc.Messageable] = None,
-        rng: Optional[random.Random] = None,
+        channel: discord.abc.Messageable | None = None,
+        rng: random.Random | None = None,
     ) -> tuple[bool, str]:
         """そのサーバーの告知チャンネル（channel を渡せば、そのチャンネル）に、抽選の募集を出す。(成功か, 説明) を返す。"""
         target = channel or announce_channel(guild, self._guild_repo)
@@ -103,7 +103,7 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
         mention = getattr(target, "mention", str(target))
         return True, f"{guild.name} の {mention} に投稿しました（参加費 {ui.pelica(fee)}・{minutes}分）。"
 
-    async def repost(self, guild: discord.Guild, channel: Optional[discord.abc.Messageable] = None) -> tuple[bool, str]:
+    async def repost(self, guild: discord.Guild, channel: discord.abc.Messageable | None = None) -> tuple[bool, str]:
         """募集中の抽選の投稿を、告知チャンネル（channel を渡せば、そのチャンネル）に出し直す（古い投稿は消す）。"""
         raffle = self._raffle.current(guild.id)
         if raffle is None:

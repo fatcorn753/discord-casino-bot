@@ -1,7 +1,7 @@
 """信用取引（空売り・信用買い）の建てと決済。"""
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import discord
 
@@ -22,9 +22,9 @@ async def margin_close(
     interaction: discord.Interaction,
     side: str,
     symbol: str,
-    percent: Optional[int] = None,
+    percent: int | None = None,
     *,
-    confirm_fn: Optional[Callable] = None,
+    confirm_fn: Callable | None = None,
 ) -> None:
     """信用取引の決済（空売りは買い戻し、信用買いは売り戻し）。percent（1〜100）で割合を決める。省略すると全部。"""
     sym, label = market.BY_KEY[symbol], market.SIDE_NAME[side]
@@ -87,7 +87,7 @@ async def margin_order(
     collateral: int,
     leverage: int = 1,
     *,
-    confirm_fn: Optional[Callable] = None,
+    confirm_fn: Callable | None = None,
 ) -> None:
     """信用取引（空売り＝売り建て、信用買い＝買い建て）。collateral（預ける証拠金）× レバレッジ の総額まで建てる(#78)。
 

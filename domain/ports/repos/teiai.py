@@ -1,7 +1,6 @@
 """帝愛ファイナンス・銀行・個人間貸付のリポジトリポート契約。"""
 
 import random
-from typing import Optional
 
 from domain.errors import Outcome
 from domain.ports.bridges import (
@@ -63,7 +62,7 @@ class ILoanRepo(IGuildScopedRepo, IOverdueLoanCollector):
     def loan_set_message(self, loan_id: int, message_id: int) -> None:
         raise NotImplementedError
 
-    def loan_get(self, loan_id: int) -> Optional[LoanRow]:
+    def loan_get(self, loan_id: int) -> LoanRow | None:
         raise NotImplementedError
 
     def loan_accept(self, loan_id: int, user_id: int, now: float) -> Outcome[str]:
@@ -75,7 +74,7 @@ class ILoanRepo(IGuildScopedRepo, IOverdueLoanCollector):
     def loan_cancel(self, loan_id: int, user_id: int) -> Outcome[str]:
         raise NotImplementedError
 
-    def loan_repay(self, loan_id: int, user_id: int, amount: Optional[int], now: float) -> Outcome[int]:
+    def loan_repay(self, loan_id: int, user_id: int, amount: int | None, now: float) -> Outcome[int]:
         raise NotImplementedError
 
     def loan_collect_due(self, now: float) -> list[LoanCollectRow]:
@@ -113,10 +112,10 @@ class IBankRepo(IGuildScopedRepo, IBankCashFlow, IHouseAccount, IBankCdsBridge):
     def bank_deposit(self, user_id: int, amount: int, now: float) -> Outcome[int]:
         raise NotImplementedError
 
-    def bank_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> Outcome[int]:
+    def bank_withdraw(self, user_id: int, amount: int | None = None, now: float | None = None) -> Outcome[int]:
         raise NotImplementedError
 
-    def grace_until(self, user_id: int) -> Optional[float]:
+    def grace_until(self, user_id: int) -> float | None:
         raise NotImplementedError
 
     def grace_list(self) -> list[tuple[int, int, float]]:
@@ -128,7 +127,7 @@ class IBankRepo(IGuildScopedRepo, IBankCashFlow, IHouseAccount, IBankCdsBridge):
     def bank_trust_accrue(self, now: float) -> int:
         raise NotImplementedError
 
-    def bank_rf_tick(self, now: float, rng: Optional[random.Random] = None) -> float:
+    def bank_rf_tick(self, now: float, rng: random.Random | None = None) -> float:
         raise NotImplementedError
 
     def cds_quote(self, target_id: int, now: float) -> CdsQuote:
@@ -158,10 +157,10 @@ class IDebtRepo(
     def repay_all_of_for(self, guild_id: int, user_id: int, amount: int, label: str) -> int:
         raise NotImplementedError
 
-    def status(self, user_id: int, now: Optional[float] = None) -> str:
+    def status(self, user_id: int, now: float | None = None) -> str:
         raise NotImplementedError
 
-    def loan_blacklisted(self, user_id: int, now: Optional[float] = None) -> bool:
+    def loan_blacklisted(self, user_id: int, now: float | None = None) -> bool:
         raise NotImplementedError
 
     def debt(self, user_id: int) -> int:
@@ -173,13 +172,13 @@ class IDebtRepo(
     def can_borrow_for_bet(self, user_id: int, need: int) -> Outcome[str]:
         raise NotImplementedError
 
-    def repay_debt(self, user_id: int, amount: Optional[int] = None) -> Outcome[int]:
+    def repay_debt(self, user_id: int, amount: int | None = None) -> Outcome[int]:
         raise NotImplementedError
 
     def escape_left(self, user_id: int) -> int:
         raise NotImplementedError
 
-    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Outcome[EscapeResult]:
+    def escape_attempt(self, user_id: int, now: float, rng: random.Random | None = None) -> Outcome[EscapeResult]:
         raise NotImplementedError
 
     def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> Outcome[BankruptResult]:
@@ -195,7 +194,7 @@ class IKyosaiRepo(IGuildScopedRepo):
     def recover_units_for(self, guild_id: int, user_id: int, now: float) -> int:
         raise NotImplementedError
 
-    def kyosai_daily(self, now: float) -> Optional[KyosaiDaily]:
+    def kyosai_daily(self, now: float) -> KyosaiDaily | None:
         raise NotImplementedError
 
     def kyosai_auction_tick(self, now: float) -> list[KyosaiAuctionEventRow]:
@@ -219,7 +218,7 @@ class IKyosaiRepo(IGuildScopedRepo):
     def kyosai_propose(self, user_id: int, premium: float, now: float) -> Outcome[KyosaiMotionProposeRow]:
         raise NotImplementedError
 
-    def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: Optional[int] = None) -> Outcome[int]:
+    def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: int | None = None) -> Outcome[int]:
         raise NotImplementedError
 
     def kyosai_close_motions(self, now: float) -> list[KyosaiMotionViewRow]:
@@ -228,7 +227,7 @@ class IKyosaiRepo(IGuildScopedRepo):
     def kyosai_set_motion_message(self, motion_id: int, channel_id: int, message_id: int) -> None:
         raise NotImplementedError
 
-    def kyosai_motion(self, motion_id: int, now: float) -> Optional[KyosaiMotionViewRow]:
+    def kyosai_motion(self, motion_id: int, now: float) -> KyosaiMotionViewRow | None:
         raise NotImplementedError
 
     def kyosai_status(self, user_id: int, now: float) -> KyosaiStatus:

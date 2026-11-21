@@ -1,7 +1,7 @@
 """`/ショップ` の操作パネル（View）。"""
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 
@@ -148,7 +148,7 @@ class ShopView(ui.OwnerView):
             qty.callback = self._on_qty
             self.add_item(qty)
 
-    def _p2p(self) -> Optional[IP2PNavigationBridge]:
+    def _p2p(self) -> IP2PNavigationBridge | None:
         """プレイヤー間の取引ブリッジ。読み込まれていなければ None（画面に出さない）。"""
         return resolve_bridge(self.cog.bot, IP2PNavigationBridge, self.cog._p2p_bridge)
 
@@ -301,7 +301,7 @@ class ShopView(ui.OwnerView):
         self.p2p_order = ui.selected_values(interaction)[0]
         await self._redraw(interaction)
 
-    def _build_auction_teiai(self, listed: list[Any], horses: list[Any], market: Optional[list[Any]] = None) -> None:
+    def _build_auction_teiai(self, listed: list[Any], horses: list[Any], market: list[Any] | None = None) -> None:
         """帝愛の棚のタブ（帝愛の期間限定の出品と、破産で差し押さえた品・馬。差し押さえ品の値段は日ごとに下がる）。
 
         Discord の行は5つまでなので、帝愛の出品は差し押さえ品と同じ選択肢に並べる（値は "tm:出品ID"）。

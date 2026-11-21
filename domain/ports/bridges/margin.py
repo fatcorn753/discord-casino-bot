@@ -15,13 +15,13 @@ if TYPE_CHECKING:
 AddAssetPart = Callable[[int, str, int], None]
 
 # 単一コールバック契約（Callable 型エイリアス）: 静的型だけで LSP を 100% 保証できる純粋契約
-MarginRatioReader = Callable[[int, int], Optional[float]]
+MarginRatioReader = Callable[[int, int], float | None]
 WealthyReader = Callable[[int], set[int]]
 ValuationSource = Callable[[int, dict[int, int]], None]
 AssetCollector = Callable[[int, AddAssetPart, float], None]
 
 
-def noop_margin_ratio_reader(guild_id: int, user_id: int) -> Optional[float]:
+def noop_margin_ratio_reader(guild_id: int, user_id: int) -> float | None:
     """維持率未接続時に None を返す LSP 準拠の既定動作。"""
     return None
 
@@ -55,7 +55,7 @@ class IMarginCollateralGuard:
     """現物株・債券を売るときに信用取引の維持率低下を防ぐガード契約。"""
 
     def check_spot_sell(
-        self, guild_id: int, user_id: int, symbol: str, units: Optional[int], have: int, price: float
+        self, guild_id: int, user_id: int, symbol: str, units: int | None, have: int, price: float
     ) -> Optional["Failure"]:
         raise NotImplementedError
 
@@ -67,7 +67,7 @@ class NoOpMarginCollateralGuard(IMarginCollateralGuard):
     """担保ガード未接続時に制約なし (None) を返す LSP 準拠 Null 実装。"""
 
     def check_spot_sell(
-        self, guild_id: int, user_id: int, symbol: str, units: Optional[int], have: int, price: float
+        self, guild_id: int, user_id: int, symbol: str, units: int | None, have: int, price: float
     ) -> Optional["Failure"]:
         return None
 

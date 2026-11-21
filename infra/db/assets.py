@@ -7,7 +7,6 @@
 
 import json
 from collections.abc import Callable
-from typing import Optional
 
 from domain import horse as horse_mod
 from domain import labor as labor_mod
@@ -162,7 +161,7 @@ class AssetRepo(ScopedRepo, IAssetRepo):
         self,
         db: EcoDb,
         collector: AssetCollector,
-        horse_worth_fn: Optional[Callable[[int, int, int], int]] = None,
+        horse_worth_fn: Callable[[int, int, int], int] | None = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -191,7 +190,7 @@ class AssetRepo(ScopedRepo, IAssetRepo):
         return parts
 
     def final_assets(
-        self, user_ids: Optional[set[int]] = None, now: Optional[float] = None
+        self, user_ids: set[int] | None = None, now: float | None = None
     ) -> list[tuple[int, int, dict[str, int]]]:
         """[(ユーザーID, ファイナル総資産, 内訳)] を多い順に（同額はユーザーID順）。user_ids を渡すと、その人たちだけ。"""
         out = [
@@ -201,11 +200,11 @@ class AssetRepo(ScopedRepo, IAssetRepo):
         ]
         return sorted(out, key=lambda t: (-t[1], t[0]))
 
-    def final_top(self, limit: int = 10, user_ids: Optional[set[int]] = None) -> list[RankEntry]:
+    def final_top(self, limit: int = 10, user_ids: set[int] | None = None) -> list[RankEntry]:
         """[(順位, ユーザーID, ファイナル総資産), ...]。"""
         return [(i + 1, uid, total) for i, (uid, total, _p) in enumerate(self.final_assets(user_ids)[:limit])]
 
-    def final_rank_of(self, user_id: int, user_ids: Optional[set[int]] = None) -> Optional[RankEntry]:
+    def final_rank_of(self, user_id: int, user_ids: set[int] | None = None) -> RankEntry | None:
         """(順位, ファイナル総資産, 対象人数)。登録がなければ None。"""
         ranked = self.final_assets(user_ids)
         for i, (uid, total, _p) in enumerate(ranked):

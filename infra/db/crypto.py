@@ -1,7 +1,5 @@
 """証券の現物保有・売買。"""
 
-from typing import Optional
-
 from domain import market as market_mod
 from domain.errors import fail
 from domain.market import DEFAULT
@@ -23,7 +21,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
         account: AccountCore,
         market: MarketDataRepo,
         tax: GainsTaxCollector,
-        collateral_guard: Optional[IMarginCollateralGuard] = None,
+        collateral_guard: IMarginCollateralGuard | None = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -128,7 +126,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
                 True, units=units, money=total, fee=fee, balance=self._account.raw_balance(gid, user_id)
             )
 
-    def crypto_sell(self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT) -> CryptoResult:
+    def crypto_sell(self, user_id: int, units: int | None, price: float, symbol: str = DEFAULT) -> CryptoResult:
         """units 口を売る（None なら全部）。受け取る額は手数料を引いたもの。"""
         with self._db.tx():
             gid = self._g()
@@ -145,7 +143,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
         self,
         guild_id: int,
         user_id: int,
-        units: Optional[int],
+        units: int | None,
         price: float,
         symbol: str = DEFAULT,
         taxable: bool = False,

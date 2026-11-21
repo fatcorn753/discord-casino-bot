@@ -3,7 +3,7 @@
 対応する表の定義は infra/db/schema/tables.py。キーは `SELECT *` の列と同じ。
 """
 
-from typing import TYPE_CHECKING, Optional, TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 if TYPE_CHECKING:
     from domain.horse import Runner, Track
@@ -28,9 +28,9 @@ class HorseRow(TypedDict):
     earnings: int
     bonus: int
     created: float
-    listed_at: Optional[float]
-    rented_day: Optional[str]
-    style: Optional[str]
+    listed_at: float | None
+    rented_day: str | None
+    style: str | None
 
 
 class RaceRow(TypedDict):
@@ -67,7 +67,7 @@ class RaceEntryRow(TypedDict):
     power: int
     guts: int
     tactic: str
-    style: Optional[str]
+    style: str | None
     form: int
     races: int
     wins: int
@@ -121,7 +121,7 @@ class ArenaFighterRow(TypedDict):
     group_no: int
     stage: str  # semi / final / out
     bet_total: int
-    result: Optional[str]  # NULL 未決着 / won / lost
+    result: str | None  # NULL 未決着 / won / lost
 
 
 class ArenaBetRow(TypedDict):

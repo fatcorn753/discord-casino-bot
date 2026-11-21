@@ -1,7 +1,5 @@
 """プレイヤー間の市場と競りの埋め込み・表示文の組み立て。"""
 
-from typing import Optional
-
 import discord
 
 from cogs.shared import ui
@@ -44,7 +42,7 @@ def entry_text(r: ListingRow, label: str) -> str:
     return f"`#{r['id']}` **{label}**　{how}\n　└ 出品 <@{r['seller_id']}>　{left} {when(r['end_at'])}"
 
 
-def detail_embed(r: ListingRow, label: str, horse: Optional[HorseRow] = None) -> discord.Embed:
+def detail_embed(r: ListingRow, label: str, horse: HorseRow | None = None) -> discord.Embed:
     lines = [
         f"出品者: <@{r['seller_id']}>",
         price_text(r),
@@ -80,7 +78,7 @@ ENDED_TEXT = {
 }
 
 
-def post_embed(r: ListingRow, label: str, horse: Optional[HorseRow] = None) -> discord.Embed:
+def post_embed(r: ListingRow, label: str, horse: HorseRow | None = None) -> discord.Embed:
     """告知の投稿。出ている間は、値段・締切・最高入札。終わったら、結果（売れた値段など）に書き換わる。"""
     if r["status"] != "active":
         title, text = ENDED_TEXT.get(r["status"], ENDED_TEXT["expired"])

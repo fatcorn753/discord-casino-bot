@@ -1,7 +1,5 @@
 """プレイヤー間の市場と競り（出品・購入・入札・取り消し・締切の精算）のアプリケーションサービス。"""
 
-from typing import Optional
-
 from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import HorseRow, ListingRow, P2PMine
@@ -22,13 +20,13 @@ class P2PService:
         return self._p2p.for_guild(guild_id)
 
     # ------------------------------ 照会 ------------------------------ #
-    def get(self, guild_id: int, listing_id: int) -> Optional[ListingRow]:
+    def get(self, guild_id: int, listing_id: int) -> ListingRow | None:
         return self._repo(guild_id).p2p_get(listing_id)
 
     def label(self, guild_id: int, row: ListingRow) -> str:
         return self._repo(guild_id).p2p_label(row)
 
-    def horse_of(self, guild_id: int, row: ListingRow) -> Optional[HorseRow]:
+    def horse_of(self, guild_id: int, row: ListingRow) -> HorseRow | None:
         """馬の出品なら、その馬。それ以外は None。"""
         return self._horses.for_guild(guild_id).horse_get(int(row["ref"])) if row["kind"] == "horse" else None
 
@@ -54,7 +52,7 @@ class P2PService:
         qty: int,
         mode: str,
         price: int,
-        hours: Optional[int],
+        hours: int | None,
     ) -> Outcome[int]:
         return self._repo(guild_id).p2p_list(user_id, kind, ref, qty, mode, price, hours, self._clock.now_ts())
 

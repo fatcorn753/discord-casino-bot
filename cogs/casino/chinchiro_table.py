@@ -9,7 +9,6 @@
 import asyncio
 import logging
 import random
-from typing import Optional
 
 import discord
 
@@ -42,9 +41,9 @@ class ChinchiroTable:
         self.closes_at = closes_at  # 締切の UNIX 秒（表示用）
         self.seats: dict[int, GameContext] = {}
         self.started = False
-        self.message: Optional[discord.Message] = None
+        self.message: discord.Message | None = None
         self._lock = asyncio.Lock()
-        self._task: Optional[asyncio.Task] = None  # 締切で始めるタスク（参照を持って、途中で消されないようにする）
+        self._task: asyncio.Task | None = None  # 締切で始めるタスク（参照を持って、途中で消されないようにする）
 
     # --------------------------- 表示 --------------------------- #
     def lobby_embed(self) -> discord.Embed:
@@ -58,7 +57,7 @@ class ChinchiroTable:
         )
 
     # --------------------------- 席 --------------------------- #
-    async def sit(self, interaction: discord.Interaction) -> Optional[str]:
+    async def sit(self, interaction: discord.Interaction) -> str | None:
         """座る。座れなかった理由を返す（start_game が返信したときは空文字）。座れたら None。"""
         async with self._lock:
             uid = interaction.user.id
@@ -129,7 +128,7 @@ class ChinchiroTable:
         extra = "".join(f"\n　{n}" for n in ctx.notices)
         return f"**{who}**　{verdict}{mult}　**{signed(net)}ペリカ**\n　{_hand_line(rolls)}{extra}"
 
-    async def _edit(self, embed: discord.Embed, view: Optional[discord.ui.View]) -> None:
+    async def _edit(self, embed: discord.Embed, view: discord.ui.View | None) -> None:
         if self.message is None:
             return
         try:
@@ -183,7 +182,7 @@ class TableView(discord.ui.View):
         await self.table.play()
 
 
-async def open_table(interaction: discord.Interaction, deps: CasinoDeps, bet: int) -> Optional[ChinchiroTable]:
+async def open_table(interaction: discord.Interaction, deps: CasinoDeps, bet: int) -> ChinchiroTable | None:
     """卓を立て、立てた人が最初の席に座る。締切で自動的に始める。"""
     closes_at = deps.casino.clock.now().timestamp() + JOIN_SECONDS
     table = ChinchiroTable(deps, bet, interaction.user.id, closes_at)

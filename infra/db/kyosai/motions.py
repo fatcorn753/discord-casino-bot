@@ -1,7 +1,5 @@
 """動議（信託の上乗せ金利。#94: いくつも並行でき、締めた順に後勝ち）。"""
 
-from typing import Optional
-
 from domain import kyosai
 from domain.errors import Outcome, fail
 from domain.ports.contracts import KyosaiMotionProposeRow, KyosaiMotionRow, KyosaiMotionViewRow
@@ -55,7 +53,7 @@ class KyosaiRepo(Base):
             }
             return True, proposed
 
-    def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: Optional[int] = None) -> Outcome[int]:
+    def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: int | None = None) -> Outcome[int]:
         """投票中の動議に投票する（あとから変えられる）。番号を省けるのは、投票中が1件だけのとき。
 
         (成功か, Failure か動議の番号)。
@@ -131,11 +129,11 @@ class KyosaiRepo(Base):
                 (channel_id, message_id, self._g(), motion_id),
             )
 
-    def kyosai_motion(self, motion_id: int, now: float) -> Optional[KyosaiMotionViewRow]:
+    def kyosai_motion(self, motion_id: int, now: float) -> KyosaiMotionViewRow | None:
         """動議1件と、いまの賛成・反対の口数（ボタンの投稿の書き換え用）。"""
         with self._lock:
             gid = self._g()
-            row: Optional[KyosaiMotionRow] = self._one(
+            row: KyosaiMotionRow | None = self._one(
                 "SELECT * FROM kyosai_motions WHERE id=? AND guild_id=?", (motion_id, gid)
             )
             if row is None:

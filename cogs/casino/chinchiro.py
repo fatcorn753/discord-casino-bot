@@ -5,7 +5,6 @@
 
 import asyncio
 import random
-from typing import Optional
 
 import discord
 
@@ -65,7 +64,7 @@ def _rolling_text(skin=None) -> str:
     return dice_text([RNG.randint(1, 6) for _ in range(3)], skin.dice_mark if skin else "") + "　カラカラカラ…"
 
 
-def _role_line(table: dict, skin_table: Optional[dict], key: str) -> str:
+def _role_line(table: dict, skin_table: dict | None, key: str) -> str:
     """役ごとの地の文。演出の変更品が、その役の文を持っていれば、そちらを使う。"""
     return (skin_table or {}).get(key) or table.get(key, table[rules.ME])
 

@@ -6,7 +6,6 @@
 """
 
 from collections.abc import Callable
-from typing import Optional
 
 from domain.errors import Outcome, fail
 
@@ -22,7 +21,7 @@ def noop_debt_repay_hook(guild_id: int, user_id: int, amount: int, label: str) -
 class IDebtLifecycleHook:
     """台帳更新に連動する借金利息・天引き・猶予更新のブリッジ契約。"""
 
-    def accrue_interest(self, guild_id: int, user_id: int, now: Optional[float] = None) -> int:
+    def accrue_interest(self, guild_id: int, user_id: int, now: float | None = None) -> int:
         raise NotImplementedError
 
     def after_debt_change(self, guild_id: int, user_id: int) -> None:
@@ -35,7 +34,7 @@ class IDebtLifecycleHook:
 class NoOpDebtLifecycleHook(IDebtLifecycleHook):
     """借金フック未接続時に安全に何もしない LSP 準拠実装。"""
 
-    def accrue_interest(self, guild_id: int, user_id: int, now: Optional[float] = None) -> int:
+    def accrue_interest(self, guild_id: int, user_id: int, now: float | None = None) -> int:
         return 0
 
     def after_debt_change(self, guild_id: int, user_id: int) -> None:

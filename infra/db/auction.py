@@ -6,7 +6,7 @@
 """
 
 import random
-from typing import Any, Optional
+from typing import Any
 
 from domain import shop as shop_mod
 from domain import teiai
@@ -90,7 +90,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
             entry["qty"] += r["qty"]
         return list(out.values())
 
-    def auction_buy(self, user_id: int, item_id: str, qty: int = 1, now: Optional[float] = None) -> PurchaseResult:
+    def auction_buy(self, user_id: int, item_id: str, qty: int = 1, now: float | None = None) -> PurchaseResult:
         """競売で買う。カタギだけ。持っているもの（消耗品以外）は買えない。安い（古い）出品から順に売れる。"""
         now = self._now() if now is None else now
         item = shop_mod.BY_ID.get(item_id)
@@ -183,7 +183,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
             "expires_at": r["expires_at"],
         }
 
-    def market_list(self, now: float, rng: Optional[random.Random] = None) -> list[TeiaiMarketListing]:
+    def market_list(self, now: float, rng: random.Random | None = None) -> list[TeiaiMarketListing]:
         """いま出ている帝愛の出品（売り切れ・期限切れ・まだ出ていないものは除く）。期限の近い順。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():
@@ -201,8 +201,8 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
         user_id: int,
         listing_id: int,
         qty: int = 1,
-        now: Optional[float] = None,
-        rng: Optional[random.Random] = None,
+        now: float | None = None,
+        rng: random.Random | None = None,
     ) -> MarketPurchase:
         """帝愛の出品を買う。カタギだけ（差し押さえ品の競売と同じ）。闇市品は、買ったときに中身が決まる。"""
         now = self._now() if now is None else now

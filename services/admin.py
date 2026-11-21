@@ -1,7 +1,5 @@
 """Bot の持ち主が使う運営の操作（ペリカの付与・残高の設定・還元率・パチンコの集計）のアプリケーションサービス。"""
 
-from typing import Optional
-
 from domain.ports.contracts import PachinkoStats
 from domain.ports.repos import IPachinkoRepo, IRtpRepo, IWalletRepo
 
@@ -25,9 +23,9 @@ class AdminService:
     def rtp_levels(self, guild_id: int) -> dict[str, int]:
         return self._rtp.for_guild(guild_id).rtp_levels()
 
-    def rtp_set(self, guild_id: int, game: Optional[str], level: int) -> list[str]:
+    def rtp_set(self, guild_id: int, game: str | None, level: int) -> list[str]:
         """還元率のレベルを変える（game が None なら全ゲーム）。変えたゲームの一覧を返す。"""
         return self._rtp.for_guild(guild_id).rtp_level_set(game, level)
 
-    def pachinko_stats(self, guild_id: Optional[int], since: Optional[float]) -> PachinkoStats:
+    def pachinko_stats(self, guild_id: int | None, since: float | None) -> PachinkoStats:
         return self._pachinko.pachinko_stats(guild_id, since)

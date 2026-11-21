@@ -1,7 +1,5 @@
 """地下闘技場の賭けパネル（BetPanel）と賭け金モーダル（StakeModal）。賭けが入ると、掲示を自動で書き換える。"""
 
-from typing import Optional
-
 import discord
 
 from cogs.arena.embeds import tournament_embed
@@ -76,7 +74,7 @@ class BetPanel(discord.ui.View):
     def __init__(self, arena_svc: ArenaService, tournament: ArenaTournamentDetailRow) -> None:
         super().__init__(timeout=None)
         self.arena_svc, self.tournament = arena_svc, tournament
-        self.message: Optional[discord.Message] = None
+        self.message: discord.Message | None = None
         if bettable_fighters(tournament):
             self.add_item(FighterSelect(self))
 

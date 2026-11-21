@@ -7,7 +7,7 @@
 """
 
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any
 
 from domain import loans as loans_mod
 from domain.errors import Failure, Outcome, fail
@@ -25,8 +25,8 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         self,
         db: EcoDb,
         account: AccountCore,
-        status_reader: Optional[IStatusReader] = None,
-        bank: Optional[GraceReader] = None,
+        status_reader: IStatusReader | None = None,
+        bank: GraceReader | None = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -124,7 +124,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
                 "bankrupt_at": row["bankrupt_at"] if row else None,
             }
 
-    def _loan_borrow_block(self, guild_id: int, user_id: int) -> Optional[Failure]:
+    def _loan_borrow_block(self, guild_id: int, user_id: int) -> Failure | None:
         """いま、この人が貸付を借りられない理由（借りられるなら None）。承諾・募集・貸すときに、同じ条件で確かめる。"""
         if self._status_reader.loan_blacklisted_for(guild_id, user_id, self._now()):
             return fail("loan_blacklisted")
@@ -180,7 +180,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         """募集に応じて貸す（早い者勝ち）。貸す人の残高から借りる人へ、その場でお金が移る。(成功か, 理由) を返す。"""
         with self._db.tx():
             gid = self._g()
-            loan: Optional[LoanRow] = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
+            loan: LoanRow | None = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
             if loan is None or loan["status"] != "request":
                 return False, fail("loan_request_ended")
             if lender_id == loan["borrower_id"]:
@@ -271,7 +271,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         with self._db.tx():
             self._conn.execute("UPDATE loans SET message_id=? WHERE id=?", (message_id, loan_id))
 
-    def loan_get(self, loan_id: int) -> Optional[LoanRow]:
+    def loan_get(self, loan_id: int) -> LoanRow | None:
         with self._lock:
             return self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
 
@@ -279,7 +279,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         """借りる人が承諾して、お金を受け取る。(成功か, 理由) を返す。"""
         with self._db.tx():
             gid = self._g()
-            loan: Optional[LoanRow] = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
+            loan: LoanRow | None = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
             if loan is None or loan["status"] != "offer":
                 return False, fail("loan_offer_ended")
             if user_id != loan["borrower_id"]:
@@ -306,7 +306,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
     def loan_decline(self, loan_id: int, user_id: int) -> Outcome[str]:
         """借りる人が断る。"""
         with self._db.tx():
-            loan: Optional[LoanRow] = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
+            loan: LoanRow | None = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
             if loan is None or loan["status"] != "offer":
                 return False, fail("loan_offer_ended")
             if user_id != loan["borrower_id"]:
@@ -317,7 +317,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
     def loan_cancel(self, loan_id: int, user_id: int) -> Outcome[str]:
         """貸す側が提案を取り下げる。"""
         with self._db.tx():
-            loan: Optional[LoanRow] = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
+            loan: LoanRow | None = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
             if loan is None or loan["status"] not in ("offer", "request"):
                 return False, fail("loan_offer_ended")
             owner = loan["borrower_id"] if loan["status"] == "request" else loan["lender_id"]
@@ -328,11 +328,11 @@ class LoanRepo(ScopedRepo, ILoanRepo):
             self._conn.execute("UPDATE loans SET status='cancelled' WHERE id=?", (loan_id,))
             return True, ""
 
-    def loan_repay(self, loan_id: int, user_id: int, amount: Optional[int], now: float) -> Outcome[int]:
+    def loan_repay(self, loan_id: int, user_id: int, amount: int | None, now: float) -> Outcome[int]:
         """借りた人が返す。amount が None なら全額（残高の範囲で）。(成功か, Failure か返した額) を返す。"""
         with self._db.tx():
             gid = self._g()
-            loan: Optional[LoanRow] = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
+            loan: LoanRow | None = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
             if loan is None or loan["status"] not in ("active", "overdue"):
                 return False, fail("loan_repay_not_found")
             if loan["borrower_id"] != user_id:

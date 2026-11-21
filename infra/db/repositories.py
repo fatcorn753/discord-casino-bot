@@ -5,7 +5,6 @@ Bridge パターン / Constructor DI / OCP 戦略ステップで組み立てる�
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 from domain.ports.bridges import (
     compose_asset_collectors,
@@ -177,7 +176,7 @@ class RepositoryBundle(IRepositoryBundle):
 
 
 def open_repositories(
-    db_path: str, legacy_guild_id: Optional[int] = None, strict: bool = False, clock: Optional[IClock] = None
+    db_path: str, legacy_guild_id: int | None = None, strict: bool = False, clock: IClock | None = None
 ) -> RepositoryBundle:
     """DB を開き、マイグレーションとテーブル作成のうえ全リポジトリを組み立てて返す。
 

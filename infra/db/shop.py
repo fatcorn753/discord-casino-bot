@@ -3,7 +3,7 @@
 表の定義は infra/db/schema/tables.py にある。
 """
 
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from domain import shop as shop_mod
 from domain import teiai
@@ -61,7 +61,7 @@ class ShopRepo(ScopedRepo, IShopRepo):
         )
         return SeizedBelongings(items=tuple(items))
 
-    def shop_stock(self, user_id: int, item_id: str, now: float) -> Optional[ShopStockInfo]:
+    def shop_stock(self, user_id: int, item_id: str, now: float) -> ShopStockInfo | None:
         """在庫のある品の、このプレイヤーの在庫 {stock: 買える数, max, next_at: 次に1つ増える時刻（満タンなら None）}。在庫のない品は None。
 
         読み取りだけ（記録がなければ、満タン）。
@@ -90,7 +90,7 @@ class ShopRepo(ScopedRepo, IShopRepo):
         price: int,
         unique: bool,
         qty: int = 1,
-        now: Optional[float] = None,
+        now: float | None = None,
     ) -> PurchaseResult:
         """購入。支払い・持ち物の追加を1回の処理で行う。持っているもの（消耗品以外）は買えない。在庫のある品は、在庫の数まで。"""
         if qty < 1 or price <= 0:
@@ -170,7 +170,7 @@ class ShopRepo(ScopedRepo, IShopRepo):
                 prof[slot] = None
         return cast("ProfileView", prof)
 
-    def equip(self, user_id: int, slot: str, item_id: Optional[str]) -> bool:
+    def equip(self, user_id: int, slot: str, item_id: str | None) -> bool:
         """称号・カードの色・アイコンを装備（None で外す）。持っていないものは装備できない。"""
         if slot not in self.SLOTS:
             raise ValueError(slot)

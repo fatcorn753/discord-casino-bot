@@ -4,7 +4,6 @@
 """
 
 from collections.abc import Iterable
-from typing import Optional
 
 from domain.ports.bridges import WealthyReader, noop_wealthy_reader
 from domain.ports.contracts import GuildStatusRow, LeaderboardRow, ProfileRow
@@ -18,7 +17,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
     def __init__(
         self,
         db: EcoDb,
-        wealthy_reader: Optional[WealthyReader] = None,
+        wealthy_reader: WealthyReader | None = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -28,9 +27,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
     # ------------------------------------------------------------------ #
     # 利用できるサーバーの承認                                            #
     # ------------------------------------------------------------------ #
-    def set_guild_status(
-        self, guild_id: int, status: str, name: Optional[str] = None, by: Optional[int] = None
-    ) -> None:
+    def set_guild_status(self, guild_id: int, status: str, name: str | None = None, by: int | None = None) -> None:
         with self._db.tx():
             self._conn.execute(
                 "INSERT INTO guild_status (guild_id, status, name, decided_by, updated_at) VALUES (?, ?, ?, ?, ?) "
@@ -39,7 +36,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
                 (guild_id, status, name, by, self._now()),
             )
 
-    def get_guild_status(self, guild_id: int) -> Optional[GuildStatusRow]:
+    def get_guild_status(self, guild_id: int) -> GuildStatusRow | None:
         with self._lock:
             return self._one("SELECT * FROM guild_status WHERE guild_id=?", (guild_id,))
 
@@ -62,7 +59,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
                 (guild_id, channel_id, message_id),
             )
 
-    def get_leaderboard(self, guild_id: int) -> Optional[LeaderboardRow]:
+    def get_leaderboard(self, guild_id: int) -> LeaderboardRow | None:
         with self._lock:
             return self._one("SELECT * FROM leaderboards WHERE guild_id=?", (guild_id,))
 
@@ -137,14 +134,14 @@ class GuildRepo(ScopedRepo, IGuildRepo):
             ]
         return rows + sorted(self._wealthy_reader(gid))
 
-    def get_nick_state(self, guild_id: int, user_id: int) -> Optional[tuple[Optional[str], str]]:
+    def get_nick_state(self, guild_id: int, user_id: int) -> tuple[str | None, str] | None:
         with self._lock:
             row = self._one(
                 "SELECT original_nick, applied_nick FROM nick_prefs WHERE guild_id=? AND user_id=?", (guild_id, user_id)
             )
         return None if row is None or row["applied_nick"] is None else (row["original_nick"], row["applied_nick"])
 
-    def set_nick_state(self, guild_id: int, user_id: int, original: Optional[str], applied: Optional[str]) -> None:
+    def set_nick_state(self, guild_id: int, user_id: int, original: str | None, applied: str | None) -> None:
         with self._db.tx():
             self._conn.execute(
                 "UPDATE nick_prefs SET original_nick=?, applied_nick=? WHERE guild_id=? AND user_id=?",

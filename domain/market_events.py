@@ -11,7 +11,7 @@
 import math
 import random
 from collections.abc import Mapping, Sequence
-from typing import Any, Optional
+from typing import Any
 
 from domain import market
 from domain.ports import get_catalogs
@@ -122,7 +122,7 @@ def describe_alert(alert: dict[str, Any]) -> str:
     )
 
 
-def current(events: Sequence[Mapping[str, Any]], now: float) -> Optional[Mapping[str, Any]]:
+def current(events: Sequence[Mapping[str, Any]], now: float) -> Mapping[str, Any] | None:
     """終わっていないイベント（予告中か発生中）を1つ返す。"""
     live = [e for e in events if phase(e, now) != "done"]
     return min(live, key=lambda e: e["start_ts"]) if live else None

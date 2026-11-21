@@ -1,7 +1,5 @@
 """帝愛共済（#34）のアプリケーションサービス。"""
 
-from typing import Optional
-
 from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import (
@@ -48,19 +46,17 @@ class KyosaiService:
     def propose(self, guild_id: int, user_id: int, premium: float) -> Outcome[KyosaiMotionProposeRow]:
         return self._kyosai.for_guild(guild_id).kyosai_propose(user_id, premium, self._now())
 
-    def vote(self, guild_id: int, user_id: int, yes: bool, motion_id: Optional[int] = None) -> Outcome[int]:
+    def vote(self, guild_id: int, user_id: int, yes: bool, motion_id: int | None = None) -> Outcome[int]:
         return self._kyosai.for_guild(guild_id).kyosai_vote(user_id, yes, self._now(), motion_id)
 
     def set_motion_message(self, guild_id: int, motion_id: int, channel_id: int, message_id: int) -> None:
         self._kyosai.for_guild(guild_id).kyosai_set_motion_message(motion_id, channel_id, message_id)
 
-    def motion(self, guild_id: int, motion_id: int) -> Optional[KyosaiMotionViewRow]:
+    def motion(self, guild_id: int, motion_id: int) -> KyosaiMotionViewRow | None:
 
         return self._kyosai.for_guild(guild_id).kyosai_motion(motion_id, self._now())
 
-    def tick(
-        self, guild_id: int
-    ) -> tuple[Optional[KyosaiDaily], list[KyosaiMotionViewRow], list[KyosaiAuctionEventRow]]:
+    def tick(self, guild_id: int) -> tuple[KyosaiDaily | None, list[KyosaiMotionViewRow], list[KyosaiAuctionEventRow]]:
         """毎分: 1日ごとの配当（と休眠の回収）、締切を過ぎた動議の締め、帝愛の持ち口の競り。
 
         (配当の結果, 締めた動議の結果, 競りで起きたこと)。

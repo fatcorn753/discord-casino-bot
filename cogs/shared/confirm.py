@@ -2,7 +2,6 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Optional
 
 import discord
 
@@ -18,7 +17,7 @@ class ConfirmView(ui.OwnerView):
             owner_message="この操作を実行できるのはコマンドを使った本人だけです。",
         )
         self.author_id = author_id
-        self.value: Optional[bool] = None
+        self.value: bool | None = None
         self.confirm.label = label
         self.confirm.style = style
 
@@ -35,7 +34,7 @@ class ConfirmView(ui.OwnerView):
         self.stop()
 
 
-async def confirm_action(interaction: discord.Interaction, title: str, description: str, label: str) -> Optional[bool]:
+async def confirm_action(interaction: discord.Interaction, title: str, description: str, label: str) -> bool | None:
     """確認ボタンを出し、True / False / None(時間切れ) を返す。呼んだあとの返信は interaction.followup で行う。"""
     view = ConfirmView(interaction.user.id, label)
     await interaction.response.send_message(embed=ui.warn_embed(title, description), view=view, ephemeral=True)

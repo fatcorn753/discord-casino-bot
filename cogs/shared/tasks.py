@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, Optional
+from typing import Any
 
 import discord
 
@@ -24,8 +24,8 @@ async def run_for_allowed_guilds(
     handler: Callable[[discord.Guild], Awaitable[None]],
     *,
     error_label: str,
-    busy: Optional[set[int]] = None,
-    logger: Optional[logging.Logger] = None,
+    busy: set[int] | None = None,
+    logger: logging.Logger | None = None,
 ) -> None:
     """承認済みギルドごとに非同期処理を順次実行し、1 ギルドの失敗で他を止めない。"""
     log = logger or _LOG
@@ -50,7 +50,7 @@ def run_sync_for_allowed_guilds(
     handler: Callable[[discord.Guild], None],
     *,
     error_label: str,
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger | None = None,
 ) -> None:
     """承認済みギルドごとに同期処理を順次実行し、1 ギルドの失敗で他を止めない。"""
     log = logger or _LOG

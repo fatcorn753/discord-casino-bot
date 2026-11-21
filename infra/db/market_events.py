@@ -4,7 +4,7 @@
 """
 
 import random
-from typing import Optional, cast
+from typing import cast
 
 from domain import market_events as ev_mod
 from domain.ports.contracts import MarketEventPlan, MarketEventRow
@@ -36,8 +36,8 @@ class MarketEventRepo(ScopedRepo, IMarketEventRepo):
         return out
 
     def event_step(
-        self, now: float, rng: Optional[random.Random] = None, force: Optional[MarketEventPlan] = None
-    ) -> Optional[MarketEventRow]:
+        self, now: float, rng: random.Random | None = None, force: MarketEventPlan | None = None
+    ) -> MarketEventRow | None:
         """1分ごとに呼ぶ。終わっていないイベントも、終わって COOLDOWN_MIN 分以内のものもなければ、確率で新しい予告を出す。出したらその行を返す。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():

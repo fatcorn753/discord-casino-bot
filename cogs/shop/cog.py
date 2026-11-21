@@ -5,7 +5,7 @@
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -63,7 +63,7 @@ class ShopCog(commands.Cog, IShopTitleBridge):
         shop_svc: ShopService,
         guild_repo: IGuildRepo,
         sessions: ISessionGuard,
-        p2p_bridge: Optional[IP2PNavigationBridge] = None,
+        p2p_bridge: IP2PNavigationBridge | None = None,
     ) -> None:
         self.bot = bot
         self._config = config

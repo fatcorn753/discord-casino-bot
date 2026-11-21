@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import discord
 
@@ -139,7 +139,7 @@ class FormValues:
 
     choices: list
     reward: int
-    minutes: Optional[int]
+    minutes: int | None
     msg_right: str
     msg_wrong: str
 
@@ -169,7 +169,7 @@ class QuizForm(discord.ui.Modal):
     )
 
     def read(
-        self, max_reward: Optional[int], default_minutes: Optional[int], min_minutes: int, max_minutes: int
+        self, max_reward: int | None, default_minutes: int | None, min_minutes: int, max_minutes: int
     ) -> FormValues:
         """入力を検証して返す。問題があれば ValueError（文面はそのまま利用者に見せる）。"""
         choices = parse_choices(self.choices.value)

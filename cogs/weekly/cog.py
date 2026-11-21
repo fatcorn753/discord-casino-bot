@@ -5,7 +5,7 @@ Bot が止まっていて月曜0時を逃しても、次に起動したときに
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord.ext import commands, tasks
@@ -36,8 +36,8 @@ class WeeklyCog(commands.Cog):
         config: dict[str, Any],
         economy_svc: EconomyService,
         guild_repo: IGuildRepo,
-        shop_bridge: Optional[IShopTitleBridge] = None,
-        clock: Optional[IClock] = None,
+        shop_bridge: IShopTitleBridge | None = None,
+        clock: IClock | None = None,
     ) -> None:
         self.bot = bot
         self._config = config

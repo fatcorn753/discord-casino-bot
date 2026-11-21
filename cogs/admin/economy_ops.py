@@ -1,6 +1,6 @@
 """運営向けの経済・イベント・還元率・統計・履歴操作（`/運営 付与/残高設定/イベント/還元率/統計/履歴`）。"""
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import discord
 
@@ -56,8 +56,8 @@ async def event_start(
     game: str,
     minutes: int,
     boost: int,
-    guild_id: Optional[str],
-    channel_id: Optional[str],
+    guild_id: str | None,
+    channel_id: str | None,
 ) -> None:
     picked = await pick_guild(cog.bot, interaction, guild_id) if guild_id else None
     if guild_id and picked is None:
@@ -80,7 +80,7 @@ async def event_start(
     )
 
 
-async def event_stop(cog: "ApprovalCog", interaction: discord.Interaction, guild_id: Optional[str]) -> None:
+async def event_stop(cog: "ApprovalCog", interaction: discord.Interaction, guild_id: str | None) -> None:
     if guild_id and await pick_guild(cog.bot, interaction, guild_id) is None:
         return
     event_bridge = await require_bridge(interaction, cog.bot, IEventAdminBridge, "イベント機能", cog._event_bridge)
@@ -113,7 +113,7 @@ async def rtp_set(cog: "ApprovalCog", interaction: discord.Interaction, guild_id
     )
 
 
-async def rtp_list(cog: "ApprovalCog", interaction: discord.Interaction, guild_id: Optional[str]) -> None:
+async def rtp_list(cog: "ApprovalCog", interaction: discord.Interaction, guild_id: str | None) -> None:
     guild = await pick_guild(cog.bot, interaction, guild_id) if guild_id else None
     if guild_id and guild is None:
         return
@@ -126,7 +126,7 @@ async def rtp_list(cog: "ApprovalCog", interaction: discord.Interaction, guild_i
 
 
 async def pachinko_stats(
-    cog: "ApprovalCog", interaction: discord.Interaction, guild_id: Optional[str], days: Optional[int]
+    cog: "ApprovalCog", interaction: discord.Interaction, guild_id: str | None, days: int | None
 ) -> None:
     guild = None
     if guild_id:

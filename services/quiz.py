@@ -1,7 +1,5 @@
 """クイズ（出題・挑戦・回答・取り下げ・期限の精算・運営の追加と削除）のアプリケーションサービス。"""
 
-from typing import Optional
-
 from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import (
@@ -25,7 +23,7 @@ class QuizService:
         return self._clock.now_ts()
 
     # ------------------------------ 全サーバー共通の問題（運営） ------------------------------ #
-    def get(self, quiz_id: int) -> Optional[QuizView]:
+    def get(self, quiz_id: int) -> QuizView | None:
         return self._quiz.quiz_get(quiz_id)
 
     def list_all(self) -> list[QuizAdminView]:
@@ -43,7 +41,7 @@ class QuizService:
         choices: list[str],
         explanation: str,
         reward: int,
-        minutes: Optional[int],
+        minutes: int | None,
         creator_name: str = "",
         msg_right: str = "",
         msg_wrong: str = "",
@@ -59,7 +57,7 @@ class QuizService:
         return self._quiz.quiz_add_many(items, self._clock.now_ts(), creator_name)
 
     # ------------------------------ サーバーごとの挑戦・出題 ------------------------------ #
-    def next_for(self, guild_id: int, user_id: int) -> tuple[Optional[QuizView], int]:
+    def next_for(self, guild_id: int, user_id: int) -> tuple[QuizView | None, int]:
         """(次の問題 or None, 残りの問題数)。"""
         return self._quiz.for_guild(guild_id).quiz_next(user_id, self._clock.now_ts())
 
@@ -95,7 +93,7 @@ class QuizService:
             msg_wrong,
         )
 
-    def get_in(self, guild_id: int, quiz_id: int) -> Optional[QuizView]:
+    def get_in(self, guild_id: int, quiz_id: int) -> QuizView | None:
         return self._quiz.for_guild(guild_id).quiz_get(quiz_id)
 
     def set_message(self, guild_id: int, quiz_id: int, message_id: int) -> None:
@@ -104,7 +102,7 @@ class QuizService:
     def own_open(self, guild_id: int, user_id: int) -> list[QuizView]:
         return self._quiz.for_guild(guild_id).quiz_own_open(user_id, self._clock.now_ts())
 
-    def withdraw(self, guild_id: int, user_id: int, quiz_id: int) -> Optional[QuizSettleRow]:
+    def withdraw(self, guild_id: int, user_id: int, quiz_id: int) -> QuizSettleRow | None:
         return self._quiz.for_guild(guild_id).quiz_withdraw(user_id, quiz_id, self._clock.now_ts())
 
     def settle(self, guild_id: int) -> list[QuizSettleRow]:

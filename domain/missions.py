@@ -7,7 +7,6 @@
 import datetime
 import random
 from dataclasses import dataclass
-from typing import Optional
 
 from domain.ports import get_catalogs
 
@@ -26,8 +25,8 @@ class Mission:
     kind: str  # play / win / wager / streak / big_win / play_game / game_win / tag
     target: int
     reward: int
-    game: Optional[str] = None
-    tag: Optional[str] = None  # kind が tag のとき、ゲームが付ける印（例: ブラックジャックのダブル勝ち）
+    game: str | None = None
+    tag: str | None = None  # kind が tag のとき、ゲームが付ける印（例: ブラックジャックのダブル勝ち）
 
 
 UNIVERSAL = [

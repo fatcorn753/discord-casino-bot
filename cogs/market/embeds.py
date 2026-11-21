@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Mapping, Sequence
-from typing import Any, Optional
+from typing import Any
 
 import discord
 
@@ -172,7 +172,7 @@ def event_lines(events_rows: Sequence[Mapping[str, Any]], now: float) -> str:
     )
 
 
-def earnings_lines(ev: Optional[Mapping[str, Any]]) -> str:
+def earnings_lines(ev: Mapping[str, Any] | None) -> str:
     """今週の決算発表の予告（月曜9:00から、発表まで）。なければ空文字。"""
     if ev is None:
         return ""
@@ -215,7 +215,7 @@ def chart_embed(
     holders: Sequence = (),
     shorts: Sequence = (),
     title_prefix: str = "",
-    live_until: Optional[float] = None,
+    live_until: float | None = None,
     ended: bool = False,
     now: float = 0.0,
 ) -> discord.Embed:
@@ -269,7 +269,7 @@ def chart_embed(
 def summary_embed(
     hist_24h: dict[str, list],
     latest: dict[str, float],
-    upcoming_earnings: Optional[Mapping[str, Any]],
+    upcoming_earnings: Mapping[str, Any] | None,
     event_rows: Sequence[Mapping[str, Any]],
     alert_histories: dict[str, list[float]],
     cut_rows: list,
@@ -307,7 +307,7 @@ def holdings_embed(
     bond_data: HoldingBook[BondRow],
     option_quotes: dict[int, int],
     bond_quotes: dict[int, int],
-    margin_status: Optional[MarginStatus],
+    margin_status: MarginStatus | None,
 ) -> discord.Embed:
     if (
         not spots

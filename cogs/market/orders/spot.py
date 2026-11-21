@@ -1,7 +1,7 @@
 """現物の売買（買い・売り）。"""
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import discord
 
@@ -23,7 +23,7 @@ async def buy_spot(
     symbol: str,
     amount: int,
     *,
-    confirm_fn: Optional[Callable] = None,
+    confirm_fn: Callable | None = None,
 ) -> None:
     """現物の購入（手数料なし・小数で買える）。amount ペリカの範囲で買えるだけ買う。"""
     sym = market.BY_KEY[symbol]
@@ -70,9 +70,9 @@ async def sell_spot(
     cog: "MarketCog",
     interaction: discord.Interaction,
     symbol: str,
-    percent: Optional[int] = None,
+    percent: int | None = None,
     *,
-    confirm_fn: Optional[Callable] = None,
+    confirm_fn: Callable | None = None,
 ) -> None:
     """現物の売却。percent（1〜100）で割合を決める。省略すると全部。"""
     sym = market.BY_KEY[symbol]

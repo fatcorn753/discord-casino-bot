@@ -1,7 +1,7 @@
 """ショップ・競売・P2P・クイズ・抽選・地下作業・エスクローのリポジトリポート契約。"""
 
 import random
-from typing import TYPE_CHECKING, Literal, Optional, overload
+from typing import TYPE_CHECKING, Literal, overload
 
 from domain.errors import Outcome
 from domain.ports.contracts import (
@@ -42,16 +42,16 @@ class IRaffleRepo(IGuildScopedRepo):
     def raffle_open(self, host_id: int, fee: int, closes: float, channel_id: int) -> Outcome[str]:
         raise NotImplementedError
 
-    def raffle_get(self) -> Optional[RaffleView]:
+    def raffle_get(self) -> RaffleView | None:
         raise NotImplementedError
 
-    def raffle_set_message(self, raffle_id: int, message_id: int, channel_id: Optional[int] = None) -> None:
+    def raffle_set_message(self, raffle_id: int, message_id: int, channel_id: int | None = None) -> None:
         raise NotImplementedError
 
     def raffle_join(self, user_id: int, now: float) -> Outcome[str]:
         raise NotImplementedError
 
-    def raffle_close(self, rng: Optional[random.Random] = None, cancel: bool = False) -> Optional[RaffleResult]:
+    def raffle_close(self, rng: random.Random | None = None, cancel: bool = False) -> RaffleResult | None:
         raise NotImplementedError
 
 
@@ -62,7 +62,7 @@ class IPollRepo(IGuildScopedRepo):
     def poll_set_message(self, poll_id: int, channel_id: int, message_id: int) -> None:
         raise NotImplementedError
 
-    def poll_get(self, poll_id: int) -> Optional[PollView]:
+    def poll_get(self, poll_id: int) -> PollView | None:
         raise NotImplementedError
 
     def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> Outcome[PollView]:
@@ -78,7 +78,7 @@ class IPollRepo(IGuildScopedRepo):
 class IShopRepo(IGuildScopedRepo):
     SLOTS: tuple[str, ...]
 
-    def shop_stock(self, user_id: int, item_id: str, now: float) -> Optional[ShopStockInfo]:
+    def shop_stock(self, user_id: int, item_id: str, now: float) -> ShopStockInfo | None:
         raise NotImplementedError
 
     def purchase(
@@ -89,7 +89,7 @@ class IShopRepo(IGuildScopedRepo):
         price: int,
         unique: bool,
         qty: int = 1,
-        now: Optional[float] = None,
+        now: float | None = None,
     ) -> "PurchaseResult":
         raise NotImplementedError
 
@@ -99,7 +99,7 @@ class IShopRepo(IGuildScopedRepo):
     def get_profile(self, user_id: int, raw: bool = False) -> ProfileView:
         raise NotImplementedError
 
-    def equip(self, user_id: int, slot: str, item_id: Optional[str]) -> bool:
+    def equip(self, user_id: int, slot: str, item_id: str | None) -> bool:
         raise NotImplementedError
 
     def arm(self, user_id: int, item_id: str) -> bool:
@@ -113,10 +113,10 @@ class IAuctionRepo(IGuildScopedRepo):
     def auction_list(self, now: float) -> list[AuctionListing]:
         raise NotImplementedError
 
-    def auction_buy(self, user_id: int, item_id: str, qty: int = 1, now: Optional[float] = None) -> "PurchaseResult":
+    def auction_buy(self, user_id: int, item_id: str, qty: int = 1, now: float | None = None) -> "PurchaseResult":
         raise NotImplementedError
 
-    def market_list(self, now: float, rng: Optional[random.Random] = None) -> list[TeiaiMarketListing]:
+    def market_list(self, now: float, rng: random.Random | None = None) -> list[TeiaiMarketListing]:
         raise NotImplementedError
 
     def market_buy(
@@ -124,14 +124,14 @@ class IAuctionRepo(IGuildScopedRepo):
         user_id: int,
         listing_id: int,
         qty: int = 1,
-        now: Optional[float] = None,
-        rng: Optional[random.Random] = None,
+        now: float | None = None,
+        rng: random.Random | None = None,
     ) -> "MarketPurchase":
         raise NotImplementedError
 
 
 class IEscrowRepo(IGuildScopedRepo):
-    def place_bet(self, user_id: int, amount: int, game: str) -> Optional[int]:
+    def place_bet(self, user_id: int, amount: int, game: str) -> int | None:
         raise NotImplementedError
 
     def add_to_escrow(self, escrow_id: int, extra: int, credit: bool = False) -> bool:
@@ -140,12 +140,10 @@ class IEscrowRepo(IGuildScopedRepo):
     def escrow_amount(self, escrow_id: int) -> int:
         raise NotImplementedError
 
-    def settle(self, escrow_id: int, payout: int, game: str) -> Optional[int]:
+    def settle(self, escrow_id: int, payout: int, game: str) -> int | None:
         raise NotImplementedError
 
-    def settle_with_penalty(
-        self, escrow_id: int, payout: int, game: str, penalty: int
-    ) -> Optional[tuple[int, int, int]]:
+    def settle_with_penalty(self, escrow_id: int, payout: int, game: str, penalty: int) -> tuple[int, int, int] | None:
         raise NotImplementedError
 
     def refund(self, escrow_id: int) -> bool:
@@ -170,7 +168,7 @@ class IQuizAdminRepo(IGuildScopedRepo):
         choices: list[str],
         explanation: str,
         reward: int,
-        expires: Optional[float],
+        expires: float | None,
         now: float,
         creator_name: str = "",
         msg_right: str = "",
@@ -184,7 +182,7 @@ class IQuizAdminRepo(IGuildScopedRepo):
     def quiz_existing_questions(self) -> set[str]:
         raise NotImplementedError
 
-    def quiz_get(self, quiz_id: int) -> Optional[QuizView]:
+    def quiz_get(self, quiz_id: int) -> QuizView | None:
         raise NotImplementedError
 
     def quiz_list(self) -> list[QuizAdminView]:
@@ -197,7 +195,7 @@ class IQuizAdminRepo(IGuildScopedRepo):
 class IQuizPlayRepo(IGuildScopedRepo):
     """クイズの出題・回答・投稿・締め切り（プレイ用）。"""
 
-    def quiz_next(self, user_id: int, now: float) -> tuple[Optional[QuizView], int]:
+    def quiz_next(self, user_id: int, now: float) -> tuple[QuizView | None, int]:
         raise NotImplementedError
 
     def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> Outcome[QuizAnswerResult]:
@@ -228,7 +226,7 @@ class IQuizPlayRepo(IGuildScopedRepo):
     def quiz_settle(self, now: float) -> list[QuizSettleRow]:
         raise NotImplementedError
 
-    def quiz_withdraw(self, user_id: int, quiz_id: int, now: float) -> Optional[QuizSettleRow]:
+    def quiz_withdraw(self, user_id: int, quiz_id: int, now: float) -> QuizSettleRow | None:
         raise NotImplementedError
 
 
@@ -246,10 +244,10 @@ class ILaborRepo(IGuildScopedRepo):
     def labor_state(self, user_id: int, now: float, day: str = "") -> LaborState:
         raise NotImplementedError
 
-    def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> LaborTop:
+    def labor_top(self, limit: int = 10, day: str | None = None, user_id: int | None = None) -> LaborTop:
         raise NotImplementedError
 
-    def labor_click(self, user_id: int, now: float, day: str = "", rng: Optional[random.Random] = None) -> LaborClick:
+    def labor_click(self, user_id: int, now: float, day: str = "", rng: random.Random | None = None) -> LaborClick:
         raise NotImplementedError
 
     def labor_click_hours(self, user_id: int, since: float) -> list[LaborClickHourRow]:
@@ -290,15 +288,15 @@ class IP2PRepo(IGuildScopedRepo):
         qty: int,
         mode: str,
         price: int,
-        hours: Optional[int] = None,
-        now: Optional[float] = None,
+        hours: int | None = None,
+        now: float | None = None,
     ) -> Outcome[int]:
         raise NotImplementedError
 
     def p2p_label(self, row: ListingRow) -> str:
         raise NotImplementedError
 
-    def p2p_get(self, listing_id: int) -> Optional[ListingRow]:
+    def p2p_get(self, listing_id: int) -> ListingRow | None:
         raise NotImplementedError
 
     def p2p_set_post(self, listing_id: int, channel_id: int, message_id: int) -> None:
@@ -313,7 +311,7 @@ class IP2PRepo(IGuildScopedRepo):
     def p2p_cancel(self, user_id: int, listing_id: int, now: float) -> Outcome[str]:
         raise NotImplementedError
 
-    def p2p_pull_back(self, user_id: int, now: Optional[float] = None) -> dict[str, int]:
+    def p2p_pull_back(self, user_id: int, now: float | None = None) -> dict[str, int]:
         raise NotImplementedError
 
     def p2p_unsynced_posts(self) -> list[ListingRow]:
@@ -327,10 +325,10 @@ class IP2PRepo(IGuildScopedRepo):
 
     def p2p_active(
         self,
-        kind: Optional[str] = None,
-        now: Optional[float] = None,
+        kind: str | None = None,
+        now: float | None = None,
         limit: int = 25,
-        mode: Optional[str] = None,
+        mode: str | None = None,
         order: str = "end",
     ) -> list[ListingRow]:
         raise NotImplementedError
@@ -338,12 +336,12 @@ class IP2PRepo(IGuildScopedRepo):
     def p2p_count(self, now: float) -> int:
         raise NotImplementedError
 
-    def p2p_mine(self, user_id: int, now: Optional[float] = None) -> P2PMine:
+    def p2p_mine(self, user_id: int, now: float | None = None) -> P2PMine:
         raise NotImplementedError
 
 
 class ICompanyRepo(IGuildScopedRepo):
-    def company_get(self, user_id: int, now: float) -> Optional[CompanyView]:
+    def company_get(self, user_id: int, now: float) -> CompanyView | None:
         raise NotImplementedError
 
     def company_found(self, user_id: int, name: str, kind: str, now: float) -> Outcome[CompanyView]:
@@ -352,7 +350,7 @@ class ICompanyRepo(IGuildScopedRepo):
     def company_invest(self, user_id: int, amount: int, now: float) -> Outcome[int]:
         raise NotImplementedError
 
-    def company_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> Outcome[int]:
+    def company_withdraw(self, user_id: int, amount: int | None = None, now: float | None = None) -> Outcome[int]:
         raise NotImplementedError
 
     def company_ship(self, user_id: int, now: float) -> Outcome[CompanyShipResult]:

@@ -2,7 +2,7 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -136,8 +136,8 @@ class MarketCog(commands.Cog):
         self,
         period: str = "24h",
         title_prefix: str = "",
-        guild_id: Optional[int] = None,
-        live_until: Optional[float] = None,
+        guild_id: int | None = None,
+        live_until: float | None = None,
         ended: bool = False,
         symbol: str = market.DEFAULT,
     ) -> discord.Embed:
@@ -162,7 +162,7 @@ class MarketCog(commands.Cog):
             now=now,
         )
 
-    def summary_embed(self, guild_id: Optional[int] = None) -> discord.Embed:
+    def summary_embed(self, guild_id: int | None = None) -> discord.Embed:
         now = self._market_svc.clock.now_ts()
         hist_24h = self._market_svc.histories(CORRELATION_MINUTES, now)
         latest = self._market_svc.latest_prices()
@@ -186,8 +186,8 @@ class MarketCog(commands.Cog):
     async def board(
         self,
         interaction: discord.Interaction,
-        symbol: Optional[app_commands.Choice[str]] = None,
-        period: Optional[app_commands.Choice[str]] = None,
+        symbol: app_commands.Choice[str] | None = None,
+        period: app_commands.Choice[str] | None = None,
     ):
         gid = ui.guild_id_of(interaction)
         if symbol is None:
@@ -265,7 +265,7 @@ class MarketCog(commands.Cog):
         symbol: app_commands.Choice[str],
         side: app_commands.Choice[str],
         amount: app_commands.Range[int, 10, AMOUNT_MAX],
-        leverage: Optional[app_commands.Choice[int]] = None,
+        leverage: app_commands.Choice[int] | None = None,
     ):
         lev = leverage.value if leverage else 1
         await orders.margin_order(self, interaction, side.value, symbol.value, amount, lev)
@@ -286,7 +286,7 @@ class MarketCog(commands.Cog):
         interaction: discord.Interaction,
         symbol: app_commands.Choice[str],
         amount: app_commands.Range[int, 10, AMOUNT_MAX],
-        target: Optional[app_commands.Range[int, 1, opt.MAX_TARGET_PCT]] = None,
+        target: app_commands.Range[int, 1, opt.MAX_TARGET_PCT] | None = None,
     ):
         await orders.option_buy(self, interaction, opt.CALL, symbol.value, amount, target=target)
 
@@ -306,7 +306,7 @@ class MarketCog(commands.Cog):
         interaction: discord.Interaction,
         symbol: app_commands.Choice[str],
         amount: app_commands.Range[int, 10, AMOUNT_MAX],
-        target: Optional[app_commands.Range[int, 1, opt.MAX_TARGET_PCT]] = None,
+        target: app_commands.Range[int, 1, opt.MAX_TARGET_PCT] | None = None,
     ):
         await orders.option_buy(self, interaction, opt.PUT, symbol.value, amount, target=target)
 
@@ -352,7 +352,7 @@ class MarketCog(commands.Cog):
         symbol: app_commands.Choice[str],
         kind: app_commands.Choice[str],
         amount: app_commands.Range[int, 10, AMOUNT_MAX],
-        target: Optional[app_commands.Range[int, 1, opt.MAX_TARGET_PCT]] = None,
+        target: app_commands.Range[int, 1, opt.MAX_TARGET_PCT] | None = None,
     ):
         await orders.option_write(self, interaction, kind.value, symbol.value, amount, target=target)
 
@@ -373,7 +373,7 @@ class MarketCog(commands.Cog):
     def positions(self, uid: int, guild_id: int) -> list:
         return self._market_svc.positions(guild_id, uid)
 
-    async def settle_position(self, interaction: discord.Interaction, code: str, percent: Optional[int] = None) -> None:
+    async def settle_position(self, interaction: discord.Interaction, code: str, percent: int | None = None) -> None:
         """持ち物（code）を、percent（1〜100。省略で全部）だけ決済する。債券・オプションは全部だけ。"""
         kind, _, target = code.partition(":")
         match kind:
@@ -448,7 +448,7 @@ class MarketCog(commands.Cog):
         self,
         interaction: discord.Interaction,
         position: str,
-        percent: Optional[app_commands.Range[int, 1, 100]] = None,
+        percent: app_commands.Range[int, 1, 100] | None = None,
     ):
         await self.settle_position(interaction, position, percent)
 

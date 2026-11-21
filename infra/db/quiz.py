@@ -5,7 +5,7 @@
 
 import json
 from collections.abc import Mapping
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from domain import quizpay as quizpay_mod
 from domain.errors import Outcome, fail
@@ -26,7 +26,7 @@ def _quiz_dict(row: Any) -> QuizView:
     return cast("QuizView", d)
 
 
-def _quiz_row(row: Any) -> Optional[QuizView]:
+def _quiz_row(row: Any) -> QuizView | None:
     return None if row is None else _quiz_dict(row)
 
 
@@ -51,7 +51,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         choices: list[str],
         explanation: str,
         reward: int,
-        expires: Optional[float],
+        expires: float | None,
         now: float,
         creator_name: str = "",
         msg_right: str = "",
@@ -98,7 +98,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         with self._lock:
             return {r["question"] for r in self._all("SELECT question FROM quiz_questions")}
 
-    def quiz_get(self, quiz_id: int) -> Optional[QuizView]:
+    def quiz_get(self, quiz_id: int) -> QuizView | None:
         with self._lock:
             return _quiz_row(self._one("SELECT * FROM quiz_questions WHERE id=?", (quiz_id,)))
 
@@ -116,7 +116,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             self._conn.execute("DELETE FROM quiz_answers WHERE question_id=?", (quiz_id,))
             return self._conn.execute("DELETE FROM quiz_questions WHERE id=?", (quiz_id,)).rowcount > 0
 
-    def quiz_next(self, user_id: int, now: float) -> tuple[Optional[QuizView], int]:
+    def quiz_next(self, user_id: int, now: float) -> tuple[QuizView | None, int]:
         """まだ答えていない、期限内の一番古い問題と、その残り数（その問題を含む）を返す。無ければ (None, 0)。
 
         ユーザーの問題は、このサーバーのもので、自分の問題ではないものだけ出る（出題者の残高が尽きても、借金で報酬を払うので出続ける）。
@@ -320,7 +320,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
                 )
         return out
 
-    def quiz_withdraw(self, user_id: int, quiz_id: int, now: float) -> Optional[QuizSettleRow]:
+    def quiz_withdraw(self, user_id: int, quiz_id: int, now: float) -> QuizSettleRow | None:
         """出題者が自分の問題を取り下げる。すぐ終了して、出題者の報酬を決着させる。自分の問題でない・終了済みなら None。"""
         with self._db.tx():
             gid = self._g()

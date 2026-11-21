@@ -1,7 +1,7 @@
 """プレイヤー間市場（P2P）の View・Modal・Button。"""
 
 import re
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import discord
 
@@ -156,7 +156,7 @@ class SellView(ui.OwnerView):
     def __init__(self, cog: "P2PCog", user_id: int, guild_id: int):
         super().__init__(user_id, timeout=300)
         self.cog, self.user_id = cog, user_id
-        self.target: Optional[str] = None
+        self.target: str | None = None
         self.options = []
         for item_id, qty in cog.p2p.sellable_items(guild_id, user_id).items():
             if p2p.tradable(item_id):

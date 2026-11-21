@@ -2,7 +2,7 @@
 
 import datetime
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from domain.ports.bridges import INoticeSink
 from domain.ports.contracts import (
@@ -42,10 +42,10 @@ class IRecordRepo(IGuildScopedRepo):
     def weekly_top(self, week: str, limit: int = 10) -> list[tuple[int, int, int]]:
         raise NotImplementedError
 
-    def weekly_rank(self, week: str, user_id: int) -> Optional[WeeklyRankEntry]:
+    def weekly_rank(self, week: str, user_id: int) -> WeeklyRankEntry | None:
         raise NotImplementedError
 
-    def weekly_last_announced(self) -> Optional[str]:
+    def weekly_last_announced(self) -> str | None:
         raise NotImplementedError
 
     def set_weekly_announced(self, week: str) -> None:
@@ -54,7 +54,7 @@ class IRecordRepo(IGuildScopedRepo):
     def weekly_champion_count(self, user_id: int) -> int:
         raise NotImplementedError
 
-    def weekly_award(self, week: str) -> Optional[WeeklyAward]:
+    def weekly_award(self, week: str) -> WeeklyAward | None:
         raise NotImplementedError
 
     def backfill_weekly(self, utc_offset_hours: float = 9) -> int:
@@ -70,12 +70,10 @@ class IRecordRepo(IGuildScopedRepo):
 class IGuildApprovalRepo(IGuildScopedRepo):
     """サーバーの承認状態の読み書き。"""
 
-    def set_guild_status(
-        self, guild_id: int, status: str, name: Optional[str] = None, by: Optional[int] = None
-    ) -> None:
+    def set_guild_status(self, guild_id: int, status: str, name: str | None = None, by: int | None = None) -> None:
         raise NotImplementedError
 
-    def get_guild_status(self, guild_id: int) -> Optional[GuildStatusRow]:
+    def get_guild_status(self, guild_id: int) -> GuildStatusRow | None:
         raise NotImplementedError
 
     def list_guild_status(self) -> list[GuildStatusRow]:
@@ -91,7 +89,7 @@ class ILeaderboardConfigRepo(IGuildScopedRepo):
     def set_leaderboard(self, guild_id: int, channel_id: int, message_id: int) -> None:
         raise NotImplementedError
 
-    def get_leaderboard(self, guild_id: int) -> Optional[LeaderboardRow]:
+    def get_leaderboard(self, guild_id: int) -> LeaderboardRow | None:
         raise NotImplementedError
 
     def list_leaderboards(self) -> list[LeaderboardRow]:
@@ -116,10 +114,10 @@ class INickPrefRepo(IGuildScopedRepo):
     def status_nick_targets(self) -> list[int]:
         raise NotImplementedError
 
-    def get_nick_state(self, guild_id: int, user_id: int) -> Optional[tuple[Optional[str], str]]:
+    def get_nick_state(self, guild_id: int, user_id: int) -> tuple[str | None, str] | None:
         raise NotImplementedError
 
-    def set_nick_state(self, guild_id: int, user_id: int, original: Optional[str], applied: Optional[str]) -> None:
+    def set_nick_state(self, guild_id: int, user_id: int, original: str | None, applied: str | None) -> None:
         raise NotImplementedError
 
     def delete_guild_nick_prefs(self, guild_id: int) -> None:
@@ -168,7 +166,7 @@ class IWalletBalanceRepo(IGuildScopedRepo):
     def debit_up_to(self, user_id: int, amount: int, reason: str) -> int:
         raise NotImplementedError
 
-    def claim_daily(self, user_id: int, today: datetime.date, slot: Optional[int] = None) -> "DailyResult":
+    def claim_daily(self, user_id: int, today: datetime.date, slot: int | None = None) -> "DailyResult":
         raise NotImplementedError
 
     def transfer(
@@ -196,20 +194,20 @@ class IWalletRankingReader(IGuildScopedRepo):
     def wealthy_ids(self) -> set[int]:
         raise NotImplementedError
 
-    def display_status(self, user_id: int, wealthy: Optional[set[int]] = None) -> str:
+    def display_status(self, user_id: int, wealthy: set[int] | None = None) -> str:
         raise NotImplementedError
 
-    def top(self, limit: int = 10, user_ids: Optional[set[int]] = None) -> list[RankEntry]:
+    def top(self, limit: int = 10, user_ids: set[int] | None = None) -> list[RankEntry]:
         raise NotImplementedError
 
-    def rank_of(self, user_id: int, user_ids: Optional[set[int]] = None) -> Optional[RankEntry]:
+    def rank_of(self, user_id: int, user_ids: set[int] | None = None) -> RankEntry | None:
         raise NotImplementedError
 
 
 class IWalletStatsReader(IGuildScopedRepo):
     """成績と取引履歴（読み取り）。"""
 
-    def peek_stats(self, user_id: int) -> Optional[UserRow]:
+    def peek_stats(self, user_id: int) -> UserRow | None:
         raise NotImplementedError
 
     def stats(self, user_id: int) -> UserRow:
@@ -231,12 +229,12 @@ class IAssetRepo(IGuildScopedRepo):
         raise NotImplementedError
 
     def final_assets(
-        self, user_ids: Optional[set[int]] = None, now: Optional[float] = None
+        self, user_ids: set[int] | None = None, now: float | None = None
     ) -> list[tuple[int, int, dict[str, int]]]:
         raise NotImplementedError
 
-    def final_top(self, limit: int = 10, user_ids: Optional[set[int]] = None) -> list[RankEntry]:
+    def final_top(self, limit: int = 10, user_ids: set[int] | None = None) -> list[RankEntry]:
         raise NotImplementedError
 
-    def final_rank_of(self, user_id: int, user_ids: Optional[set[int]] = None) -> Optional[RankEntry]:
+    def final_rank_of(self, user_id: int, user_ids: set[int] | None = None) -> RankEntry | None:
         raise NotImplementedError

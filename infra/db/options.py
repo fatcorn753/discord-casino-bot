@@ -6,7 +6,7 @@
 
 import math
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any
 
 from domain import market as market_mod
 from domain import options as opt
@@ -33,7 +33,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         market_events: MarketEventRepo,
         earnings: EarningsRepo,
         bank: IBankCashFlow,
-        debt: Optional[IDebtOps] = None,
+        debt: IDebtOps | None = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -49,7 +49,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         """オプションの値付けに入れる出来事: ボラティリティ予告 + 満期までにある決算の発表（OPTION_HOURS の間）。"""
         return self._market_events.market_events(now) + self._earnings.earnings_jumps(now, opt.OPTION_HOURS * 3600)
 
-    def _price_at(self, symbol: str, ts: float) -> Optional[float]:
+    def _price_at(self, symbol: str, ts: float) -> float | None:
         """ts 以前の、最後の価格（満期の価格）。その前の記録がなければ、いまの価格。"""
         v = self._scalar(
             "SELECT price FROM market_prices WHERE symbol=? AND ts<=? ORDER BY ts DESC LIMIT 1", (symbol, ts)
@@ -79,8 +79,8 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         symbol: str,
         amount: int,
         now: float,
-        symbol2: Optional[str] = None,
-        strike_pct: Optional[float] = None,
+        symbol2: str | None = None,
+        strike_pct: float | None = None,
     ) -> Outcome[OptionBuyResult]:
         """amount（掛け金）の範囲で、買えるだけ買う。ペア・ワラントは、symbol が symbol2 より上がると当たり。"""
         if kind not in opt.KINDS or symbol not in market_mod.BY_KEY:
@@ -153,7 +153,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         symbol: str,
         amount: int,
         now: float,
-        strike_pct: Optional[float] = None,
+        strike_pct: float | None = None,
     ) -> Outcome[OptionWriteResult]:
         """帝愛に売って、プレミアムを先にもらう（裸売り）。amount は預ける証拠金の上限。(成功か, 理由か {...}) を返す。"""
         if kind not in opt.SHORT_NAMES or symbol not in market_mod.BY_KEY:

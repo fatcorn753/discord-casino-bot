@@ -3,7 +3,7 @@
 対応する表の定義は infra/db/schema/tables.py。キーは `SELECT *` の列と同じ。
 """
 
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 
 class KyosaiAuctionRow(TypedDict):
@@ -13,7 +13,7 @@ class KyosaiAuctionRow(TypedDict):
     guild_id: int
     units: int
     top_bid: int
-    top_bidder: Optional[int]
+    top_bidder: int | None
     ends: float
     status: str  # open / sold / unsold
 
@@ -61,8 +61,8 @@ class LoanRow(TypedDict):
     status: str  # offer / active / overdue / repaid / declined / cancelled / expired
     created: float
     offer_expires: float
-    accepted_at: Optional[float]
-    due: Optional[float]
+    accepted_at: float | None
+    due: float | None
     paid: int
     reminded: int
     channel_id: int
@@ -139,7 +139,7 @@ class EscapeResult(TypedDict):
     escaped: bool
     fine: int  # 失敗時の罰金（借金に加わった額）
     debt: int  # 逃亡後の借金
-    bankrupt: Optional[BankruptResult]  # 成功したときの自己破産の結果
+    bankrupt: BankruptResult | None  # 成功したときの自己破産の結果
 
 
 class KyosaiDaily(TypedDict):
@@ -157,12 +157,12 @@ class KyosaiStatus(TypedDict):
     total: int  # 流通する口数の合計
     holders: int  # 持ち主の数（帝愛を除く）
     house: int  # 帝愛の持ち口
-    auction: Optional[KyosaiAuctionRow]  # 開いている競り
+    auction: KyosaiAuctionRow | None  # 開いている競り
     paid: float  # これまでに配った配当の累計
     charged: float  # これまでに請求した超過損失の累計
-    next_dividend: Optional[float]  # 次の配当の時刻
+    next_dividend: float | None  # 次の配当の時刻
     pool: int  # いま配れる額
-    theta: Optional[float]  # 銀行の準備率
+    theta: float | None  # 銀行の準備率
     locked: bool  # 共済の口の移動が封鎖中か
     premium: float  # 信託のプレミアム
     circulating: int  # 流通している口数

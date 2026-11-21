@@ -1,6 +1,6 @@
 """サーバー承認・持ち主 DM コマンド・機能のオン・オフの Discord 入口ガード（cogs 共通基盤）。"""
 
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import discord
 
@@ -58,8 +58,8 @@ async def allow_component(
     config: dict[str, Any],
     *,
     title: str = "利用できません",
-    text: Optional[str] = None,
-    feature: Optional[str] = None,
+    text: str | None = None,
+    feature: str | None = None,
 ) -> bool:
     """ボタン・Select の操作の入口の検査（スラッシュコマンドの guard とは別に、押された時点の許可を見る）。
 
@@ -73,7 +73,7 @@ async def allow_component(
     return False
 
 
-def feature_off(guild_repo: IGuildRepo, guild_id: Optional[int], feature: str) -> bool:
+def feature_off(guild_repo: IGuildRepo, guild_id: int | None, feature: str) -> bool:
     """その機能が、このサーバーで止められているか。"""
     return guild_id is not None and feature in guild_repo.features_off(guild_id)
 

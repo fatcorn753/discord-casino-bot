@@ -8,7 +8,7 @@
 """
 
 import random
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from domain import bonds as bonds_mod
 from domain import rates
@@ -35,8 +35,8 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         db: EcoDb,
         account: AccountCore,
         bank: IBankCashFlow,
-        debt_repay: Optional[DebtRepayHook] = None,
-        collateral_guard: Optional[IMarginCollateralGuard] = None,
+        debt_repay: DebtRepayHook | None = None,
+        collateral_guard: IMarginCollateralGuard | None = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -118,7 +118,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         done = [r for r in reversed(rows) if r["status"] != "active"][:recent]
         return {"active": active, "done": done}
 
-    def bond_settle(self, now: float, rng: Optional[random.Random] = None) -> list[BondRow]:
+    def bond_settle(self, now: float, rng: random.Random | None = None) -> list[BondRow]:
         """ジャンク債の倒産抽選と、満期を過ぎた債券の決着（このサーバー全員分）。決着した行（status と paid つき）を返す。"""
         rng = rng if rng is not None else cast("random.Random", random)
         out: list[BondRow] = []
@@ -184,7 +184,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         discount = rates.sale_discount_per_hour(self._bank.risk_free_per_day_for(guild_id, now))
         return bonds_mod.sale_value(kind, row["principal"], now, row["due"], row["rate"], discount)
 
-    def bond_cancel(self, user_id: int, bond_id: int, now: Optional[float] = None) -> Outcome[int]:
+    def bond_cancel(self, user_id: int, bond_id: int, now: float | None = None) -> Outcome[int]:
         """満期前に、DCF の値段で売る（通常債だけ）。(成功か, 理由か受け取った額) を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -230,7 +230,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         self._account.apply(guild_id, user_id, payout, reason)
 
     def bond_cancel_locked_for(
-        self, guild_id: int, user_id: int, bond_id: int, now: Optional[float] = None
+        self, guild_id: int, user_id: int, bond_id: int, now: float | None = None
     ) -> Outcome[int]:
         """bond_cancel の本体（呼び出し側が、ロックとトランザクションの中で使う）。"""
         row = self._one(

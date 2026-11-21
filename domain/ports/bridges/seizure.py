@@ -7,7 +7,6 @@
 """
 
 from collections.abc import Callable
-from typing import Optional
 
 from domain.errors import Outcome
 from domain.ports.contracts import ActiveBond, SeizedBelongings
@@ -100,7 +99,7 @@ class IBondHoldings:
         raise NotImplementedError
 
     def bond_cancel_locked_for(
-        self, guild_id: int, user_id: int, bond_id: int, now: Optional[float] = None
+        self, guild_id: int, user_id: int, bond_id: int, now: float | None = None
     ) -> Outcome[int]:
         raise NotImplementedError
 

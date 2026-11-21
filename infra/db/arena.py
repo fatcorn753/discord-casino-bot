@@ -5,7 +5,7 @@
 
 import datetime
 import random
-from typing import Any, Optional
+from typing import Any
 
 from domain import arena as arena_mod
 from domain import teiai
@@ -44,7 +44,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
         return datetime.datetime.fromtimestamp(now, tz).date().isoformat()
 
     def arena_tournament_ensure(
-        self, fmt: str, now: float, tz_hours: float, rng: Optional[random.Random] = None
+        self, fmt: str, now: float, tz_hours: float, rng: random.Random | None = None
     ) -> ArenaTournamentDetailRow:
         """今日の、指定した形式の大会を用意する（無ければ作る）。すでにあれば、そのまま返す。"""
         rng = rng or random.SystemRandom()
@@ -74,12 +74,12 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
             return result
 
     def arena_tournaments_ensure_today(
-        self, now: float, tz_hours: float, rng: Optional[random.Random] = None
+        self, now: float, tz_hours: float, rng: random.Random | None = None
     ) -> list[ArenaTournamentDetailRow]:
         """今日の大会を、1on1・バトロワの両方そろえて返す（無ければ作る）。"""
         return [self.arena_tournament_ensure(fmt, now, tz_hours, rng) for fmt in arena_mod.FORMATS]
 
-    def arena_tournament_get_by_day(self, day: str, fmt: str) -> Optional[ArenaTournamentDetailRow]:
+    def arena_tournament_get_by_day(self, day: str, fmt: str) -> ArenaTournamentDetailRow | None:
         with self._lock:
             t = self._one(
                 "SELECT * FROM arena_tournaments WHERE guild_id=? AND day=? AND format=?", (self._g(), day, fmt)
@@ -151,7 +151,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
         winner: ArenaFighterRow,
         losers: list[ArenaFighterRow],
         win_odds: float,
-        now: Optional[float] = None,
+        now: float | None = None,
     ) -> None:
         """1試合ぶんを精算する。敗者側の賭け（観客ぶんも含む）が、勝者側のプレイヤーの配当の原資になる。"""
         loser_ids = [f["id"] for f in losers]
@@ -199,8 +199,8 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
         self._conn.execute("UPDATE arena_fighters SET result='won' WHERE id=?", (winner["id"],))
 
     def arena_run_semis(
-        self, tournament_id: int, rng: Optional[random.Random] = None, now: Optional[float] = None
-    ) -> Optional[ArenaSemiResult]:
+        self, tournament_id: int, rng: random.Random | None = None, now: float | None = None
+    ) -> ArenaSemiResult | None:
         """準決勝の全組を同時に決着させ、決勝へ進む人（組の数ぶん）を決める。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():
@@ -226,8 +226,8 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
             return {"groups": groups, "finalists": [w["name"] for w in finalists]}
 
     def arena_run_final(
-        self, tournament_id: int, rng: Optional[random.Random] = None, now: Optional[float] = None
-    ) -> Optional[ArenaFinalResult]:
+        self, tournament_id: int, rng: random.Random | None = None, now: float | None = None
+    ) -> ArenaFinalResult | None:
         """決勝を決着させ、優勝者を決める（準決勝の勝者全員で、同時に戦う）。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():

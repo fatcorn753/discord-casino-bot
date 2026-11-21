@@ -6,7 +6,6 @@
 import collections
 import datetime
 from collections.abc import Iterable
-from typing import Optional
 
 from domain import history as history_mod
 from domain import missions as missions_mod
@@ -126,7 +125,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
                 )
             ]
 
-    def weekly_rank(self, week: str, user_id: int) -> Optional[WeeklyRankEntry]:
+    def weekly_rank(self, week: str, user_id: int) -> WeeklyRankEntry | None:
         """(順位, 稼ぎ, ゲーム数, 人数)。その週に遊んでいなければ None。"""
         rows = self.weekly_top(week, 10_000)
         for i, (uid, net, plays) in enumerate(rows):
@@ -134,7 +133,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
                 return i + 1, net, plays, len(rows)
         return None
 
-    def weekly_last_announced(self) -> Optional[str]:
+    def weekly_last_announced(self) -> str | None:
         with self._lock:
             return self._scalar("SELECT last_week FROM weekly_state WHERE guild_id=?", (self._g(),))
 
@@ -152,7 +151,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
                 "SELECT COUNT(*) FROM weekly_champions WHERE guild_id=? AND user_id=?", (self._g(), user_id)
             )
 
-    def weekly_award(self, week: str) -> Optional[WeeklyAward]:
+    def weekly_award(self, week: str) -> WeeklyAward | None:
         """その週の発表。王者（稼ぎがプラスで、ゲーム数が規定以上の1位）に限定称号を贈り、前の週の保持者からは外す。"""
         with self._db.tx():
             g, king = self._g(), shop_mod.WEEKLY_KING

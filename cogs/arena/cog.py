@@ -9,7 +9,7 @@
 import asyncio
 import logging
 import random
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -92,10 +92,10 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
     async def _before(self) -> None:
         await self.bot.wait_until_ready()
 
-    async def _channel(self, guild: discord.Guild) -> Optional[discord.abc.GuildChannel]:
+    async def _channel(self, guild: discord.Guild) -> discord.abc.GuildChannel | None:
         return announce_channel(guild, self._guild_repo)
 
-    async def _post(self, channel: object, **kw: Any) -> Optional[discord.Message]:
+    async def _post(self, channel: object, **kw: Any) -> discord.Message | None:
         try:
             return await ui.send_channel(channel, allowed_mentions=NONE, **kw)
         except discord.HTTPException as exc:
@@ -121,7 +121,7 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
 
     async def _advance_semis(
         self, guild: discord.Guild, t: ArenaTournamentDetailRow, day_key: DayKey
-    ) -> Optional[ArenaSemiResult]:
+    ) -> ArenaSemiResult | None:
         """準決勝を決着させ、演出・結果投稿・パネル更新まで行う（時刻は見ない。呼ぶ側が判断する）。"""
         pre_fighters = t["fighters"]
         result = self._arena.run_semis(guild.id, t["id"])
@@ -139,7 +139,7 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
 
     async def _advance_final(
         self, guild: discord.Guild, t: ArenaTournamentDetailRow, day_key: DayKey
-    ) -> Optional[ArenaFinalResult]:
+    ) -> ArenaFinalResult | None:
         """決勝を決着させ、演出・結果投稿・パネル更新まで行う（時刻は見ない。呼ぶ側が判断する）。"""
         pre_finalists = [f for f in t["fighters"] if f["stage"] == "final"]
         result = self._arena.run_final(guild.id, t["id"])
@@ -159,9 +159,9 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
     async def host_now(
         self,
         guild: discord.Guild,
-        channel: Optional[discord.abc.Messageable],
+        channel: discord.abc.Messageable | None,
         advance: bool,
-        fmt: Optional[str] = None,
+        fmt: str | None = None,
     ) -> str:
         """[管理者用] 今日の大会を、時刻を待たずに出す（無ければ作成）。advance なら、現在の段をすぐ決着させる。
 

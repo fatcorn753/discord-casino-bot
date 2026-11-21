@@ -2,7 +2,6 @@
 
 import datetime
 import logging
-from typing import Optional
 
 import discord
 
@@ -107,7 +106,7 @@ async def refresh_board(
         logthrottle.warn(("board", guild.id), f"ランキング掲示板を更新できません: guild={guild.id}: {exc!r}")
 
 
-async def delete_board_message(guild: discord.Guild, board: Optional[LeaderboardRow]) -> None:
+async def delete_board_message(guild: discord.Guild, board: LeaderboardRow | None) -> None:
     if not board:
         return
     channel = guild.get_channel(board["channel_id"])
@@ -122,7 +121,7 @@ async def board_set(
     ranking_repos: RankingService,
     guild_repo: IGuildRepo,
     interaction: discord.Interaction,
-    channel: Optional[discord.TextChannel],
+    channel: discord.TextChannel | None,
     stop: bool,
     interval_minutes: int,
 ) -> None:

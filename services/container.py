@@ -1,7 +1,7 @@
 """アプリケーションサービス群のコンテナと配線ヘルパー（Composition Root 用）。"""
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from domain.ports.clock import IClock
 from domain.ports.repos import IRepositoryBundle
@@ -54,7 +54,7 @@ class ServiceRegistry:
 
 
 def build_services(
-    config: dict[str, Any], repos: IRepositoryBundle, sessions: ISessionGuard, clock: Optional[IClock] = None
+    config: dict[str, Any], repos: IRepositoryBundle, sessions: ISessionGuard, clock: IClock | None = None
 ) -> ServiceRegistry:
     """clock を省略すると config の utc_offset_hours から作る。リポジトリと同じ時計を渡すと、時刻の出どころが1つになる。"""
     clock = clock if clock is not None else ConfigClock(config)

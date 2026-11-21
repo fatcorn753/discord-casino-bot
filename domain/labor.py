@@ -11,7 +11,7 @@
 import math
 import random
 from collections.abc import Mapping, Sequence
-from typing import Any, Optional
+from typing import Any
 
 from domain.ports import get_catalogs
 from domain.ports.contracts import LaborClickReport
@@ -275,7 +275,7 @@ def settle_plan(
     now: float,
     pot: int,
     balance: int,
-    rng: Optional[random.Random] = None,
+    rng: random.Random | None = None,
     wage_bonus: float = 0.0,
     luck_bonus: float = 0.0,
 ) -> dict[str, Any]:

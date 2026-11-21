@@ -2,7 +2,7 @@
 
 import logging
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import discord
 from discord import app_commands
@@ -168,8 +168,8 @@ class QuizCog(commands.Cog, IQuizAdminBridge, IQuizButtonBridge):
     async def broadcast(
         self,
         quiz_id: int,
-        guild: Optional[discord.Guild] = None,
-        channel: Optional[discord.abc.Messageable] = None,
+        guild: discord.Guild | None = None,
+        channel: discord.abc.Messageable | None = None,
     ) -> int:
         """問題を、許可されている全サーバーの告知チャンネルに出す。出せた投稿の数を返す。"""
         quiz = self._quiz.get(quiz_id)
@@ -249,8 +249,8 @@ class QuizCog(commands.Cog, IQuizAdminBridge, IQuizButtonBridge):
     def add_modal(
         self,
         announce: bool = True,
-        guild: Optional[discord.Guild] = None,
-        channel: Optional[discord.abc.Messageable] = None,
+        guild: discord.Guild | None = None,
+        channel: discord.abc.Messageable | None = None,
     ) -> AddModal:
         return AddModal(self._quiz, self, announce, guild, channel)
 

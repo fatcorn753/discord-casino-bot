@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any
 
 import discord
 
@@ -66,7 +66,7 @@ def parse_verdicts(text: str) -> tuple:
     return right, wrong
 
 
-def verdict(q: Optional[Mapping[str, Any]], correct: bool) -> str:
+def verdict(q: Mapping[str, Any] | None, correct: bool) -> str:
     """正解・不正解の見出しの言葉。出題者が決めていなければ既定。"""
     if q:
         text = (q.get("msg_right") if correct else q.get("msg_wrong")) or ""
@@ -87,7 +87,7 @@ def question_embed(q: Mapping[str, Any], order: list, remaining: int) -> discord
     return e
 
 
-def result_embed(result: QuizAnswerResult, more: int, quiz: Optional[QuizView] = None) -> discord.Embed:
+def result_embed(result: QuizAnswerResult, more: int, quiz: QuizView | None = None) -> discord.Embed:
     if result["correct"] and result["reward_blocked"]:
         e = ui.embed(
             f"⭕ {verdict(quiz, True)}",

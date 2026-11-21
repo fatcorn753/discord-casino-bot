@@ -1,7 +1,7 @@
 """運営向けのコンテンツ・メッセージ操作（臨時競馬・お知らせ・発言削除・抽選・クイズ）。"""
 
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import discord
 
@@ -33,7 +33,7 @@ async def special_race(
     guild_id: str,
     entry_min: int,
     bet_min: int,
-    channel_id: Optional[str],
+    channel_id: str | None,
 ) -> None:
     guild = await pick_guild(cog.bot, interaction, guild_id)
     if guild is None:
@@ -57,8 +57,8 @@ async def host_arena(
     interaction: discord.Interaction,
     guild_id: str,
     advance: bool,
-    fmt: Optional[str],
-    channel_id: Optional[str],
+    fmt: str | None,
+    channel_id: str | None,
 ) -> None:
     guild = await pick_guild(cog.bot, interaction, guild_id)
     if guild is None:
@@ -80,10 +80,10 @@ async def host_arena(
 async def announce(
     cog: "ApprovalCog",
     interaction: discord.Interaction,
-    guild_id: Optional[str],
-    image: Optional[discord.Attachment],
-    title: Optional[str],
-    channel_id: Optional[str],
+    guild_id: str | None,
+    image: discord.Attachment | None,
+    title: str | None,
+    channel_id: str | None,
 ) -> None:
     if image is not None and not ((image.content_type or "").startswith("image/") and image.size <= MAX_IMAGE_BYTES):
         await ui.reply_error(interaction, "画像ファイル（8MBまで）を添付してください。", title="画像を使えません")
@@ -136,8 +136,8 @@ async def _raffle_panel_op(
     cog: "ApprovalCog",
     interaction: discord.Interaction,
     guild_id: str,
-    channel_id: Optional[str],
-    op: Callable[[IRaffleAdminBridge, discord.Guild, Optional[discord.abc.Messageable]], Awaitable[tuple[bool, str]]],
+    channel_id: str | None,
+    op: Callable[[IRaffleAdminBridge, discord.Guild, discord.abc.Messageable | None], Awaitable[tuple[bool, str]]],
     ok_title: str,
     ng_title: str,
 ) -> None:
@@ -160,9 +160,9 @@ async def raffle_start(
     cog: "ApprovalCog",
     interaction: discord.Interaction,
     guild_id: str,
-    fee: Optional[int],
+    fee: int | None,
     minutes: int,
-    channel_id: Optional[str],
+    channel_id: str | None,
 ) -> None:
     await _raffle_panel_op(
         cog,
@@ -176,7 +176,7 @@ async def raffle_start(
 
 
 async def raffle_repost(
-    cog: "ApprovalCog", interaction: discord.Interaction, guild_id: str, channel_id: Optional[str]
+    cog: "ApprovalCog", interaction: discord.Interaction, guild_id: str, channel_id: str | None
 ) -> None:
     await _raffle_panel_op(
         cog,
@@ -205,8 +205,8 @@ async def quiz_add(
     cog: "ApprovalCog",
     interaction: discord.Interaction,
     announce_flag: bool,
-    guild_id: Optional[str],
-    channel_id: Optional[str],
+    guild_id: str | None,
+    channel_id: str | None,
 ) -> None:
     guild = await pick_guild(cog.bot, interaction, guild_id) if guild_id else None
     if guild_id and guild is None:
@@ -225,8 +225,8 @@ async def quiz_bulk(
     interaction: discord.Interaction,
     file: discord.Attachment,
     announce_flag: bool,
-    guild_id: Optional[str],
-    channel_id: Optional[str],
+    guild_id: str | None,
+    channel_id: str | None,
 ) -> None:
     guild = await pick_guild(cog.bot, interaction, guild_id) if guild_id else None
     if guild_id and guild is None:

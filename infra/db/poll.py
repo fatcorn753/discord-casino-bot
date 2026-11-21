@@ -3,8 +3,6 @@
 表の定義は infra/db/schema/tables.py（polls・poll_votes）。数字は domain/poll.py。
 """
 
-from typing import Optional
-
 from domain import poll
 from domain.errors import Outcome, fail
 from domain.ports.contracts import PollRigResult, PollRow, PollView
@@ -31,7 +29,7 @@ class PollRepo(ScopedRepo, IPollRepo):
         assert row is not None  # 集計なので必ず1行返る
         return row["yes"], row["n"] - row["yes"]
 
-    def _view_for(self, guild_id: int, poll_id: int) -> Optional[PollView]:
+    def _view_for(self, guild_id: int, poll_id: int) -> PollView | None:
         d = self._one("SELECT * FROM polls WHERE guild_id=? AND id=?", (guild_id, poll_id))
         if d is None:
             return None
@@ -41,7 +39,7 @@ class PollRepo(ScopedRepo, IPollRepo):
         d["no"] = poll.shown(real_no, d["adj_no"])
         return d
 
-    def _open_for(self, guild_id: int, poll_id: int, now: float) -> Optional[PollRow]:
+    def _open_for(self, guild_id: int, poll_id: int, now: float) -> PollRow | None:
         """受付中の投票の行。締切を過ぎていれば（見回りの前でも）None。"""
         return self._one(
             "SELECT * FROM polls WHERE guild_id=? AND id=? AND status='open' AND closes>?", (guild_id, poll_id, now)
@@ -76,7 +74,7 @@ class PollRepo(ScopedRepo, IPollRepo):
                 (channel_id, message_id, self._g(), poll_id),
             )
 
-    def poll_get(self, poll_id: int) -> Optional[PollView]:
+    def poll_get(self, poll_id: int) -> PollView | None:
         with self._lock:
             return self._view_for(self._g(), poll_id)
 

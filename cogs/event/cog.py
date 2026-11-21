@@ -6,7 +6,7 @@ Bot が止まっていて開始を逃しても、告知はやり直さない（�
 
 import datetime
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord.ext import commands, tasks
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from cogs.shared.bot import CasinoBot
 
 
-def _event_channel(guild: discord.Guild, m: ManualEventRow) -> Optional[discord.abc.GuildChannel]:
+def _event_channel(guild: discord.Guild, m: ManualEventRow) -> discord.abc.GuildChannel | None:
     """特別イベントの開始を告知したチャンネル（消えていれば None → 告知チャンネルに出す）。"""
     return guild.get_channel(m["channel_id"]) if m.get("channel_id") else None
 
@@ -96,7 +96,7 @@ class EventCog(commands.Cog, IEventAdminBridge):
         game: str,
         boost_pct: int,
         minutes: int,
-        channel: Optional[discord.abc.Messageable] = None,
+        channel: discord.abc.Messageable | None = None,
     ) -> tuple[bool, str]:
         """持ち主が開く特別イベント。いま開催中のものがあれば置き換える。channel を渡すと、そこに告知する（終了の告知も同じ所）。"""
         replaced, started = self._events.start_manual(
