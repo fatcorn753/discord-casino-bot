@@ -3,6 +3,7 @@
 import random
 from typing import TYPE_CHECKING, Any, Optional
 
+from domain.errors import Outcome
 from domain.ports.bridges import (
     IMarginCollateralGuard,
     IMarginRatioReader,
@@ -104,7 +105,7 @@ class IEarningsRepo(IGuildScopedRepo):
     def insider_stock(self, now: float) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def insider_buy(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> tuple[Any, ...]:
+    def insider_buy(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> "Outcome[MemoInfo]":
         raise NotImplementedError
 
 
@@ -184,7 +185,7 @@ class IMarginRepo(IGuildScopedRepo, IMarginCollateralGuard, IMarginRatioReader, 
 
 
 class IBondRepo(IGuildScopedRepo, IValuationSource):
-    def bond_buy(self, user_id: int, kind_key: str, amount: int, now: float) -> tuple[Any, ...]:
+    def bond_buy(self, user_id: int, kind_key: str, amount: int, now: float) -> Outcome[str]:
         raise NotImplementedError
 
     def bond_values(self) -> dict[int, int]:
@@ -202,7 +203,7 @@ class IBondRepo(IGuildScopedRepo, IValuationSource):
     def bond_quote(self, kind_key: str, amount: int, now: float) -> BondQuote:
         raise NotImplementedError
 
-    def bond_cancel(self, user_id: int, bond_id: int, now: Optional[float] = None) -> tuple[Any, ...]:
+    def bond_cancel(self, user_id: int, bond_id: int, now: Optional[float] = None) -> Outcome[int]:
         raise NotImplementedError
 
 
@@ -216,7 +217,7 @@ class IOptionRepo(IGuildScopedRepo, IValuationSource):
         now: float,
         symbol2: Optional[str] = None,
         strike_pct: Optional[float] = None,
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[dict[str, Any]]:
         raise NotImplementedError
 
     def option_write(
@@ -227,7 +228,7 @@ class IOptionRepo(IGuildScopedRepo, IValuationSource):
         amount: int,
         now: float,
         strike_pct: Optional[float] = None,
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[dict[str, Any]]:
         raise NotImplementedError
 
     def option_close_cost(self, row: dict[str, Any], now: float, prices: dict[str, Any]) -> int:
@@ -242,7 +243,7 @@ class IOptionRepo(IGuildScopedRepo, IValuationSource):
     def option_list(self, user_id: int, recent: int = 5) -> HoldingBook:
         raise NotImplementedError
 
-    def option_sell(self, user_id: int, option_id: int, now: float) -> tuple[Any, ...]:
+    def option_sell(self, user_id: int, option_id: int, now: float) -> Outcome[int]:
         raise NotImplementedError
 
     def option_settle(self, now: float) -> list[Any]:

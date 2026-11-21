@@ -1,6 +1,8 @@
 """台帳・借金ライフサイクル・返済のブリッジ契約（名目的基底クラスと NoOp 実装）。"""
 
-from typing import Any, Optional
+from typing import Optional
+
+from domain.errors import Outcome, fail
 
 
 class IDebtLifecycleHook:
@@ -58,10 +60,10 @@ class NoOpStatusReader(IStatusReader):
 class IDebtOps:
     """信用取引・クイズ・預かり金・ウォレットが利用する借金・種銭操作契約。"""
 
-    def borrow_seed_for(self, guild_id: int, user_id: int) -> tuple[Any, ...]:
+    def borrow_seed_for(self, guild_id: int, user_id: int) -> Outcome[int]:
         raise NotImplementedError
 
-    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> tuple[Any, ...]:
+    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> Outcome[str]:
         raise NotImplementedError
 
     def seed_for(self, guild_id: int, user_id: int, amount: int) -> None:
@@ -80,11 +82,11 @@ class IDebtOps:
 class NoOpDebtOps(IDebtOps):
     """借金操作契約未接続時の LSP 準拠 Null 実装。"""
 
-    def borrow_seed_for(self, guild_id: int, user_id: int) -> tuple[Any, ...]:
-        return False, ""
+    def borrow_seed_for(self, guild_id: int, user_id: int) -> Outcome[int]:
+        return False, fail("unavailable")
 
-    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> tuple[Any, ...]:
-        return False, ""
+    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> Outcome[str]:
+        return False, fail("unavailable")
 
     def seed_for(self, guild_id: int, user_id: int, amount: int) -> None:
         return None
