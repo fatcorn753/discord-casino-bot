@@ -24,16 +24,16 @@ class PollRepo(ScopedRepo, IPollRepo):
         self._bank = bank
 
     def _real_for(self, poll_id: int) -> tuple[int, int]:
-        row = self._conn.execute(
-            "SELECT COALESCE(SUM(yes), 0), COUNT(*) FROM poll_votes WHERE poll_id=?", (poll_id,)
-        ).fetchone()
-        return row[0], row[1] - row[0]
+        row = self._one(
+            "SELECT COALESCE(SUM(yes), 0) AS yes, COUNT(*) AS n FROM poll_votes WHERE poll_id=?", (poll_id,)
+        )
+        assert row is not None  # 集計なので必ず1行返る
+        return row["yes"], row["n"] - row["yes"]
 
     def _view_for(self, guild_id: int, poll_id: int) -> Optional[dict[str, Any]]:
-        row = self._conn.execute("SELECT * FROM polls WHERE guild_id=? AND id=?", (guild_id, poll_id)).fetchone()
-        if row is None:
+        d = self._one("SELECT * FROM polls WHERE guild_id=? AND id=?", (guild_id, poll_id))
+        if d is None:
             return None
-        d = dict(row)
         real_yes, real_no = self._real_for(poll_id)
         d["voters"] = real_yes + real_no
         d["yes"] = poll.shown(real_yes, d["adj_yes"])
@@ -42,9 +42,9 @@ class PollRepo(ScopedRepo, IPollRepo):
 
     def _open_for(self, guild_id: int, poll_id: int, now: float) -> Any:
         """受付中の投票の行。締切を過ぎていれば（見回りの前でも）None。"""
-        return self._conn.execute(
+        return self._one(
             "SELECT * FROM polls WHERE guild_id=? AND id=? AND status='open' AND closes>?", (guild_id, poll_id, now)
-        ).fetchone()
+        )
 
     def poll_create(self, creator: int, title: str, closes: float, channel_id: int, now: float) -> tuple[Any, ...]:
         """投票を作る。(成功か, 番号 か Failure)。"""
@@ -55,9 +55,9 @@ class PollRepo(ScopedRepo, IPollRepo):
             return False, fail("poll_bad_duration", max_minutes=poll.MAX_MINUTES)
         with self._db.tx():
             gid = self._g()
-            mine = self._conn.execute(
+            mine = self._scalar(
                 "SELECT COUNT(*) FROM polls WHERE guild_id=? AND creator=? AND status='open'", (gid, creator)
-            ).fetchone()[0]
+            )
             if mine >= poll.MAX_OPEN_PER_USER:
                 return False, fail("poll_too_many", max=poll.MAX_OPEN_PER_USER)
             cur = self._conn.execute(
@@ -125,8 +125,8 @@ class PollRepo(ScopedRepo, IPollRepo):
         with self._db.tx():
             gid = self._g()
             ids = [
-                r[0]
-                for r in self._conn.execute(
+                r["id"]
+                for r in self._all(
                     "SELECT id FROM polls WHERE guild_id=? AND status='open' AND closes<=? ORDER BY id", (gid, now)
                 )
             ]
