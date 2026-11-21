@@ -279,6 +279,36 @@ def test_production_code_has_no_rng_any_parameter():
     assert not violations, "\n".join(violations)
 
 
+def test_production_code_has_no_tuple_any_ellipsis_annotation():
+    """本番コード（domain/・services/・infra/・cogs/・main.py・manage.py）で `tuple[Any, ...]` の型注釈を禁止する。
+
+    結果タプルは domain.errors.Outcome[T]（または実態の具体型）で表す。
+    """
+    targets = [
+        *[p for folder in ("domain", "services", "infra", "cogs") for p in _iter_py(folder)],
+        ROOT / "main.py",
+        ROOT / "manage.py",
+    ]
+    violations: list[str] = []
+    for path in targets:
+        rel = path.relative_to(ROOT)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        annotations: list[tuple[int, ast.expr]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.returns is not None:
+                    annotations.append((node.lineno, node.returns))
+                for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+                    if arg.annotation is not None:
+                        annotations.append((arg.lineno, arg.annotation))
+            elif isinstance(node, ast.AnnAssign) and node.annotation is not None:
+                annotations.append((node.lineno, node.annotation))
+        for lineno, ann in annotations:
+            if "tuple[Any, ...]" in ast.unparse(ann):
+                violations.append(f"{rel}:{lineno} tuple[Any, ...]")
+    assert not violations, "\n".join(violations)
+
+
 def test_cogs_have_no_untyped_cog_parameter():
     """`cog` 引数に型が無いと Pyright が Unknown 扱いにし、消えたメソッドの呼び出しを見逃す(#61)。"""
     found = []
