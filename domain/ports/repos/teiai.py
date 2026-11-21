@@ -3,6 +3,7 @@
 import random
 from typing import Any, Optional
 
+from domain.errors import Outcome
 from domain.ports.bridges import (
     IBankCashFlow,
     IBankCdsBridge,
@@ -26,10 +27,10 @@ class ILoanRepo(IGuildScopedRepo, IOverdueLoanCollector):
 
     def loan_request(
         self, borrower_id: int, principal: int, rate_tenths: int, term_days: int, channel_id: int, now: float
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         raise NotImplementedError
 
-    def loan_lend(self, loan_id: int, lender_id: int, now: float) -> tuple[Any, ...]:
+    def loan_lend(self, loan_id: int, lender_id: int, now: float) -> Outcome[str]:
         raise NotImplementedError
 
     def loan_offer(
@@ -41,7 +42,7 @@ class ILoanRepo(IGuildScopedRepo, IOverdueLoanCollector):
         term_days: int,
         channel_id: int,
         now: float,
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         raise NotImplementedError
 
     def loan_set_message(self, loan_id: int, message_id: int) -> None:
@@ -50,16 +51,16 @@ class ILoanRepo(IGuildScopedRepo, IOverdueLoanCollector):
     def loan_get(self, loan_id: int) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def loan_accept(self, loan_id: int, user_id: int, now: float) -> tuple[Any, ...]:
+    def loan_accept(self, loan_id: int, user_id: int, now: float) -> Outcome[str]:
         raise NotImplementedError
 
-    def loan_decline(self, loan_id: int, user_id: int) -> tuple[Any, ...]:
+    def loan_decline(self, loan_id: int, user_id: int) -> Outcome[str]:
         raise NotImplementedError
 
-    def loan_cancel(self, loan_id: int, user_id: int) -> tuple[Any, ...]:
+    def loan_cancel(self, loan_id: int, user_id: int) -> Outcome[str]:
         raise NotImplementedError
 
-    def loan_repay(self, loan_id: int, user_id: int, amount: Optional[int], now: float) -> tuple[Any, ...]:
+    def loan_repay(self, loan_id: int, user_id: int, amount: Optional[int], now: float) -> Outcome[int]:
         raise NotImplementedError
 
     def loan_collect_due(self, now: float) -> list[Any]:
@@ -88,10 +89,10 @@ class IBankRepo(IGuildScopedRepo, IBankCashFlow, IHouseAccount, IGainsTaxCollect
     def house_account(self) -> HouseAccount:
         raise NotImplementedError
 
-    def bank_deposit(self, user_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def bank_deposit(self, user_id: int, amount: int, now: float) -> Outcome[int]:
         raise NotImplementedError
 
-    def bank_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> tuple[Any, ...]:
+    def bank_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> Outcome[int]:
         raise NotImplementedError
 
     def grace_until(self, user_id: int) -> Optional[float]:
@@ -112,7 +113,7 @@ class IBankRepo(IGuildScopedRepo, IBankCashFlow, IHouseAccount, IGainsTaxCollect
     def cds_quote(self, target_id: int, now: float) -> CdsQuote:
         raise NotImplementedError
 
-    def cds_buy(self, buyer_id: int, target_id: int, stake: int, now: float) -> tuple[Any, ...]:
+    def cds_buy(self, buyer_id: int, target_id: int, stake: int, now: float) -> Outcome[float]:
         raise NotImplementedError
 
     def cds_list(self, user_id: int) -> CdsHoldings:
@@ -139,22 +140,22 @@ class IDebtRepo(
     def debt(self, user_id: int) -> int:
         raise NotImplementedError
 
-    def borrow_seed(self, user_id: int) -> tuple[Any, ...]:
+    def borrow_seed(self, user_id: int) -> Outcome[int]:
         raise NotImplementedError
 
-    def can_borrow_for_bet(self, user_id: int, need: int) -> tuple[Any, ...]:
+    def can_borrow_for_bet(self, user_id: int, need: int) -> Outcome[str]:
         raise NotImplementedError
 
-    def repay_debt(self, user_id: int, amount: Optional[int] = None) -> tuple[Any, ...]:
+    def repay_debt(self, user_id: int, amount: Optional[int] = None) -> Outcome[int]:
         raise NotImplementedError
 
     def escape_left(self, user_id: int) -> int:
         raise NotImplementedError
 
-    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> tuple[Any, ...]:
+    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Outcome[dict[str, Any]]:
         raise NotImplementedError
 
-    def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> tuple[Any, ...]:
+    def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> Outcome[dict[str, Any]]:
         raise NotImplementedError
 
 
@@ -173,13 +174,13 @@ class IKyosaiRepo(IGuildScopedRepo):
     def kyosai_auction_tick(self, now: float) -> list[dict[str, Any]]:
         raise NotImplementedError
 
-    def kyosai_bid(self, user_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def kyosai_bid(self, user_id: int, amount: int, now: float) -> Outcome[dict[str, Any]]:
         raise NotImplementedError
 
-    def kyosai_offer(self, seller: int, buyer: int, units: int, price: int, now: float) -> tuple[Any, ...]:
+    def kyosai_offer(self, seller: int, buyer: int, units: int, price: int, now: float) -> Outcome[int]:
         raise NotImplementedError
 
-    def kyosai_accept(self, buyer: int, offer_id: int, now: float) -> tuple[Any, ...]:
+    def kyosai_accept(self, buyer: int, offer_id: int, now: float) -> Outcome[dict[str, Any]]:
         raise NotImplementedError
 
     def kyosai_cancel(self, user_id: int, offer_id: int) -> bool:
@@ -188,10 +189,10 @@ class IKyosaiRepo(IGuildScopedRepo):
     def kyosai_offers_of(self, user_id: int, now: float) -> list[dict[str, Any]]:
         raise NotImplementedError
 
-    def kyosai_propose(self, user_id: int, premium: float, now: float) -> tuple[Any, ...]:
+    def kyosai_propose(self, user_id: int, premium: float, now: float) -> Outcome[dict[str, Any]]:
         raise NotImplementedError
 
-    def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: Optional[int] = None) -> tuple[Any, ...]:
+    def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: Optional[int] = None) -> Outcome[int]:
         raise NotImplementedError
 
     def kyosai_close_motions(self, now: float) -> list[dict[str, Any]]:

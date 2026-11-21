@@ -50,7 +50,7 @@ class IRecordRepo(IGuildScopedRepo):
     def play_summary(self, user_id: int) -> dict[str, Any]:
         raise NotImplementedError
 
-    def win_streak(self, user_id: int) -> tuple[Any, ...]:
+    def win_streak(self, user_id: int) -> tuple[int, int]:
         raise NotImplementedError
 
 
@@ -149,7 +149,7 @@ class IWalletBalanceRepo(IGuildScopedRepo):
     def credit(self, user_id: int, amount: int, reason: str) -> int:
         raise NotImplementedError
 
-    def set_balance(self, user_id: int, amount: int, reason: str) -> tuple[Any, ...]:
+    def set_balance(self, user_id: int, amount: int, reason: str) -> tuple[int, int, int, int]:
         raise NotImplementedError
 
     def debit_up_to(self, user_id: int, amount: int, reason: str) -> int:

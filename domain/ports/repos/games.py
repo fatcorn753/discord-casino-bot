@@ -4,6 +4,7 @@ import datetime
 import random
 from typing import TYPE_CHECKING, Any, Optional
 
+from domain.errors import Outcome
 from domain.ports.repos.base import IGuildScopedRepo
 
 if TYPE_CHECKING:
@@ -64,14 +65,14 @@ class IRelicRepo(IGuildScopedRepo):
     def relic_stock(self, user_id: int) -> dict[str, int]:
         raise NotImplementedError
 
-    def relic_merge(self, user_id: int, item_id: str) -> tuple[Any, ...]:
+    def relic_merge(self, user_id: int, item_id: str) -> Outcome[str]:
         raise NotImplementedError
 
 
 class IHorseRepo(IGuildScopedRepo):
     HORSE_PRICE: int
 
-    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> tuple[Any, ...]:
+    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> Outcome[str | int]:
         raise NotImplementedError
 
     def horse_list(self, user_id: int) -> list[dict[str, Any]]:
@@ -80,16 +81,16 @@ class IHorseRepo(IGuildScopedRepo):
     def horse_get(self, horse_id: int) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def horse_carrot(self, user_id: int, horse_id: int, src: str, dst: str) -> tuple[Any, ...]:
+    def horse_carrot(self, user_id: int, horse_id: int, src: str, dst: str) -> Outcome[dict[str, int]]:
         raise NotImplementedError
 
-    def horse_retire(self, user_id: int, horse_id: int) -> tuple[Any, ...]:
+    def horse_retire(self, user_id: int, horse_id: int) -> Outcome[int]:
         raise NotImplementedError
 
-    def horse_set_style(self, user_id: int, horse_id: int, style: Optional[str]) -> tuple[Any, ...]:
+    def horse_set_style(self, user_id: int, horse_id: int, style: Optional[str]) -> Outcome[str]:
         raise NotImplementedError
 
-    def horse_gold_carrot(self, user_id: int, horse_id: int, first: str, second: str) -> tuple[Any, ...]:
+    def horse_gold_carrot(self, user_id: int, horse_id: int, first: str, second: str) -> Outcome[dict[str, int]]:
         raise NotImplementedError
 
     def horse_auction_price(self, listed_at: float, now: float) -> int:
@@ -127,10 +128,10 @@ class IRaceRepo(IGuildScopedRepo):
     def race_entries(self, race_id: int, registered_only: bool = False) -> list[dict[str, Any]]:
         raise NotImplementedError
 
-    def race_register(self, user_id: int, horse_id: int, race_id: int, now: float) -> tuple[Any, ...]:
+    def race_register(self, user_id: int, horse_id: int, race_id: int, now: float) -> Outcome[str]:
         raise NotImplementedError
 
-    def race_withdraw(self, user_id: int, horse_id: int, race_id: int, now: float) -> tuple[Any, ...]:
+    def race_withdraw(self, user_id: int, horse_id: int, race_id: int, now: float) -> Outcome[str]:
         raise NotImplementedError
 
     def race_close_entries(self, race_id: int, rng: Optional[random.Random] = None) -> Optional[dict[str, Any]]:
@@ -147,12 +148,12 @@ class IRaceRepo(IGuildScopedRepo):
 
     def race_bet(
         self, user_id: int, race_id: int, kind: str, lane: int | list[int], stake: int, now: float
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[dict[str, Any]]:
         raise NotImplementedError
 
     def race_bet_many(
         self, user_id: int, race_id: int, kind: str, lanes: list[int], stake: int, now: float
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[list[dict[str, Any]]]:
         raise NotImplementedError
 
     def race_run(self, race_id: int, tz_hours: float, rng: Optional[random.Random] = None) -> Optional[dict[str, Any]]:
@@ -179,7 +180,7 @@ class IArenaRepo(IGuildScopedRepo):
     def arena_fighters(self, tournament_id: int) -> list[dict[str, Any]]:
         raise NotImplementedError
 
-    def arena_bet(self, user_id: int, fighter_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def arena_bet(self, user_id: int, fighter_id: int, amount: int, now: float) -> Outcome[str]:
         raise NotImplementedError
 
     def arena_run_semis(
