@@ -44,7 +44,7 @@
 | パス | 内容 |
 |---|---|
 | `loader.py` | 読み込む Cog モジュール一覧（`COG_MODULES`）と `load_all_cogs()`（`main.py` とテストで共有） |
-| `shared/` | 共通 Discord 基盤（`bot.py` / `bridges.py` / `ui.py` / `texts.py` / `tasks.py` / `confirm.py` / `messages/` / `approval_guard.py` / `ranking.py` / `announce.py` / `amount.py` / `horse_display.py` / `logthrottle.py`）。`CasinoBot` と Cog 間ブリッジ（`bridges.py`: `BotBridges`・`resolve_bridge` / `require_bridge`・名目的基底クラス群。運営パネル操作の共通基底 `IAdminPanelBridge` を挟み `(成功か, 説明)` 返却の契約を明示）により Service Locator なしで疎結合に連携、`tasks.py` で承認済みギルド走査を共通化、`logthrottle.py` で同じ原因の警告ログを間引く。`ui.py` の応答ヘルパ（`reply_embed` / `reply_error` / `reply_warn` / `reply_ok`）が `interaction.response.is_done()` を見て `response.send_message` / `followup.send` を振り分けるので、全 Cog のエラー応答はそれらへ統一されている。`cogs/` は `infra/` を import しない（ログは標準 `logging`） |
+| `shared/` | 共通 Discord 基盤（`bot.py` / `bridges.py` / `ui.py` / `texts.py` / `tasks.py` / `confirm.py` / `messages/` / `approval_guard.py` / `ranking.py` / `announce.py` / `amount.py` / `horse_display.py` / `logthrottle.py`）。`CasinoBot` と Cog 間ブリッジ（`bridges.py`: `BotBridges`・`resolve_bridge` / `require_bridge`・名目的基底クラス群。運営パネル操作は各機能ブリッジが自分の操作だけを宣言（ISP）し `(成功か, 説明)` 返却の契約を明示）し Service Locator なしで疎結合に連携、`tasks.py` で承認済みギルド走査を共通化、`logthrottle.py` で同じ原因の警告ログを間引く。`ui.py` の応答ヘルパ（`reply_embed` / `reply_error` / `reply_warn` / `reply_ok`）が `interaction.response.is_done()` を見て `response.send_message` / `followup.send` を振り分けるので、全 Cog のエラー応答はそれらへ統一されている。`cogs/` は `infra/` を import しない（ログは標準 `logging`） |
 | `casino/` | `/カジノ`。`cog.py` と進行演出・静的台本（`common.py`・`simple.py`・`blackjack.py`・`chinchiro.py`・`chinchiro_table.py`（チンチロの卓・賭け台の描画。#104）・`pachinko.py`・`texts.py`） |
 | `economy/` | `/ペリカ`。`cog.py`・`embeds.py`（残高・デイリー・返済・破産・ミッション・履歴の画面）・`boards.py`（ランキング・掲示板自動更新） |
 | `teiai/` | `/ペリカ 帝愛` のパネル（`panel.py`）と海外逃亡の演出（`escape.py`）、静的 AA・状態文言（`texts.py`） |
@@ -98,6 +98,8 @@
 
 ### `ports/` — DIP 水平インターフェース（名目的基底クラス群）
 
+**契約の住み分け（Wave 4）**: 静的型だけで LSP を 100% 保証できる単一コールバック契約は `Callable` 型エイリアス＋`noop_*` / `compose_*` 関数（形式的型付け。関数・クロージャ・束縛メソッドをそのまま渡せる）で表し、複数メソッド・状態・不変条件・実行時 `isinstance` 契約を持つ領域（`ports/repos/`・`ports/contracts/`・`cogs/shared/bridges.py` の `BotBridges` 登録対象・`infra/db/` の逐次継承チェーン）は名目的基底クラス（`I*`、`raise NotImplementedError`）のまま維持する。`Protocol` / `Callable` は純粋契約層（`ports/bridges/`・`games/`）に限り許可し、それ以外の本番コードでは `abc` / `Protocol` / `ABC` を禁止するガードが `tests/infra/test_architecture_ports.py` にある。
+
 | パス | 内容 |
 |---|---|
 | `catalogs.py` / `catalog_types/` | `ICatalogs` カタログ取得契約と責務別公称データ契約（`shop`・`economy`・`market`・`games`・`arena`・`company`） |
@@ -105,7 +107,7 @@
 | `session.py` | `ISessionGuard`（二重プレイ防止セッション管理の契約） |
 | `repos/` | 領域別 DB リポジトリ用名目的基底クラス群（`base.py`・`economy.py`・`teiai.py`・`market.py`・`social.py`・`games.py`・`bundle.py` / `__init__.py` で `IRepositoryBundle` 等を集約再エクスポート）。全リポジトリポートの引数・戻り値の辞書契約は `contracts/` の `TypedDict` または正確な組み込み型で型付け済み（`dict[str, Any]` は 0 件。`tests/infra/test_architecture_ports.py::test_ports_repos_no_dict_any` が AST で恒久検証） |
 | `contracts/` | ポートの戻り値に使う型付きの値型・行モデル（catalogs 非依存）。責務別サブモジュール（`core.py`（値型とジェネリックな `HoldingBook[RowT]`・`LoanBook[RowT]`）・`social.py`（出品/抽選/投票/クイズ/労働等の行）・`games.py`（馬/レース/闘技場の行）・`market.py`（現物/建玉/オプション/債券/決算/市場イベント/チャートの行と派生ペイロード）・`teiai.py`（共済の競り/譲渡/動議・貸付・CDS の行と派生ペイロード））に分割し、`__init__.py` で全シンボルを再エクスポート。`from domain.ports.contracts import X` は従来どおり使える。`ports/repos/` の全リポジトリメソッドの辞書引数・戻り値はここの `TypedDict` で表され、`dict[str, Any]` は使わない |
-| `bridges/` | リポジトリ・サービス間の循環を防ぐ細粒度ブリッジ契約と Null Object / Composite。責務別サブモジュール（`debt.py`・`bank.py`・`margin.py`・`seizure.py`・`loans.py`）に分割し、`__init__.py` で全シンボル（`NoOp*`・`Composite*`・`IValuationSource`・`IAssetCollector`・`IAssetSeizureStep`・`AddAssetPart` 等）を再エクスポート |
+| `bridges/` | リポジトリ・サービス間の循環を防ぐ細粒度ブリッジ契約。住み分け: 単一メソッドの純粋コールバックは `Callable` 型エイリアス（`GraceEnterHook`・`ExcessLossSink`・`BankruptExecutor`・`ValuationSource`・`AssetSeizureStep` 等）＋ `noop_*`（LSP 準拠の既定動作）・`compose_*`（OCP の束ね）関数、複数メソッド・不変条件の契約は名目的基底 `I*` ＋ `NoOp*` のまま。責務別サブモジュール（`debt.py`・`bank.py`・`margin.py`・`seizure.py`・`loans.py`）に分割し、`__init__.py` で全シンボル（クラス・関数・型エイリアス）を再エクスポート |
 
 ### `games/` — ゲームのルール（純粋な計算）
 
@@ -117,7 +119,7 @@
 | `chinchiro.py` | チンチロの役と勝敗 |
 | `jackpot.py` | チンチロのジャックポット抽選と配当計算（#104） |
 | `pachinko.py` | パチンコ。当たりの確率、リーチ・予告の抽選、還元率の計算 |
-| `rtplevel.py` | 還元率のレベル（1〜6）と `MIN_BET` |
+| `rtplevel.py` | 還元率のレベル（1〜6）と `MIN_BET`。RTP プロファイルは単一メソッドの純粋戦略なので `RtpProfile`（Callable エイリアス）＋ `fixed/roulette/pachinko_rtp_profile` ファクトリ関数で表す（`IRtpPolicy` は不変条件を持つため名目的基底のまま） |
 
 ### ドメインモジュール（DB・Discord 非依存）
 
@@ -162,15 +164,15 @@
 
 | パス | 内容 |
 |---|---|
-| `base.py` | `EcoDb`（共有 DB 接続・ロック・`tx()`・`close()`）、`ScopedRepo`（ギルドスコープ共通基底。`_one()`/`_all()`/`_scalar()` は行→辞書・単一値の定型取得）、`validate_guild_id()` |
+| `base.py` | `EcoDb`（共有 DB 接続・ロック・`tx()`・`close()`）、`ScopedRepo`（ギルドスコープ共通基底。`_one()`/`_all()` は行→辞書の定型取得）、`validate_guild_id()` |
 | `schema/` | DB の表定義（`tables.py`）と旧版からの列追加・データ移行（`migrations.py`） |
 | `repositories.py` | `RepositoryBundle` と `open_repositories()`（全リポジトリの構築・ブリッジ接続・`for_guild(gid)` スコープ切り替え・`db` 管理） |
-| `lazy_bridges.py` | 初期化時の循環参照を解決する遅延解決ブリッジラッパー（`Lazy*`） |
+| `lazy_bridges.py` | 初期化時の循環参照を 1 パスの Constructor DI へ解決する遅延デリゲート。複数メソッドの名目的契約（`IDebtLifecycleHook`・`IStatusReader`・`IMarginCollateralGuard`・`IOverdueLoanCollector`）は `LazyBridgeBase[T]` 多重継承の `Lazy*` クラス（全メソッド明示で Pyright の完全な型検証を維持）、単一メソッドの `Callable` 契約は `lazy_*` ファクトリ関数（解決した束縛メソッドを呼ぶクロージャを返す。例: `lazy_excess_sink(lambda: kyosai.charge_excess_for)`） |
 | `account.py` | `AccountCore`（口座残高・台帳記帳・借金ライフサイクルフックの共有プリミティブ） |
 | `escrow.py` / `wallet.py` | 賭け金預かり・精算（`EscrowRepo`）と残高・デイリー・ランキング・統計・送金（`WalletRepo`） |
-| `assets.py` / `auction.py` / `bonds.py` / `company.py` / `crypto.py` / `earnings.py` / `events.py` / `guild.py` / `horse.py` / `labor.py` / `loans.py` / `margin.py` / `market.py` / `market_events.py` / `notices.py` / `options.py` / `p2p.py` / `pachinko.py` / `poll.py` / `quiz.py` / `race.py` / `raffle.py` / `records.py` / `relics.py` / `rtp.py` / `shop.py` / `arena.py` | 機能別の独立リポジトリ群と `IAssetCollector` / `IAssetSeizureStep` / `ILiquidationStep` 戦略群（各 `domain/ports/repos/` 契約を継承実装） |
+| `assets.py` / `auction.py` / `bonds.py` / `company.py` / `crypto.py` / `earnings.py` / `events.py` / `guild.py` / `horse.py` / `labor.py` / `loans.py` / `margin.py` / `market.py` / `market_events.py` / `notices.py` / `options.py` / `p2p.py` / `pachinko.py` / `poll.py` / `quiz.py` / `race.py` / `raffle.py` / `records.py` / `relics.py` / `rtp.py` / `shop.py` / `arena.py` | 機能別の独立リポジトリ群。`assets.py` の資産コレクタと `debt/`・`company.py` の差し押さえ/換金/競売ステップは、単一メソッドのラッパークラスではなく `AssetCollector` / `AssetSeizureStep` / `LiquidationStep` / `SeizureValueStep`（Callable）を返すファクトリ関数（各 `domain/ports/repos/` 契約を実装するリポジトリの束縛メソッドもそのまま渡せる） |
 | `bank/` | `BankRepo`（帝愛銀行・破産猶予・CDS）の責務別パッケージ。逐次継承チェーンで `base.py`（コンストラクタ・手元現金の同期）→ `thermostat.py`（熱浴の内部状態）→ `deposits.py`（信託預金の読取・利率・入出金）→ `reserve.py`（準備率・ロック・`bank_status`）→ `flow.py`（入出金ウォーターフォール）→ `interest.py`（金利遷移・信託利息・利得税）→ `house.py`（胴元口座）→ `grace.py`（破産猶予）→ `cds.py`（CDS）。`__init__.py` が最終クラス `BankRepo` を再エクスポートし、`from infra.db.bank import BankRepo` は従来どおり使える |
-| `debt/` | `DebtRepo`（借金・身分・強制執行・種銭・自己破産・海外逃亡）の責務別パッケージ。逐次継承チェーンで `base.py`（コンストラクタ・身分と借金の読み取り）→ `lifecycle.py`（利息・後始末・天引き）→ `ops.py`（強制執行と借金の発生）→ `repay.py`（返済）→ `escape.py`（海外逃亡）→ `bankrupt.py`（自己破産）。差し押さえ `seizure.py`・換金 `liquidation.py`・競売査定 `seizure_value.py` は独立戦略クラス群。`__init__.py` が最終クラス `DebtRepo` と戦略ステップ群を再エクスポートし、`from infra.db.debt import DebtRepo` は従来どおり使える |
+| `debt/` | `DebtRepo`（借金・身分・強制執行・種銭・自己破産・海外逃亡）の責務別パッケージ。逐次継承チェーンで `base.py`（コンストラクタ・身分と借金の読み取り）→ `lifecycle.py`（利息・後始末・天引き）→ `ops.py`（強制執行と借金の発生）→ `repay.py`（返済）→ `escape.py`（海外逃亡）→ `bankrupt.py`（自己破産）。差し押さえ `seizure.py`・換金 `liquidation.py`・競売査定 `seizure_value.py` は `AssetSeizureStep` / `LiquidationStep` / `SeizureValueStep`（Callable）を返すファクトリ関数群。`__init__.py` が最終クラス `DebtRepo` と戦略ステップ群を再エクスポートし、`from infra.db.debt import DebtRepo` は従来どおり使える |
 | `kyosai/` | `KyosaiRepo`（帝愛共済 #34。口・配当・超過損失の請求・回収と帝愛の持ち口の競り・譲渡・動議）の責務別パッケージ。逐次継承チェーンで `base.py`（コンストラクタ・口の管理と引き戻し・`DAY`）→ `excess.py`（超過損失の請求）→ `daily.py`（毎日の配当と休眠回収）→ `auction.py`（競り）→ `offers.py`（譲渡）→ `motions.py`（動議と投票）→ `status.py`（表示用まとめ）。`__init__.py` が最終クラス `KyosaiRepo` と `DAY` を再エクスポートし、`from infra.db.kyosai import KyosaiRepo` は従来どおり使える |
 
 ## `tests/` — 自動テスト
