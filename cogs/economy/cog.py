@@ -17,7 +17,7 @@ from cogs.shared.bridges import DeferredShopTitleBridge, IShopTitleBridge
 from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
 from cogs.shared.messages import format_failure, format_memo
 from cogs.teiai.panel import TeiaiPanel, panel_embed
-from domain import approval
+from domain import approval, skins
 from domain.ports import get_catalogs
 from domain.ports.clock import IClock
 from domain.ports.repos import IGuildRepo
@@ -132,7 +132,9 @@ class EconomyCog(commands.Cog):
             return await interaction.response.send_message(
                 embed=embeds.daily_wait_embed(result.streak, next_label, next_ts), ephemeral=True
             )
-        await interaction.response.send_message(embed=embeds.daily_embed(result, next_label, next_ts))
+        await interaction.response.send_message(
+            embed=embeds.daily_embed(result, next_label, next_ts, skins.active_season(now))
+        )
         if outcome.memo:  # 本人にだけ見える
             await interaction.followup.send(
                 embed=ui.embed("🕴️ 黒服の噂話", format_memo(outcome.memo), ui.DARK), ephemeral=True

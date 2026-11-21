@@ -11,7 +11,7 @@ from infra.catalogs import bind_catalogs
 
 bind_catalogs()
 
-from domain import events, missions, teiai  # noqa: E402
+from domain import events, missions, skins, teiai  # noqa: E402
 from infra.db.base import ScopedRepo  # noqa: E402
 from infra.db.repositories import RepositoryBundle  # noqa: E402
 
@@ -30,6 +30,9 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "real_scope: サーバーごとの記録の分離を、本物の for_guild で確かめるテスト")
     config.addinivalue_line(
         "markers", "real_market: 帝愛の出品(#72)を本物の設定で出すテスト（既定では1日0回にして、棚に並べない）"
+    )
+    config.addinivalue_line(
+        "markers", "real_seasons: 季節演出を本物の設定で確かめるテスト（既定では季節演出なしにする）"
     )
 
 
@@ -63,3 +66,11 @@ def no_teiai_market(request, monkeypatch):
     if request.node.get_closest_marker("real_market"):
         return
     monkeypatch.setattr(teiai, "MARKET_SLOTS_PER_DAY", 0)
+
+
+@pytest.fixture(autouse=True)
+def no_seasons(request, monkeypatch):
+    """季節演出（クリスマスなど）が、テストを実行した日付によって見た目を変えないよう、既定では季節演出なしにする。"""
+    if request.node.get_closest_marker("real_seasons"):
+        return
+    monkeypatch.setattr(skins, "SEASONS", ())

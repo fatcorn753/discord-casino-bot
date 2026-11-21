@@ -103,7 +103,7 @@ class CasinoService:
             escrow_id = escrow_repo.place_bet(user_id, bet, game)
             if escrow_id is None:
                 return BeginGameResult(False, reason_kind="place_bet", balance=wallet.balance(user_id))
-            skin = skins.active_skin(shop_repo.get_profile(user_id), game)
+            skin = skins.skin_for(shop_repo.get_profile(user_id), game, self.clock.now())
             return BeginGameResult(True, escrow_id=escrow_id, skin=skin, balance=balance)
         finally:
             if escrow_id is None:

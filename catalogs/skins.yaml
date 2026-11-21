@@ -66,3 +66,59 @@ skins:
     win_line: "🕳️ 沼が、ついに口を開けた！！"
     lose_line: "🕳️ 沼は、すべてを飲み込んだ…"
     banner: "# 🕳️ 沼が開いた…！！ 🕳️"
+
+# 季節演出: 期間中だけ、変更品を装備していない人の見た目になる（装備している人は、装備が優先）。
+# start はその時刻を含み、end は含まない（タイムゾーンをつける）。配当・確率は変えない
+seasons:
+  - id: christmas_2026
+    name: クリスマス
+    start: "2026-11-21T00:00:00+09:00"
+    end: "2026-12-26T00:00:00+09:00"
+    daily_title: "🎁 サンタからのプレゼント"
+    daily_line: "🎅 枕元に、サンタからプレゼントが届いたみたいだ…！"
+    skins:
+      - item_id: season_xmas_dice
+        games: ["チンチロ"]
+        title_prefix: "🎄 "
+        start_line: "🎅 サンタ帽の黒服が、丼を差し出す… 「メリークリスマス」"
+        win_line: "🎁 サンタ帽の黒服「…今夜のプレゼントです」"
+        lose_line: "🎅 サンタ帽の黒服「…悪い子には、石炭を」"
+        dice_mark: "❄️"
+        role_win:
+          pinzoro: "🎄 聖夜のピンゾロ…ッ！！ 5倍…！ 鈴の音が鳴り響く…！"
+          arashi: "❄️ 吹雪の嵐…ッ！ 3倍…！ 丼に雪が舞う…"
+          shigoro: "🔔 シゴロ…！ 2倍…。ジングルベルが聞こえる…"
+        role_lose:
+          pinzoro: "親のピンゾロ…。5倍払い…。サンタは来なかった…"
+          arashi: "親の嵐…。3倍払い…。プレゼントが吹雪に消えた…"
+          hifumi: "ヒフミ…。倍払い…。靴下の中には、請求書が…"
+        roll_mark: "🔔"
+
+      - item_id: season_xmas_pachinko
+        games: ["パチンコ"]
+        title_prefix: "🎄 "
+        start_line: "🔔 ジングルベルが流れる台に、玉を弾く…"
+        win_line: "🎁 台から、プレゼントがあふれ出した！"
+        lose_line: "❄️ 玉は、雪のように溶けていった…"
+        banner: "# 🎅 サンタが来た…！！ 🎁"
+
+      - item_id: season_xmas_blackjack
+        games: ["ブラックジャック"]
+        title_prefix: "🎄 "
+        start_line: "🎅 サンタ帽のディーラーが、カードを配る…"
+        win_line: "🎁 ディーラー「メリークリスマス。プレゼントです」"
+        lose_line: "🎅 ディーラー「…今年は、いい子にしていましたか？」"
+
+      - item_id: season_xmas_slot
+        games: ["スロット"]
+        title_prefix: "🎄 "
+        start_line: "🔔 リールに雪の結晶が回る…"
+        win_line: "🎁 リールから、プレゼントが転がり出た！"
+        lose_line: "❄️ リールに、雪だけが積もった…"
+
+      - item_id: season_xmas_roulette
+        games: ["ルーレット"]
+        title_prefix: "🎄 "
+        start_line: "🔔 ツリーの飾りのような玉が、盤を回る…"
+        win_line: "🎁 玉が、プレゼントの上で止まった！"
+        lose_line: "❄️ 玉は、冷たい雪の上に落ちた…"

@@ -1,13 +1,16 @@
 """ゲーム演出の変更品（スキン）の見た目。装備すると、結果画面のタイトル・飾り・地の文が変わる。
 
 勝率・配当・演出のコマの数は変えない。どのゲームに効くかは games で決める。商品そのものは domain/shop.py。
+季節演出（seasons）は、期間中だけ、変更品を装備していない人の見た目になる（装備している人は、装備が優先）。
 """
 
+import datetime
 from dataclasses import dataclass
 from typing import Optional
 
 from domain import shop
 from domain.ports import get_catalogs
+from domain.ports.catalog_types.shop import SkinContract
 
 CHINCHIRO, PACHINKO, BLACKJACK = "チンチロ", "パチンコ", "ブラックジャック"
 
@@ -28,9 +31,22 @@ class Skin:
     banner: str = ""  # パチンコ: 大当たり以上のときの見出し（なければ、いつもの見出し）
 
 
-_CFG = get_catalogs().skins()
-SKINS = {
-    s.item_id: Skin(
+@dataclass(frozen=True)
+class Season:
+    id: str
+    name: str
+    start: datetime.datetime  # この時刻を含む
+    end: datetime.datetime  # この時刻を含まない
+    skins: tuple[Skin, ...]
+    daily_title: str = ""  # デイリーボーナスの見出し
+    daily_line: str = ""  # デイリーボーナスの一言
+
+    def active(self, now: datetime.datetime) -> bool:
+        return self.start <= now < self.end
+
+
+def _skin(s: SkinContract) -> Skin:
+    return Skin(
         s.item_id,
         s.games,
         s.title_prefix,
@@ -44,9 +60,23 @@ SKINS = {
         roll_mark=s.roll_mark,
         banner=s.banner,
     )
-    for s in _CFG.skins
-}
+
+
+_CFG = get_catalogs().skins()
+SKINS = {s.item_id: _skin(s) for s in _CFG.skins}
 SLOT_OF_GAME = dict(_CFG.slot_of_game)  # ゲームごとに見る装備の枠
+SEASONS = tuple(
+    Season(
+        c.id,
+        c.name,
+        datetime.datetime.fromisoformat(c.start),
+        datetime.datetime.fromisoformat(c.end),
+        tuple(_skin(s) for s in c.skins),
+        c.daily_title,
+        c.daily_line,
+    )
+    for c in _CFG.seasons
+)
 
 
 def active_skin(profile: dict, game: str) -> Optional[Skin]:
@@ -55,6 +85,22 @@ def active_skin(profile: dict, game: str) -> Optional[Skin]:
     skin_id = profile.get(slot) if slot else None
     skin = SKINS.get(skin_id) if isinstance(skin_id, str) else None
     return skin if skin is not None and game in skin.games else None
+
+
+def season_skin(game: str, now: datetime.datetime) -> Optional[Skin]:
+    """いま期間中の季節演出の、そのゲームの見た目（なければ None）。"""
+    season = active_season(now)
+    return next((s for s in season.skins if game in s.games), None) if season else None
+
+
+def active_season(now: datetime.datetime) -> Optional[Season]:
+    """いま期間中の季節演出（なければ None。期間が重なれば、先に書いたほう）。"""
+    return next((s for s in SEASONS if s.active(now)), None)
+
+
+def skin_for(profile: dict, game: str, now: datetime.datetime) -> Optional[Skin]:
+    """そのゲームで使う見た目。装備している変更品が優先で、なければ期間中の季節演出。"""
+    return active_skin(profile, game) or season_skin(game, now)
 
 
 def check_catalog() -> list:

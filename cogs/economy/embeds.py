@@ -1,13 +1,13 @@
 """`/ペリカ` の画面の組み立て（残高カード・デイリー・返済・自己破産・ミッション・履歴）。値は services/ から受け取る。"""
 
-from typing import Any
+from typing import Any, Optional
 
 import discord
 
 from cogs.shared import ui
 from cogs.shared.messages import format_history
 from domain import missions as missions_mod
-from domain import shop, teiai
+from domain import shop, skins, teiai
 from domain.types import DAILY_BASE, DAILY_STREAK_BONUS, DAILY_STREAK_CAP, DailyResult
 from services.economy import BalanceCard, MissionBoard
 
@@ -86,7 +86,10 @@ def daily_wait_embed(streak: int, next_label: str, next_ts: int) -> discord.Embe
     )
 
 
-def daily_embed(result: DailyResult, next_label: str, next_ts: int) -> discord.Embed:
+def daily_embed(
+    result: DailyResult, next_label: str, next_ts: int, season: Optional[skins.Season] = None
+) -> discord.Embed:
+    """デイリーボーナスの結果。季節演出の期間中は、見出しと一言がその季節のものになる（額は変わらない）。"""
     next_bonus = DAILY_BASE + DAILY_STREAK_BONUS * min(result.streak, DAILY_STREAK_CAP)
     boost = "🎟️ デイリー2倍券を使った！\n" if result.boosted else ""
     if result.guarded:
@@ -98,11 +101,14 @@ def daily_embed(result: DailyResult, next_label: str, next_ts: int) -> discord.E
         debt_line += f"💸 借金の返済に天引きされた: **{ui.pelica(result.repaid)}**\n"
     if result.seed:
         debt_line += f"🕴️ 帝愛が種銭を貸し付けた: **{ui.pelica(result.seed)}**（借金に加わります）\n"
-    return ui.ok_embed(
-        "デイリーボーナス",
-        f"{boost}**+{ui.pelica(result.amount)}**\n{debt_line}連続ログイン: **{result.streak}日**（明日は {ui.pelica(next_bonus)}）\n残高: **{ui.pelica(result.balance)}**\n\n"
-        f"🕛 次のボーナスは **{next_label}**（<t:{next_ts}:R>）から。6時間ごと（0・6・12・18時）に受け取れます。",
+    lead = f"{season.daily_line}\n" if season and season.daily_line else ""
+    body = (
+        f"{lead}{boost}**+{ui.pelica(result.amount)}**\n{debt_line}連続ログイン: **{result.streak}日**（明日は {ui.pelica(next_bonus)}）\n残高: **{ui.pelica(result.balance)}**\n\n"
+        f"🕛 次のボーナスは **{next_label}**（<t:{next_ts}:R>）から。6時間ごと（0・6・12・18時）に受け取れます。"
     )
+    if season and season.daily_title:  # 季節の見出しは、自前の絵文字で始まるので ✅ を付けない
+        return ui.embed(season.daily_title, body, ui.OK)
+    return ui.ok_embed("デイリーボーナス", body)
 
 
 def repaid_embed(paid: int, left: int) -> discord.Embed:

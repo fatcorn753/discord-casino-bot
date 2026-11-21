@@ -52,9 +52,21 @@ class SkinContract:
 
 
 @dataclass(frozen=True)
+class SeasonContract:
+    id: str
+    name: str
+    start: str  # 始まり（ISO 8601、タイムゾーンつき。この時刻を含む）
+    end: str  # 終わり（ISO 8601、タイムゾーンつき。この時刻を含まない）
+    skins: tuple[SkinContract, ...]
+    daily_title: str  # デイリーボーナスの見出し（空なら、いつもの見出し）
+    daily_line: str  # デイリーボーナスの先頭に添える一言（空なら、なし）
+
+
+@dataclass(frozen=True)
 class SkinsCatalogContract:
     slot_of_game: Mapping[str, str]
     skins: tuple[SkinContract, ...]
+    seasons: tuple[SeasonContract, ...]
 
 
 @dataclass(frozen=True)

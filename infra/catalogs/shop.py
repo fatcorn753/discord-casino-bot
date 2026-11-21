@@ -1,5 +1,6 @@
 """ショップ・スキン・発掘品カタログの Pydantic スキーマ。"""
 
+import datetime
 from collections.abc import Mapping
 from functools import lru_cache
 from typing import Self
@@ -10,6 +11,7 @@ from pydantic.dataclasses import dataclass as pydantic_dataclass
 from domain.ports.catalog_types.shop import (
     RelicBuffContract,
     RelicsCatalogContract,
+    SeasonContract,
     ShopCatalogContract,
     ShopItemContract,
     SkinContract,
@@ -89,10 +91,38 @@ class SkinConfig(SkinContract):
     banner: str = ""
 
 
+def _aware(text: str) -> datetime.datetime:
+    at = datetime.datetime.fromisoformat(text)
+    if at.tzinfo is None:
+        raise ValueError(f"タイムゾーンをつけてください（例: +09:00）: {text}")
+    return at
+
+
+@pydantic_dataclass(frozen=True, config=STRICT_CONFIG, kw_only=True)
+class SeasonConfig(SeasonContract):
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    start: str
+    end: str
+    skins: tuple[SkinConfig, ...] = Field(min_length=1)
+    daily_title: str = ""
+    daily_line: str = ""
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if _aware(self.end) <= _aware(self.start):
+            raise ValueError(f"季節演出 {self.id}: end は start より後にしてください")
+        games = [g for s in self.skins for g in s.games]
+        if len(games) != len(set(games)):
+            raise ValueError(f"季節演出 {self.id}: 同じゲームに2つの見た目があります")
+        return self
+
+
 @pydantic_dataclass(frozen=True, config=STRICT_CONFIG, kw_only=True)
 class SkinsCatalog(SkinsCatalogContract):
     slot_of_game: Mapping[str, str]
     skins: tuple[SkinConfig, ...]
+    seasons: tuple[SeasonConfig, ...] = ()
 
 
 # ------------------------------------------------------------------ #
