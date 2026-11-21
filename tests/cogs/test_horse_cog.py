@@ -12,7 +12,7 @@ from cogs.horse import views as views
 from cogs.horse.cog import HorseCog, anim_frames, comment, lane_text, laps_for, pick_frames
 from domain import horse as h
 from domain import shop
-from domain.ports.contracts import RaceRow
+from domain.ports.contracts import RaceBetResult, RaceRow, RaceRunResult
 from tests.fakes import as_interaction, freeze_time, invoke, must
 from tests.support import make_horse_cog, make_shop_cog, make_test_bot
 
@@ -247,7 +247,7 @@ def test_bet_is_announced_publicly_in_the_race_channel(setup):
         make_test_bot(repos=eco).services.horse, V, cast("RaceRow", {**race, "guild_id": 0}), cog.post_bet_announcement
     )
     interaction = SimpleNamespace(guild=guild, guild_id=0, user=SimpleNamespace(id=V))
-    result = {"kind": "win", "lanes": [3], "name": "アルファ", "stake": 500, "odds": 4.2}
+    result = cast("RaceBetResult", {"kind": "win", "lanes": [3], "name": "アルファ", "stake": 500, "odds": 4.2})
     asyncio.run(panel.announce_bet(as_interaction(interaction), "3", result))
     text = chan.sent[-1]["content"]
     assert f"<@{V}>" in text and "単勝" in text and "アルファ" in text and "4.2" in text
@@ -382,7 +382,7 @@ def test_result_embed_lists_every_winner_even_when_the_net_is_a_loss(setup):
         {"user_id": U, "stake": 1000, "payout": 1500},  # 当たったが、合計は赤字
         {"user_id": V, "stake": 500, "payout": 0},
     ]
-    embed = horse_cog.result_embed(desk(eco), {"race": race, "bets": bets, "prizes": {}})
+    embed = horse_cog.result_embed(desk(eco), cast("RaceRunResult", {"race": race, "bets": bets, "prizes": {}}))
     text = next(f.value for f in embed.fields if f.name == "払い戻し")
     assert (
         f"<@{U}>" in must(text) and "1,500" in must(text) and "収支" not in must(text) and f"<@{V}>" not in must(text)
