@@ -257,6 +257,28 @@ def test_production_follows_python_coding_conventions():
     assert not violations, "\n".join(violations)
 
 
+def test_production_code_has_no_rng_any_parameter():
+    """本番コード（domain/・services/・infra/・cogs/・main.py・manage.py）で rng 引数への Any 型を禁止する。
+
+    乱数は Optional[random.Random] で注入し、テスト決定性を担保する。
+    """
+    targets = [
+        *[p for folder in ("domain", "services", "infra", "cogs") for p in _iter_py(folder)],
+        ROOT / "main.py",
+        ROOT / "manage.py",
+    ]
+    violations: list[str] = []
+    for path in targets:
+        rel = path.relative_to(ROOT)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+                    if arg.arg == "rng" and arg.annotation is not None and ast.unparse(arg.annotation) == "Any":
+                        violations.append(f"{rel}:{node.lineno} {node.name} の引数 rng: Any")
+    assert not violations, "\n".join(violations)
+
+
 def test_cogs_have_no_untyped_cog_parameter():
     """`cog` 引数に型が無いと Pyright が Unknown 扱いにし、消えたメソッドの呼び出しを見逃す(#61)。"""
     found = []
