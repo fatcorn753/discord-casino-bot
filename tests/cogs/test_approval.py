@@ -554,7 +554,7 @@ def test_raffle_and_quiz_admin_commands_delegate_and_are_owner_only(tmp_path):
     calls = []
 
     class FakeRaffle(IRaffleAdminBridge):
-        async def host(self, guild, host_id, fee=None, minutes=60, channel=None):
+        async def host(self, guild, host_id, fee=None, minutes=60, channel=None, rng=None):
             calls.append(("host", guild.id, fee, minutes))
             return True, "投稿した"
 

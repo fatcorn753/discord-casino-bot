@@ -1,5 +1,6 @@
 """Cog 間・DynamicItem 間の疎結合ブリッジ契約（名目的基底クラス）とオープンレジストリ。"""
 
+import random
 from typing import Any, Optional, TypeVar, cast
 
 import discord
@@ -130,6 +131,7 @@ class IRaffleAdminBridge:
         fee: Optional[int] = None,
         minutes: int = 60,
         channel: Optional[discord.abc.Messageable] = None,
+        rng: Optional[random.Random] = None,
     ) -> tuple[bool, str]:
         raise NotImplementedError
 
