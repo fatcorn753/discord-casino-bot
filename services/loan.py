@@ -1,19 +1,20 @@
 """個人間貸付（提案・募集・承諾・返済・期日回収）のアプリケーションサービス。"""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from domain.errors import Outcome
 from domain.ports.clock import IClock
-from domain.ports.contracts import LoanBook, LoanCredit
+from domain.ports.contracts import LoanBook, LoanCollectRow, LoanCredit, LoanRow
 from domain.ports.repos import ILoanRepo
 
 
 @dataclass(frozen=True)
 class LoanTickOutcome:
-    expired: list[dict[str, Any]]
-    due_soon: list[dict[str, Any]]
-    collected: list[dict[str, Any]]
+    expired: list[LoanRow]
+    due_soon: list[LoanRow]
+    collected: list[LoanCollectRow]
 
 
 class LoanService:
@@ -26,13 +27,13 @@ class LoanService:
     def now_ts(self) -> float:
         return self.clock.now_ts()
 
-    def get(self, guild_id: int, loan_id: int) -> Optional[dict[str, Any]]:
+    def get(self, guild_id: int, loan_id: int) -> Optional[LoanRow]:
         return self._loans.for_guild(guild_id).loan_get(loan_id)
 
     def credit(self, guild_id: int, user_id: int) -> LoanCredit:
         return self._loans.for_guild(guild_id).loan_credit(user_id, self.clock.now_ts())
 
-    def list_for(self, guild_id: int, user_id: int) -> LoanBook:
+    def list_for(self, guild_id: int, user_id: int) -> LoanBook[LoanRow]:
         return self._loans.for_guild(guild_id).loan_list(user_id)
 
     def set_message(self, guild_id: int, loan_id: int, message_id: int) -> None:
@@ -44,7 +45,7 @@ class LoanService:
     def cancel(self, guild_id: int, loan_id: int, user_id: int) -> Outcome[str]:
         return self._loans.for_guild(guild_id).loan_cancel(loan_id, user_id)
 
-    def remaining(self, guild_id: int, loan: dict[str, Any], now: Optional[float] = None) -> int:
+    def remaining(self, guild_id: int, loan: Mapping[str, Any], now: Optional[float] = None) -> int:
         ts = self.clock.now_ts() if now is None else now
         return self._loans.for_guild(guild_id).loan_remaining(loan, ts)
 
