@@ -109,6 +109,24 @@ class WalletRepo(ScopedRepo, IWalletRepo):
     # ------------------------------------------------------------------ #
     # デイリー                                                            #
     # ------------------------------------------------------------------ #
+    def _streak_guard_bonus(
+        self, gid: int, user_id: int, last: Optional[datetime.date], today: datetime.date, streak: int
+    ) -> tuple[int, int]:
+        """連続が途切れたとき、連続守り券で埋められるだけ埋めて (新しい連続日数, 使った枚数) を返す。
+
+        受け取れなかった日が守り券の枚数以内なら、1枚で1日ぶん埋めて連続をつなぐ（足りなければ1枚も使わない）。
+        """
+        missed = (today - last).days - 1 if last is not None else 0
+        if missed <= 0 or streak <= 0:
+            return 1, 0
+        cur = self._conn.execute(
+            "UPDATE inventory SET qty = qty - ? WHERE guild_id=? AND user_id=? AND item_id=? AND qty>=?",
+            (missed, gid, user_id, STREAK_GUARD, missed),
+        )
+        if cur.rowcount:
+            return streak + 1, missed
+        return 1, 0
+
     def claim_daily(self, user_id: int, today: datetime.date, slot: Optional[int] = None) -> DailyResult:
         """時間帯（slot）ごとに1回のボーナス。slot が前回より進んでいれば受け取れる（省略時は1日1回）。
 
@@ -131,22 +149,12 @@ class WalletRepo(ScopedRepo, IWalletRepo):
                 return DailyResult(
                     False, streak=row["daily_streak"], balance=self._account.raw_balance(gid, user_id)
                 )  # 時計が戻っても二重に受け取れない
-            guarded = 0
             if last == today:
-                streak = max(1, row["daily_streak"])
+                streak, guarded = max(1, row["daily_streak"]), 0
             elif last == today - datetime.timedelta(days=1):
-                streak = row["daily_streak"] + 1
+                streak, guarded = row["daily_streak"] + 1, 0
             else:
-                streak = 1
-                # 受け取れなかった日が、連続守り券の枚数以内なら、1枚で1日ぶん埋めて連続をつなぐ（足りなければ1枚も使わない）
-                missed = (today - last).days - 1 if last is not None else 0
-                if missed > 0 and row["daily_streak"] > 0:
-                    cur = self._conn.execute(
-                        "UPDATE inventory SET qty = qty - ? WHERE guild_id=? AND user_id=? AND item_id=? AND qty>=?",
-                        (missed, gid, user_id, STREAK_GUARD, missed),
-                    )
-                    if cur.rowcount:
-                        streak, guarded = row["daily_streak"] + 1, missed
+                streak, guarded = self._streak_guard_bonus(gid, user_id, last, today, row["daily_streak"])
             amount = self.DAILY_BASE + self.DAILY_STREAK_BONUS * min(streak - 1, self.DAILY_STREAK_CAP)
             prof = self._one("SELECT daily_boost FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id))
             boosted = bool(prof and prof["daily_boost"] > 0)
