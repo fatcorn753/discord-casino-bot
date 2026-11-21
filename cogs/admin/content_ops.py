@@ -44,12 +44,10 @@ async def special_race(
     if horse_bridge is None:
         return
     race_id = await horse_bridge.start_special(guild, entry_min, bet_min, channel)
-    await interaction.response.send_message(
-        embed=ui.ok_embed(
-            "臨時レースを開催しました",
-            f"{guild.name} で、臨時レース（#{race_id}）の申し込みを始めました（掲示は{channel.mention if channel else '告知チャンネル'}）。申し込み {entry_min}分 → 馬券 {bet_min}分 → 発走（2分後）。",
-        ),
-        ephemeral=True,
+    await ui.reply_ok(
+        interaction,
+        f"{guild.name} で、臨時レース（#{race_id}）の申し込みを始めました（掲示は{channel.mention if channel else '告知チャンネル'}）。申し込み {entry_min}分 → 馬券 {bet_min}分 → 発走（2分後）。",
+        title="臨時レースを開催しました",
     )
 
 
@@ -71,12 +69,10 @@ async def host_arena(
     if arena_bridge is None:
         return
     status = await arena_bridge.host_now(guild, channel, advance, fmt)
-    await interaction.response.send_message(
-        embed=ui.ok_embed(
-            "闘技場を開催しました",
-            f"{guild.name} で、今日の大会を出しました（掲示は{channel.mention if channel else '告知チャンネル'}）。状態: {status}",
-        ),
-        ephemeral=True,
+    await ui.reply_ok(
+        interaction,
+        f"{guild.name} で、今日の大会を出しました（掲示は{channel.mention if channel else '告知チャンネル'}）。状態: {status}",
+        title="闘技場を開催しました",
     )
 
 
@@ -89,9 +85,7 @@ async def announce(
     channel_id: Optional[str],
 ) -> None:
     if image is not None and not ((image.content_type or "").startswith("image/") and image.size <= MAX_IMAGE_BYTES):
-        await interaction.response.send_message(
-            embed=ui.error_embed("画像を使えません", "画像ファイル（8MBまで）を添付してください。"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "画像ファイル（8MBまで）を添付してください。", title="画像を使えません")
         return
     if guild_id:
         guild = await pick_guild(cog.bot, interaction, guild_id)
@@ -104,9 +98,7 @@ async def announce(
     if not ok:
         return
     if not guilds:
-        await interaction.response.send_message(
-            embed=ui.error_embed("送り先がありません", "許可されているサーバーがありません。"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "許可されているサーバーがありません。", title="送り先がありません")
         return
     await interaction.response.send_modal(AnnounceModal(cog, guilds, (title or "").strip()[:200], image, channel))
 
@@ -121,12 +113,10 @@ async def purge_own_messages(
     if not ok:
         return
     if not can_read_history(channel, guild):
-        await interaction.response.send_message(
-            embed=ui.error_embed(
-                "履歴を読めません",
-                f"Bot は #{channel.name} の「メッセージ履歴を読む」権限がありません。招待URLの権限に足して（README を参照）、もう一度試してください。",
-            ),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction,
+            f"Bot は #{channel.name} の「メッセージ履歴を読む」権限がありません。招待URLの権限に足して（README を参照）、もう一度試してください。",
+            title="履歴を読めません",
         )
         return
     warning = (
@@ -235,12 +225,10 @@ async def quiz_bulk(
     if file.size > MAX_IMPORT_BYTES or not (
         file.filename.lower().endswith((".txt", ".md", ".text")) or (file.content_type or "").startswith("text/")
     ):
-        await interaction.response.send_message(
-            embed=ui.error_embed(
-                "ファイルを使えません",
-                f"テキストファイル（.txt、{MAX_IMPORT_BYTES // 1024}KBまで）を添付してください。",
-            ),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction,
+            f"テキストファイル（.txt、{MAX_IMPORT_BYTES // 1024}KBまで）を添付してください。",
+            title="ファイルを使えません",
         )
         return
     await interaction.response.defer(ephemeral=True)
@@ -292,6 +280,6 @@ async def quiz_delete(cog: "ApprovalCog", interaction: discord.Interaction, quiz
     if quiz_bridge is None:
         return
     if not quiz_bridge.remove(quiz_id):
-        await interaction.response.send_message(embed=ui.error_embed("その番号の問題はありません"), ephemeral=True)
+        await ui.reply_error(interaction, "", title="その番号の問題はありません")
         return
-    await interaction.response.send_message(embed=ui.ok_embed(f"クイズ #{quiz_id} を削除しました"), ephemeral=True)
+    await ui.reply_ok(interaction, "", title=f"クイズ #{quiz_id} を削除しました")

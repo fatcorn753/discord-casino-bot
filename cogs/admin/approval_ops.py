@@ -88,40 +88,32 @@ async def server_list(cog: "ApprovalCog", interaction: discord.Interaction) -> N
 
 async def server_allow(cog: "ApprovalCog", interaction: discord.Interaction, guild_id: str) -> None:
     if not valid_guild_id(guild_id):
-        await interaction.response.send_message(
-            embed=ui.error_embed("入力エラー", "サーバーidは数字だけで入力してください。"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "サーバーidは数字だけで入力してください。", title="入力エラー")
         return
     gid = int(guild_id)
     guild = cog.bot.get_guild(gid)
     cog._guild_repo.set_guild_status(gid, approval.APPROVED, guild.name if guild else None, interaction.user.id)
     if guild is not None:
         await cog.announce_approved(guild)
-    await interaction.response.send_message(
-        embed=ui.ok_embed(
-            "許可しました",
-            f"`{gid}`"
-            + (f"（{guild.name}）" if guild else "（まだ参加していません。追加されたらすぐ遊べます）")
-            + " で遊べます。",
-        ),
-        ephemeral=True,
+    await ui.reply_ok(
+        interaction,
+        f"`{gid}`"
+        + (f"（{guild.name}）" if guild else "（まだ参加していません。追加されたらすぐ遊べます）")
+        + " で遊べます。",
+        title="許可しました",
     )
 
 
 async def server_revoke(cog: "ApprovalCog", interaction: discord.Interaction, guild_id: str) -> None:
     if not valid_guild_id(guild_id):
-        await interaction.response.send_message(
-            embed=ui.error_embed("入力エラー", "サーバーidは数字だけで入力してください。"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "サーバーidは数字だけで入力してください。", title="入力エラー")
         return
     gid = int(guild_id)
     if gid in approval.preapproved(cog._config):
-        await interaction.response.send_message(
-            embed=ui.warn_embed(
-                "取り消せません",
-                "設定ファイル（allowed_guild_ids）で許可されているサーバーです。設定ファイルから外してください。",
-            ),
-            ephemeral=True,
+        await ui.reply_warn(
+            interaction,
+            "設定ファイル（allowed_guild_ids）で許可されているサーバーです。設定ファイルから外してください。",
+            title="取り消せません",
         )
         return
     guild = cog.bot.get_guild(gid)
@@ -133,6 +125,4 @@ async def server_revoke(cog: "ApprovalCog", interaction: discord.Interaction, gu
             left = "Bot はそのサーバーから退出しました。"
         except discord.HTTPException:
             left = "退出はできませんでしたが、コマンドは使えないままです。"
-    await interaction.response.send_message(
-        embed=ui.ok_embed("取り消しました", f"`{gid}` の許可を取り消しました。{left}"), ephemeral=True
-    )
+    await ui.reply_ok(interaction, f"`{gid}` の許可を取り消しました。{left}", title="取り消しました")
