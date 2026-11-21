@@ -581,10 +581,10 @@ def test_short_counts_in_ranking_and_payout_repays_debt(eco):
     set_price(eco, 100.0)
     a.margin.short_open(U, 10_000, 100.0, 2)
     assert (
-        dict((u, v) for _, u, v in a.wallet.top(5))[U] == INITIAL_BALANCE
+        {u: v for _, u, v in a.wallet.top(5)}[U] == INITIAL_BALANCE
     )  # 担保 + 含み損益（0）で、総資産は変わらない
     set_price(eco, 90.0)
-    assert dict((u, v) for _, u, v in a.wallet.top(5))[U] == INITIAL_BALANCE + 100
+    assert {u: v for _, u, v in a.wallet.top(5)}[U] == INITIAL_BALANCE + 100
     with a.db.tx():
         a.db.conn.execute("UPDATE users SET debt=300 WHERE user_id=?", (U,))  # 建てたあとに借金ができても
     a.margin.short_close(U, None, 90.0)  # 決済で戻るのは、もともと自分のお金なので、天引きされない

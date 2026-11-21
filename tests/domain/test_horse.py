@@ -89,7 +89,7 @@ def test_race_is_decided_by_the_seed_and_has_a_full_order():
     a = h.simulate(runners, h.Track(1800, "良"), random.Random(9), keep_frames=True)
     b = h.simulate(runners, h.Track(1800, "良"), random.Random(9))
     assert a["order"] == b["order"] and sorted(a["order"]) == list(range(8))
-    assert all(x <= y for x, y in zip(a["times"], a["times"][1:]))  # 着順 = ゴールの時刻の順
+    assert all(x <= y for x, y in zip(a["times"], a["times"][1:], strict=False))  # 着順 = ゴールの時刻の順
     first, last = a["frames"][0], a["frames"][-1]
     assert first == [0.0] * 8 and all(p == 1.0 for p in last)
 
@@ -510,7 +510,7 @@ def test_combo_bets_are_settled_by_the_real_finishing_order(eco):
     order_lanes = [result["entries"][i]["lane"] for i in result["order"]]
     by_pick = {(b["kind"], b["picks"]): b for b in result["bets"]}
     assert placed and len(result["bets"]) == len(placed)
-    for kind, lanes, odds in placed:
+    for kind, lanes, _ in placed:
         b = by_pick[(kind, h.combo_key(kind, lanes))]
         expected = int(100 * b["odds"]) if h.combo_hit(kind, lanes, order_lanes) else 0
         assert b["payout"] == expected

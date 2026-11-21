@@ -702,7 +702,7 @@ def test_cheap_coal_shows_up_often_for_every_worker_and_ignores_power_and_luck()
     boosted = sum(_REAL_ROLL("apprentice", 1, 2.0, rng).get("coal", 0) for _ in range(4000)) / 4000
     assert abs(boosted - lab.COAL_P) < 0.03  # 監督の運でも変わらない
     assert _REAL_ROLL("foreman", 50, 0.0, rng) == {}  # 監督は、掘らない
-    assert [k for k in lab.ORE_VALUE][:1] == ["copper"] and lab.ORE_VALUE["coal"] < lab.ORE_VALUE["copper"]
+    assert list(lab.ORE_VALUE)[:1] == ["copper"] and lab.ORE_VALUE["coal"] < lab.ORE_VALUE["copper"]
 
 
 def test_ore_text_lists_the_most_valuable_first():
