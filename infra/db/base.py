@@ -109,12 +109,12 @@ class ScopedRepo:
         """注入された IClock の現在時刻（UNIX 秒）。"""
         return self._db.now_ts()
 
-    def _one(self, sql: str, params: Sequence[Any] = ()) -> Optional[dict[str, Any]]:
-        """1行だけ取得して辞書で返す（無ければ None）。"""
+    def _one(self, sql: str, params: Sequence[Any] = ()) -> Optional[Any]:
+        """1行だけ取得して返す（無ければ None）。SQLite 行をリポジトリ境界の TypedDict 契約へ渡す内部ヘルパのため戻り値は Any とし、契約は呼び出し側の注釈で付く。"""
         return fetch_one(self._conn, sql, params)
 
-    def _all(self, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
-        """全行を辞書のリストで返す。"""
+    def _all(self, sql: str, params: Sequence[Any] = ()) -> list[Any]:
+        """全行をリストで返す。SQLite 行をリポジトリ境界の TypedDict 契約へ渡す内部ヘルパのため戻り値は Any とし、契約は呼び出し側の注釈で付く。"""
         return fetch_all(self._conn, sql, params)
 
     def _scalar(self, sql: str, params: Sequence[Any] = ()) -> Any:

@@ -4,6 +4,17 @@ import random
 from typing import TYPE_CHECKING, Any, Optional
 
 from domain.errors import Outcome
+from domain.ports.contracts import (
+    LaborClickHourRow,
+    LaborFindSummary,
+    ListingRow,
+    P2PMine,
+    PollView,
+    QuizAdminView,
+    QuizView,
+    RaffleResult,
+    RaffleView,
+)
 from domain.ports.repos.base import IGuildScopedRepo
 
 if TYPE_CHECKING:
@@ -14,7 +25,7 @@ class IRaffleRepo(IGuildScopedRepo):
     def raffle_open(self, host_id: int, fee: int, closes: float, channel_id: int) -> Outcome[str]:
         raise NotImplementedError
 
-    def raffle_get(self) -> Optional[dict[str, Any]]:
+    def raffle_get(self) -> Optional[RaffleView]:
         raise NotImplementedError
 
     def raffle_set_message(self, raffle_id: int, message_id: int, channel_id: Optional[int] = None) -> None:
@@ -23,7 +34,7 @@ class IRaffleRepo(IGuildScopedRepo):
     def raffle_join(self, user_id: int, now: float) -> Outcome[str]:
         raise NotImplementedError
 
-    def raffle_close(self, rng: Optional[random.Random] = None, cancel: bool = False) -> Optional[dict[str, Any]]:
+    def raffle_close(self, rng: Optional[random.Random] = None, cancel: bool = False) -> Optional[RaffleResult]:
         raise NotImplementedError
 
 
@@ -34,16 +45,16 @@ class IPollRepo(IGuildScopedRepo):
     def poll_set_message(self, poll_id: int, channel_id: int, message_id: int) -> None:
         raise NotImplementedError
 
-    def poll_get(self, poll_id: int) -> Optional[dict[str, Any]]:
+    def poll_get(self, poll_id: int) -> Optional[PollView]:
         raise NotImplementedError
 
-    def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> Outcome[dict[str, Any]]:
+    def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> Outcome[PollView]:
         raise NotImplementedError
 
     def poll_rig(self, user_id: int, poll_id: int, yes: int, no: int, now: float) -> Outcome[dict[str, Any]]:
         raise NotImplementedError
 
-    def poll_close_due(self, now: float) -> list[dict[str, Any]]:
+    def poll_close_due(self, now: float) -> list[PollView]:
         raise NotImplementedError
 
 
@@ -156,10 +167,10 @@ class IQuizAdminRepo(IGuildScopedRepo):
     def quiz_existing_questions(self) -> set[str]:
         raise NotImplementedError
 
-    def quiz_get(self, quiz_id: int) -> Optional[dict[str, Any]]:
+    def quiz_get(self, quiz_id: int) -> Optional[QuizView]:
         raise NotImplementedError
 
-    def quiz_list(self) -> list[dict[str, Any]]:
+    def quiz_list(self) -> list[QuizAdminView]:
         raise NotImplementedError
 
     def quiz_delete(self, quiz_id: int) -> bool:
@@ -169,7 +180,7 @@ class IQuizAdminRepo(IGuildScopedRepo):
 class IQuizPlayRepo(IGuildScopedRepo):
     """クイズの出題・回答・投稿・締め切り（プレイ用）。"""
 
-    def quiz_next(self, user_id: int, now: float) -> tuple[Optional[dict[str, Any]], int]:
+    def quiz_next(self, user_id: int, now: float) -> tuple[Optional[QuizView], int]:
         raise NotImplementedError
 
     def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> Outcome[dict[str, Any]]:
@@ -191,7 +202,7 @@ class IQuizPlayRepo(IGuildScopedRepo):
     ) -> Outcome[int]:
         raise NotImplementedError
 
-    def quiz_own_open(self, user_id: int, now: float) -> list[dict[str, Any]]:
+    def quiz_own_open(self, user_id: int, now: float) -> list[QuizView]:
         raise NotImplementedError
 
     def quiz_set_message(self, quiz_id: int, message_id: int) -> None:
@@ -212,7 +223,7 @@ class ILaborRepo(IGuildScopedRepo):
     def labor_donated_total(self) -> int:
         raise NotImplementedError
 
-    def labor_finds(self, user_id: int, limit: int = 6) -> list[dict[str, Any]]:
+    def labor_finds(self, user_id: int, limit: int = 6) -> list[LaborFindSummary]:
         raise NotImplementedError
 
     def labor_state(self, user_id: int, now: float, day: str = "") -> dict[str, Any]:
@@ -226,7 +237,7 @@ class ILaborRepo(IGuildScopedRepo):
     ) -> dict[str, Any]:
         raise NotImplementedError
 
-    def labor_click_hours(self, user_id: int, since: float) -> list[dict[str, Any]]:
+    def labor_click_hours(self, user_id: int, since: float) -> list[LaborClickHourRow]:
         raise NotImplementedError
 
     def labor_collect(self, user_id: int, now: float, day: str = "", detail: bool = False) -> int | dict[str, Any]:
@@ -265,10 +276,10 @@ class IP2PRepo(IGuildScopedRepo):
     ) -> Outcome[int]:
         raise NotImplementedError
 
-    def p2p_label(self, row: dict[str, Any]) -> str:
+    def p2p_label(self, row: ListingRow) -> str:
         raise NotImplementedError
 
-    def p2p_get(self, listing_id: int) -> Optional[dict[str, Any]]:
+    def p2p_get(self, listing_id: int) -> Optional[ListingRow]:
         raise NotImplementedError
 
     def p2p_set_post(self, listing_id: int, channel_id: int, message_id: int) -> None:
@@ -286,13 +297,13 @@ class IP2PRepo(IGuildScopedRepo):
     def p2p_pull_back(self, user_id: int, now: Optional[float] = None) -> dict[str, int]:
         raise NotImplementedError
 
-    def p2p_unsynced_posts(self) -> list[dict[str, Any]]:
+    def p2p_unsynced_posts(self) -> list[ListingRow]:
         raise NotImplementedError
 
     def p2p_mark_post_done(self, listing_id: int) -> None:
         raise NotImplementedError
 
-    def p2p_settle(self, now: float) -> list[tuple[dict[str, Any], str]]:
+    def p2p_settle(self, now: float) -> list[tuple[ListingRow, str]]:
         raise NotImplementedError
 
     def p2p_active(
@@ -302,13 +313,13 @@ class IP2PRepo(IGuildScopedRepo):
         limit: int = 25,
         mode: Optional[str] = None,
         order: str = "end",
-    ) -> list[dict[str, Any]]:
+    ) -> list[ListingRow]:
         raise NotImplementedError
 
     def p2p_count(self, now: float) -> int:
         raise NotImplementedError
 
-    def p2p_mine(self, user_id: int, now: Optional[float] = None) -> dict[str, Any]:
+    def p2p_mine(self, user_id: int, now: Optional[float] = None) -> P2PMine:
         raise NotImplementedError
 
 
