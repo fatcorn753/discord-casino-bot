@@ -15,7 +15,7 @@ from cogs.shared import logthrottle, ui
 from cogs.shared.bridges import BotBridges, IP2PNavigationBridge, IShopTitleBridge
 from cogs.shared.tasks import allowed_guilds
 from cogs.shop.discord_ops import ShopError, apply_title_nick, set_color_role
-from cogs.shop.embeds import (  #
+from cogs.shop.embeds import (
     EFFECT_OF_ITEM as EFFECT_OF_ITEM,
 )
 from cogs.shop.embeds import MAX_QTY as MAX_QTY

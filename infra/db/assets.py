@@ -18,18 +18,18 @@ from domain.ports.bridges import (
     IValuationSource,
 )
 from domain.ports.bridges import (
-    CompositeAssetCollector as CompositeAssetCollector,  #
+    CompositeAssetCollector as CompositeAssetCollector,
 )
 from domain.ports.contracts import RankEntry
 from domain.ports.repos import IAssetRepo
 from domain.types import (
-    FIXED_KEYS as FIXED_KEYS,  #
+    FIXED_KEYS as FIXED_KEYS,
 )
 from domain.types import (
-    LIABILITY_KEYS as LIABILITY_KEYS,  #
+    LIABILITY_KEYS as LIABILITY_KEYS,
 )
 from domain.types import (
-    LIQUID_KEYS as LIQUID_KEYS,  #
+    LIQUID_KEYS as LIQUID_KEYS,
 )
 from domain.types import PART_KEYS
 from infra.db.base import EcoDb, ScopedRepo

@@ -8,40 +8,40 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs.quiz.embeds import (
-    DEFAULT_REWARD as DEFAULT_REWARD,  #
+    DEFAULT_REWARD as DEFAULT_REWARD,
 )
 from cogs.quiz.embeds import (
-    DEFAULT_RIGHT as DEFAULT_RIGHT,  #
+    DEFAULT_RIGHT as DEFAULT_RIGHT,
 )
 from cogs.quiz.embeds import (
-    DEFAULT_WRONG as DEFAULT_WRONG,  #
+    DEFAULT_WRONG as DEFAULT_WRONG,
 )
 from cogs.quiz.embeds import (
-    LETTERS as LETTERS,  #
+    LETTERS as LETTERS,
 )
 from cogs.quiz.embeds import (
-    MAX_CHOICE_LEN as MAX_CHOICE_LEN,  #
+    MAX_CHOICE_LEN as MAX_CHOICE_LEN,
 )
 from cogs.quiz.embeds import (
-    MAX_VERDICT_LEN as MAX_VERDICT_LEN,  #
+    MAX_VERDICT_LEN as MAX_VERDICT_LEN,
 )
 from cogs.quiz.embeds import (
-    creator_label as creator_label,  #
+    creator_label as creator_label,
 )
 from cogs.quiz.embeds import (
-    names_field as names_field,  #
+    names_field as names_field,
 )
 from cogs.quiz.embeds import (
-    parse_choices as parse_choices,  #
+    parse_choices as parse_choices,
 )
 from cogs.quiz.embeds import (
-    parse_int as parse_int,  #
+    parse_int as parse_int,
 )
 from cogs.quiz.embeds import (
-    parse_terms as parse_terms,  #
+    parse_terms as parse_terms,
 )
 from cogs.quiz.embeds import (
-    parse_verdicts as parse_verdicts,  #
+    parse_verdicts as parse_verdicts,
 )
 from cogs.quiz.embeds import (
     public_embed,
@@ -50,10 +50,10 @@ from cogs.quiz.embeds import (
     settle_text,
 )
 from cogs.quiz.embeds import (
-    result_embed as result_embed,  #
+    result_embed as result_embed,
 )
 from cogs.quiz.embeds import (
-    verdict as verdict,  #
+    verdict as verdict,
 )
 from cogs.quiz.views import (
     AddModal,
@@ -63,16 +63,16 @@ from cogs.quiz.views import (
     public_view,
 )
 from cogs.quiz.views import (
-    FormValues as FormValues,  #
+    FormValues as FormValues,
 )
 from cogs.quiz.views import (
-    QuizForm as QuizForm,  #
+    QuizForm as QuizForm,
 )
 from cogs.quiz.views import (
-    record_answer as record_answer,  #
+    record_answer as record_answer,
 )
 from cogs.quiz.views import (
-    verdicts_input as verdicts_input,  #
+    verdicts_input as verdicts_input,
 )
 from cogs.shared import logthrottle, ui
 from cogs.shared.announce import announce_channel

@@ -14,7 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from cogs.loan.embeds import (  #
+from cogs.loan.embeds import (
     borrower_note as borrower_note,
 )
 from cogs.loan.embeds import offer_embed as offer_embed
@@ -22,7 +22,7 @@ from cogs.loan.embeds import request_embed as request_embed
 from cogs.loan.embeds import state_embed as state_embed
 from cogs.loan.embeds import terms_lines as terms_lines
 from cogs.loan.embeds import who as who
-from cogs.loan.views import (  #
+from cogs.loan.views import (
     LoanButton as LoanButton,
 )
 from cogs.loan.views import handle_button as handle_button

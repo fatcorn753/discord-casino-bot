@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import discord
 from discord.ext import commands, tasks
 
-from cogs.p2p.embeds import (  #
+from cogs.p2p.embeds import (
     ENDED_TEXT as ENDED_TEXT,
 )
 from cogs.p2p.embeds import detail_embed as detail_embed
@@ -21,7 +21,7 @@ from cogs.p2p.embeds import line_of as line_of
 from cogs.p2p.embeds import post_embed as post_embed
 from cogs.p2p.embeds import price_text as price_text
 from cogs.p2p.embeds import when as when
-from cogs.p2p.views import (  #
+from cogs.p2p.views import (
     BidModal as BidModal,
 )
 from cogs.p2p.views import DetailView as DetailView
