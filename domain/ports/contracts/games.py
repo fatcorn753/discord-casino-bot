@@ -102,6 +102,12 @@ class ArenaTournamentRow(TypedDict):
     created: float
 
 
+class ArenaTournamentDetailRow(ArenaTournamentRow):
+    """大会の詳細（大会の行に、戦士一覧を足したもの）。"""
+
+    fighters: list["ArenaFighterRow"]
+
+
 class ArenaFighterRow(TypedDict):
     """闘技場の戦士（arena_fighters 表の行）。"""
 
@@ -139,3 +145,10 @@ class ManualEventRow(TypedDict):
     ends: float
     ended: int
     channel_id: int
+
+
+class AuctionHorseRow(HorseRow):
+    """帝愛の競売に出ている馬（馬の行に、査定の価格と率を足したもの）。"""
+
+    price: int
+    rate: float

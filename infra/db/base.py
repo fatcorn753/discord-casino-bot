@@ -10,7 +10,7 @@ import sqlite3
 import threading
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Optional, Self
+from typing import TYPE_CHECKING, Any, Optional, Self, TypeVar, cast
 
 from domain.ports.clock import IClock
 from infra.clock import ConfigClock
@@ -86,6 +86,10 @@ def fetch_scalar(conn: sqlite3.Connection, sql: str, params: Sequence[Any] = ())
     return row[0] if row else None
 
 
+RowT = TypeVar("RowT")
+"""行モデル（domain/ports/contracts/ の TypedDict）を束ねる型変数。呼び出し側の戻り値型から決まる。"""
+
+
 class ScopedRepo:
     """EcoDb とサーバーID（guild_id）に紐づくリポジトリ共通基底（コンポジション用）。"""
 
@@ -109,13 +113,13 @@ class ScopedRepo:
         """注入された IClock の現在時刻（UNIX 秒）。"""
         return self._db.now_ts()
 
-    def _one(self, sql: str, params: Sequence[Any] = ()) -> Optional[dict[str, Any]]:
-        """1行だけ取得して辞書で返す（無ければ None）。"""
-        return fetch_one(self._conn, sql, params)
+    def _one(self, sql: str, params: Sequence[Any] = ()) -> Optional[RowT]:
+        """1行だけ取得して行モデル型で返す（無ければ None）。戻り値の注釈（contracts の TypedDict）から RowT が決まる。"""
+        return cast("Optional[RowT]", fetch_one(self._conn, sql, params))
 
-    def _all(self, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
-        """全行を辞書のリストで返す。"""
-        return fetch_all(self._conn, sql, params)
+    def _all(self, sql: str, params: Sequence[Any] = ()) -> list[RowT]:
+        """全行を行モデル型のリストで返す。戻り値の注釈（contracts の TypedDict）から RowT が決まる。"""
+        return cast("list[RowT]", fetch_all(self._conn, sql, params))
 
     def _scalar(self, sql: str, params: Sequence[Any] = ()) -> Any:
         """1行1列だけ取得してその値を返す（行が無ければ None）。"""

@@ -126,10 +126,8 @@ class LaborFindRow(TypedDict):
 
 
 class LaborClickHourRow(TypedDict):
-    """「働く」を押した記録の1時間ごとの集計（labor_click_hours 表の行）。"""
+    """「働く」を押した記録の1時間ごとの集計（labor_click_hours の読み出し射影）。"""
 
-    guild_id: int
-    user_id: int
     hour: int
     clicks: int
     pay: int
@@ -200,3 +198,70 @@ class StakeRow(TypedDict):
     investor_id: int
     amount: int
     dividends: int
+
+
+class LaborFindSummary(TypedDict):
+    """最近の掘り出しの表示用（labor_finds の読み出し射影）。"""
+
+    at: float
+    kind: str
+    ore: str
+
+
+class RaffleView(RaffleRow):
+    """募集中の抽選（抽選の行に、参加者一覧を足したもの）。"""
+
+    entries: list[int]
+
+
+class PollView(PollRow):
+    """投票の表示用（投票の行に、本物の票数と表示する票数を足したもの）。"""
+
+    voters: int
+    yes: int
+    no: int
+
+
+class P2PMine(TypedDict):
+    """自分の出品（出しているもの）と、自分が最高入札者の競り。"""
+
+    selling: list[ListingRow]
+    bidding: list[ListingRow]
+
+
+class QuizView(TypedDict):
+    """クイズの問題の表示用（choices はパース済みの配列、order は表示する並び）。"""
+
+    id: int
+    question: str
+    choices: list[str]
+    explanation: str
+    shown_order: str
+    author_id: int
+    guild_id: int
+    channel_id: int
+    message_id: int
+    settled: int
+    earned: int
+    creator_name: str
+    msg_right: str
+    msg_wrong: str
+    reward: int
+    expires: Optional[float]
+    created: float
+    order: list[str]
+
+
+class QuizAdminView(QuizView):
+    """管理の一覧用の問題（回答数と正解数つき）。"""
+
+    answered: int
+    right_count: int
+
+
+class RaffleResult(RaffleView):
+    """締めた抽選の結果（募集中の抽選に、当選者・賞金・返金フラグを足したもの）。"""
+
+    winner: Optional[int]
+    prize: int
+    refunded: bool
