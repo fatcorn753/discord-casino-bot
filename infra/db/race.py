@@ -423,7 +423,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 horse_mod.Runner(
                     e["lane"], e["name"], e["speed"], e["stamina"], e["power"], e["guts"], e["form"], style=s
                 )
-                for e, s in zip(entries, styles)
+                for e, s in zip(entries, styles, strict=True)
             ]
             track = horse_mod.Track(race["distance"], race["going"])
             sim = horse_mod.simulate(runners, track, rng, keep_frames=True)
@@ -521,5 +521,5 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 "track": track,
                 "retired": retired,
                 "is_major": is_major,
-                "styles": dict(zip((e["lane"] for e in entries), styles)),
+                "styles": dict(zip((e["lane"] for e in entries), styles, strict=True)),
             }

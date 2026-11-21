@@ -13,7 +13,7 @@
 import random
 from collections.abc import Iterable
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache
 
 from domain.ports import get_catalogs
 
@@ -157,7 +157,7 @@ def _convolve(a: list[float], b: list[float]) -> list[float]:
     return out
 
 
-@lru_cache(maxsize=None)
+@cache
 def _set_distribution() -> tuple[float, ...]:
     """1セットの払い戻しの倍数の分布 [0..ANALYSIS_MAX]（それ以上は ANALYSIS_MAX にまとめる。計算のためだけで、遊びに上限はない）。"""
     one = [0.0] * (ANALYSIS_MAX + 1)
@@ -167,16 +167,16 @@ def _set_distribution() -> tuple[float, ...]:
     for _ in range(ANALYSIS_MAX):
         step = _convolve(one, chain)
         new = [(1 - CONTINUE) * one[a] + CONTINUE * step[a] for a in range(ANALYSIS_MAX + 1)]
-        if max(abs(x - y) for x, y in zip(new, chain)) < 1e-15:
+        if max(abs(x - y) for x, y in zip(new, chain, strict=True)) < 1e-15:
             break
         chain = new
     q = P_START * mean_hit_prob()  # 玉1発が、大当たりの始まりになる確率
     total = [1.0] + [0.0] * ANALYSIS_MAX
     result = [0.0] * (ANALYSIS_MAX + 1)
     comb = 1.0  # 二項分布 P(M = m) を、漸化式で求める
-    for m in range(0, 31):
+    for m in range(31):
         p_m = comb * q**m * (1 - q) ** (BALLS_PER_SET - m) if m <= BALLS_PER_SET else 0.0
-        result = [r + p_m * t for r, t in zip(result, total)]
+        result = [r + p_m * t for r, t in zip(result, total, strict=True)]
         total = _convolve(total, chain)
         comb = comb * (BALLS_PER_SET - m) / (m + 1) if m < BALLS_PER_SET else 0.0
     return tuple(result)

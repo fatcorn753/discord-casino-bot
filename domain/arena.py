@@ -74,7 +74,7 @@ def _odds(prob: float, takeout: float, cap: float) -> float:
 def match_odds(fighters: Sequence[Mapping[str, Any]], boost: float = 1.0) -> dict[str, float]:
     """試合に出る戦士ごとの単勝オッズ（{名前: 倍率}）。boost は、決勝で賭けたくなるよう高くする倍率。"""
     probs = win_weights(fighters)
-    return {f["name"]: min(MAX_ODDS, _odds(p, TAKEOUT, MAX_ODDS) * boost) for f, p in zip(fighters, probs)}
+    return {f["name"]: min(MAX_ODDS, _odds(p, TAKEOUT, MAX_ODDS) * boost) for f, p in zip(fighters, probs, strict=True)}
 
 
 def generate_fighters(fmt: str, rng: random.Random) -> list[dict[str, Any]]:
@@ -149,7 +149,7 @@ def settle_payouts(stakes: list[int], rate: float, pool: int, subsidy_cap: int) 
     scale = payout_scale(pool + subsidy, due)
     paid = [round(p * scale) for p in profits]
     leftover = max(0, pool + subsidy - sum(paid))
-    return [a + p for a, p in zip(stakes, paid)], subsidy, leftover
+    return [a + p for a, p in zip(stakes, paid, strict=True)], subsidy, leftover
 
 
 def payout_scale(losers_pool: int, winners_due: int) -> float:

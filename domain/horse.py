@@ -186,7 +186,7 @@ def random_stats(rng: random.Random, total: int = STAT_TOTAL) -> dict[str, int]:
         scale = (total - STAT_MIN * len(STAT_KEYS)) / sum(raw)
         vals = [STAT_MIN + unit * round(r * scale / unit) for r in raw]
         vals[0] += total - sum(vals)  # 端数は先頭に寄せる（total・unit とも5の倍数なので、刻みは保たれる）
-        stats = dict(zip(STAT_KEYS, vals))
+        stats = dict(zip(STAT_KEYS, vals, strict=True))
         if (
             set(stats) == set(STAT_KEYS)
             and sum(stats.values()) == total
@@ -364,7 +364,7 @@ def _win_weights(runners: list[Runner]) -> list[float]:
     share = _ability_share(runners)
     prior = [ABILITY_PRIOR_WEIGHT * sh + (1 - ABILITY_PRIOR_WEIGHT) * flat for sh in share]
     raw = []
-    for r, pr in zip(runners, prior):
+    for r, pr in zip(runners, prior, strict=True):
         p = (r.wins + RECORD_PRIOR_RUNS * pr) / (r.races + RECORD_PRIOR_RUNS)
         if r.races == 0:
             p *= FIRST_RUN_FACTOR
@@ -380,7 +380,7 @@ def _place_probs(runners: list[Runner]) -> list[float]:
     share = _ability_share(runners)
     prior = [ABILITY_PRIOR_WEIGHT * (sh * min(3, n)) + (1 - ABILITY_PRIOR_WEIGHT) * flat for sh in share]
     raw = []
-    for r, pr in zip(runners, prior):
+    for r, pr in zip(runners, prior, strict=True):
         p = (r.places + RECORD_PRIOR_RUNS * pr) / (r.races + RECORD_PRIOR_RUNS)
         if r.races == 0:
             p *= FIRST_RUN_FACTOR
@@ -408,8 +408,8 @@ def _blended_probs(runners: list[Runner], track: Optional[Track]) -> tuple[list[
     sim_win, sim_place = estimate(runners, track, ODDS_SIMS)
     w = ODDS_SIM_WEIGHT
     return (
-        [w * s + (1 - w) * r for s, r in zip(sim_win, win)],
-        [min(PLACE_CAP, w * s + (1 - w) * r) for s, r in zip(sim_place, place)],
+        [w * s + (1 - w) * r for s, r in zip(sim_win, win, strict=True)],
+        [min(PLACE_CAP, w * s + (1 - w) * r) for s, r in zip(sim_place, place, strict=True)],
     )
 
 
@@ -421,8 +421,8 @@ def make_all_odds(runners: list[Runner], track: Optional[Track] = None) -> dict[
     """
     lanes = [r.lane for r in runners]
     win_probs, place_probs = _blended_probs(runners, track)
-    win = dict(zip(lanes, win_probs))
-    place = dict(zip(lanes, place_probs))
+    win = dict(zip(lanes, win_probs, strict=True))
+    place = dict(zip(lanes, place_probs, strict=True))
 
     def first_two(a: int, b: int) -> float:  # a が1着・b が2着
         return win[a] * win[b] / (1 - win[a])
