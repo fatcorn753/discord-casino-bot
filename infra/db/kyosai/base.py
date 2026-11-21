@@ -63,12 +63,12 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
     # 取引停止時の引き戻し（破産猶予入り・自己破産。#25 と同型の逃避をふさぐ）
 
     def prepare(self, guild_id: int, user_id: int, now: float) -> None:
-        self.kyosai_pull_back_for(guild_id, user_id, now)
+        self._kyosai_pull_back_for(guild_id, user_id, now)
 
     def on_grace_enter(self, guild_id: int, user_id: int, now: float) -> None:
-        self.kyosai_pull_back_for(guild_id, user_id, now)
+        self._kyosai_pull_back_for(guild_id, user_id, now)
 
-    def kyosai_pull_back_for(self, guild_id: int, user_id: int, now: float) -> int:
+    def _kyosai_pull_back_for(self, guild_id: int, user_id: int, now: float) -> int:
         """その人が最高入札者になっている進行中の競りをすべて取り消し、預かり金を手元へ戻す。引き戻した件数を返す。"""
         pulled = 0
         for row in self._all(

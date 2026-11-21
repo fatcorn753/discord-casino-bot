@@ -403,7 +403,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
             for uid, v in investors.items():
                 totals[uid] = totals.get(uid, 0) + v
 
-    def company_take_for(self, guild_id: int, user_id: int, need: int) -> int:
+    def _company_take_for(self, guild_id: int, user_id: int, need: int) -> int:
         """強制執行: 会社資金から need まで取り上げる。取り上げた額を返す。"""
         c = self._load(guild_id, user_id)
         taken = max(0, min(need, c["funds"])) if c else 0
@@ -413,7 +413,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
             )
         return taken
 
-    def company_dissolve_for(self, guild_id: int, user_id: int) -> int:
+    def _company_dissolve_for(self, guild_id: int, user_id: int) -> int:
         """自己破産: 会社をたたむ（事業所と在庫は失う）。残っていた会社資金を返す。"""
         c = self._load(guild_id, user_id)
         if c is None:
@@ -432,7 +432,7 @@ class CompanySeizureStep(IAssetSeizureStep):
         self._notices = notices
 
     def seize(self, guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
-        taken = self._company.company_take_for(guild_id, user_id, need)
+        taken = self._company._company_take_for(guild_id, user_id, need)
         if taken:
             self._account.ledger(
                 guild_id,
@@ -453,6 +453,6 @@ class CompanyLiquidationStep(ILiquidationStep):
         self._company = company
 
     def liquidate(self, guild_id: int, user_id: int, now: float) -> None:
-        saved = self._company.company_dissolve_for(guild_id, user_id)
+        saved = self._company._company_dissolve_for(guild_id, user_id)
         if saved:
             self._account.apply(guild_id, user_id, saved, "破産:会社資金の差し押さえ")
