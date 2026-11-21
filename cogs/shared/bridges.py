@@ -64,14 +64,7 @@ class NoOpShopTitleBridge(IShopTitleBridge):
         return None
 
 
-class IAdminPanelBridge:
-    """運営向けパネル操作の共通名目的基底。各操作（開始/出し直し/中止など）は (成功か, 説明) を返す契約。
-
-    メソッドはここに置かず、各機能のブリッジが自分の操作だけを宣言する（ISP）。
-    """
-
-
-class IEventAdminBridge(IAdminPanelBridge):
+class IEventAdminBridge:
     """運営向けイベント操作（Admin → EventCog）のブリッジ契約。"""
 
     async def start_manual(
@@ -128,7 +121,7 @@ class NoOpHorseButtonBridge(IHorseButtonBridge):
         return None
 
 
-class IRaffleAdminBridge(IAdminPanelBridge):
+class IRaffleAdminBridge:
     """運営向け抽選操作（Admin → RaffleCog）のブリッジ契約（host/repost/cancel はすべて (成功か, 説明) を返す）。"""
 
     async def host(
