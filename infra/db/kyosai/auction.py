@@ -1,26 +1,27 @@
 """帝愛の持ち口の競り（#93。値段は入札で決まる）。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain import kyosai, p2p
 from domain.errors import Outcome, fail
+from domain.ports.contracts import KyosaiAuctionEventRow, KyosaiAuctionRow
 
 from .daily import KyosaiRepo as Base
 
 
 class KyosaiRepo(Base):
-    def _open_auction_for(self, guild_id: int) -> Optional[dict[str, Any]]:
+    def _open_auction_for(self, guild_id: int) -> Optional[KyosaiAuctionRow]:
         return self._one(
             "SELECT * FROM kyosai_auctions WHERE guild_id=? AND status='open' ORDER BY id LIMIT 1", (guild_id,)
         )
 
-    def kyosai_auction_tick(self, now: float) -> list[dict[str, Any]]:
+    def kyosai_auction_tick(self, now: float) -> list[KyosaiAuctionEventRow]:
         """締切を過ぎた競りを締め（落札なら口を渡し、代金を銀行の収入にする）、帝愛の持ち口があれば次の競りを出す。
 
         流動性ゲート（準備率が低い・破産猶予中の人がいる）の間も、競りは止めない（落札の代金で銀行に現金が入り、
         流動性を助けるため。止めるのは、プレイヤーどうしの譲渡だけ）。起きたこと [{event: sold/unsold/listed, ...}] を返す。
         """
-        events: list[dict[str, Any]] = []
+        events: list[KyosaiAuctionEventRow] = []
         with self._db.tx():
             gid = self._g()
             self.bank_sync(gid, now)
@@ -31,10 +32,10 @@ class KyosaiRepo(Base):
                     self._move_units_for(gid, kyosai.HOUSE, row["top_bidder"], row["units"], now)
                     self._bank.bank_income_for(gid, row["top_bid"], now)
                     self._conn.execute("UPDATE kyosai_auctions SET status='sold' WHERE id=?", (row["id"],))
-                    events.append({**dict(row), "event": "sold"})
+                    events.append({**row, "event": "sold"})
                 else:
                     self._conn.execute("UPDATE kyosai_auctions SET status='unsold' WHERE id=?", (row["id"],))
-                    events.append({**dict(row), "event": "unsold"})
+                    events.append({**row, "event": "unsold"})
                 row = None
             house = self.units_of_for(gid, kyosai.HOUSE)
             if row is None and house > 0:
@@ -43,13 +44,23 @@ class KyosaiRepo(Base):
                 cur = self._conn.execute(
                     "INSERT INTO kyosai_auctions (guild_id, units, ends) VALUES (?, ?, ?)", (gid, units, ends)
                 )
-                listed = {"id": cur.lastrowid, "units": units, "ends": ends, "top_bid": 0, "top_bidder": None}
+                auction_id = cur.lastrowid
+                assert auction_id is not None
+                listed: KyosaiAuctionRow = {
+                    "id": auction_id,
+                    "guild_id": gid,
+                    "units": units,
+                    "top_bid": 0,
+                    "top_bidder": None,
+                    "ends": ends,
+                    "status": "open",
+                }
                 # 売れ残りの出し直しは告知しない（同じ口の出し直しで、告知チャンネルを埋めないように）
                 if not any(e["event"] == "unsold" for e in events):
                     events.append({**listed, "event": "listed"})
         return events
 
-    def kyosai_bid(self, user_id: int, amount: int, now: float) -> Outcome[dict[str, Any]]:
+    def kyosai_bid(self, user_id: int, amount: int, now: float) -> Outcome[KyosaiAuctionRow]:
         """出ている競りに入札する（入札額は手元から預かり、前の最高値の人へ返す）。(成功か, Failure か競りの行)。"""
         with self._db.tx():
             gid = self._g()
@@ -79,4 +90,4 @@ class KyosaiRepo(Base):
                 "UPDATE kyosai_auctions SET top_bid=?, top_bidder=?, ends=? WHERE id=?",
                 (amount, user_id, ends, row["id"]),
             )
-            return True, {**dict(row), "top_bid": amount, "top_bidder": user_id, "ends": ends}
+            return True, {**row, "top_bid": amount, "top_bidder": user_id, "ends": ends}

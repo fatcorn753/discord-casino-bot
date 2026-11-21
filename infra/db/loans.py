@@ -6,12 +6,13 @@
 表の定義は infra/db/schema/tables.py にある。数字と計算は domain/loans.py。
 """
 
+from collections.abc import Mapping
 from typing import Any, Optional
 
 from domain import loans as loans_mod
 from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import IGraceReader, IStatusReader, NoOpGraceReader, NoOpStatusReader
-from domain.ports.contracts import LoanBook, LoanCredit
+from domain.ports.contracts import LoanBook, LoanCollectRow, LoanCredit, LoanRow
 from domain.ports.repos import ILoanRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -34,13 +35,13 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         self._status_reader: IStatusReader = status_reader or NoOpStatusReader()
         self._bank: IGraceReader = bank or NoOpGraceReader()
 
-    def _loan_owed(self, loan: dict[str, Any], now: float) -> int:
+    def _loan_owed(self, loan: Mapping[str, Any], now: float) -> int:
         """いまの返済総額（利息つき）。承諾前は 0。"""
         if not loan["accepted_at"]:
             return 0
         return loans_mod.total_owed(loan["principal"], loan["rate_tenths"], loan["term_days"], loan["accepted_at"], now)
 
-    def loan_remaining(self, loan: dict[str, Any], now: float) -> int:
+    def loan_remaining(self, loan: Mapping[str, Any], now: float) -> int:
         return max(0, self._loan_owed(loan, now) - loan["paid"])
 
     def has_overdue_for(self, guild_id: int, user_id: int) -> bool:
@@ -52,7 +53,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
             is not None
         )
 
-    def active_loans_for(self, guild_id: int, user_id: int) -> list[dict[str, Any]]:
+    def active_loans_for(self, guild_id: int, user_id: int) -> list[LoanRow]:
         return self._all(
             "SELECT * FROM loans WHERE guild_id=? AND borrower_id=? AND status IN ('active','overdue') ORDER BY id",
             (guild_id, user_id),
@@ -64,7 +65,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
     def finalize_bankrupt_loan_for(self, loan_id: int, repaid: bool) -> None:
         self._conn.execute("UPDATE loans SET status=? WHERE id=?", ("repaid" if repaid else "discharged", loan_id))
 
-    def _loan_pay_for(self, guild_id: int, loan: dict[str, Any], amount: int) -> None:
+    def _loan_pay_for(self, guild_id: int, loan: LoanRow, amount: int) -> None:
         """借りた人 → 貸した人へ amount を動かす（借りた人の残高は、呼び出し側が確かめておく）。"""
         self._account.apply(guild_id, loan["borrower_id"], -amount, f"貸付の返済→{loan['lender_id']}（#{loan['id']}）")
         self._account.ensure(guild_id, loan["lender_id"])
@@ -79,12 +80,12 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         """
         total = 0
         now = self._now()
-        rows = self._all(
+        rows: list[LoanRow] = self._all(
             "SELECT * FROM loans WHERE guild_id=? AND borrower_id=? AND status='overdue' ORDER BY id",
             (guild_id, user_id),
         )
         for row in rows:
-            loan = dict(row)
+            loan = row
             take = min(self._account.raw_balance(guild_id, user_id), self.loan_remaining(loan, now), budget - total)
             if take > 0:
                 self._loan_pay_for(guild_id, loan, take)
@@ -179,7 +180,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         """募集に応じて貸す（早い者勝ち）。貸す人の残高から借りる人へ、その場でお金が移る。(成功か, 理由) を返す。"""
         with self._db.tx():
             gid = self._g()
-            loan = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
+            loan: Optional[LoanRow] = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
             if loan is None or loan["status"] != "request":
                 return False, fail("loan_request_ended")
             if lender_id == loan["borrower_id"]:
@@ -270,7 +271,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         with self._db.tx():
             self._conn.execute("UPDATE loans SET message_id=? WHERE id=?", (message_id, loan_id))
 
-    def loan_get(self, loan_id: int) -> Optional[dict[str, Any]]:
+    def loan_get(self, loan_id: int) -> Optional[LoanRow]:
         with self._lock:
             return self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
 
@@ -278,7 +279,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         """借りる人が承諾して、お金を受け取る。(成功か, 理由) を返す。"""
         with self._db.tx():
             gid = self._g()
-            loan = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
+            loan: Optional[LoanRow] = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
             if loan is None or loan["status"] != "offer":
                 return False, fail("loan_offer_ended")
             if user_id != loan["borrower_id"]:
@@ -305,7 +306,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
     def loan_decline(self, loan_id: int, user_id: int) -> Outcome[str]:
         """借りる人が断る。"""
         with self._db.tx():
-            loan = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
+            loan: Optional[LoanRow] = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
             if loan is None or loan["status"] != "offer":
                 return False, fail("loan_offer_ended")
             if user_id != loan["borrower_id"]:
@@ -316,7 +317,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
     def loan_cancel(self, loan_id: int, user_id: int) -> Outcome[str]:
         """貸す側が提案を取り下げる。"""
         with self._db.tx():
-            loan = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
+            loan: Optional[LoanRow] = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, self._g()))
             if loan is None or loan["status"] not in ("offer", "request"):
                 return False, fail("loan_offer_ended")
             owner = loan["borrower_id"] if loan["status"] == "request" else loan["lender_id"]
@@ -331,7 +332,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         """借りた人が返す。amount が None なら全額（残高の範囲で）。(成功か, Failure か返した額) を返す。"""
         with self._db.tx():
             gid = self._g()
-            loan = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
+            loan: Optional[LoanRow] = self._one("SELECT * FROM loans WHERE id=? AND guild_id=?", (loan_id, gid))
             if loan is None or loan["status"] not in ("active", "overdue"):
                 return False, fail("loan_repay_not_found")
             if loan["borrower_id"] != user_id:
@@ -352,29 +353,32 @@ class LoanRepo(ScopedRepo, ILoanRepo):
                 self._conn.execute("UPDATE loans SET status='repaid' WHERE id=?", (loan_id,))
             return True, pay
 
-    def loan_collect_due(self, now: float) -> list[Any]:
+    def loan_collect_due(self, now: float) -> list[LoanCollectRow]:
         """期限が来た貸付を、借りた人の残高から自動で回収する。足りなければ延滞にする。結果の一覧を返す。"""
-        out = []
+        out: list[LoanCollectRow] = []
         with self._db.tx():
             gid = self._g()
-            for row in self._all(
+            collect_rows: list[LoanRow] = self._all(
                 "SELECT * FROM loans WHERE guild_id=? AND status='active' AND due<=? ORDER BY id", (gid, now)
-            ):
-                loan = dict(row)
-                remaining = self.loan_remaining(loan, loan["due"])
+            )
+            for row in collect_rows:
+                loan: LoanRow = row
+                due = loan["due"]
+                assert due is not None
+                remaining = self.loan_remaining(loan, due)
                 take = min(self._account.raw_balance(gid, loan["borrower_id"]), remaining) if remaining else 0
                 if take > 0:
                     self._loan_pay_for(gid, loan, take)
-                left = self.loan_remaining(loan, loan["due"])
+                left = self.loan_remaining(loan, due)
                 status = "repaid" if left <= 0 else "overdue"
                 self._conn.execute("UPDATE loans SET status=? WHERE id=?", (status, loan["id"]))
                 out.append({**loan, "status": status, "collected": take, "left": left})
         return out
 
-    def loan_due_soon(self, now: float) -> list[Any]:
+    def loan_due_soon(self, now: float) -> list[LoanRow]:
         """期限まで REMIND_HOURS 時間を切った、まだ知らせていない貸付。知らせたことを記録して返す。"""
         with self._db.tx():
-            rows = self._all(
+            rows: list[LoanRow] = self._all(
                 "SELECT * FROM loans WHERE guild_id=? AND status='active' AND reminded=0 AND due>? AND due<=?",
                 (self._g(), now, now + loans_mod.REMIND_HOURS * 3600),
             )
@@ -382,10 +386,10 @@ class LoanRepo(ScopedRepo, ILoanRepo):
                 self._conn.execute("UPDATE loans SET reminded=1 WHERE id=?", (r["id"],))
             return rows
 
-    def loan_expire_offers(self, now: float) -> list[Any]:
+    def loan_expire_offers(self, now: float) -> list[LoanRow]:
         """承諾の期限が過ぎた提案を終了にして返す（投稿を書き換えるため）。"""
         with self._db.tx():
-            rows = self._all(
+            rows: list[LoanRow] = self._all(
                 "SELECT * FROM loans WHERE guild_id=? AND status IN ('offer','request') AND offer_expires<=?",
                 (self._g(), now),
             )
@@ -393,10 +397,10 @@ class LoanRepo(ScopedRepo, ILoanRepo):
                 self._conn.execute("UPDATE loans SET status='expired' WHERE id=?", (r["id"],))
             return rows
 
-    def loan_list(self, user_id: int) -> LoanBook:
+    def loan_list(self, user_id: int) -> LoanBook[LoanRow]:
         """自分が借りている／貸している、終了前の貸付（承諾待ちを含む）。"""
         with self._lock:
-            rows = self._all(
+            rows: list[LoanRow] = self._all(
                 "SELECT * FROM loans WHERE guild_id=? AND (borrower_id=? OR lender_id=?) AND status IN ('offer','request','active','overdue') ORDER BY id",
                 (self._g(), user_id, user_id),
             )

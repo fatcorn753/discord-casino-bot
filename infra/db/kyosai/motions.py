@@ -1,20 +1,21 @@
 """動議（信託の上乗せ金利。#94: いくつも並行でき、締めた順に後勝ち）。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain import kyosai
 from domain.errors import Outcome, fail
+from domain.ports.contracts import KyosaiMotionProposeRow, KyosaiMotionRow, KyosaiMotionViewRow
 
 from .offers import KyosaiRepo as Base
 
 
 class KyosaiRepo(Base):
-    def _open_motions_for(self, guild_id: int) -> list[dict[str, Any]]:
+    def _open_motions_for(self, guild_id: int) -> list[KyosaiMotionRow]:
         return self._all(
             "SELECT * FROM kyosai_motions WHERE guild_id=? AND status='open' ORDER BY closes, id", (guild_id,)
         )
 
-    def kyosai_propose(self, user_id: int, premium: float, now: float) -> Outcome[dict[str, Any]]:
+    def kyosai_propose(self, user_id: int, premium: float, now: float) -> Outcome[KyosaiMotionProposeRow]:
         """動議を出す。(成功か, Failure か動議の行)。
 
         通知の荒らしを防ぐため、口が MOTION_MIN_UNITS 以上の人だけが、1人 MOTION_MAX_OPEN_PER_USER 件まで、
@@ -42,10 +43,17 @@ class KyosaiRepo(Base):
                 (gid, user_id, premium, now, closes),
             )
             motion_id = cur.lastrowid
+            assert motion_id is not None
             self._conn.execute(
                 "INSERT INTO kyosai_votes (motion_id, user_id, yes) VALUES (?, ?, 1)", (motion_id, user_id)
             )
-            return True, {"id": motion_id, "proposer": user_id, "premium": premium, "closes": closes}
+            proposed: KyosaiMotionProposeRow = {
+                "id": motion_id,
+                "proposer": user_id,
+                "premium": premium,
+                "closes": closes,
+            }
+            return True, proposed
 
     def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: Optional[int] = None) -> Outcome[int]:
         """投票中の動議に投票する（あとから変えられる）。番号を省けるのは、投票中が1件だけのとき。
@@ -89,12 +97,12 @@ class KyosaiRepo(Base):
         """流通口数（帝愛の持ち口を除いた口の合計。可決に要る賛成の割合の分母）。"""
         return sum(u for _, u in self._holdings_for(guild_id, with_house=False))
 
-    def kyosai_close_motions(self, now: float) -> list[dict[str, Any]]:
+    def kyosai_close_motions(self, now: float) -> list[KyosaiMotionViewRow]:
         """締切を過ぎた動議を、締切の順にすべて締める。可決なら、その順に信託の上乗せ金利を上書きする（後勝ち）。
 
         締めた動議の結果を、締めた順に返す（なければ空）。
         """
-        out: list[dict[str, Any]] = []
+        out: list[KyosaiMotionViewRow] = []
         with self._db.tx():
             gid = self._g()
             circulating = self._circulating_for(gid)
@@ -112,7 +120,7 @@ class KyosaiRepo(Base):
                     self._conn.execute(
                         "UPDATE teiai_bank SET trust_premium=? WHERE guild_id=?", (motion["premium"], gid)
                     )
-                out.append({**dict(motion), "status": status, "yes": yes, "no": no, "circulating": circulating})
+                out.append({**motion, "status": status, "yes": yes, "no": no, "circulating": circulating})
         return out
 
     def kyosai_set_motion_message(self, motion_id: int, channel_id: int, message_id: int) -> None:
@@ -123,11 +131,13 @@ class KyosaiRepo(Base):
                 (channel_id, message_id, self._g(), motion_id),
             )
 
-    def kyosai_motion(self, motion_id: int, now: float) -> Optional[dict[str, Any]]:
+    def kyosai_motion(self, motion_id: int, now: float) -> Optional[KyosaiMotionViewRow]:
         """動議1件と、いまの賛成・反対の口数（ボタンの投稿の書き換え用）。"""
         with self._lock:
             gid = self._g()
-            row = self._one("SELECT * FROM kyosai_motions WHERE id=? AND guild_id=?", (motion_id, gid))
+            row: Optional[KyosaiMotionRow] = self._one(
+                "SELECT * FROM kyosai_motions WHERE id=? AND guild_id=?", (motion_id, gid)
+            )
             if row is None:
                 return None
             yes, no = self._tally_for(gid, motion_id) if row["status"] == "open" else (row["yes"], row["no"])

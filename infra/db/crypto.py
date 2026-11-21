@@ -1,6 +1,6 @@
 """証券の現物保有・売買。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain import market as market_mod
 from domain.errors import fail
@@ -56,7 +56,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
                 )
             ]
 
-    def holdings(self, user_id: int) -> list[Any]:
+    def holdings(self, user_id: int) -> list[tuple[str, int, int]]:
         return self.holdings_for(self._g(), user_id)
 
     def crypto_holders(self, limit: int = 10, symbol: str = DEFAULT) -> list[tuple[int, int, int]]:

@@ -1,7 +1,7 @@
 """Composition Root で循環依存を 1 パスの Constructor DI へ解決するための遅延デリゲート群。"""
 
-from collections.abc import Callable
-from typing import Any, Optional
+from collections.abc import Callable, Mapping
+from typing import Any, Generic, Optional, TypeVar
 
 from domain.errors import Failure, Outcome
 from domain.ports.bridges import (
@@ -19,6 +19,7 @@ from domain.ports.bridges import (
     IStatusReader,
     IWealthyReader,
 )
+from domain.ports.contracts import LoanRow
 
 
 class LazyDebtLifecycleHook(IDebtLifecycleHook):
@@ -95,13 +96,13 @@ class LazyOverdueLoanCollector(IOverdueLoanCollector):
     def collect_overdue_for(self, guild_id: int, user_id: int, budget: int) -> int:
         return self._target().collect_overdue_for(guild_id, user_id, budget)
 
-    def loan_remaining(self, loan: dict[str, Any], now: float) -> int:
+    def loan_remaining(self, loan: Mapping[str, Any], now: float) -> int:
         return self._target().loan_remaining(loan, now)
 
     def has_overdue_for(self, guild_id: int, user_id: int) -> bool:
         return self._target().has_overdue_for(guild_id, user_id)
 
-    def active_loans_for(self, guild_id: int, user_id: int) -> list[dict[str, Any]]:
+    def active_loans_for(self, guild_id: int, user_id: int) -> list[LoanRow]:
         return self._target().active_loans_for(guild_id, user_id)
 
     def record_bankrupt_payment_for(self, loan_id: int, paid: int) -> None:

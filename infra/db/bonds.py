@@ -21,7 +21,7 @@ from domain.ports.bridges import (
     NoOpDebtRepayHook,
     NoOpMarginCollateralGuard,
 )
-from domain.ports.contracts import ActiveBond, BondQuote, HoldingBook
+from domain.ports.contracts import ActiveBond, BondQuote, BondRow, HoldingBook
 from domain.ports.repos import IBondRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -108,23 +108,28 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
             ):
                 totals[r["user_id"]] = totals.get(r["user_id"], 0) + r["p"]
 
-    def bond_list(self, user_id: int, recent: int = 5) -> HoldingBook:
+    def bond_list(self, user_id: int, recent: int = 5) -> HoldingBook[BondRow]:
         """保有中（満期が近い順）と、直近に決着したもの（新しい順）。"""
         with self._lock:
-            rows = self._all("SELECT * FROM bonds WHERE guild_id=? AND user_id=? ORDER BY id", (self._g(), user_id))
+            rows: list[BondRow] = self._all(
+                "SELECT * FROM bonds WHERE guild_id=? AND user_id=? ORDER BY id", (self._g(), user_id)
+            )
         active = sorted((r for r in rows if r["status"] == "active"), key=lambda r: r["due"])
         done = [r for r in reversed(rows) if r["status"] != "active"][:recent]
         return {"active": active, "done": done}
 
-    def bond_settle(self, now: float, rng: Optional[random.Random] = None) -> list[dict[str, Any]]:
+    def bond_settle(self, now: float, rng: Optional[random.Random] = None) -> list[BondRow]:
         """ジャンク債の倒産抽選と、満期を過ぎた債券の決着（このサーバー全員分）。決着した行（status と paid つき）を返す。"""
         rng = rng if rng is not None else cast("random.Random", random)
-        out = []
+        out: list[BondRow] = []
         offset = 0  # このバッチの流入（倒産で返さなくてよくなった元本と、満期で返す元本）
-        matured = []
+        matured: list[tuple[BondRow, Any, int]] = []
         with self._db.tx():
             gid = self._g()
-            for row in self._all("SELECT * FROM bonds WHERE guild_id=? AND status='active' ORDER BY id", (gid,)):
+            bond_rows: list[BondRow] = self._all(
+                "SELECT * FROM bonds WHERE guild_id=? AND status='active' ORDER BY id", (gid,)
+            )
+            for row in bond_rows:
                 kind = bonds_mod.KINDS[row["kind"]]
                 until = min(now, row["due"])
                 since = row["checked"] if row["checked"] is not None else row["ts"]
@@ -133,7 +138,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
                         self._conn.execute("UPDATE bonds SET status='defaulted', paid=0 WHERE id=?", (row["id"],))
                         # 返さなくてよくなった元本は、銀行の儲け（流入）になる
                         offset += row["principal"]
-                        out.append({**dict(row), "status": "defaulted", "paid": 0})
+                        out.append({**row, "status": "defaulted", "paid": 0})
                         continue
                     self._conn.execute("UPDATE bonds SET checked=? WHERE id=?", (until, row["id"]))
                 if row["due"] > now:
@@ -154,10 +159,10 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
                     gid, row["user_id"], row["principal"], f"帝愛への返済（債券の元本:{kind.name}）"
                 )
                 self._conn.execute("UPDATE bonds SET status='paid', paid=? WHERE id=?", (paid, row["id"]))
-                out.append({**dict(row), "status": "paid", "paid": paid})
+                out.append({**row, "status": "paid", "paid": paid})
         return sorted(out, key=lambda o: o["id"])
 
-    def bond_price(self, row: dict[str, Any], now: float) -> int:
+    def bond_price(self, row: BondRow, now: float) -> int:
         """その債券を、いま売ったときの手取り（売れない債券は 0）。表示用。"""
         kind = bonds_mod.KINDS[row["kind"]]
         return self._sale_value_for(self._g(), row, now) if kind.sellable else 0
