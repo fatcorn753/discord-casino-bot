@@ -166,8 +166,8 @@ class BlackjackView(GameOwnerView):
         if (
             len(self.game.player) != 2 or self.game.doubled
         ):  # 最初の2枚のときだけ。無効化の表示は古い画面には届かないので、ここでも断る
-            return await interaction.response.send_message(
-                embed=ui.error_embed("ダブルできません", "ダブルは、最初の2枚のときだけ選べます。"), ephemeral=True
+            return await ui.reply_error(
+                interaction, "ダブルは、最初の2枚のときだけ選べます。", title="ダブルできません"
             )
         gid, uid, eid = self.ctx.guild_id, interaction.user.id, self.ctx.escrow_id
         casino = self.ctx.casino
@@ -175,11 +175,8 @@ class BlackjackView(GameOwnerView):
             need = self.ctx.bet - casino.balance_of(gid, uid)
             can, why = self.ctx.deps.teiai.can_borrow_for_bet(gid, uid, need)
             if not can:
-                return await interaction.response.send_message(
-                    embed=ui.error_embed(
-                        "ダブルできません", f"倍にするためのペリカが足りません。{format_failure(why)}"
-                    ),
-                    ephemeral=True,
+                return await ui.reply_error(
+                    interaction, f"倍にするためのペリカが足りません。{format_failure(why)}", title="ダブルできません"
                 )
             agreed = await confirm_action(
                 interaction,

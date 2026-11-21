@@ -140,30 +140,25 @@ async def start_game(
 
     if not res.ok:
         if res.reason_kind == "session":
-            await interaction.response.send_message(
-                embed=ui.error_embed("まだ始められません", res.reason), ephemeral=True
-            )
+            await ui.reply_error(interaction, res.reason, title="まだ始められません")
         elif res.reason_kind == "min_bet":
-            await interaction.response.send_message(
-                embed=ui.error_embed("賭け金が少なすぎます", f"{ui.pelica(MIN_BET)} 以上で指定してください。"),
-                ephemeral=True,
+            await ui.reply_error(
+                interaction, f"{ui.pelica(MIN_BET)} 以上で指定してください。", title="賭け金が少なすぎます"
             )
         elif res.reason_kind == "balance_factor":
             msg = (
                 f"{factor_reason}賭け金の **{balance_factor}倍**（{ui.pelica(bet * balance_factor)}）以上の残高が必要です（いまの残高: {ui.pelica(res.balance)}）。\n"
                 f"いまの残高なら、**{ui.pelica(res.balance // balance_factor)}** まで賭けられます。"
             )
-            await interaction.response.send_message(embed=ui.error_embed("ペリカが足りません", msg), ephemeral=True)
+            await ui.reply_error(interaction, msg, title="ペリカが足りません")
         elif res.reason_kind == "balance":
             msg = f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。\n`/ペリカ デイリー` で6時間ごとにもらえます。"
-            await interaction.response.send_message(embed=ui.error_embed("ペリカが足りません", msg), ephemeral=True)
+            await ui.reply_error(interaction, msg, title="ペリカが足りません")
         else:
-            await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "ペリカが足りません",
-                    f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。",
-                ),
-                ephemeral=True,
+            await ui.reply_error(
+                interaction,
+                f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。",
+                title="ペリカが足りません",
             )
         return None
     ctx = GameContext(
