@@ -1,7 +1,7 @@
-"""ポートの戻り値に使う、型付きの入れ物（catalogs に依存しない値型だけを置く）。
+"""ポートの戻り値に使う、型付きの入れ物のうち基礎の値型（catalogs に依存しない値型だけを置く）。
 
 domain/types.py は catalogs を読むため、ポート（domain/ports）からは実行時に import できない。
-ポートの契約に出てくる値型は、ここに置く。
+ポートの契約に出てくる値型は、このパッケージに置く（行モデルは social / games / market / teiai の各サブモジュール）。
 """
 
 from dataclasses import dataclass
