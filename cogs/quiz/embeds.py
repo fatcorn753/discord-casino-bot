@@ -12,6 +12,7 @@ from cogs.shared import ui
 from cogs.shared.amount import typed_amount
 from domain import quizpay
 from domain.ports import get_catalogs
+from domain.ports.contracts import QuizAnswerResult, QuizView
 
 _QUIZ_CFG = get_catalogs().economy().quizpay
 MAX_CHOICE_LEN = _QUIZ_CFG.max_choice_len
@@ -86,7 +87,7 @@ def question_embed(q: Mapping[str, Any], order: list, remaining: int) -> discord
     return e
 
 
-def result_embed(result: dict, more: int, quiz: Optional[Mapping[str, Any]] = None) -> discord.Embed:
+def result_embed(result: QuizAnswerResult, more: int, quiz: Optional[QuizView] = None) -> discord.Embed:
     if result["correct"] and result["reward_blocked"]:
         e = ui.embed(
             f"⭕ {verdict(quiz, True)}",

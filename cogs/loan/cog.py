@@ -39,6 +39,7 @@ from cogs.shared.tasks import run_for_allowed_guilds
 from domain import loans
 from domain.duration import format_minutes
 from domain.errors import Failure
+from domain.ports.contracts import LoanRow
 from domain.ports.repos import IGuildRepo
 from services.economy import EconomyService
 from services.loan import LoanService
@@ -216,7 +217,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
         now = self._loans.now_ts()
         data = self._loans.list_for(guild_id, interaction.user.id)
 
-        def line(loan: Mapping[str, Any], mine_is_borrower: bool) -> str:
+        def line(loan: LoanRow, mine_is_borrower: bool) -> str:
             other = (
                 who(loan["lender_id"] if mine_is_borrower else loan["borrower_id"])
                 if loan["lender_id"]
@@ -227,11 +228,11 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
             if loan["status"] == "offer":
                 return f"`#{loan['id']}` {other}　{ui.pelica(loan['principal'])}　日利{loans.rate_text(loan['rate_tenths'])}・{loan['term_days']}日　**承諾待ち**"
             left = self._loans.remaining(guild_id, loan, now)
-            late = loans.late_interest(
-                loan["principal"], loan["rate_tenths"], loan["term_days"], loan["accepted_at"], now
-            )
+            accepted_at = loan["accepted_at"] if loan["accepted_at"] is not None else 0.0
+            late = loans.late_interest(loan["principal"], loan["rate_tenths"], loan["term_days"], accepted_at, now)
+            due = loan["due"] if loan["due"] is not None else 0.0
             state = (
-                f"⚠️延滞（うち遅延損害金 {late:,}）" if loan["status"] == "overdue" else f"期限 <t:{int(loan['due'])}:R>"
+                f"⚠️延滞（うち遅延損害金 {late:,}）" if loan["status"] == "overdue" else f"期限 <t:{int(due)}:R>"
             )
             return f"`#{loan['id']}` {other}　元本{loan['principal']:,}　日利{loans.rate_text(loan['rate_tenths'])}　残り **{left:,}**　{state}"
 

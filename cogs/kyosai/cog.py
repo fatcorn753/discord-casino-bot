@@ -26,6 +26,7 @@ from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import kyosai, p2p
 from domain.errors import Failure
+from domain.ports.contracts import KyosaiOfferRow, KyosaiStatus
 from domain.ports.repos import IGuildRepo
 from services.kyosai import KyosaiService
 
@@ -40,7 +41,7 @@ def _need_yes(circulating: int) -> int:
     return math.ceil(circulating * kyosai.MOTION_MIN_YES_SHARE)
 
 
-def status_embed(s: dict[str, Any], offers: Sequence[Mapping[str, Any]], user_id: int) -> discord.Embed:
+def status_embed(s: KyosaiStatus, offers: Sequence[KyosaiOfferRow], user_id: int) -> discord.Embed:
     share = s["units"] / s["total"] if s["total"] else 0.0
     lines = [
         f"あなたの口: **{s['units']:,}口**（全 {s['total']:,}口 の {share:.2%}）　持っている人 {s['holders']}人",

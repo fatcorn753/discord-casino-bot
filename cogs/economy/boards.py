@@ -7,6 +7,7 @@ from typing import Optional
 import discord
 
 from cogs.shared import logthrottle, ranking, ui
+from domain.ports.contracts import LeaderboardRow
 from domain.ports.repos import IGuildRepo
 from services.ranking import RankingService
 
@@ -79,7 +80,7 @@ async def refresh_board(
     bot: discord.Client,
     ranking_repos: RankingService,
     guild_repo: IGuildRepo,
-    board: dict,
+    board: LeaderboardRow,
     interval_minutes: int,
 ) -> None:
     """掲示板のメッセージを最新の順位に書き換える。消されていたら投稿し直す。"""
@@ -106,7 +107,7 @@ async def refresh_board(
         logthrottle.warn(("board", guild.id), f"ランキング掲示板を更新できません: guild={guild.id}: {exc!r}")
 
 
-async def delete_board_message(guild: discord.Guild, board: Optional[dict]) -> None:
+async def delete_board_message(guild: discord.Guild, board: Optional[LeaderboardRow]) -> None:
     if not board:
         return
     channel = guild.get_channel(board["channel_id"])

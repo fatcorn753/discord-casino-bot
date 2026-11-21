@@ -7,6 +7,7 @@ import discord
 from cogs.company.texts import CONDITION_TEXT, KIND_BLURB, KIND_MARK, PANEL_HINT
 from cogs.shared import ui
 from domain import company as company_mod
+from domain.ports.contracts import CompanyView, StakeHolding
 
 
 def kind_label(kind: str) -> str:
@@ -18,7 +19,7 @@ def meter(ratio: float, width: int = 10) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
-def company_embed(c: dict[str, Any]) -> discord.Embed:
+def company_embed(c: CompanyView) -> discord.Embed:
     """自分の会社の状況。"""
     full = c["stock"] / c["storage_cap"] if c["storage_cap"] else 0.0
     color = ui.ERROR if c["unpaid_days"] else ui.GOLD if full >= 0.999 else ui.INFO
@@ -72,7 +73,7 @@ def company_embed(c: dict[str, Any]) -> discord.Embed:
     return e
 
 
-def holdings_embed(rows: list[dict[str, Any]]) -> discord.Embed:
+def holdings_embed(rows: list[StakeHolding]) -> discord.Embed:
     """自分の出資先（/会社 持分）。"""
     if not rows:
         return ui.embed(

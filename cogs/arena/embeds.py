@@ -6,7 +6,7 @@ import discord
 
 from cogs.shared import ui
 from domain import arena as arena_mod
-from domain.ports.contracts import ArenaFighterRow, ArenaTournamentDetailRow
+from domain.ports.contracts import ArenaFinalResult, ArenaFighterRow, ArenaSemiResult, ArenaTournamentDetailRow
 
 FORMAT_NAME = {"duel": "🥊 1on1", "royale": "⚔️ バトルロイヤル"}
 STAGE_LABEL = {
@@ -99,7 +99,7 @@ def tournament_embed(
     return ui.embed(title, "\n".join(lines), ui.GOLD)
 
 
-def semis_result_embed(result: dict) -> discord.Embed:
+def semis_result_embed(result: ArenaSemiResult) -> discord.Embed:
     """準決勝の決着（組ごとの勝者と、決勝の顔ぶれ）。"""
     lines = [f"第{g}組: **{r['winner']}** が勝利（敗: {'・'.join(r['losers'])}）" for g, r in result["groups"].items()]
     return ui.embed(
@@ -109,7 +109,7 @@ def semis_result_embed(result: dict) -> discord.Embed:
     )
 
 
-def final_result_embed(result: dict) -> discord.Embed:
+def final_result_embed(result: ArenaFinalResult) -> discord.Embed:
     return ui.embed(
         "👑 決勝、決着！",
         f"優勝: **{result['champion']}**（他: {'・'.join(result['runner_up'])}）",

@@ -5,6 +5,7 @@ import discord
 from cogs.shared import ui
 from domain import labor as lab
 from domain import relics, shop
+from domain.ports.contracts import LaborState, LaborTop
 
 
 def fatigue_label(fatigue: float) -> str:
@@ -39,7 +40,7 @@ def finds_text(finds: list) -> str:
     )
 
 
-def pot_text(state: dict) -> str:
+def pot_text(state: LaborState) -> str:
     """未受け取りの額。作業員がいるときは、そのうち作業員が稼いだ分（鉱石の売値を含む）も見せる。"""
     text = f"**{ui.pelica(state['pot_total'])}**"
     if state["workers"] or state["pot_workers_total"]:
@@ -47,7 +48,7 @@ def pot_text(state: dict) -> str:
     return text
 
 
-def panel_embed(state: dict, note: str = "") -> discord.Embed:
+def panel_embed(state: LaborState, note: str = "") -> discord.Embed:
     """作業の画面。上に、直前の結果。つぎに、お金と疲労。"""
     fat = state["fatigue"]
     e = ui.embed("⛏ 地下作業", note or "「働く」を押すと、ペリカが貯まります。", ui.DARK)
@@ -106,7 +107,7 @@ def panel_embed(state: dict, note: str = "") -> discord.Embed:
     return e
 
 
-def hire_embed(state: dict, note: str = "") -> discord.Embed:
+def hire_embed(state: LaborState, note: str = "") -> discord.Embed:
     """雇用の画面。作業員の一覧（人数・稼ぎ・次の値段）、寮。"""
     full = state["workers"] >= state["slots"]
     head = [x for x in (note, "⚠ 人数がいっぱいです。寮を強化するか、誰かを解雇しよう。" if full else "") if x]
@@ -150,7 +151,7 @@ def hire_embed(state: dict, note: str = "") -> discord.Embed:
 MEDALS = ui.MEDALS
 
 
-def ranking_embed(data: dict, daily: bool) -> discord.Embed:
+def ranking_embed(data: LaborTop, daily: bool) -> discord.Embed:
     """採掘ランキング。稼いだ額（ペリカ）の多い順。"""
     title = "⛏ 採掘ランキング（今日）" if daily else "⛏ 採掘ランキング（通算）"
     if not data["rows"]:
