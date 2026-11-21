@@ -37,16 +37,14 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
     # 口
     # ------------------------------------------------------------------ #
     def _holdings_for(self, guild_id: int, *, with_house: bool = True) -> list[tuple[int, int]]:
-        rows = self._conn.execute(
+        rows = self._all(
             "SELECT user_id, units FROM kyosai_units WHERE guild_id=? AND units>0 ORDER BY user_id", (guild_id,)
-        ).fetchall()
+        )
         return [(r["user_id"], r["units"]) for r in rows if with_house or r["user_id"] != kyosai.HOUSE]
 
     def units_of_for(self, guild_id: int, user_id: int) -> int:
-        row = self._conn.execute(
-            "SELECT units FROM kyosai_units WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-        ).fetchone()
-        return row["units"] if row else 0
+        v = self._scalar("SELECT units FROM kyosai_units WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+        return v if v is not None else 0
 
     def _move_units_for(self, guild_id: int, src: int, dst: int, units: int, now: float) -> None:
         self._conn.execute(
@@ -82,10 +80,10 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
     def kyosai_pull_back_for(self, guild_id: int, user_id: int, now: float) -> int:
         """その人が最高入札者になっている進行中の競りをすべて取り消し、預かり金を手元へ戻す。引き戻した件数を返す。"""
         pulled = 0
-        for row in self._conn.execute(
+        for row in self._all(
             "SELECT id, top_bid FROM kyosai_auctions WHERE guild_id=? AND status='open' AND top_bidder=?",
             (guild_id, user_id),
-        ).fetchall():
+        ):
             if row["top_bid"] > 0:
                 self._account.ensure(guild_id, user_id)
                 self._account.apply(guild_id, user_id, row["top_bid"], "共済:競りの入札の返金（取引停止）")
@@ -99,9 +97,7 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
 
     def _ensure_supply_for(self, guild_id: int) -> None:
         """口がまだ1つもないサーバーでは、総口数をすべて帝愛の持ち口として用意する（競りで売り出す。#93）。"""
-        total = self._conn.execute(
-            "SELECT COALESCE(SUM(units), 0) FROM kyosai_units WHERE guild_id=?", (guild_id,)
-        ).fetchone()[0]
+        total = self._scalar("SELECT COALESCE(SUM(units), 0) FROM kyosai_units WHERE guild_id=?", (guild_id,))
         if total <= 0:
             self._conn.execute(
                 "INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, ?) "
@@ -111,9 +107,7 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
 
     def _gate_locked_for(self, guild_id: int, now: float) -> bool:
         theta = self._bank.bank_reserve_for(guild_id, now)[2]
-        debtors = self._conn.execute(
-            "SELECT COUNT(*) FROM users WHERE guild_id=? AND grace_until IS NOT NULL", (guild_id,)
-        ).fetchone()[0]
+        debtors = self._scalar("SELECT COUNT(*) FROM users WHERE guild_id=? AND grace_until IS NOT NULL", (guild_id,))
         return kyosai.gate_locked(theta, debtors)
 
     # ------------------------------------------------------------------ #
@@ -159,7 +153,7 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
         with self._db.tx():
             gid = self._g()
             self.bank_sync(gid, now)
-            last = self._conn.execute("SELECT kyosai_div_ts FROM teiai_bank WHERE guild_id=?", (gid,)).fetchone()[0]
+            last = self._scalar("SELECT kyosai_div_ts FROM teiai_bank WHERE guild_id=?", (gid,))
             if last == 0:
                 self._conn.execute("UPDATE teiai_bank SET kyosai_div_ts=? WHERE guild_id=?", (now, gid))
                 return None
@@ -195,15 +189,13 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
         since = now - kyosai.DORMANT_DAYS * DAY
         recovered = 0
         for user_id, _units in self._holdings_for(guild_id, with_house=False):
-            last = self._conn.execute(
+            last = self._scalar(
                 "SELECT MAX(ts) FROM ledger WHERE guild_id=? AND user_id=? "
                 "AND reason NOT IN ('共済:配当', '帝愛信託:利息') AND reason NOT LIKE '共済:超過損失の負担%'",
                 (guild_id, user_id),
-            ).fetchone()[0]
+            )
             if last is None:
-                row = self._conn.execute(
-                    "SELECT created_at FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-                ).fetchone()
+                row = self._one("SELECT created_at FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
                 last = row["created_at"] if row and row["created_at"] else None
             if last is not None and last < since:
                 recovered += self.recover_units_for(guild_id, user_id, now)
@@ -212,10 +204,10 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
     # ------------------------------------------------------------------ #
     # 帝愛の持ち口の競り（#93。値段は入札で決まる）
     # ------------------------------------------------------------------ #
-    def _open_auction_for(self, guild_id: int) -> Optional[Any]:
-        return self._conn.execute(
+    def _open_auction_for(self, guild_id: int) -> Optional[dict[str, Any]]:
+        return self._one(
             "SELECT * FROM kyosai_auctions WHERE guild_id=? AND status='open' ORDER BY id LIMIT 1", (guild_id,)
-        ).fetchone()
+        )
 
     def kyosai_auction_tick(self, now: float) -> list[dict[str, Any]]:
         """締切を過ぎた競りを締め（落札なら口を渡し、代金を銀行の収入にする）、帝愛の持ち口があれば次の競りを出す。
@@ -288,24 +280,24 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
     # 譲渡（プレイヤー間の売買）
     # ------------------------------------------------------------------ #
     def _offered_units_for(self, guild_id: int, seller: int, now: float) -> int:
-        return self._conn.execute(
+        return self._scalar(
             "SELECT COALESCE(SUM(units), 0) FROM kyosai_offers "
             "WHERE guild_id=? AND seller=? AND status='open' AND expires>?",
             (guild_id, seller, now),
-        ).fetchone()[0]
+        )
 
     def _pair_total_for(self, guild_id: int, a: int, b: int, now: float) -> int:
         """この2人（どちらが売り手でも）の、24時間の取引額の合計。P2P の取引と、共済の口の譲渡を合わせて数える。"""
-        kyosai_sum = self._conn.execute(
+        kyosai_sum = self._scalar(
             "SELECT COALESCE(SUM(price), 0) FROM kyosai_offers WHERE guild_id=? AND status='done' AND done_at>? "
             "AND ((seller=? AND buyer=?) OR (seller=? AND buyer=?))",
             (guild_id, now - DAY, a, b, b, a),
-        ).fetchone()[0]
-        market_sum = self._conn.execute(
+        )
+        market_sum = self._scalar(
             "SELECT COALESCE(SUM(sold_price), 0) FROM market_listings WHERE guild_id=? AND status='sold' "
             "AND closed_at>? AND ((seller_id=? AND buyer_id=?) OR (seller_id=? AND buyer_id=?))",
             (guild_id, now - DAY, a, b, b, a),
-        ).fetchone()[0]
+        )
         return kyosai_sum + market_sum
 
     def kyosai_offer(self, seller: int, buyer: int, units: int, price: int, now: float) -> tuple[Any, ...]:
@@ -341,10 +333,10 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
         with self._db.tx():
             gid = self._g()
             self.bank_sync(gid, now)
-            row = self._conn.execute(
+            row = self._one(
                 "SELECT * FROM kyosai_offers WHERE id=? AND guild_id=? AND buyer=? AND status='open' AND expires>?",
                 (offer_id, gid, buyer, now),
-            ).fetchone()
+            )
             if row is None:
                 return False, fail("kyosai_offer_not_found")
             if self._gate_locked_for(gid, now):
@@ -385,22 +377,19 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
 
     def kyosai_offers_of(self, user_id: int, now: float) -> list[dict[str, Any]]:
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM kyosai_offers WHERE guild_id=? AND status='open' AND expires>? "
-                    "AND (seller=? OR buyer=?) ORDER BY id",
-                    (self._g(), now, user_id, user_id),
-                )
-            ]
+            return self._all(
+                "SELECT * FROM kyosai_offers WHERE guild_id=? AND status='open' AND expires>? "
+                "AND (seller=? OR buyer=?) ORDER BY id",
+                (self._g(), now, user_id, user_id),
+            )
 
     # ------------------------------------------------------------------ #
     # 動議（信託の上乗せ金利。#94: いくつも並行でき、締めた順に後勝ち）
     # ------------------------------------------------------------------ #
-    def _open_motions_for(self, guild_id: int) -> list[Any]:
-        return self._conn.execute(
+    def _open_motions_for(self, guild_id: int) -> list[dict[str, Any]]:
+        return self._all(
             "SELECT * FROM kyosai_motions WHERE guild_id=? AND status='open' ORDER BY closes, id", (guild_id,)
-        ).fetchall()
+        )
 
     def kyosai_propose(self, user_id: int, premium: float, now: float) -> tuple[Any, ...]:
         """動議を出す。(成功か, Failure か動議の行)。
@@ -419,9 +408,9 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
             mine = [m for m in self._open_motions_for(gid) if m["proposer"] == user_id]
             if len(mine) >= kyosai.MOTION_MAX_OPEN_PER_USER:
                 return False, fail("kyosai_motion_open", max=kyosai.MOTION_MAX_OPEN_PER_USER)
-            last = self._conn.execute(
+            last = self._scalar(
                 "SELECT MAX(created) FROM kyosai_motions WHERE guild_id=? AND proposer=?", (gid, user_id)
-            ).fetchone()[0]
+            )
             if last and now - last < kyosai.MOTION_COOLDOWN_HOURS * 3600:
                 return False, fail("kyosai_motion_cooldown", until=last + kyosai.MOTION_COOLDOWN_HOURS * 3600)
             closes = now + kyosai.MOTION_HOURS * 3600
@@ -465,7 +454,7 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
     def _tally_for(self, guild_id: int, motion_id: int) -> tuple[int, int]:
         """賛成・反対の口数（締めるときの、いまの口数で数える。譲った口が二重に数えられないように）。"""
         yes = no = 0
-        for r in self._conn.execute("SELECT user_id, yes FROM kyosai_votes WHERE motion_id=?", (motion_id,)):
+        for r in self._all("SELECT user_id, yes FROM kyosai_votes WHERE motion_id=?", (motion_id,)):
             units = self.units_of_for(guild_id, r["user_id"])
             if r["yes"]:
                 yes += units
@@ -515,13 +504,11 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
         """動議1件と、いまの賛成・反対の口数（ボタンの投稿の書き換え用）。"""
         with self._lock:
             gid = self._g()
-            row = self._conn.execute(
-                "SELECT * FROM kyosai_motions WHERE id=? AND guild_id=?", (motion_id, gid)
-            ).fetchone()
+            row = self._one("SELECT * FROM kyosai_motions WHERE id=? AND guild_id=?", (motion_id, gid))
             if row is None:
                 return None
             yes, no = self._tally_for(gid, motion_id) if row["status"] == "open" else (row["yes"], row["no"])
-            return {**dict(row), "yes": yes, "no": no, "circulating": self._circulating_for(gid)}
+            return {**row, "yes": yes, "no": no, "circulating": self._circulating_for(gid)}
 
     # ------------------------------------------------------------------ #
     # 表示
@@ -532,21 +519,22 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IG
             self.bank_sync(gid, now)
             holdings = self._holdings_for(gid)
             total = sum(u for _, u in holdings)
-            row = self._conn.execute(
+            row = self._one(
                 "SELECT kyosai_paid, kyosai_charged, kyosai_div_ts FROM teiai_bank WHERE guild_id=?", (gid,)
-            ).fetchone()
+            )
+            assert row is not None  # bank_sync で銀行の行を作っている
             available, liabilities, theta = self._bank.bank_reserve_for(gid, now)
             motions = []
             for m in self._open_motions_for(gid):
                 yes, no = self._tally_for(gid, m["id"])
-                motions.append({**dict(m), "yes": yes, "no": no})
+                motions.append({**m, "yes": yes, "no": no})
             auction = self._open_auction_for(gid)
             return {
                 "units": self.units_of_for(gid, user_id),
                 "total": total,
                 "holders": len([1 for uid, _ in holdings if uid != kyosai.HOUSE]),
                 "house": self.units_of_for(gid, kyosai.HOUSE),
-                "auction": dict(auction) if auction is not None else None,
+                "auction": auction,
                 "paid": row["kyosai_paid"],
                 "charged": row["kyosai_charged"],
                 "next_dividend": (row["kyosai_div_ts"] + DAY) if row["kyosai_div_ts"] else None,
