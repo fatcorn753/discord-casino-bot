@@ -50,26 +50,26 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
 
     def _price_at(self, symbol: str, ts: float) -> Optional[float]:
         """ts 以前の、最後の価格（満期の価格）。その前の記録がなければ、いまの価格。"""
-        r = self._conn.execute(
+        v = self._scalar(
             "SELECT price FROM market_prices WHERE symbol=? AND ts<=? ORDER BY ts DESC LIMIT 1", (symbol, ts)
-        ).fetchone()
-        if r:
-            return r["price"]
+        )
+        if v is not None:
+            return v
         return self._market.latest_prices().get(symbol)
 
     def _open_premium(self, guild_id: int, user_id: int) -> int:
         """有効な買いの、掛け金の合計。"""
-        return self._conn.execute(
+        return self._scalar(
             "SELECT COALESCE(SUM(premium), 0) FROM options WHERE guild_id=? AND user_id=? AND status='active' AND side='long'",
             (guild_id, user_id),
-        ).fetchone()[0]
+        )
 
     def _open_margin(self, guild_id: int, user_id: int) -> int:
         """有効な裸売りの、証拠金の合計。"""
-        return self._conn.execute(
+        return self._scalar(
             "SELECT COALESCE(SUM(margin), 0) FROM options WHERE guild_id=? AND user_id=? AND status='active' AND side='short'",
             (guild_id, user_id),
-        ).fetchone()[0]
+        )
 
     def option_buy(
         self,
@@ -266,18 +266,13 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
     def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
         with self._lock:
             now, prices = self._now(), self._market.latest_prices()
-            for r in self._conn.execute("SELECT * FROM options WHERE guild_id=? AND status='active'", (guild_id,)):
+            for r in self._all("SELECT * FROM options WHERE guild_id=? AND status='active'", (guild_id,)):
                 totals[r["user_id"]] = totals.get(r["user_id"], 0) + self.option_value(r, now, prices)
 
     def option_list(self, user_id: int, recent: int = 5) -> HoldingBook:
         """有効なもの（満期が近い順）と、最近決着したもの（新しい順）。"""
         with self._lock:
-            rows = [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM options WHERE guild_id=? AND user_id=? ORDER BY id", (self._g(), user_id)
-                )
-            ]
+            rows = self._all("SELECT * FROM options WHERE guild_id=? AND user_id=? ORDER BY id", (self._g(), user_id))
         active = sorted((r for r in rows if r["status"] == "active"), key=lambda r: r["expiry"])
         done = [r for r in reversed(rows) if r["status"] != "active"][:recent]
         return {"active": active, "done": done}
@@ -286,17 +281,17 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         """持っている（status='active' の）建玉の ID（古い順）。呼び出し側のトランザクションの中で使う。"""
         return [
             r["id"]
-            for r in self._conn.execute(
+            for r in self._all(
                 "SELECT id FROM options WHERE guild_id=? AND user_id=? AND status='active' ORDER BY id",
                 (guild_id, user_id),
-            ).fetchall()
+            )
         ]
 
     def option_close_locked_for(self, guild_id: int, user_id: int, option_id: int, now: float) -> tuple[Any, ...]:
-        row = self._conn.execute(
+        row = self._one(
             "SELECT * FROM options WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
             (option_id, guild_id, user_id),
-        ).fetchone()
+        )
         if row is None:
             return False, fail("option_not_found")
         prices = self._market.latest_prices()
@@ -323,10 +318,10 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, user_id)
-            held = self._conn.execute(
+            held = self._one(
                 "SELECT kind, symbol, side FROM options WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
                 (option_id, gid, user_id),
-            ).fetchone()
+            )
             if (
                 held and held["side"] != "short" and held["kind"] == "call"
             ):  # 持っているコールは、ストップ安では売れない
@@ -340,9 +335,9 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
         with self._db.tx():
             gid = self._g()
             due = []
-            for r in self._conn.execute(
+            for r in self._all(
                 "SELECT * FROM options WHERE guild_id=? AND status='active' AND expiry<=? ORDER BY id", (gid, now)
-            ).fetchall():
+            ):
                 final = self._price_at(r["symbol"], r["expiry"])
                 final2 = self._price_at(r["symbol2"], r["expiry"]) if r["kind"] == opt.PAIR else None
                 if final is None or (r["kind"] == opt.PAIR and final2 is None):

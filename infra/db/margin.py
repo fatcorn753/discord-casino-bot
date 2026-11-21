@@ -58,11 +58,11 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         self._debt: IDebtOps = debt or NoOpDebtOps()
 
     def _margin_position_for(self, guild_id: int, user_id: int, symbol: str, side: str) -> MarginPosition:
-        r = self._conn.execute(
+        r = self._one(
             f"SELECT units, entry_value, margin FROM {self._MARGIN_TABLE[side]} "
             "WHERE guild_id=? AND user_id=? AND symbol=?",
             (guild_id, user_id, symbol),
-        ).fetchone()
+        )
         return (r["units"], r["entry_value"], r["margin"]) if r else (0, 0.0, 0)
 
     def margin_position(self, user_id: int, symbol: str, side: str) -> MarginPosition:
@@ -80,7 +80,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         """建てている信用取引すべて [(side, 銘柄, 口数, 建てた総額, 担保), ...]（空売り・信用買いの両方）。"""
         out = []
         for side, table in self._MARGIN_TABLE.items():
-            for r in self._conn.execute(
+            for r in self._all(
                 f"SELECT symbol, units, entry_value, margin FROM {table} WHERE guild_id=? AND user_id=? AND units>0 ORDER BY symbol",
                 (guild_id, user_id),
             ):
@@ -104,7 +104,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         with self._lock:
             return [
                 (r["user_id"], r["units"], r["entry_value"])
-                for r in self._conn.execute(
+                for r in self._all(
                     "SELECT user_id, units, entry_value FROM crypto_short WHERE guild_id=? AND symbol=? AND units>0 "
                     "ORDER BY units DESC, user_id LIMIT ?",
                     (self._g(), symbol, limit),
@@ -122,7 +122,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         with self._lock:
             prices = self._market.latest_prices()
             for side, table in self._MARGIN_TABLE.items():
-                for r in self._conn.execute(
+                for r in self._all(
                     f"SELECT user_id, symbol, units, entry_value, margin FROM {table} WHERE guild_id=?", (guild_id,)
                 ):
                     if r["symbol"] in prices:
@@ -136,7 +136,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         for symbol, units, _cost in self._crypto.holdings_for(guild_id, user_id):
             if symbol in prices:
                 total += market_mod.sell_quote(units, prices[symbol])[0] * hair["spot"]
-        for r in self._conn.execute(
+        for r in self._all(
             "SELECT kind, SUM(principal) AS p FROM bonds WHERE guild_id=? AND user_id=? AND status='active' GROUP BY kind",
             (guild_id, user_id),
         ):
@@ -399,7 +399,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             for uid in {
                 r["user_id"]
                 for table in self._MARGIN_TABLE.values()
-                for r in self._conn.execute(f"SELECT user_id FROM {table} WHERE guild_id=? AND units>0", (gid,))
+                for r in self._all(f"SELECT user_id FROM {table} WHERE guild_id=? AND units>0", (gid,))
             }:
                 for side, symbol, units, _entry, _margin in self.margin_positions_for(gid, uid):
                     if symbol not in prices:
@@ -427,9 +427,9 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         with self._db.tx():
             for side, table in self._MARGIN_TABLE.items():
                 rate = market_mod.BORROW_RATE_PER_DAY[side]
-                for r in self._conn.execute(
+                for r in self._all(
                     f"SELECT guild_id, user_id, symbol, entry_value, margin, interest_at, accrued FROM {table}"
-                ).fetchall():
+                ):
                     key = (r["guild_id"], r["user_id"], r["symbol"])
                     if r["interest_at"] <= 0:  # 数え始め（金利の列がなかった頃の建玉は、ここから数える）
                         self._conn.execute(
@@ -471,7 +471,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             accounts: set[tuple[int, int]] = set()
             for table in self._MARGIN_TABLE.values():
                 accounts.update(
-                    (r["guild_id"], r["user_id"]) for r in self._conn.execute(f"SELECT guild_id, user_id FROM {table}")
+                    (r["guild_id"], r["user_id"]) for r in self._all(f"SELECT guild_id, user_id FROM {table}")
                 )
             for guild_id, user_id in sorted(accounts):
                 try:
