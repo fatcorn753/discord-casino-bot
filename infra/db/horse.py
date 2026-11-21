@@ -53,8 +53,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
 
     def horse_get_for(self, guild_id: int, horse_id: int) -> Optional[dict[str, Any]]:
         with self._lock:
-            r = self._conn.execute("SELECT * FROM horses WHERE id=? AND guild_id=?", (horse_id, guild_id)).fetchone()
-            return dict(r) if r else None
+            return self._one("SELECT * FROM horses WHERE id=? AND guild_id=?", (horse_id, guild_id))
 
     def horse_worth(self, races: int, wins: int, places: int) -> int:
         """馬1頭の評価額: 購入価格に、いま引退したときの引退金（成績が悪ければ引退費用）を足す。0 未満にはしない。"""

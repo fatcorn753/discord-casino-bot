@@ -40,11 +40,10 @@ class EventRepo(ScopedRepo, IEventRepo):
     def manual_event_get(self, now: float) -> Optional[dict[str, Any]]:
         """いま開催中の特別イベント。無ければ None。"""
         with self._lock:
-            row = self._conn.execute(
+            return self._one(
                 "SELECT * FROM manual_event WHERE guild_id=? AND ended=0 AND starts<=? AND ends>?",
                 (self._g(), now, now),
-            ).fetchone()
-        return dict(row) if row else None
+            )
 
     def manual_event_stop(self, now: float) -> Optional[dict[str, Any]]:
         """開催中の特別イベントを、すぐ終わらせる。終わらせたイベントを返す（開催中でなければ None）。"""

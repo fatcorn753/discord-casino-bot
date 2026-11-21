@@ -90,7 +90,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
     def live_chart_posts(self) -> list[dict[str, Any]]:
         """自動で更新中のチャート。"""
         with self._lock:
-            return [dict(r) for r in self._conn.execute("SELECT * FROM chart_posts WHERE live=1")]
+            return self._all("SELECT * FROM chart_posts WHERE live=1")
 
     def end_chart_post(self, channel_id: int) -> None:
         with self._db.tx():
@@ -110,7 +110,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
 
     def list_chart_boards(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [dict(r) for r in self._conn.execute("SELECT * FROM chart_boards")]
+            return self._all("SELECT * FROM chart_boards")
 
     def delete_chart_board(self, guild_id: int) -> None:
         with self._db.tx():

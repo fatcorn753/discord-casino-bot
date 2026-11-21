@@ -8,9 +8,9 @@ import copy
 import os
 import sqlite3
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Optional, Self
+from typing import TYPE_CHECKING, Any, Optional, Self
 
 from domain.ports.clock import IClock
 from infra.clock import ConfigClock
@@ -91,6 +91,15 @@ class ScopedRepo:
     def _now(self) -> float:
         """注入された IClock の現在時刻（UNIX 秒）。"""
         return self._db.now_ts()
+
+    def _one(self, sql: str, params: Sequence[Any] = ()) -> Optional[dict[str, Any]]:
+        """1行だけ取得して辞書で返す（無ければ None）。sqlite3.Row は dict に変換する。"""
+        row = self._conn.execute(sql, params).fetchone()
+        return dict(row) if row else None
+
+    def _all(self, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+        """全行を辞書のリストで返す。"""
+        return [dict(r) for r in self._conn.execute(sql, params).fetchall()]
 
     def _g(self) -> int:
         if self._strict and self.guild_id == 0:

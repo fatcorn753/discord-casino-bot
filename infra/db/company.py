@@ -52,10 +52,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
     # 読み書きの土台
     # ------------------------------------------------------------------ #
     def _load(self, guild_id: int, user_id: int) -> Optional[dict[str, Any]]:
-        row = self._conn.execute(
-            "SELECT * FROM companies WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-        ).fetchone()
-        return dict(row) if row else None
+        return self._one("SELECT * FROM companies WHERE guild_id=? AND user_id=?", (guild_id, user_id))
 
     def _save(self, c: dict[str, Any]) -> None:
         self._conn.execute(

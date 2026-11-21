@@ -55,10 +55,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
 
     def race_get(self, race_id: int) -> Optional[dict[str, Any]]:
         with self._lock:
-            r = self._conn.execute(
-                "SELECT * FROM horse_races WHERE id=? AND guild_id=?", (race_id, self._g())
-            ).fetchone()
-            return dict(r) if r else None
+            return self._one("SELECT * FROM horse_races WHERE id=? AND guild_id=?", (race_id, self._g()))
 
     def race_number(self, race_id: int) -> int:
         """このサーバーでの、第何競走か。"""

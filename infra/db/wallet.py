@@ -279,10 +279,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
     def peek_stats(self, user_id: int) -> Optional[dict[str, Any]]:
         """読み取り専用。未登録の人を作らずに、成績を返す（未登録なら None）。"""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
-            ).fetchone()
-            return dict(row) if row else None
+            return self._one("SELECT * FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id))
 
     def stats(self, user_id: int) -> dict[str, Any]:
         with self._db.tx():
@@ -297,11 +294,10 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
 
     def history(self, user_id: int, limit: int = 10) -> list[dict[str, Any]]:
         with self._lock:
-            rows = self._conn.execute(
+            return self._all(
                 "SELECT delta, balance_after, reason, ts FROM ledger WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT ?",
                 (self._g(), user_id, limit),
-            ).fetchall()
-        return [dict(r) for r in rows]
+            )
 
     # ------------------------------------------------------------------ #
     # 送金                                                                #

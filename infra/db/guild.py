@@ -39,12 +39,11 @@ class GuildRepo(ScopedRepo, IGuildRepo):
 
     def get_guild_status(self, guild_id: int) -> Optional[dict[str, Any]]:
         with self._lock:
-            row = self._conn.execute("SELECT * FROM guild_status WHERE guild_id=?", (guild_id,)).fetchone()
-        return dict(row) if row else None
+            return self._one("SELECT * FROM guild_status WHERE guild_id=?", (guild_id,))
 
     def list_guild_status(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [dict(r) for r in self._conn.execute("SELECT * FROM guild_status ORDER BY updated_at DESC")]
+            return self._all("SELECT * FROM guild_status ORDER BY updated_at DESC")
 
     def mark_guild_notified(self, guild_id: int) -> None:
         with self._db.tx():
@@ -63,12 +62,11 @@ class GuildRepo(ScopedRepo, IGuildRepo):
 
     def get_leaderboard(self, guild_id: int) -> Optional[dict[str, Any]]:
         with self._lock:
-            row = self._conn.execute("SELECT * FROM leaderboards WHERE guild_id=?", (guild_id,)).fetchone()
-        return dict(row) if row else None
+            return self._one("SELECT * FROM leaderboards WHERE guild_id=?", (guild_id,))
 
     def list_leaderboards(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [dict(r) for r in self._conn.execute("SELECT * FROM leaderboards")]
+            return self._all("SELECT * FROM leaderboards")
 
     def delete_leaderboard(self, guild_id: int) -> None:
         with self._db.tx():

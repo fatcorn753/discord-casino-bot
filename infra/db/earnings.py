@@ -61,12 +61,11 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
     def earnings_upcoming(self, now: float) -> Optional[dict[str, Any]]:
         """みんなに告知ずみの、発表前の決算（対象と時刻だけ。方向と大きさは入れない）。月曜 9:00 までは None。"""
         with self._lock:
-            r = self._conn.execute(
+            return self._one(
                 "SELECT id, symbol, announce_at, release_at FROM earnings WHERE released=0 AND announce_at<=? "
                 "ORDER BY release_at LIMIT 1",
                 (now,),
-            ).fetchone()
-            return dict(r) if r else None
+            )
 
     def earnings_to_announce(self, now: float) -> list[dict[str, Any]]:
         """告知の時刻を過ぎて、まだ告知していない決算。呼ぶと、告知ずみにする。"""
