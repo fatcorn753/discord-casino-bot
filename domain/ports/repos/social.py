@@ -316,7 +316,7 @@ class ICompanyRepo(IGuildScopedRepo):
     def company_get(self, user_id: int, now: float) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def company_found(self, user_id: int, name: str, kind: str, now: float) -> Outcome[str | dict[str, Any]]:
+    def company_found(self, user_id: int, name: str, kind: str, now: float) -> Outcome[dict[str, Any]]:
         raise NotImplementedError
 
     def company_invest(self, user_id: int, amount: int, now: float) -> Outcome[int]:

@@ -10,6 +10,7 @@ from cogs.shared import ui
 from cogs.shared.amount import reject_bad_amount, typed_amount
 from cogs.shared.messages import format_failure
 from domain import horse as horse_mod
+from domain.errors import Failure
 from services.horse import HorseDesk, HorseService
 
 PostBetFn = Callable[[discord.Guild, dict, str], Awaitable[None]]
@@ -34,6 +35,7 @@ class StakeModal(discord.ui.Modal):
         if not ok:
             await ui.reply_error(interaction, format_failure(result), title="買えませんでした")
             return
+        assert not isinstance(result, Failure)
         await self.panel.announce_bets(interaction, result)
         lines = [
             f"{r['lane']}枠 {r['name']}　オッズ **{r['odds']:.1f}**（的中すれば {ui.pelica(horse_mod.payout(stake, r['odds']))}）"
@@ -67,6 +69,7 @@ class StakeModal(discord.ui.Modal):
         if not ok:
             await ui.reply_error(interaction, format_failure(result), title="買えませんでした")
             return
+        assert not isinstance(result, Failure)
         picks = (
             "→".join(map(str, result["lanes"]))
             if result["kind"] == "exacta"

@@ -5,7 +5,7 @@ from typing import Any, Optional
 from domain import horse as horse_mod
 from domain import shop as shop_mod
 from domain import teiai
-from domain.errors import Outcome, fail
+from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import IBankCashFlow, IStatusReader
 from domain.ports.repos import IHorseRepo
 from domain.shop import CARROT, GOLD_CARROT, HORSE_VOUCHER
@@ -57,11 +57,14 @@ class HorseRepo(ScopedRepo, IHorseRepo):
         """馬1頭の評価額: 購入価格に、いま引退したときの引退金（成績が悪ければ引退費用）を足す。0 未満にはしない。"""
         return max(0, self.HORSE_PRICE + horse_mod.retire_value(races, wins, places))
 
-    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> Outcome[str | int]:
+    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> Outcome[int]:
         """購入券を1枚使って、競走馬を迎える。(成功か, 理由か馬の番号)。ステータスは、全部 50 から始まる。"""
-        ok, name = horse_mod.check_name(name)
+        ok, checked = horse_mod.check_name(name)
         if not ok:
-            return False, name
+            assert isinstance(checked, Failure)
+            return False, checked
+        assert isinstance(checked, str)
+        name = checked
         if coat not in horse_mod.COATS or silks not in horse_mod.SILKS:
             return False, fail("horse_invalid_look")
         with self._db.tx():

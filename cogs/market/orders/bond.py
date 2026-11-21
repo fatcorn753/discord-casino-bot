@@ -8,6 +8,7 @@ from cogs.market.embeds import bond_buy_embed
 from cogs.shared import ui
 from cogs.shared.messages import format_failure
 from domain import bonds
+from domain.errors import Failure
 
 from .common import RNG
 
@@ -37,6 +38,7 @@ async def bond_cancel(cog: "MarketCog", interaction: discord.Interaction, bond_i
     if not ok:
         await ui.reply_error(interaction, format_failure(result), title="売れません")
         return
+    assert not isinstance(result, Failure)
     await interaction.response.send_message(  # 公開（ほかの売買の結果と同じ）
         embed=ui.ok_embed(
             f"{interaction.user.display_name} が債券を売りました", f"{ui.pelica(result)}を残高に戻しました。"

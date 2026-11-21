@@ -12,6 +12,7 @@ from cogs.shared import ui
 from cogs.shared.messages import format_failure
 from domain import market
 from domain import options as opt
+from domain.errors import Failure
 
 from .common import CONFIRM_FROM, run_trade
 
@@ -86,6 +87,7 @@ async def option_buy(
         if not res_ok:
             await ui.reply_error(interaction, format_failure(res), title=f"{name}を買えませんでした")
             return
+        assert not isinstance(res, Failure)
         await reply(
             embed=ui.ok_embed(
                 f"{emoji} 【{name}】{title_sym}（{opt.OPTION_HOURS}時間満期）",
@@ -153,6 +155,7 @@ async def option_write(
         if not ok:
             await ui.reply_error(interaction, format_failure(res), title=f"{label}できませんでした")
             return
+        assert not isinstance(res, Failure)
         await reply(
             embed=ui.ok_embed(
                 f"🎰 【{label}】{sym.name}（{opt.OPTION_HOURS}時間満期）",
@@ -210,6 +213,7 @@ async def option_sell(
     if not ok:
         await ui.reply_error(interaction, format_failure(got), title="できませんでした")
         return
+    assert not isinstance(got, Failure)
     if short:
         pnl = row["premium"] + got - row["margin"]  # got は、証拠金の戻り（マイナスなら、借金にした額）
         body = f"買い戻しました。証拠金の戻り: **{ui.pelica(max(0, got))}**" + (

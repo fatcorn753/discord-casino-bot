@@ -9,7 +9,7 @@ from cogs.shared import ui
 from cogs.shared.amount import AmountModal
 from cogs.shared.messages import format_failure
 from domain import company as company_mod
-from domain.errors import fail
+from domain.errors import Failure, fail
 from services.company import CompanyService
 
 
@@ -97,6 +97,7 @@ class CompanyPanel(ui.OwnerView):
         ok, result = self.company.ship(ui.guild_id_of(interaction), interaction.user.id)
         if not ok:
             return await self._fail(interaction, result)
+        assert not isinstance(result, Failure)
         note = f"出荷しました: 会社資金 +{ui.pelica(result['paid'])}（ピンハネ {ui.pelica(result['pinhane'])}）"
         if result.get("dividends"):
             note += f"\n出資者へ配当 {ui.pelica(result['dividends'])} を配りました（会社資金から）"

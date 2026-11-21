@@ -69,7 +69,7 @@ class HorseDesk:
     def horse_list(self, user_id: int) -> list[dict[str, Any]]:
         return self._horses.horse_list(user_id)
 
-    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> Outcome[str | int]:
+    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> Outcome[int]:
         return self._horses.horse_create(user_id, name, coat, silks)
 
     def horse_set_style(self, user_id: int, horse_id: int, style: Optional[str]) -> Outcome[str]:

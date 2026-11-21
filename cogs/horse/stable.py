@@ -10,6 +10,7 @@ from cogs.shared.horse_display import stat_lines
 from cogs.shared.messages import format_failure
 from domain import horse as horse_mod
 from domain import shop
+from domain.errors import Failure
 from services.horse import HorseDesk, HorseService
 
 
@@ -27,6 +28,7 @@ class NameModal(discord.ui.Modal):
         if not ok:
             await ui.reply_error(interaction, format_failure(result), title="名前を直してください")
             return
+        assert not isinstance(result, Failure)
         view = AppearanceView(self.stable, result)
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
@@ -84,6 +86,7 @@ class AppearanceView(discord.ui.View):
         ok, result = self.stable.desk(interaction).horse_create(interaction.user.id, self.name, self.coat, self.silks)
         if not ok:
             return await ui.reply_error(interaction, format_failure(result), title="迎えられません")
+        assert not isinstance(result, Failure)
         self.stable.horse_id = result
         self.stop()
         await interaction.response.edit_message(
@@ -189,6 +192,7 @@ class GoldCarrotView(ui.OwnerView):
         )
         if not ok:
             return await ui.reply_error(interaction, format_failure(result), title="使えません")
+        assert not isinstance(result, Failure)
         self.stop()
         await interaction.response.edit_message(
             embed=ui.ok_embed("金にんじんを使いました", f"{stat_lines(result)}"), view=None
@@ -223,6 +227,7 @@ class RetireView(ui.OwnerView):
         ok, result = horses.horse_retire(interaction.user.id, self.horse["id"])
         if not ok:
             return await ui.reply_error(interaction, format_failure(result), title="引退させられません")
+        assert not isinstance(result, Failure)
         self.stop()
         remaining = horses.horse_list(interaction.user.id)
         self.stable.horse_id = remaining[0]["id"] if remaining else None  # 厩舎の画面で選んでいた馬は、もういない

@@ -17,6 +17,7 @@ from cogs.shared.announce import announce_channel
 from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import company as company_mod
+from domain.errors import Failure
 from domain.ports.repos import IGuildRepo
 from services.company import CompanyService
 
@@ -57,6 +58,7 @@ class CompanyCog(commands.Cog):
         if not ok:
             await ui.reply_error(interaction, format_failure(result), title="設立できません")
             return
+        assert not isinstance(result, Failure)
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "🏢 会社を設立しました",
@@ -80,6 +82,7 @@ class CompanyCog(commands.Cog):
         if not ok:
             await ui.reply_error(interaction, format_failure(result), title="出資できません")
             return
+        assert not isinstance(result, Failure)
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "🤝 出資しました",

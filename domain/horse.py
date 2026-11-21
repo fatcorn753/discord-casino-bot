@@ -16,7 +16,7 @@ import random
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports import get_catalogs
 
 _CFG = get_catalogs().horse()
@@ -510,7 +510,7 @@ NPC_NAMES = list(_CFG.npc_names)
 BANNED_NAME_CHARS = set(_CFG.banned_name_chars)  # メンション・リンク・装飾を防ぐ
 
 
-def check_name(name: str) -> tuple:
+def check_name(name: str) -> Outcome[str]:
     """馬の名前が使えるか。(使えるか, 整えた名前か Failure)。メンション・リンク・装飾に使う文字は禁止。"""
     name = name.strip()
     if not name:

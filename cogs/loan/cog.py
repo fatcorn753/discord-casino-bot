@@ -37,6 +37,7 @@ from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import loans
 from domain.duration import format_minutes
+from domain.errors import Failure
 from domain.ports.repos import IGuildRepo
 from services.economy import EconomyService
 from services.loan import LoanService
@@ -117,6 +118,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
         )
         if not ok:
             return await ui.reply_error(interaction, format_failure(result), title="提案できません")
+        assert not isinstance(result, Failure)
         loan = self._loans.get(guild_id, result)
         assert loan is not None
         credit = self._loans.credit(guild_id, member.id)
@@ -149,6 +151,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
         )
         if not ok:
             return await ui.reply_error(interaction, format_failure(result), title="募集できません")
+        assert not isinstance(result, Failure)
         loan = self._loans.get(guild_id, result)
         assert loan is not None
         credit = self._loans.credit(guild_id, interaction.user.id)
@@ -173,6 +176,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
         ok, result = self._loans.repay(guild_id, loan_id, interaction.user.id, amount)
         if not ok:
             return await ui.reply_error(interaction, format_failure(result), title="返せません")
+        assert not isinstance(result, Failure)
         loan = self._loans.get(guild_id, loan_id)
         assert loan is not None
         left = self._loans.remaining(guild_id, loan)

@@ -29,6 +29,7 @@ from cogs.teiai.texts import (
     WAVES as WAVES,
 )
 from domain import teiai
+from domain.errors import Failure
 from services.teiai import TeiaiService
 
 
@@ -67,6 +68,7 @@ async def run_escape(
     done, result = teiai_svc.escape_attempt(gid, uid)
     if not done:
         return await ui.reply_error(interaction, format_failure(result), title="逃亡できません")
+    assert not isinstance(result, Failure)
     name = interaction.user.display_name
     title = f"🚢 {name} が、海外逃亡を試みる！！"
     message = await interaction.followup.send(
