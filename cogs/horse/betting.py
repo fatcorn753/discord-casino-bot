@@ -11,7 +11,7 @@ from cogs.shared.amount import reject_bad_amount, typed_amount
 from cogs.shared.messages import format_failure
 from domain import horse as horse_mod
 from domain.errors import Failure
-from domain.ports.contracts import RaceRow
+from domain.ports.contracts import RaceBetResult, RaceRow
 from services.horse import HorseDesk, HorseService
 
 PostBetFn = Callable[[discord.Guild, RaceRow, str], Awaitable[None]]
@@ -111,7 +111,7 @@ class BetPanel(ui.OwnerView):
     async def _reject_non_owner(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message("この画面を使えるのは、開いた本人だけです。", ephemeral=True)
 
-    async def announce_bet(self, interaction: discord.Interaction, picks: str, result: dict) -> None:
+    async def announce_bet(self, interaction: discord.Interaction, picks: str, result: RaceBetResult) -> None:
         """買った馬券を、レースのチャンネルに公開する（誰が何に賭けたか）。投稿できなくても、購入は済んでいる。"""
         if self._post_bet is None or interaction.guild is None:
             return
@@ -124,7 +124,7 @@ class BetPanel(ui.OwnerView):
             ),
         )
 
-    async def announce_bets(self, interaction: discord.Interaction, results: list) -> None:
+    async def announce_bets(self, interaction: discord.Interaction, results: list[RaceBetResult]) -> None:
         """単勝・複勝をまとめて買ったとき、1つの投稿で公開する。"""
         if self._post_bet is None or interaction.guild is None or not results:
             return

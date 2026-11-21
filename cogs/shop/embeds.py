@@ -1,5 +1,8 @@
 """ショップ・競売・持ち物画面のカタログ定数と埋め込み組み立て。"""
 
+from collections.abc import Mapping, Sequence
+from typing import Optional
+
 import discord
 
 from cogs.p2p.embeds import entry_text
@@ -27,6 +30,14 @@ from cogs.shop.texts import (
 )
 from domain import p2p, shop, teiai
 from domain import types as eco_types
+from domain.ports.contracts import (
+    AuctionHorseRow,
+    AuctionListing,
+    ListingRow,
+    ProfileView,
+    ShopStockInfo,
+    TeiaiMarketListing,
+)
 
 MAX_QTY = 10
 SHOWN = 25  # 競売の画面で、選択肢に出すプレイヤーの出品の数（Discord の選択肢の上限）
@@ -50,13 +61,13 @@ def kind_name(kind: str) -> str:
     return shop.KIND_LABEL[kind].split(" ", 1)[1]
 
 
-def stock_text(stock: dict) -> str:
+def stock_text(stock: ShopStockInfo) -> str:
     """在庫の表示（1人ずつ別々）。例: 在庫 3/10（次の補充 <t:…:R>）。"""
     text = f"在庫 {stock['stock']}/{stock['max']}"
     return text + (f"（次の補充 <t:{int(stock['next_at'])}:R>）" if stock["next_at"] else "")
 
 
-def item_line(item, inv: dict, stock: dict | None = None) -> str:
+def item_line(item, inv: dict[str, int], stock: Optional[ShopStockInfo] = None) -> str:
     """売り場の1行: 持っていれば ✅、値段をそろえて、名前。説明があれば、次の行に。在庫のある品は、このプレイヤーの在庫も。"""
     icon = item.value if item.kind in (shop.CARD_ICON, shop.COLLECTION) else item.mark
     mark = "✅" if item.unique and inv.get(item.id, 0) > 0 else "▫️"
@@ -78,7 +89,7 @@ def catalog_embed(
     balance: int,
     tab: str = "home",
     waiting: int = 0,
-    stocks: dict[str, dict] | None = None,
+    stocks: Mapping[str, ShopStockInfo] | None = None,
 ) -> discord.Embed:
     """売り場の画面。トップは、売り場の案内だけ。各売り場は、値段の安い順に、持っている品に ✅ を付けて並べる。"""
     stocks = stocks or {}
@@ -137,10 +148,10 @@ def auction_embed(
     tab: str = "teiai",
     p2p_filter: str = "all",
     p2p_order: str = "end",
-    p2p_rows: list[tuple[dict, str]] | tuple[tuple[dict, str], ...] = (),
-    listed: list[dict] | tuple[dict, ...] = (),
-    horses: list[dict] | tuple[dict, ...] = (),
-    market: list[dict] | tuple[dict, ...] = (),
+    p2p_rows: Sequence[tuple[ListingRow, str]] = (),
+    listed: Sequence[AuctionListing] = (),
+    horses: Sequence[AuctionHorseRow] = (),
+    market: Sequence[TeiaiMarketListing] = (),
 ) -> discord.Embed:
     """帝愛の競売の画面。tab は、プレイヤーの出品（players）か、帝愛の棚（teiai。破産で差し押さえた品。値段は日ごとに下がる）。"""
     footer = f"あなたの残高: {ui.pelica(balance)}"
@@ -209,13 +220,13 @@ def auction_embed(
     return e
 
 
-def market_label(x: dict) -> str:
+def market_label(x: TeiaiMarketListing) -> str:
     """帝愛の出品の名前。闇市品は、中身が未鑑定であることを示す。"""
     name = shop.label(shop.BY_ID[x["item_id"]])
     return f"❓闇市品「{name}」（未鑑定）" if x["black"] else name
 
 
-def market_line(x: dict) -> str:
+def market_line(x: TeiaiMarketListing) -> str:
     mode = "競売・値下がり中" if x["mode"] == "auction" else "定価販売"
     qty = f" 残り{x['qty']}" if not shop.BY_ID[x["item_id"]].unique else ""
     return (
@@ -224,7 +235,7 @@ def market_line(x: dict) -> str:
     )
 
 
-def inventory_embed(inv: dict[str, int], prof: dict) -> discord.Embed:
+def inventory_embed(inv: dict[str, int], prof: ProfileView) -> discord.Embed:
     """持ち物と、装備中のもの、使用中の効果。何も持っていなければ、その案内。"""
     if not inv and not prof["daily_boost"] and not prof["insurance"]:
         return ui.embed("🎒 持ち物", "まだ何も持っていません。「🛍️ ショップ」の画面で、景品を買えます。", ui.INFO)

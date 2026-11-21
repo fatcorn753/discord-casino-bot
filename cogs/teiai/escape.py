@@ -80,6 +80,7 @@ async def run_escape(
     await asyncio.sleep(FRAME_SECONDS)
     if result["escaped"]:
         b = result["bankrupt"]
+        assert b is not None  # 成功時は自己破産の結果が入っている
         text = (
             f"{block(SUCCESS_ART)}\n**成功！！** 帝愛の借金は、**ゼロ**になりました。\n"
             f"置いてきた財産: {ui.pelica(b['seized'])}（帝愛への配当 {ui.pelica(b['senior_paid'])}・"

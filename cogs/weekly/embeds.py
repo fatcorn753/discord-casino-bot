@@ -5,11 +5,12 @@ import discord
 from cogs.shared import ui
 from cogs.shared.messages import format_standings_lines
 from domain import shop, weekly
+from domain.ports.contracts import WeeklyAward
 
 KING = shop.BY_ID[shop.WEEKLY_KING]
 
 
-def weekly_embed(week: str, result: dict) -> discord.Embed:
+def weekly_embed(week: str, result: WeeklyAward) -> discord.Embed:
     lines = format_standings_lines(result["standings"], ui.MEDALS)
     champ = result["champion"]
     if champ:

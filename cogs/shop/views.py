@@ -1,5 +1,6 @@
 """`/ショップ` の操作パネル（View）。"""
 
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Optional
 
 import discord
@@ -18,6 +19,7 @@ from cogs.shop.embeds import (
     tab_items,
 )
 from domain import shop
+from domain.ports.contracts import ListingRow
 
 if TYPE_CHECKING:
     from cogs.shop.cog import ShopCog
@@ -48,7 +50,7 @@ class ShopView(ui.OwnerView):
         )
         self.auction_tab: str | None = None  # 競売の画面のタブ（players / teiai）。None は、開いたときに決める
         self.p2p_filter, self.p2p_order = "all", "end"  # プレイヤーの出品の、絞り込みと並び順
-        self._screen_data: dict[str, Any] = {}
+        self._screen_data: Mapping[str, Any] = {}
         self._build()
 
     # ---- 見た目 ---- #
@@ -247,7 +249,7 @@ class ShopView(ui.OwnerView):
 
         return callback
 
-    def _build_auction_players(self, p2p_rows: list[tuple[dict[str, Any], str]]) -> None:
+    def _build_auction_players(self, p2p_rows: Sequence[tuple[ListingRow, str]]) -> None:
         """プレイヤーの出品のタブ: 絞り込み・並べ替え・出品の選択肢。"""
         for key, (label, _kind, _mode) in self.P2P_FILTERS.items():
             btn = discord.ui.Button(

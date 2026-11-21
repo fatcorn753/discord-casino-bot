@@ -23,7 +23,7 @@ from cogs.shared.announce import announce_channel
 from cogs.shared.bridges import BotBridges, IHorseAdminBridge, IHorseButtonBridge
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import horse as horse_mod
-from domain.ports.contracts import RaceRow
+from domain.ports.contracts import RaceRow, RaceRunResult
 from domain.ports.repos import IGuildRepo
 from services.horse import HorseDesk, HorseService
 
@@ -124,7 +124,7 @@ def comment(entries: list, positions: list, previous_leader, final: bool, winner
     return f"先頭は {name}。", leader
 
 
-def result_embed(desk: HorseDesk, result: dict) -> discord.Embed:
+def result_embed(desk: HorseDesk, result: RaceRunResult) -> discord.Embed:
     e = card_embed(desk, cast("RaceRow", {**result["race"], "status": "done"}))
     bets = result["bets"]
     if bets:

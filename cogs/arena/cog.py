@@ -22,7 +22,7 @@ from cogs.shared.announce import announce_channel
 from cogs.shared.bridges import BotBridges, IArenaAdminBridge
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import arena as arena_mod
-from domain.ports.contracts import ArenaFighterRow, ArenaTournamentDetailRow
+from domain.ports.contracts import ArenaFinalResult, ArenaFighterRow, ArenaSemiResult, ArenaTournamentDetailRow
 from domain.ports.repos import IGuildRepo
 from services.arena import ArenaService
 
@@ -121,7 +121,7 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
 
     async def _advance_semis(
         self, guild: discord.Guild, t: ArenaTournamentDetailRow, day_key: DayKey
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[ArenaSemiResult]:
         """準決勝を決着させ、演出・結果投稿・パネル更新まで行う（時刻は見ない。呼ぶ側が判断する）。"""
         pre_fighters = t["fighters"]
         result = self._arena.run_semis(guild.id, t["id"])
@@ -139,7 +139,7 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
 
     async def _advance_final(
         self, guild: discord.Guild, t: ArenaTournamentDetailRow, day_key: DayKey
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[ArenaFinalResult]:
         """決勝を決着させ、演出・結果投稿・パネル更新まで行う（時刻は見ない。呼ぶ側が判断する）。"""
         pre_finalists = [f for f in t["fighters"] if f["stage"] == "final"]
         result = self._arena.run_final(guild.id, t["id"])

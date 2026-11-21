@@ -8,6 +8,7 @@ from cogs.shared import ui
 from cogs.shared.messages import format_history
 from domain import missions as missions_mod
 from domain import shop, skins, teiai
+from domain.ports.contracts import BankruptResult
 from domain.types import DAILY_BASE, DAILY_STREAK_BONUS, DAILY_STREAK_CAP, DailyResult
 from services.economy import BalanceCard, MissionBoard
 
@@ -19,7 +20,9 @@ def no_account_embed(name: str) -> discord.Embed:
 def balance_embed(card: BalanceCard, name: str, avatar_url: str) -> discord.Embed:
     """残高カード。ショップで買ったカードの色・アイコン・称号を反映する。"""
     s, prof = card.stats, card.profile
-    color_item, icon_item, title_item = (shop.BY_ID.get(prof[k]) for k in ("card_color", "card_icon", "title"))
+    color_item, icon_item, title_item = (
+        shop.BY_ID.get(v) if v is not None else None for v in (prof["card_color"], prof["card_icon"], prof["title"])
+    )
     icon = icon_item.value if icon_item else "💴"
     title_line = f"## 🏷️ {title_item.name}\n" if title_item else ""
     e = ui.embed(
@@ -138,7 +141,7 @@ def bankrupt_warning() -> str:
     )
 
 
-def bankrupt_result_embed(result: dict[str, Any], name: str) -> discord.Embed:
+def bankrupt_result_embed(result: BankruptResult, name: str) -> discord.Embed:
     """自己破産の結果（公開。誰が破産したかも出す）。"""
     lines = [
         f"差し押さえた額: **{ui.pelica(result['seized'])}**（うちショップの品の換金 {ui.pelica(result['shop_value'])}）",

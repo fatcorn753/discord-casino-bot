@@ -32,7 +32,7 @@ def line_of(r: ListingRow, label: str) -> str:
     return f"`#{r['id']}` {label}　{price_text(r)}　{'締切' if r['mode'] == 'auction' else '期限'} {when(r['end_at'])}"
 
 
-def entry_text(r: dict, label: str) -> str:
+def entry_text(r: ListingRow, label: str) -> str:
     """一覧の1件（2行）。何を・いくらで・どの方式で・誰が・いつまでか。競りは、入札の有無も。"""
     if r["mode"] == "fixed":
         how = f"💵 定価 **{ui.pelica(r['price'])}**"
