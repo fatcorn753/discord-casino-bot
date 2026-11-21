@@ -10,20 +10,19 @@ from domain import company as company_mod
 from domain import teiai
 from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import (
-    IAssetSeizureStep,
+    AssetSeizureStep,
     IBankCashFlow,
     IHouseAccount,
-    ILiquidationStep,
     INoticeSink,
     IStatusReader,
-    IValuationSource,
+    LiquidationStep,
 )
 from domain.ports.repos import ICompanyRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
 
 
-class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
+class CompanyRepo(ScopedRepo, ICompanyRepo):
     """会社の設立・資金の出し入れ・在庫の生産と出荷・維持費と倒産。"""
 
     def __init__(
@@ -392,7 +391,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
         return bankrupt
 
     # ------------------------------------------------------------------ #
-    # 純資産・差し押さえ（IValuationSource / 強制執行・破産のステップから使う）
+    # 純資産・差し押さえ（ValuationSource / 強制執行・破産のステップから使う）
     # ------------------------------------------------------------------ #
     def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
         """純資産に数える額: 会社資金と、事業所（建設費の累計）。出資を受けていれば、社長と出資者で分ける。"""
@@ -424,36 +423,31 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
         return c["funds"]
 
 
-class CompanySeizureStep(IAssetSeizureStep):
+def company_seizure_step(account: AccountCore, company: CompanyRepo, notices: INoticeSink) -> AssetSeizureStep:
     """強制執行: 会社資金を差し押さえる（事業所には手を付けない）。"""
 
-    def __init__(self, account: AccountCore, company: CompanyRepo, notices: INoticeSink) -> None:
-        self._account = account
-        self._company = company
-        self._notices = notices
-
-    def seize(self, guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
-        taken = self._company._company_take_for(guild_id, user_id, need)
+    def seize(guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
+        taken = company._company_take_for(guild_id, user_id, need)
         if taken:
-            self._account.ledger(
+            account.ledger(
                 guild_id,
                 user_id,
                 0,
-                self._account.raw_balance(guild_id, user_id),
+                account.raw_balance(guild_id, user_id),
                 f"強制執行:会社資金の差し押さえ（{taken:,}ペリカ）",
             )
-            self._notices.note_for(guild_id, user_id, "seize_company", taken=taken)
+            notices.note_for(guild_id, user_id, "seize_company", taken=taken)
         return taken
 
+    return seize
 
-class CompanyLiquidationStep(ILiquidationStep):
+
+def company_liquidation_step(account: AccountCore, company: CompanyRepo) -> LiquidationStep:
     """自己破産: 会社をたたみ、残っていた会社資金を現金に戻す（そのあと、債権者への配当に回る）。"""
 
-    def __init__(self, account: AccountCore, company: CompanyRepo) -> None:
-        self._account = account
-        self._company = company
-
-    def liquidate(self, guild_id: int, user_id: int, now: float) -> None:
-        saved = self._company._company_dissolve_for(guild_id, user_id)
+    def liquidate(guild_id: int, user_id: int, now: float) -> None:
+        saved = company._company_dissolve_for(guild_id, user_id)
         if saved:
-            self._account.apply(guild_id, user_id, saved, "破産:会社資金の差し押さえ")
+            account.apply(guild_id, user_id, saved, "破産:会社資金の差し押さえ")
+
+    return liquidate

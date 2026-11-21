@@ -1,8 +1,8 @@
 """帝愛ファイナンス: 借金・強制執行・種銭・身分・自己破産。数字と考え方は domain/teiai.py。
 
 表の定義は infra/db/schema/tables.py（users の debt・bankrupt_at・blacklist_until）。
-差し押さえ（IAssetSeizureStep）・換金（ILiquidationStep）・競売査定（ISeizureValueStep）は
-拡張に開き修正に閉じるため（OCP）独立戦略クラスとして構成する。
+差し押さえ（AssetSeizureStep）・換金（LiquidationStep）・競売査定（SeizureValueStep）は
+拡張に開き修正に閉じるため（OCP）ファクトリ関数が返す Callable ステップとして構成する。
 
 逐次継承チェーンで base.py（コンストラクタ・身分と借金の読み取り）→ lifecycle.py（利息・後始末・天引き）
 → ops.py（強制執行と借金の発生）→ repay.py（返済）→ escape.py（海外逃亡）→ bankrupt.py（自己破産）。
@@ -12,34 +12,34 @@
 
 from .bankrupt import DebtRepo
 from .liquidation import (
-    BondLiquidationStep,
-    CryptoLiquidationStep,
-    DepositLiquidationStep,
-    KyosaiLiquidationStep,
-    MarginLiquidationStep,
-    OptionLiquidationStep,
+    bond_liquidation_step,
+    crypto_liquidation_step,
+    deposit_liquidation_step,
+    kyosai_liquidation_step,
+    margin_liquidation_step,
+    option_liquidation_step,
 )
 from .seizure import (
-    BondSeizureStep,
-    CryptoSeizureStep,
-    DepositSeizureStep,
-    MarginSeizureStep,
-    OptionSeizureStep,
+    bond_seizure_step,
+    crypto_seizure_step,
+    deposit_seizure_step,
+    margin_seizure_step,
+    option_seizure_step,
 )
-from .seizure_value import ShopAndHorseSeizureStep
+from .seizure_value import shop_and_horse_seizure_value_step
 
 __all__ = [
-    "BondLiquidationStep",
-    "BondSeizureStep",
-    "CryptoLiquidationStep",
-    "CryptoSeizureStep",
     "DebtRepo",
-    "DepositLiquidationStep",
-    "DepositSeizureStep",
-    "KyosaiLiquidationStep",
-    "MarginLiquidationStep",
-    "MarginSeizureStep",
-    "OptionLiquidationStep",
-    "OptionSeizureStep",
-    "ShopAndHorseSeizureStep",
+    "bond_liquidation_step",
+    "bond_seizure_step",
+    "crypto_liquidation_step",
+    "crypto_seizure_step",
+    "deposit_liquidation_step",
+    "deposit_seizure_step",
+    "kyosai_liquidation_step",
+    "margin_liquidation_step",
+    "margin_seizure_step",
+    "option_liquidation_step",
+    "option_seizure_step",
+    "shop_and_horse_seizure_value_step",
 ]
