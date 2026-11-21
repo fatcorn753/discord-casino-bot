@@ -20,12 +20,9 @@ class MarketEventRepo(ScopedRepo, IMarketEventRepo):
     def market_events(self, now: float) -> list[dict[str, Any]]:
         """終わっていないイベントと、直近に終わったもの（古い順）。"""
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM market_events WHERE end_ts>=? ORDER BY start_ts", (now - ev_mod.COOLDOWN_MIN * 60,)
-                )
-            ]
+            return self._all(
+                "SELECT * FROM market_events WHERE end_ts>=? ORDER BY start_ts", (now - ev_mod.COOLDOWN_MIN * 60,)
+            )
 
     def vol_multipliers(self, now: float) -> dict[str, Any]:
         """いま発生中のイベントによる、銘柄ごとの値動きの倍率 {銘柄: 倍率}（なければ空）。"""
@@ -44,9 +41,7 @@ class MarketEventRepo(ScopedRepo, IMarketEventRepo):
         rng = rng or random.SystemRandom()
         with self._db.tx():
             self._conn.execute("DELETE FROM market_events WHERE end_ts<?", (now - ev_mod.KEEP_DAYS * 86400,))
-            recent = self._conn.execute(
-                "SELECT 1 FROM market_events WHERE end_ts>=? LIMIT 1", (now - ev_mod.COOLDOWN_MIN * 60,)
-            ).fetchone()
+            recent = self._one("SELECT 1 FROM market_events WHERE end_ts>=? LIMIT 1", (now - ev_mod.COOLDOWN_MIN * 60,))
             if force is None and (recent or rng.random() >= ev_mod.ANNOUNCE_PROB):
                 return None
             plan = force or ev_mod.plan_event(now, rng)
