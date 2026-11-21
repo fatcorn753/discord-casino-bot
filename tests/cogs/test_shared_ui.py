@@ -79,7 +79,7 @@ def test_owner_view_silent_and_custom_rejection():
     asyncio.run(run())
 
 
-# ---- cogs.shared.ui の応答ヘルパ（reply_embed / reply_error / reply_warn / reply_ok） ---- #
+# ---- cogs.shared.ui の応答ヘルパ（reply_embed / reply_error / reply_warn / reply_ok） ----
 def test_reply_helpers_send_via_response_when_not_done():
     async def run():
         it, sent, followed = make_interaction(1)  # この Resp は is_done を持たない（未応答として扱う）

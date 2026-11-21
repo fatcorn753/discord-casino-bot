@@ -10,9 +10,8 @@ from .flow import BankRepo as Base
 
 
 class BankRepo(Base):
-    # ------------------------------------------------------------------ #
     # 帝愛信託の利息（#33。確定した流出として、毎時払う）
-    # ------------------------------------------------------------------ #
+
     def risk_free_per_day_for(self, guild_id: int, now: float) -> float:
         """無リスク金利 r_f（1日あたり。連続複利）。準備率に連動して毎分動く（#18。bank_rf_tick）。未開始なら基準の金利。"""
         v = self._scalar("SELECT rf FROM teiai_bank WHERE guild_id=?", (guild_id,))
