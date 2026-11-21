@@ -6,7 +6,7 @@ import discord
 
 from cogs.shared import ui
 from domain import arena as arena_mod
-from domain.ports.contracts import ArenaFinalResult, ArenaFighterRow, ArenaSemiResult, ArenaTournamentDetailRow
+from domain.ports.contracts import ArenaFighterRow, ArenaFinalResult, ArenaSemiResult, ArenaTournamentDetailRow
 
 FORMAT_NAME = {"duel": "🥊 1on1", "royale": "⚔️ バトルロイヤル"}
 STAGE_LABEL = {

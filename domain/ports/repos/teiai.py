@@ -14,8 +14,8 @@ from domain.ports.bridges import (
     IStatusReader,
 )
 from domain.ports.contracts import (
-    BankStatus,
     BankruptResult,
+    BankStatus,
     CdsHoldings,
     CdsQuote,
     EscapeResult,

@@ -1,7 +1,7 @@
 """海外逃亡: 成否の抽選と、失敗時の罰金・成功時の自己破産。"""
 
 import random
-from typing import Any, Optional, cast
+from typing import Optional, cast
 
 from domain import teiai
 from domain.errors import Failure, Outcome, fail
@@ -62,5 +62,10 @@ class DebtRepo(Base):
                 f"海外逃亡に失敗（罰金 {fine:,}ペリカが借金に加わる）",
             )
             self.after_debt_change(gid, user_id)
-            failed: EscapeResult = {"escaped": False, "fine": fine, "debt": self._account.debt(gid, user_id), "bankrupt": None}
+            failed: EscapeResult = {
+                "escaped": False,
+                "fine": fine,
+                "debt": self._account.debt(gid, user_id),
+                "bankrupt": None,
+            }
             return True, failed

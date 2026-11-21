@@ -163,7 +163,9 @@ class PachinkoStats(TypedDict):
     omen: dict[str, tuple[int, int]]  # 予告の色ごとの (回転数, 当たり数)
     tier: dict[str, tuple[int, int]]  # リーチの格ごとの (回転数, 当たり数)
     spins: tuple[int, int]  # 全体の (回転数, 当たり数)
-    sets: tuple[int, int, int, int, int, int, int]  # (セット数, 当たりセット数, 賭け金合計, 払い戻し合計, 玉数, スタート数, 最大連チャン)
+    sets: tuple[
+        int, int, int, int, int, int, int
+    ]  # (セット数, 当たりセット数, 賭け金合計, 払い戻し合計, 玉数, スタート数, 最大連チャン)
 
 
 class RaceCloseResult(TypedDict):

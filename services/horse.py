@@ -1,7 +1,6 @@
 """競馬のレース進行・オッズ計算・スケジュール管理のアプリケーションサービス。"""
 
 import datetime
-from collections.abc import Mapping
 from typing import Optional
 
 from domain import horse as horse_mod

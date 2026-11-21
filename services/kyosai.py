@@ -5,14 +5,14 @@ from typing import Optional
 from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import (
-    KyosaiDaily,
-    KyosaiStatus,
     KyosaiAuctionEventRow,
     KyosaiAuctionRow,
+    KyosaiDaily,
     KyosaiMotionProposeRow,
     KyosaiMotionViewRow,
     KyosaiOfferDoneRow,
     KyosaiOfferRow,
+    KyosaiStatus,
 )
 from domain.ports.repos import IKyosaiRepo
 

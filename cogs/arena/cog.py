@@ -22,7 +22,7 @@ from cogs.shared.announce import announce_channel
 from cogs.shared.bridges import BotBridges, IArenaAdminBridge
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import arena as arena_mod
-from domain.ports.contracts import ArenaFinalResult, ArenaFighterRow, ArenaSemiResult, ArenaTournamentDetailRow
+from domain.ports.contracts import ArenaFighterRow, ArenaFinalResult, ArenaSemiResult, ArenaTournamentDetailRow
 from domain.ports.repos import IGuildRepo
 from services.arena import ArenaService
 

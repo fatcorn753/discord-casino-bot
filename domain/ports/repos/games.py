@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Optional
 from domain.errors import Outcome
 from domain.ports.contracts import (
     ArenaBetRow,
-    ArenaFinalResult,
     ArenaFighterRow,
+    ArenaFinalResult,
     ArenaSemiResult,
     ArenaTournamentDetailRow,
     AuctionHorseRow,

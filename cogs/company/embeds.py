@@ -1,7 +1,5 @@
 """会社の画面（Embed）の組み立て。数字は domain/company.py、文言は cogs/company/texts.py。"""
 
-from typing import Any
-
 import discord
 
 from cogs.company.texts import CONDITION_TEXT, KIND_BLURB, KIND_MARK, PANEL_HINT

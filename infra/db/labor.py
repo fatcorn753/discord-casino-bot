@@ -356,9 +356,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         result: LaborTop = {"rows": rows, "me": me}
         return result
 
-    def labor_click(
-        self, user_id: int, now: float, day: str = "", rng: Optional[random.Random] = None
-    ) -> LaborClick:
+    def labor_click(self, user_id: int, now: float, day: str = "", rng: Optional[random.Random] = None) -> LaborClick:
         """「働く」を1回押す。{ok, reason, pay, crit（鉱脈ヒットか）, ore（手掘りの鉱石。無ければ None）, combo（コンボ達成か）, terrain（今日の地層）}。"""
         rng = rng or cast("random.Random", random)
         with self._db.tx():
@@ -415,7 +413,14 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 row["ores"] = json.dumps(found)
             self._labor_log_click(gid, user_id, now, pay, now - row["last_click_before"])
             self._labor_save(gid, user_id, row)
-            clicked: LaborClickOk = {"ok": True, "pay": pay, "crit": crit, "ore": ore, "combo": combo, "terrain": terrain}
+            clicked: LaborClickOk = {
+                "ok": True,
+                "pay": pay,
+                "crit": crit,
+                "ore": ore,
+                "combo": combo,
+                "terrain": terrain,
+            }
             return clicked
 
     def _labor_log_click(self, guild_id: int, user_id: int, now: float, pay: int, gap: float) -> None:

@@ -1,7 +1,5 @@
 """自己破産: 全財産の換金・差し押さえと、帝愛 → 貸付の順の配当。"""
 
-from typing import Any
-
 from domain import teiai
 from domain.errors import Outcome, fail
 from domain.ports.contracts import BankruptResult

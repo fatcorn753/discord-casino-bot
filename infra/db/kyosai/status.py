@@ -1,7 +1,5 @@
 """共済の状態の表示用まとめ（kyosai_status）。"""
 
-from typing import Any
-
 from domain import kyosai
 from domain.ports.contracts import KyosaiStatus
 

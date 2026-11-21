@@ -1,8 +1,7 @@
 """個人間貸付（提案・募集・承諾・返済・期日回収）のアプリケーションサービス。"""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from domain.errors import Outcome
 from domain.ports.clock import IClock
