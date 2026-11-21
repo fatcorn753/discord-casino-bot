@@ -500,15 +500,17 @@ def combo_key(kind: str, lanes: Iterable[int]) -> str:
 def combo_hit(kind: str, lanes: Iterable[int], order_lanes: list[int]) -> bool:
     """着順（枠番の並び）で、その組み合わせが当たりか。"""
     lanes = list(lanes)
-    if kind == "quinella":
-        return set(lanes) == set(order_lanes[:2])
-    if kind == "exacta":
-        return lanes == order_lanes[:2]
-    if kind == "wide":
-        return set(lanes) <= set(order_lanes[:3])
-    if kind == "trio":
-        return set(lanes) == set(order_lanes[:3])
-    return False
+    match kind:
+        case "quinella":
+            return set(lanes) == set(order_lanes[:2])
+        case "exacta":
+            return lanes == order_lanes[:2]
+        case "wide":
+            return set(lanes) <= set(order_lanes[:3])
+        case "trio":
+            return set(lanes) == set(order_lanes[:3])
+        case _:
+            return False
 
 
 NPC_NAMES = list(_CFG.npc_names)

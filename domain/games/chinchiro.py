@@ -35,17 +35,19 @@ class Hand:
     @property
     def strength(self) -> int:
         """大きいほど強い。同じ値なら引き分け。"""
-        if self.kind == HIFUMI:
-            return 0
-        if self.kind == MENASHI:
-            return 1
-        if self.kind == ME:
-            return 10 + self.value
-        if self.kind == SHIGORO:
-            return 30
-        if self.kind == ARASHI:
-            return 40 + self.value
-        return 100
+        match self.kind:
+            case "hifumi":  # HIFUMI
+                return 0
+            case "menashi":  # MENASHI
+                return 1
+            case "me":  # ME
+                return 10 + self.value
+            case "shigoro":  # SHIGORO
+                return 30
+            case "arashi":  # ARASHI
+                return 40 + self.value
+            case _:  # PINZORO（デフォルト）
+                return 100
 
     @property
     def name(self) -> str:
