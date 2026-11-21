@@ -1,7 +1,7 @@
 """帝愛ファイナンス・銀行・個人間貸付のリポジトリポート契約。"""
 
 import random
-from typing import Any, Optional
+from typing import Optional
 
 from domain.errors import Outcome
 from domain.ports.bridges import (
@@ -15,15 +15,19 @@ from domain.ports.bridges import (
 )
 from domain.ports.contracts import (
     BankStatus,
+    BankruptResult,
     CdsHoldings,
     CdsQuote,
+    EscapeResult,
     HouseAccount,
     KyosaiAuctionEventRow,
     KyosaiAuctionRow,
+    KyosaiDaily,
     KyosaiMotionProposeRow,
     KyosaiMotionViewRow,
     KyosaiOfferDoneRow,
     KyosaiOfferRow,
+    KyosaiStatus,
     LoanBook,
     LoanCollectRow,
     LoanCredit,
@@ -118,7 +122,7 @@ class IBankRepo(IGuildScopedRepo, IBankCashFlow, IHouseAccount, IBankCdsBridge):
     def grace_list(self) -> list[tuple[int, int, float]]:
         raise NotImplementedError
 
-    def grace_expire(self, now: float) -> list[tuple[int, Any]]:
+    def grace_expire(self, now: float) -> list[tuple[int, BankruptResult]]:
         raise NotImplementedError
 
     def bank_trust_accrue(self, now: float) -> int:
@@ -148,7 +152,7 @@ class IDebtRepo(
 ):
     def bankrupt_for(
         self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[BankruptResult]:
         raise NotImplementedError
 
     def repay_all_of_for(self, guild_id: int, user_id: int, amount: int, label: str) -> int:
@@ -175,10 +179,10 @@ class IDebtRepo(
     def escape_left(self, user_id: int) -> int:
         raise NotImplementedError
 
-    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Outcome[dict[str, Any]]:
+    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Outcome[EscapeResult]:
         raise NotImplementedError
 
-    def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> Outcome[dict[str, Any]]:
+    def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> Outcome[BankruptResult]:
         raise NotImplementedError
 
 
@@ -191,7 +195,7 @@ class IKyosaiRepo(IGuildScopedRepo):
     def recover_units_for(self, guild_id: int, user_id: int, now: float) -> int:
         raise NotImplementedError
 
-    def kyosai_daily(self, now: float) -> Optional[dict[str, Any]]:
+    def kyosai_daily(self, now: float) -> Optional[KyosaiDaily]:
         raise NotImplementedError
 
     def kyosai_auction_tick(self, now: float) -> list[KyosaiAuctionEventRow]:
@@ -227,5 +231,5 @@ class IKyosaiRepo(IGuildScopedRepo):
     def kyosai_motion(self, motion_id: int, now: float) -> Optional[KyosaiMotionViewRow]:
         raise NotImplementedError
 
-    def kyosai_status(self, user_id: int, now: float) -> dict[str, Any]:
+    def kyosai_status(self, user_id: int, now: float) -> KyosaiStatus:
         raise NotImplementedError

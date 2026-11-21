@@ -2,19 +2,25 @@
 
 import datetime
 import random
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
 
 from domain.errors import Outcome
 from domain.ports.contracts import (
     ArenaBetRow,
+    ArenaFinalResult,
     ArenaFighterRow,
+    ArenaSemiResult,
     ArenaTournamentDetailRow,
     AuctionHorseRow,
     HorseRow,
     ManualEventRow,
+    PachinkoStats,
+    RaceBetResult,
     RaceBetRow,
+    RaceCloseResult,
     RaceEntryRow,
     RaceRow,
+    RaceRunResult,
 )
 from domain.ports.repos.base import IGuildScopedRepo
 
@@ -62,7 +68,7 @@ class IPachinkoRepo(IGuildScopedRepo):
     ) -> None:
         raise NotImplementedError
 
-    def pachinko_stats(self, guild_id: Optional[int] = None, since: Optional[float] = None) -> dict[str, Any]:
+    def pachinko_stats(self, guild_id: Optional[int] = None, since: Optional[float] = None) -> PachinkoStats:
         raise NotImplementedError
 
 
@@ -145,10 +151,10 @@ class IRaceRepo(IGuildScopedRepo):
     def race_withdraw(self, user_id: int, horse_id: int, race_id: int, now: float) -> Outcome[str]:
         raise NotImplementedError
 
-    def race_close_entries(self, race_id: int, rng: Optional[random.Random] = None) -> Optional[dict[str, Any]]:
+    def race_close_entries(self, race_id: int, rng: Optional[random.Random] = None) -> Optional[RaceCloseResult]:
         raise NotImplementedError
 
-    def race_set_odds(self, race_id: int, odds: dict[str, Any] | list[tuple[float, float]]) -> None:
+    def race_set_odds(self, race_id: int, odds: dict[str, dict[str, float]] | list[tuple[float, float]]) -> None:
         raise NotImplementedError
 
     def race_odds(self, race_id: int, kind: str, lanes: list[int]) -> Optional[float]:
@@ -159,15 +165,15 @@ class IRaceRepo(IGuildScopedRepo):
 
     def race_bet(
         self, user_id: int, race_id: int, kind: str, lane: int | list[int], stake: int, now: float
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[RaceBetResult]:
         raise NotImplementedError
 
     def race_bet_many(
         self, user_id: int, race_id: int, kind: str, lanes: list[int], stake: int, now: float
-    ) -> Outcome[list[dict[str, Any]]]:
+    ) -> Outcome[list[RaceBetResult]]:
         raise NotImplementedError
 
-    def race_run(self, race_id: int, tz_hours: float, rng: Optional[random.Random] = None) -> Optional[dict[str, Any]]:
+    def race_run(self, race_id: int, tz_hours: float, rng: Optional[random.Random] = None) -> Optional[RaceRunResult]:
         raise NotImplementedError
 
 
@@ -196,12 +202,12 @@ class IArenaRepo(IGuildScopedRepo):
 
     def arena_run_semis(
         self, tournament_id: int, rng: Optional[random.Random] = None, now: Optional[float] = None
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[ArenaSemiResult]:
         raise NotImplementedError
 
     def arena_run_final(
         self, tournament_id: int, rng: Optional[random.Random] = None, now: Optional[float] = None
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[ArenaFinalResult]:
         raise NotImplementedError
 
     def arena_my_bets(self, tournament_id: int, user_id: int) -> list[ArenaBetRow]:

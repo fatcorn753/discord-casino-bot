@@ -1,7 +1,8 @@
 """証券市場・現物・信用・債券・オプション・決算のリポジトリポート契約。"""
 
 import random
-from typing import TYPE_CHECKING, Any, Optional
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Optional
 
 from domain.errors import Outcome
 from domain.ports.bridges import (
@@ -18,8 +19,10 @@ from domain.ports.contracts import (
     EarningsJump,
     EarningsRow,
     HoldingBook,
+    InsiderStock,
     MarginPosition,
     MarginStatus,
+    MarketEventPlan,
     MarketEventRow,
     OptionBuyResult,
     OptionRow,
@@ -91,11 +94,11 @@ class IMarketEventRepo(IGuildScopedRepo):
     def market_events(self, now: float) -> list[MarketEventRow]:
         raise NotImplementedError
 
-    def vol_multipliers(self, now: float) -> dict[str, Any]:
+    def vol_multipliers(self, now: float) -> dict[str, float]:
         raise NotImplementedError
 
     def event_step(
-        self, now: float, rng: Optional[random.Random] = None, force: Optional[dict[str, Any]] = None
+        self, now: float, rng: Optional[random.Random] = None, force: Optional[MarketEventPlan] = None
     ) -> Optional[MarketEventRow]:
         raise NotImplementedError
 
@@ -121,7 +124,7 @@ class IEarningsRepo(IGuildScopedRepo):
     def earnings_memo(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Optional["MemoInfo"]:
         raise NotImplementedError
 
-    def insider_stock(self, now: float) -> Optional[dict[str, Any]]:
+    def insider_stock(self, now: float) -> Optional[InsiderStock]:
         raise NotImplementedError
 
     def insider_buy(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> "Outcome[MemoInfo]":
@@ -182,7 +185,7 @@ class IMarginRepo(IGuildScopedRepo, IMarginCollateralGuard):
     def margin_equity(self) -> dict[int, int]:
         raise NotImplementedError
 
-    def margin_status(self, user_id: int, prices: Optional[dict[str, Any]] = None) -> MarginStatus:
+    def margin_status(self, user_id: int, prices: Optional[Mapping[str, float]] = None) -> MarginStatus:
         raise NotImplementedError
 
     def short_open(self, user_id: int, units: int, price: float, leverage: int, symbol: str = "cs") -> "CryptoResult":
@@ -202,13 +205,13 @@ class IMarginRepo(IGuildScopedRepo, IMarginCollateralGuard):
     def long_close(self, user_id: int, units: Optional[int], price: float, symbol: str = "cs") -> "CryptoResult":
         raise NotImplementedError
 
-    def margin_cut_map(self, prices: Optional[dict[str, Any]] = None) -> list[tuple[str, str, float, int]]:
+    def margin_cut_map(self, prices: Optional[Mapping[str, float]] = None) -> list[tuple[str, str, float, int]]:
         raise NotImplementedError
 
     def margin_interest(self, now: float) -> list[tuple[int, int, str, str, int]]:
         raise NotImplementedError
 
-    def margin_losscut(self, prices: dict[str, Any]) -> list[tuple[int, int, str, str, int]]:
+    def margin_losscut(self, prices: Mapping[str, float]) -> list[tuple[int, int, str, str, int]]:
         raise NotImplementedError
 
 
@@ -265,10 +268,10 @@ class IOptionRepo(IGuildScopedRepo):
     ) -> Outcome[OptionWriteResult]:
         raise NotImplementedError
 
-    def option_close_cost(self, row: OptionRow, now: float, prices: dict[str, Any]) -> int:
+    def option_close_cost(self, row: OptionRow, now: float, prices: Mapping[str, float]) -> int:
         raise NotImplementedError
 
-    def option_value(self, row: OptionRow, now: float, prices: dict[str, Any]) -> int:
+    def option_value(self, row: OptionRow, now: float, prices: Mapping[str, float]) -> int:
         raise NotImplementedError
 
     def option_values(self) -> dict[int, int]:
