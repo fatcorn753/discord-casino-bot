@@ -105,8 +105,8 @@
 | `catalogs.py` / `catalog_types/` | `ICatalogs` カタログ取得契約と責務別公称データ契約（`shop`・`economy`・`market`・`games`・`arena`・`company`） |
 | `clock.py` | `IClock`（現在時刻・日付・UTCオフセット・タイムスタンプの抽象契約） |
 | `session.py` | `ISessionGuard`（二重プレイ防止セッション管理の契約） |
-| `repos/` | 領域別 DB リポジトリ用名目的基底クラス群（`base.py`・`economy.py`・`teiai.py`・`market.py`・`social.py`・`games.py`・`bundle.py` / `__init__.py` で `IRepositoryBundle` 等を集約再エクスポート） |
-| `contracts/` | ポートの戻り値に使う型付きの値型・行モデル（catalogs 非依存）。責務別サブモジュール（`core.py`（値型とジェネリックな `HoldingBook[RowT]`・`LoanBook[RowT]`）・`social.py`（出品/抽選/投票/クイズ/労働等の行）・`games.py`（馬/レース/闘技場の行）・`market.py`（現物/建玉/オプション/債券/決算/市場イベント/チャートの行と派生ペイロード）・`teiai.py`（共済の競り/譲渡/動議・貸付・CDS の行と派生ペイロード））に分割し、`__init__.py` で全シンボルを再エクスポート。`from domain.ports.contracts import X` は従来どおり使える |
+| `repos/` | 領域別 DB リポジトリ用名目的基底クラス群（`base.py`・`economy.py`・`teiai.py`・`market.py`・`social.py`・`games.py`・`bundle.py` / `__init__.py` で `IRepositoryBundle` 等を集約再エクスポート）。全リポジトリポートの引数・戻り値の辞書契約は `contracts/` の `TypedDict` または正確な組み込み型で型付け済み（`dict[str, Any]` は 0 件。`tests/infra/test_architecture_ports.py::test_ports_repos_no_dict_any` が AST で恒久検証） |
+| `contracts/` | ポートの戻り値に使う型付きの値型・行モデル（catalogs 非依存）。責務別サブモジュール（`core.py`（値型とジェネリックな `HoldingBook[RowT]`・`LoanBook[RowT]`）・`social.py`（出品/抽選/投票/クイズ/労働等の行）・`games.py`（馬/レース/闘技場の行）・`market.py`（現物/建玉/オプション/債券/決算/市場イベント/チャートの行と派生ペイロード）・`teiai.py`（共済の競り/譲渡/動議・貸付・CDS の行と派生ペイロード））に分割し、`__init__.py` で全シンボルを再エクスポート。`from domain.ports.contracts import X` は従来どおり使える。`ports/repos/` の全リポジトリメソッドの辞書引数・戻り値はここの `TypedDict` で表され、`dict[str, Any]` は使わない |
 | `bridges/` | リポジトリ・サービス間の循環を防ぐ細粒度ブリッジ契約。住み分け: 単一メソッドの純粋コールバックは `Callable` 型エイリアス（`GraceEnterHook`・`ExcessLossSink`・`BankruptExecutor`・`ValuationSource`・`AssetSeizureStep` 等）＋ `noop_*`（LSP 準拠の既定動作）・`compose_*`（OCP の束ね）関数、複数メソッド・不変条件の契約は名目的基底 `I*` ＋ `NoOp*` のまま。責務別サブモジュール（`debt.py`・`bank.py`・`margin.py`・`seizure.py`・`loans.py`）に分割し、`__init__.py` で全シンボル（クラス・関数・型エイリアス）を再エクスポート |
 
 ### `games/` — ゲームのルール（純粋な計算）
@@ -164,7 +164,7 @@
 
 | パス | 内容 |
 |---|---|
-| `base.py` | `EcoDb`（共有 DB 接続・ロック・`tx()`・`close()`）、`ScopedRepo`（ギルドスコープ共通基底。`_one[RowT]()`/`_all[RowT]()` はジェネリックな行→辞書の定型取得で、`domain/ports/contracts/` の行モデルで型付けされる）、`validate_guild_id()` |
+| `base.py` | `EcoDb`（共有 DB 接続・ロック・`tx()`・`close()`）、`ScopedRepo`（ギルドスコープ共通基底。`_one()`/`_all()` は行→辞書の定型取得）、`validate_guild_id()` |
 | `schema/` | DB の表定義（`tables.py`）と旧版からの列追加・データ移行（`migrations.py`） |
 | `repositories.py` | `RepositoryBundle` と `open_repositories()`（全リポジトリの構築・ブリッジ接続・`for_guild(gid)` スコープ切り替え・`db` 管理） |
 | `lazy_bridges.py` | 初期化時の循環参照を 1 パスの Constructor DI へ解決する遅延デリゲート。複数メソッドの名目的契約（`IDebtLifecycleHook`・`IStatusReader`・`IMarginCollateralGuard`・`IOverdueLoanCollector`）は `LazyBridgeBase[T]` 多重継承の `Lazy*` クラス（全メソッド明示で Pyright の完全な型検証を維持）、単一メソッドの `Callable` 契約は `lazy_*` ファクトリ関数（解決した束縛メソッドを呼ぶクロージャを返す。例: `lazy_excess_sink(lambda: kyosai.charge_excess_for)`） |
