@@ -5,7 +5,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 _GAME_ROWS = ("追加の賭け:", "払い戻し:", "保険券で半額返金:", "追加の支払い:", "返金:")
 _TRANSFER = re.compile(r"^送金（(送|受)）[→←](\d+)$")
@@ -24,7 +24,7 @@ class HistoryEntry:
     reason: str = ""
 
 
-def _entries_oldest_first(rows: list) -> list[HistoryEntry]:
+def _entries_oldest_first(rows: list[dict[str, Any]]) -> list[HistoryEntry]:
     """台帳の行（古い順）を HistoryEntry の並びにする。"""
     out: list[HistoryEntry] = []
     i = 0
@@ -86,12 +86,12 @@ def _entries_oldest_first(rows: list) -> list[HistoryEntry]:
     return out
 
 
-def summarize_history(rows_newest_first: list, limit: int = 12) -> list[HistoryEntry]:
+def summarize_history(rows_newest_first: list[dict[str, Any]], limit: int = 12) -> list[HistoryEntry]:
     """新しい順の台帳の行から、1ゲーム1件にまとめたエントリ（新しい順）を返す。"""
     grouped = _entries_oldest_first(list(reversed(rows_newest_first)))
     return list(reversed(grouped))[:limit]
 
 
-def game_results(rows_oldest_first: list) -> list:
+def game_results(rows_oldest_first: list[dict[str, Any]]) -> list[tuple[float, str, int]]:
     """台帳の行（古い順）から、1ゲームごとの結果 [(時刻, ゲーム名, 損益), ...] を取り出す（過去の分の集計用）。"""
     return [(e.ts, e.game, e.delta) for e in _entries_oldest_first(rows_oldest_first) if e.game]

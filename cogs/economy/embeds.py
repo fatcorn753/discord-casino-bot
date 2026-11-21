@@ -48,7 +48,7 @@ def balance_embed(card: BalanceCard, name: str, avatar_url: str) -> discord.Embe
     elif owned:  # ショップのコレクション。持っているものが、絵文字で並ぶ
         e.add_field(
             name=f"🏆 コレクション（資産価値 {ui.pelica(collection_total)}）",
-            value=" ".join(i.value for i in owned),
+            value=" ".join(str(i.value) for i in owned),
             inline=False,
         )
     if card.has_frozen_equipment:

@@ -179,7 +179,10 @@ def test_stable_view_shows_horses_and_stats(setup):
 
 def test_display_frames_end_when_the_winner_crosses_and_never_move_backward():
     rng = random.Random(3)
-    rs = [h.Runner(i + 1, f"馬{i + 1}", **h.random_stats(rng)) for i in range(8)]
+    rs = []
+    for i in range(8):
+        s = h.random_stats(rng)
+        rs.append(h.Runner(i + 1, f"馬{i + 1}", s["speed"], s["stamina"], s["power"], s["guts"]))
     sim = h.simulate(rs, h.Track(1800, "良"), rng, keep_frames=True)
     winner = sim["order"][0]
     frames = horse_cog.display_frames(sim["frames"], winner)

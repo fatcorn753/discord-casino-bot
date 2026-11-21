@@ -50,7 +50,7 @@ def participation(participants: int, correct: int, reward: int) -> int:
     return round(factor(participants, correct) * PARTICIPATION_RATE * reward * participants)
 
 
-def author_payout(participants: int, correct: int, reward: int) -> tuple:
+def author_payout(participants: int, correct: int, reward: int) -> tuple[int, int, int]:
     """(基本報酬, 正答率ボーナス, 参加報酬)。回答者が MIN_PARTICIPANTS 人に満たなければ (0, 0, 0)。"""
     if participants < MIN_PARTICIPANTS:
         return 0, 0, 0
