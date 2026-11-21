@@ -73,23 +73,25 @@ def today_missions(day: datetime.date) -> list[Mission]:
 
 def progress_after(m: Mission, current: int, game: str, bet: int, net: int, streak: int, tags=()) -> int:
     """1回遊んだあとの、そのミッションの進み具合。"""
-    if m.kind == "play":
-        return current + 1
-    if m.kind == "win":
-        return current + (1 if net > 0 else 0)
-    if m.kind == "wager":
-        return current + bet
-    if m.kind == "streak":
-        return max(current, streak)
-    if m.kind == "big_win":
-        return max(current, net // bet if net > 0 and bet > 0 else 0)
-    if m.kind == "play_game":
-        return current + (1 if game == m.game else 0)
-    if m.kind == "game_win":
-        return current + (1 if game == m.game and net > 0 else 0)
-    if m.kind == "tag":
-        return current + (1 if m.tag in tags else 0)
-    return current
+    match m.kind:
+        case "play":
+            return current + 1
+        case "win":
+            return current + (1 if net > 0 else 0)
+        case "wager":
+            return current + bet
+        case "streak":
+            return max(current, streak)
+        case "big_win":
+            return max(current, net // bet if net > 0 and bet > 0 else 0)
+        case "play_game":
+            return current + (1 if game == m.game else 0)
+        case "game_win":
+            return current + (1 if game == m.game and net > 0 else 0)
+        case "tag":
+            return current + (1 if m.tag in tags else 0)
+        case _:
+            return current
 
 
 def is_jackpot(bet: int, net: int) -> bool:
