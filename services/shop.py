@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from domain import shop, teiai
+from domain.earnings import MemoInfo
+from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.repos import (
     IAuctionRepo,
@@ -189,5 +191,5 @@ class ShopService:
     def insider_stock(self, guild_id: int) -> Optional[dict[str, Any]]:
         return self._earnings.for_guild(guild_id).insider_stock(self._clock.now_ts())
 
-    def insider_buy(self, guild_id: int, user_id: int) -> tuple[Any, ...]:
+    def insider_buy(self, guild_id: int, user_id: int) -> Outcome[MemoInfo]:
         return self._earnings.for_guild(guild_id).insider_buy(user_id, self._clock.now_ts())

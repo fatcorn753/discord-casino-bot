@@ -4,6 +4,7 @@ import datetime
 import random
 from typing import Any, Optional
 
+from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.repos import IArenaRepo
 
@@ -33,7 +34,7 @@ class ArenaService:
 
     def place_bet(
         self, guild_id: int, user_id: int, fighter_id: int, stake: int, now: Optional[float] = None
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[str]:
         ts = self.clock.now_ts() if now is None else now
         return self._arena.for_guild(guild_id).arena_bet(user_id, fighter_id, stake, ts)
 

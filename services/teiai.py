@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from domain import teiai
+from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import BankStatus, CdsHoldings, CdsQuote, HouseAccount
 from domain.ports.repos import IBankRepo, IDebtRepo, ILoanRepo, INoticeRepo, IWalletRepo
@@ -53,14 +54,14 @@ class TeiaiService:
     def status_of(self, guild_id: int, user_id: int) -> str:
         return self._debt.for_guild(guild_id).status(user_id)
 
-    def can_borrow_for_bet(self, guild_id: int, user_id: int, need: int) -> tuple[Any, ...]:
+    def can_borrow_for_bet(self, guild_id: int, user_id: int, need: int) -> Outcome[str]:
         return self._debt.for_guild(guild_id).can_borrow_for_bet(user_id, need)
 
-    def repay(self, guild_id: int, user_id: int, amount: Optional[int]) -> tuple[Any, ...]:
+    def repay(self, guild_id: int, user_id: int, amount: Optional[int]) -> Outcome[int]:
         """帝愛への返済。amount が None なら返せる限り全額。"""
         return self._debt.for_guild(guild_id).repay_debt(user_id, amount)
 
-    def borrow_seed(self, guild_id: int, user_id: int) -> tuple[Any, ...]:
+    def borrow_seed(self, guild_id: int, user_id: int) -> Outcome[int]:
         """種銭を借りる。結果にかかわらず、溜まった一時通知は掃き出す。"""
         result = self._debt.for_guild(guild_id).borrow_seed(user_id)
         self._notices.for_guild(guild_id).take_notices(user_id)
@@ -74,7 +75,7 @@ class TeiaiService:
             return "nothing"
         return None
 
-    def bankrupt(self, guild_id: int, user_id: int) -> tuple[Any, ...]:
+    def bankrupt(self, guild_id: int, user_id: int) -> Outcome[dict[str, Any]]:
         return self._debt.for_guild(guild_id).bankrupt(user_id)
 
     def take_notices(self, guild_id: int, user_id: int) -> None:
@@ -84,7 +85,7 @@ class TeiaiService:
     def escape_left(self, guild_id: int, user_id: int) -> int:
         return self._debt.for_guild(guild_id).escape_left(user_id)
 
-    def escape_attempt(self, guild_id: int, user_id: int) -> tuple[Any, ...]:
+    def escape_attempt(self, guild_id: int, user_id: int) -> Outcome[dict[str, Any]]:
         return self._debt.for_guild(guild_id).escape_attempt(user_id, self._clock.now_ts())
 
     # ------------------------------ 帝愛銀行・CDS ------------------------------ #
@@ -108,17 +109,17 @@ class TeiaiService:
             uid=user_id,
         )
 
-    def deposit(self, guild_id: int, user_id: int, amount: int) -> tuple[Any, ...]:
+    def deposit(self, guild_id: int, user_id: int, amount: int) -> Outcome[int]:
         return self._bank.for_guild(guild_id).bank_deposit(user_id, amount, self._clock.now_ts())
 
-    def withdraw(self, guild_id: int, user_id: int, amount: Optional[int]) -> tuple[Any, ...]:
+    def withdraw(self, guild_id: int, user_id: int, amount: Optional[int]) -> Outcome[int]:
         """amount が None なら全額。"""
         return self._bank.for_guild(guild_id).bank_withdraw(user_id, amount, self._clock.now_ts())
 
     def cds_quote(self, guild_id: int, target_id: int) -> CdsQuote:
         return self._bank.for_guild(guild_id).cds_quote(target_id, self._clock.now_ts())
 
-    def cds_buy(self, guild_id: int, user_id: int, target_id: int, stake: int) -> tuple[Any, ...]:
+    def cds_buy(self, guild_id: int, user_id: int, target_id: int, stake: int) -> Outcome[float]:
         return self._bank.for_guild(guild_id).cds_buy(user_id, target_id, stake, self._clock.now_ts())
 
     def grace_expire(self, guild_id: int, now: float) -> list[tuple[int, Any]]:

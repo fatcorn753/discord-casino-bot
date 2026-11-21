@@ -2,6 +2,7 @@
 
 from typing import Any, Optional
 
+from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.repos import IKyosaiRepo
 
@@ -22,22 +23,22 @@ class KyosaiService:
     def offers(self, guild_id: int, user_id: int) -> list[dict[str, Any]]:
         return self._kyosai.for_guild(guild_id).kyosai_offers_of(user_id, self._now())
 
-    def bid(self, guild_id: int, user_id: int, amount: int) -> tuple[Any, ...]:
+    def bid(self, guild_id: int, user_id: int, amount: int) -> Outcome[dict[str, Any]]:
         return self._kyosai.for_guild(guild_id).kyosai_bid(user_id, amount, self._now())
 
-    def offer(self, guild_id: int, seller: int, buyer: int, units: int, price: int) -> tuple[Any, ...]:
+    def offer(self, guild_id: int, seller: int, buyer: int, units: int, price: int) -> Outcome[int]:
         return self._kyosai.for_guild(guild_id).kyosai_offer(seller, buyer, units, price, self._now())
 
-    def accept(self, guild_id: int, buyer: int, offer_id: int) -> tuple[Any, ...]:
+    def accept(self, guild_id: int, buyer: int, offer_id: int) -> Outcome[dict[str, Any]]:
         return self._kyosai.for_guild(guild_id).kyosai_accept(buyer, offer_id, self._now())
 
     def cancel(self, guild_id: int, user_id: int, offer_id: int) -> bool:
         return self._kyosai.for_guild(guild_id).kyosai_cancel(user_id, offer_id)
 
-    def propose(self, guild_id: int, user_id: int, premium: float) -> tuple[Any, ...]:
+    def propose(self, guild_id: int, user_id: int, premium: float) -> Outcome[dict[str, Any]]:
         return self._kyosai.for_guild(guild_id).kyosai_propose(user_id, premium, self._now())
 
-    def vote(self, guild_id: int, user_id: int, yes: bool, motion_id: Optional[int] = None) -> tuple[Any, ...]:
+    def vote(self, guild_id: int, user_id: int, yes: bool, motion_id: Optional[int] = None) -> Outcome[int]:
         return self._kyosai.for_guild(guild_id).kyosai_vote(user_id, yes, self._now(), motion_id)
 
     def set_motion_message(self, guild_id: int, motion_id: int, channel_id: int, message_id: int) -> None:

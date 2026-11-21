@@ -3,6 +3,7 @@
 from typing import Any, Optional, cast
 
 from domain import labor as labor_mod
+from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.repos import ILaborRepo, IRelicRepo
 
@@ -32,7 +33,7 @@ class LaborService:
     def click(self, guild_id: int, user_id: int, now: float) -> dict[str, Any]:
         return self._repo(guild_id).labor_click(user_id, now, self.today_key())
 
-    def drink(self, guild_id: int, user_id: int, now: float) -> tuple[Any, ...]:
+    def drink(self, guild_id: int, user_id: int, now: float) -> Outcome[str]:
         return self._repo(guild_id).labor_drink(user_id, now, self.today_key())
 
     def collect(self, guild_id: int, user_id: int, now: float) -> dict[str, Any]:
@@ -40,26 +41,26 @@ class LaborService:
         # detail=True なら必ず内訳の辞書が返る
         return cast("dict[str, Any]", self._repo(guild_id).labor_collect(user_id, now, self.today_key(), detail=True))
 
-    def hire(self, guild_id: int, user_id: int, kind: str, now: float) -> tuple[Any, ...]:
+    def hire(self, guild_id: int, user_id: int, kind: str, now: float) -> Outcome[str]:
         return self._repo(guild_id).labor_hire(user_id, kind, now, self.today_key())
 
-    def dismiss(self, guild_id: int, user_id: int, kind: str, now: float) -> tuple[Any, ...]:
+    def dismiss(self, guild_id: int, user_id: int, kind: str, now: float) -> Outcome[str]:
         return self._repo(guild_id).labor_dismiss(user_id, kind, now, self.today_key())
 
-    def set_renew(self, guild_id: int, user_id: int, on: bool, now: float) -> tuple[Any, ...]:
+    def set_renew(self, guild_id: int, user_id: int, on: bool, now: float) -> Outcome[str]:
         return self._repo(guild_id).labor_set_renew(user_id, on, now, self.today_key())
 
-    def dorm(self, guild_id: int, user_id: int, now: float) -> tuple[Any, ...]:
+    def dorm(self, guild_id: int, user_id: int, now: float) -> Outcome[str]:
         return self._repo(guild_id).labor_dorm(user_id, now, self.today_key())
 
-    def upgrade(self, guild_id: int, user_id: int, tool: str, now: float) -> tuple[Any, ...]:
+    def upgrade(self, guild_id: int, user_id: int, tool: str, now: float) -> Outcome[str]:
         return self._repo(guild_id).labor_upgrade(user_id, tool, now, self.today_key())
 
     def top(self, guild_id: int, daily: bool, user_id: int, limit: int = 10) -> dict[str, Any]:
         """採掘ランキング。daily なら今日の分、そうでなければ通算。"""
         return self._repo(guild_id).labor_top(limit, self.today_key() if daily else None, user_id)
 
-    def merge_relic(self, guild_id: int, user_id: int, item_id: str) -> tuple[Any, ...]:
+    def merge_relic(self, guild_id: int, user_id: int, item_id: str) -> Outcome[str]:
         """同じ発掘品を集めて、★が1つ増えた1個に合体する。"""
         if self._relics is None:
             raise RuntimeError("LaborService に relics が渡されていません")

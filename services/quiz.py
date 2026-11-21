@@ -2,6 +2,7 @@
 
 from typing import Any, Optional
 
+from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.repos import IQuizRepo
 
@@ -51,11 +52,11 @@ class QuizService:
         return self._quiz.quiz_add_many(items, self._clock.now_ts(), creator_name)
 
     # ------------------------------ サーバーごとの挑戦・出題 ------------------------------ #
-    def next_for(self, guild_id: int, user_id: int) -> tuple[Any, ...]:
+    def next_for(self, guild_id: int, user_id: int) -> tuple[Optional[dict[str, Any]], int]:
         """(次の問題 or None, 残りの問題数)。"""
         return self._quiz.for_guild(guild_id).quiz_next(user_id, self._clock.now_ts())
 
-    def answer(self, guild_id: int, user_id: int, quiz_id: int, chosen: str) -> tuple[Any, ...]:
+    def answer(self, guild_id: int, user_id: int, quiz_id: int, chosen: str) -> Outcome[dict[str, Any]]:
         return self._quiz.for_guild(guild_id).quiz_answer(user_id, quiz_id, chosen, self._clock.now_ts())
 
     def post(
@@ -71,7 +72,7 @@ class QuizService:
         creator_name: str = "",
         msg_right: str = "",
         msg_wrong: str = "",
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         """プレイヤーの出題（報酬は出題者のペリカから預かる）。"""
         return self._quiz.for_guild(guild_id).quiz_post(
             author_id,

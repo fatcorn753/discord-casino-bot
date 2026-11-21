@@ -4,6 +4,7 @@ import datetime
 from typing import Any, Optional
 
 from domain import horse as horse_mod
+from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.repos import IHorseRepo, IRaceRepo, IShopRepo
 
@@ -41,12 +42,12 @@ class HorseDesk:
 
     def race_bet(
         self, user_id: int, race_id: int, kind: str, lane: int | list[int], stake: int, now: float
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[dict[str, Any]]:
         return self._races.race_bet(user_id, race_id, kind, lane, stake, now)
 
     def race_bet_many(
         self, user_id: int, race_id: int, kind: str, lanes: list[int], stake: int, now: float
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[list[dict[str, Any]]]:
         return self._races.race_bet_many(user_id, race_id, kind, lanes, stake, now)
 
     def race_set_message(self, race_id: int, channel_id: int, message_id: int) -> None:
@@ -55,10 +56,10 @@ class HorseDesk:
     def race_create_special(self, now: float, entry_min: int, bet_min: int, channel_id: int = 0) -> int:
         return self._races.race_create_special(now, entry_min, bet_min, channel_id)
 
-    def race_register(self, user_id: int, horse_id: int, race_id: int, now: float) -> tuple[Any, ...]:
+    def race_register(self, user_id: int, horse_id: int, race_id: int, now: float) -> Outcome[str]:
         return self._races.race_register(user_id, horse_id, race_id, now)
 
-    def race_withdraw(self, user_id: int, horse_id: int, race_id: int, now: float) -> tuple[Any, ...]:
+    def race_withdraw(self, user_id: int, horse_id: int, race_id: int, now: float) -> Outcome[str]:
         return self._races.race_withdraw(user_id, horse_id, race_id, now)
 
     # ------------------------------ 厩舎 ------------------------------ #
@@ -68,19 +69,19 @@ class HorseDesk:
     def horse_list(self, user_id: int) -> list[dict[str, Any]]:
         return self._horses.horse_list(user_id)
 
-    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> tuple[Any, ...]:
+    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> Outcome[str | int]:
         return self._horses.horse_create(user_id, name, coat, silks)
 
-    def horse_set_style(self, user_id: int, horse_id: int, style: Optional[str]) -> tuple[Any, ...]:
+    def horse_set_style(self, user_id: int, horse_id: int, style: Optional[str]) -> Outcome[str]:
         return self._horses.horse_set_style(user_id, horse_id, style)
 
-    def horse_carrot(self, user_id: int, horse_id: int, src: str, dst: str) -> tuple[Any, ...]:
+    def horse_carrot(self, user_id: int, horse_id: int, src: str, dst: str) -> Outcome[dict[str, int]]:
         return self._horses.horse_carrot(user_id, horse_id, src, dst)
 
-    def horse_gold_carrot(self, user_id: int, horse_id: int, first: str, second: str) -> tuple[Any, ...]:
+    def horse_gold_carrot(self, user_id: int, horse_id: int, first: str, second: str) -> Outcome[dict[str, int]]:
         return self._horses.horse_gold_carrot(user_id, horse_id, first, second)
 
-    def horse_retire(self, user_id: int, horse_id: int) -> tuple[Any, ...]:
+    def horse_retire(self, user_id: int, horse_id: int) -> Outcome[int]:
         return self._horses.horse_retire(user_id, horse_id)
 
     def is_major_race(self, race: dict[str, Any]) -> bool:

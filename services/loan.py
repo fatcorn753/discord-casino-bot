@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import LoanBook, LoanCredit
 from domain.ports.repos import ILoanRepo
@@ -37,10 +38,10 @@ class LoanService:
     def set_message(self, guild_id: int, loan_id: int, message_id: int) -> None:
         self._loans.for_guild(guild_id).loan_set_message(loan_id, message_id)
 
-    def decline(self, guild_id: int, loan_id: int, user_id: int) -> tuple[Any, ...]:
+    def decline(self, guild_id: int, loan_id: int, user_id: int) -> Outcome[str]:
         return self._loans.for_guild(guild_id).loan_decline(loan_id, user_id)
 
-    def cancel(self, guild_id: int, loan_id: int, user_id: int) -> tuple[Any, ...]:
+    def cancel(self, guild_id: int, loan_id: int, user_id: int) -> Outcome[str]:
         return self._loans.for_guild(guild_id).loan_cancel(loan_id, user_id)
 
     def remaining(self, guild_id: int, loan: dict[str, Any], now: Optional[float] = None) -> int:
@@ -56,7 +57,7 @@ class LoanService:
         rate_tenths: int,
         term_days: int,
         channel_id: int,
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         return self._loans.for_guild(guild_id).loan_offer(
             lender_id, borrower_id, principal, rate_tenths, term_days, channel_id, self.clock.now_ts()
         )
@@ -69,18 +70,18 @@ class LoanService:
         rate_tenths: int,
         term_days: int,
         channel_id: int,
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         return self._loans.for_guild(guild_id).loan_request(
             borrower_id, principal, rate_tenths, term_days, channel_id, self.clock.now_ts()
         )
 
-    def accept(self, guild_id: int, loan_id: int, user_id: int) -> tuple[Any, ...]:
+    def accept(self, guild_id: int, loan_id: int, user_id: int) -> Outcome[str]:
         return self._loans.for_guild(guild_id).loan_accept(loan_id, user_id, self.clock.now_ts())
 
-    def lend(self, guild_id: int, loan_id: int, user_id: int) -> tuple[Any, ...]:
+    def lend(self, guild_id: int, loan_id: int, user_id: int) -> Outcome[str]:
         return self._loans.for_guild(guild_id).loan_lend(loan_id, user_id, self.clock.now_ts())
 
-    def repay(self, guild_id: int, loan_id: int, user_id: int, amount: Optional[int]) -> tuple[Any, ...]:
+    def repay(self, guild_id: int, loan_id: int, user_id: int, amount: Optional[int]) -> Outcome[int]:
         return self._loans.for_guild(guild_id).loan_repay(loan_id, user_id, amount, self.clock.now_ts())
 
     def process_tick(self, guild_id: int, now: Optional[float] = None) -> LoanTickOutcome:

@@ -7,6 +7,7 @@ from typing import Any, Optional
 from domain import missions as missions_mod
 from domain.earnings import MemoInfo
 from domain.ports.clock import IClock
+from domain.ports.contracts import RankEntry
 from domain.ports.repos import (
     IBondRepo,
     ICryptoRepo,
@@ -24,7 +25,7 @@ class BalanceCard:
     """`/ペリカ 残高` に出す値（表示の組み立ては cogs/economy/embeds.py）。"""
 
     stats: dict[str, Any]
-    rank: Optional[tuple[Any, ...]]
+    rank: Optional[RankEntry]
     display_status: str
     profile: dict[str, Any]
     has_frozen_equipment: bool  # 差し押さえ中の称号・カード・演出を、元は装備していたか

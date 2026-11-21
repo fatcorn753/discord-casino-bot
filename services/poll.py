@@ -2,6 +2,7 @@
 
 from typing import Any, Optional
 
+from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.repos import IPollRepo
 
@@ -16,7 +17,7 @@ class PollService:
     def _now(self) -> float:
         return self._clock.now_ts()
 
-    def create(self, guild_id: int, creator: int, title: str, minutes: int, channel_id: int) -> tuple[Any, ...]:
+    def create(self, guild_id: int, creator: int, title: str, minutes: int, channel_id: int) -> Outcome[int]:
         now = self._now()
         return self._polls.for_guild(guild_id).poll_create(creator, title, now + minutes * 60, channel_id, now)
 
@@ -26,10 +27,10 @@ class PollService:
     def get(self, guild_id: int, poll_id: int) -> Optional[dict[str, Any]]:
         return self._polls.for_guild(guild_id).poll_get(poll_id)
 
-    def vote(self, guild_id: int, user_id: int, poll_id: int, yes: bool) -> tuple[Any, ...]:
+    def vote(self, guild_id: int, user_id: int, poll_id: int, yes: bool) -> Outcome[dict[str, Any]]:
         return self._polls.for_guild(guild_id).poll_vote(user_id, poll_id, yes, self._now())
 
-    def rig(self, guild_id: int, user_id: int, poll_id: int, yes: int, no: int) -> tuple[Any, ...]:
+    def rig(self, guild_id: int, user_id: int, poll_id: int, yes: int, no: int) -> Outcome[dict[str, Any]]:
         return self._polls.for_guild(guild_id).poll_rig(user_id, poll_id, yes, no, self._now())
 
     def close_due(self, guild_id: int) -> list[dict[str, Any]]:
