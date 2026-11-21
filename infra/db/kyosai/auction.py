@@ -3,7 +3,7 @@
 from typing import Any, Optional
 
 from domain import kyosai, p2p
-from domain.errors import fail
+from domain.errors import Outcome, fail
 
 from .daily import KyosaiRepo as Base
 
@@ -49,7 +49,7 @@ class KyosaiRepo(Base):
                     events.append({**listed, "event": "listed"})
         return events
 
-    def kyosai_bid(self, user_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def kyosai_bid(self, user_id: int, amount: int, now: float) -> Outcome[dict[str, Any]]:
         """出ている競りに入札する（入札額は手元から預かり、前の最高値の人へ返す）。(成功か, Failure か競りの行)。"""
         with self._db.tx():
             gid = self._g()

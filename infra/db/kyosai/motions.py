@@ -3,7 +3,7 @@
 from typing import Any, Optional
 
 from domain import kyosai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 
 from .offers import KyosaiRepo as Base
 
@@ -14,7 +14,7 @@ class KyosaiRepo(Base):
             "SELECT * FROM kyosai_motions WHERE guild_id=? AND status='open' ORDER BY closes, id", (guild_id,)
         )
 
-    def kyosai_propose(self, user_id: int, premium: float, now: float) -> tuple[Any, ...]:
+    def kyosai_propose(self, user_id: int, premium: float, now: float) -> Outcome[dict[str, Any]]:
         """動議を出す。(成功か, Failure か動議の行)。
 
         通知の荒らしを防ぐため、口が MOTION_MIN_UNITS 以上の人だけが、1人 MOTION_MAX_OPEN_PER_USER 件まで、
@@ -47,7 +47,7 @@ class KyosaiRepo(Base):
             )
             return True, {"id": motion_id, "proposer": user_id, "premium": premium, "closes": closes}
 
-    def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: Optional[int] = None) -> tuple[Any, ...]:
+    def kyosai_vote(self, user_id: int, yes: bool, now: float, motion_id: Optional[int] = None) -> Outcome[int]:
         """投票中の動議に投票する（あとから変えられる）。番号を省けるのは、投票中が1件だけのとき。
 
         (成功か, Failure か動議の番号)。

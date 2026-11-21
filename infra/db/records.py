@@ -223,7 +223,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
             )
             return r if r else {"plays": 0, "wins": 0, "net_total": 0, "best_streak": 0}
 
-    def win_streak(self, user_id: int) -> tuple[Any, ...]:
+    def win_streak(self, user_id: int) -> tuple[int, int]:
         """(いまの連勝, 自己ベスト)。"""
         with self._lock:
             r = self._one(

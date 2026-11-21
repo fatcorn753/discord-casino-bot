@@ -1,9 +1,9 @@
 """帝愛信託の預金: 残高の読み取り・利率の決定・入出金と強制差し押さえ。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 
 from .thermostat import BankRepo as Base
 
@@ -49,7 +49,7 @@ class BankRepo(Base):
 
     # 預金
 
-    def bank_deposit(self, user_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def bank_deposit(self, user_id: int, amount: int, now: float) -> Outcome[int]:
         """帝愛に預ける（カタギだけ）。(成功か, 理由か預金残高) を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -72,7 +72,7 @@ class BankRepo(Base):
             self.bank_set_for(gid, state["cash"] + reserve, state["loaned"] + amount - reserve)
             return True, self.deposit_of_for(gid, user_id)
 
-    def bank_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> tuple[Any, ...]:
+    def bank_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> Outcome[int]:
         """預金を引き出す（amount が None なら全額）。利用可能現金の範囲まで。(成功か, 理由か引き出した額) を返す。"""
         now = self._now() if now is None else now
         with self._db.tx():

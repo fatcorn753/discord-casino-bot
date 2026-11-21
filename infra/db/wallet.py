@@ -68,7 +68,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
             self._account.apply(gid, user_id, amount, reason)
             return self._account.raw_balance(gid, user_id)
 
-    def set_balance(self, user_id: int, amount: int, reason: str) -> tuple[Any, ...]:
+    def set_balance(self, user_id: int, amount: int, reason: str) -> tuple[int, int, int, int]:
         """残高を amount ちょうどにする（管理者用。差額は台帳に残る）。収入ではないので、天引きしない。
 
         amount が負のときは、手元を 0 にして、帝愛の借金を -amount ちょうどにする（借金状態にする。いまの借金は置き換わる）。

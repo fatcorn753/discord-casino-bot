@@ -1,14 +1,14 @@
 """自分からの借金返済。"""
 
-from typing import Any, Optional
+from typing import Optional
 
-from domain.errors import fail
+from domain.errors import Outcome, fail
 
 from .ops import DebtRepo as Base
 
 
 class DebtRepo(Base):
-    def repay_debt(self, user_id: int, amount: Optional[int] = None) -> tuple[Any, ...]:
+    def repay_debt(self, user_id: int, amount: Optional[int] = None) -> Outcome[int]:
         """手元の現金から、帝愛の借金を返す（amount が None なら、返せる限り全額）。(成功か, 理由か返した額)。"""
         with self._db.tx():
             gid = self._g()

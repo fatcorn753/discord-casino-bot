@@ -3,7 +3,7 @@
 from typing import Any
 
 from domain import kyosai, p2p
-from domain.errors import fail
+from domain.errors import Outcome, fail
 
 from .auction import KyosaiRepo as Base
 from .base import DAY
@@ -31,7 +31,7 @@ class KyosaiRepo(Base):
         )
         return kyosai_sum + market_sum
 
-    def kyosai_offer(self, seller: int, buyer: int, units: int, price: int, now: float) -> tuple[Any, ...]:
+    def kyosai_offer(self, seller: int, buyer: int, units: int, price: int, now: float) -> Outcome[int]:
         """口の譲渡を申し出る（相手が受けると成立）。(成功か, Failure か申し出の番号)。
 
         送金の抜け道（高値で譲って、あとで 0 で返す）をふさぐため、P2P と同じく、売り手の受け取りから手数料を引き、
@@ -61,7 +61,7 @@ class KyosaiRepo(Base):
             assert lastrowid is not None
             return True, lastrowid
 
-    def kyosai_accept(self, buyer: int, offer_id: int, now: float) -> tuple[Any, ...]:
+    def kyosai_accept(self, buyer: int, offer_id: int, now: float) -> Outcome[dict[str, Any]]:
         """自分あての申し出を受ける。(成功か, Failure か申し出の行)。"""
         with self._db.tx():
             gid = self._g()

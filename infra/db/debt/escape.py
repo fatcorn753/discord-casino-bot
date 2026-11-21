@@ -4,7 +4,7 @@ import random
 from typing import Any, Optional, cast
 
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 
 from .repay import DebtRepo as Base
 
@@ -16,7 +16,7 @@ class DebtRepo(Base):
             v = self._scalar("SELECT escape_tries FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id))
         return max(0, teiai.ESCAPE_MAX_TRIES - (v if v is not None else 0))
 
-    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> tuple[Any, ...]:
+    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Outcome[dict[str, Any]]:
         """海外逃亡。(成功か, 理由か結果の辞書) を返す。"""
         rng = rng or cast("random.Random", random)
         with self._db.tx():

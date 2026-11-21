@@ -12,7 +12,7 @@ from typing import Any, Optional, cast
 
 from domain import bonds as bonds_mod
 from domain import rates
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.bridges import (
     IBankCashFlow,
     IBondHoldings,
@@ -46,7 +46,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         self._debt_repay: IDebtRepayHook = debt_repay or NoOpDebtRepayHook()
         self._collateral_guard: IMarginCollateralGuard = collateral_guard or NoOpMarginCollateralGuard()
 
-    def bond_buy(self, user_id: int, kind_key: str, amount: int, now: float) -> tuple[Any, ...]:
+    def bond_buy(self, user_id: int, kind_key: str, amount: int, now: float) -> Outcome[str]:
         """債券を買う。(成功か, Failure | "") を返す。"""
         kind = bonds_mod.KINDS.get(kind_key)
         if kind is None:
@@ -181,7 +181,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         discount = rates.sale_discount_per_hour(self._bank.risk_free_per_day_for(guild_id, now))
         return bonds_mod.sale_value(kind, row["principal"], now, row["due"], row["rate"], discount)
 
-    def bond_cancel(self, user_id: int, bond_id: int, now: Optional[float] = None) -> tuple[Any, ...]:
+    def bond_cancel(self, user_id: int, bond_id: int, now: Optional[float] = None) -> Outcome[int]:
         """満期前に、DCF の値段で売る（通常債だけ）。(成功か, 理由か受け取った額) を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -228,7 +228,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
 
     def bond_cancel_locked_for(
         self, guild_id: int, user_id: int, bond_id: int, now: Optional[float] = None
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         """bond_cancel の本体（呼び出し側が、ロックとトランザクションの中で使う）。"""
         row = self._one(
             "SELECT * FROM bonds WHERE id=? AND guild_id=? AND user_id=? AND status='active'",

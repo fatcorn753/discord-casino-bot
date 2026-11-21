@@ -1,9 +1,7 @@
 """CDS（破綻保証）: オッズの提示・購入・自己肩代わり・破産時の配当と失効。"""
 
-from typing import Any
-
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.contracts import CdsHoldings, CdsQuote
 
 from .grace import BankRepo as Base
@@ -23,7 +21,7 @@ class BankRepo(Base):
             "grace": self.grace_until_for(gid, target_id) is not None,
         }
 
-    def cds_buy(self, buyer_id: int, target_id: int, stake: int, now: float) -> tuple[Any, ...]:
+    def cds_buy(self, buyer_id: int, target_id: int, stake: int, now: float) -> Outcome[float]:
         """CDS を買う（自分にも、他人にも）。(成功か, 理由かオッズ) を返す。"""
         with self._db.tx():
             gid = self._g()

@@ -1,9 +1,7 @@
 """借金の発生と種銭: 強制執行・貸付・信用枠の判定。"""
 
-from typing import Any
-
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 
 from .base import _take_cash
 from .lifecycle import DebtRepo as Base
@@ -28,7 +26,7 @@ class DebtRepo(Base):
         self._bank.grace_update_for(guild_id, user_id, self._now())
         self._notices.note_for(guild_id, user_id, "seed_loan", amount=amount)
 
-    def borrow_seed_for(self, guild_id: int, user_id: int) -> tuple[Any, ...]:
+    def borrow_seed_for(self, guild_id: int, user_id: int) -> Outcome[int]:
         """（いつでも）手元が種銭の枠に満たなければ、枠まで帝愛から借りる。(成功か, 理由か借りた額)。"""
         with self._db.tx():
             self._account.ensure(guild_id, user_id)
@@ -42,10 +40,10 @@ class DebtRepo(Base):
             self.seed_for(guild_id, user_id, short)
             return True, short
 
-    def borrow_seed(self, user_id: int) -> tuple[Any, ...]:
+    def borrow_seed(self, user_id: int) -> Outcome[int]:
         return self.borrow_seed_for(self._g(), user_id)
 
-    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> tuple[Any, ...]:
+    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> Outcome[str]:
         """手元が足りない need を、帝愛の信用で借りて賭けられるか。(可否, Failure | "")。"""
         with self._lock:
             if need <= 0:
@@ -58,7 +56,7 @@ class DebtRepo(Base):
                 return False, fail("credit_limit_exceeded", seed=teiai.SEED, need=need)
             return True, ""
 
-    def can_borrow_for_bet(self, user_id: int, need: int) -> tuple[Any, ...]:
+    def can_borrow_for_bet(self, user_id: int, need: int) -> Outcome[str]:
         return self.can_borrow_for_bet_for(self._g(), user_id, need)
 
     def _seed_if_empty_for(self, guild_id: int, user_id: int) -> int:

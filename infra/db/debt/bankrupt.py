@@ -3,7 +3,7 @@
 from typing import Any
 
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 
 from .base import _take_cash
 from .escape import DebtRepo as Base
@@ -23,7 +23,9 @@ class DebtRepo(Base):
     def _seize_valuables_for(self, guild_id: int, user_id: int, now: float) -> int:
         return self._seizure_value_step.seize(guild_id, user_id, now)
 
-    def bankrupt_for(self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False) -> tuple[Any, ...]:
+    def bankrupt_for(
+        self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
+    ) -> Outcome[dict[str, Any]]:
         """自己破産。全財産とショップの全品を差し押さえて換金し、帝愛 → 貸付の順に配当する。"""
         with self._db.tx():
             self._account.ensure(guild_id, user_id)
@@ -90,5 +92,5 @@ class DebtRepo(Base):
                 "seed": seed,
             }
 
-    def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> tuple[Any, ...]:
+    def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> Outcome[dict[str, Any]]:
         return self.bankrupt_for(self._g(), user_id, forced=forced, escape=escape)
