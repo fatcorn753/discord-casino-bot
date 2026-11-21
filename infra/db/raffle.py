@@ -19,20 +19,18 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
         super().__init__(db, guild_id, strict)
         self._account = account
 
-    def _raffle_open_row(self, guild_id: int) -> Any:
-        return self._conn.execute(
+    def _raffle_open_row(self, guild_id: int) -> Optional[dict[str, Any]]:
+        return self._one(
             "SELECT * FROM raffle WHERE guild_id=? AND status='open' ORDER BY id DESC LIMIT 1", (guild_id,)
-        ).fetchone()
+        )
 
-    def _raffle_view(self, row: Any) -> Optional[dict[str, Any]]:
+    def _raffle_view(self, row: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
         if row is None:
             return None
-        d = dict(row)
+        d = row
         d["entries"] = [
             r["user_id"]
-            for r in self._conn.execute(
-                "SELECT user_id FROM raffle_entries WHERE raffle_id=? ORDER BY rowid", (row["id"],)
-            )
+            for r in self._all("SELECT user_id FROM raffle_entries WHERE raffle_id=? ORDER BY rowid", (row["id"],))
         ]
         return d
 
@@ -70,9 +68,7 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
             if row is None or now >= row["closes"]:
                 return False, fail("raffle_closed")
             self._account.ensure(gid, user_id)
-            if self._conn.execute(
-                "SELECT 1 FROM raffle_entries WHERE raffle_id=? AND user_id=?", (row["id"], user_id)
-            ).fetchone():
+            if self._one("SELECT 1 FROM raffle_entries WHERE raffle_id=? AND user_id=?", (row["id"], user_id)):
                 return False, fail("raffle_already_joined")
             debt = self._account.debt(gid, user_id)
             if debt > 0:

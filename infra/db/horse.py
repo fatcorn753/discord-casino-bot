@@ -42,13 +42,11 @@ class HorseRepo(ScopedRepo, IHorseRepo):
 
     def horse_count_for(self, guild_id: int, user_id: int) -> int:
         """持っている馬の数。出品中（預かり中）の馬も数える（出品しておけば3頭を超えて持てる、を防ぐ）。"""
-        owned = self._conn.execute(
-            "SELECT COUNT(*) FROM horses WHERE guild_id=? AND owner_id=?", (guild_id, user_id)
-        ).fetchone()[0]
-        listed = self._conn.execute(
+        owned = self._scalar("SELECT COUNT(*) FROM horses WHERE guild_id=? AND owner_id=?", (guild_id, user_id))
+        listed = self._scalar(
             "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND seller_id=? AND kind='horse' AND status='active'",
             (guild_id, user_id),
-        ).fetchone()[0]
+        )
         return owned + listed
 
     def horse_get_for(self, guild_id: int, horse_id: int) -> Optional[dict[str, Any]]:
@@ -84,12 +82,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
 
     def horse_list(self, user_id: int) -> list[dict[str, Any]]:
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM horses WHERE guild_id=? AND owner_id=? ORDER BY id", (self._g(), user_id)
-                )
-            ]
+            return self._all("SELECT * FROM horses WHERE guild_id=? AND owner_id=? ORDER BY id", (self._g(), user_id))
 
     def horse_get(self, horse_id: int) -> Optional[dict[str, Any]]:
         return self.horse_get_for(self._g(), horse_id)
@@ -122,11 +115,11 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             h = self.horse_get_for(gid, horse_id)
             if h is None or h["owner_id"] != user_id:
                 return False, fail("horse_select_own")
-            busy = self._conn.execute(
+            busy = self._one(
                 "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
                 "WHERE e.horse_id=? AND r.status IN ('entry','betting')",
                 (horse_id,),
-            ).fetchone()
+            )
             if busy:
                 return False, fail("horse_busy_no_retire")
             value = horse_mod.retire_value(h["races"], h["wins"], h["places"])
@@ -188,9 +181,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
 
         出走の申し込み中の馬は取り下げ（出走料は戻らない）。すでに出走馬に決まっている馬は、帝愛の馬（NPC）に替わる。
         """
-        rows = self._conn.execute(
-            "SELECT id FROM horses WHERE guild_id=? AND owner_id=?", (guild_id, user_id)
-        ).fetchall()
+        rows = self._all("SELECT id FROM horses WHERE guild_id=? AND owner_id=?", (guild_id, user_id))
         for r in rows:
             self._conn.execute("UPDATE horses SET owner_id=-1, listed_at=? WHERE id=?", (now, r["id"]))
             self._conn.execute("DELETE FROM horse_entries WHERE horse_id=? AND lane<0", (r["id"],))
@@ -207,12 +198,12 @@ class HorseRepo(ScopedRepo, IHorseRepo):
     def auction_horses(self, now: float) -> list[dict[str, Any]]:
         """帝愛の競売に出ている馬。[{馬の行, price, rate}]（出品の早い順）。"""
         with self._lock:
-            rows = self._conn.execute(
+            rows = self._all(
                 "SELECT * FROM horses WHERE guild_id=? AND owner_id=-1 ORDER BY listed_at, id", (self._g(),)
-            ).fetchall()
+            )
         return [
             {
-                **dict(r),
+                **r,
                 "price": self.horse_auction_price(r["listed_at"], now),
                 "rate": teiai.auction_rate(r["listed_at"], now),
             }
@@ -226,9 +217,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             self._account.ensure(gid, user_id)
             if self._status_reader.status_for(gid, user_id, now) != teiai.KATAGI:
                 return PurchaseResult(False, fail("auction_katagi_only"), self._account.raw_balance(gid, user_id))
-            row = self._conn.execute(
-                "SELECT * FROM horses WHERE id=? AND guild_id=? AND owner_id=-1", (horse_id, gid)
-            ).fetchone()
+            row = self._one("SELECT * FROM horses WHERE id=? AND guild_id=? AND owner_id=-1", (horse_id, gid))
             if row is None:
                 return PurchaseResult(False, fail("auction_horse_sold"), self._account.raw_balance(gid, user_id))
             owned = self.horse_count_for(gid, user_id)  # 出品中の馬も数える

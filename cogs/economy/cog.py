@@ -147,9 +147,7 @@ class EconomyCog(commands.Cog):
         gid, uid = ui.guild_id_of(interaction), interaction.user.id
         ok, result = self._teiai.repay(gid, uid, amount)
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("返せません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="返せません")
         await interaction.response.send_message(
             embed=embeds.repaid_embed(result, self._teiai.debt_of(gid, uid)), ephemeral=True
         )
@@ -172,15 +170,13 @@ class EconomyCog(commands.Cog):
         refusal = self._teiai.can_go_bankrupt(gid, uid)
         if refusal is not None:
             title, text = embeds.BANKRUPT_REFUSALS[refusal]
-            return await interaction.response.send_message(embed=ui.error_embed(title, text), ephemeral=True)
+            return await ui.reply_error(interaction, text, title=title)
         ok = await confirm_action(interaction, "自己破産しますか？", embeds.bankrupt_warning(), "破産する")
         if ok is not True:
             return
         ok, result = self._teiai.bankrupt(gid, uid)
         if not ok:
-            return await interaction.followup.send(
-                embed=ui.error_embed("破産できません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="破産できません")
         await interaction.followup.send(  # 公開（見せ場）。誰が破産したかも出す
             embed=embeds.bankrupt_result_embed(result, interaction.user.display_name)
         )
@@ -265,9 +261,7 @@ class EconomyCog(commands.Cog):
         self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 1_000_000]
     ):
         if member.bot:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("送れません", "Bot には送金できません。"), ephemeral=True
-            )
+            return await ui.reply_error(interaction, "Bot には送金できません。", title="送れません")
         # 送金の間は「プレイ中」にする。ゲーム中に残高を逃がして負けや倍払いを避ける／確認待ちの間にゲームを始める、を防ぐ
         async with user_session(self._sessions, interaction, "いまは送れません") as ok:
             if not ok:
@@ -277,11 +271,10 @@ class EconomyCog(commands.Cog):
             fee = math.ceil(round(amount * TRANSFER_FEE_RATE, 6))
             # 確認ボタンを出す前に、残高を先に調べる（足りないのに確認だけさせない）
             if self._economy_svc.balance_of(gid, uid) < amount + fee:
-                return await interaction.response.send_message(
-                    embed=ui.error_embed(
-                        "送金できません", f"残高が足りません（送金額 {amount:,} + 手数料 {fee:,} が必要です）。"
-                    ),
-                    ephemeral=True,
+                return await ui.reply_error(
+                    interaction,
+                    f"残高が足りません（送金額 {amount:,} + 手数料 {fee:,} が必要です）。",
+                    title="送金できません",
                 )
             reply = await confirmed_reply(
                 interaction,
@@ -305,7 +298,7 @@ class EconomyCog(commands.Cog):
                 now=now,
             )
             if not res.ok:
-                return await reply(embed=ui.error_embed("送金できません", format_failure(res.reason)), ephemeral=True)
+                return await ui.reply_error(interaction, format_failure(res.reason), title="送金できません")
             await reply(
                 embed=ui.ok_embed(
                     "送金しました",

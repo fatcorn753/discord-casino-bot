@@ -99,6 +99,6 @@ class RigModal(discord.ui.Modal, title="票数を書き換える"):
         try:
             yes, no = parse_count(self.yes.value), parse_count(self.no.value)
         except ValueError as exc:
-            await interaction.response.send_message(embed=ui.error_embed("できません", str(exc)), ephemeral=True)
+            await ui.reply_error(interaction, str(exc), title="できません")
             return
         await self._cog.rig(interaction, self.poll_id, yes, no)

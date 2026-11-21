@@ -1,0 +1,102 @@
+"""帝愛ファイナンスリポジトリの基礎部分: コンストラクタと身分・借金の読み取り。"""
+
+from typing import Optional
+
+from domain import teiai
+from domain.ports.bridges import (
+    IAssetSeizureStep,
+    IBankCdsBridge,
+    IBankruptPrepHook,
+    ILiquidationStep,
+    INoticeSink,
+    IOverdueLoanCollector,
+    ISeizureValueStep,
+    NoOpAssetSeizureStep,
+    NoOpBankCdsBridge,
+    NoOpBankruptPrepHook,
+    NoOpLiquidationStep,
+    NoOpNoticeSink,
+    NoOpOverdueLoanCollector,
+    NoOpSeizureValueStep,
+)
+from domain.ports.repos import IDebtRepo
+from infra.db.account import AccountCore
+from infra.db.base import EcoDb, ScopedRepo
+
+
+def _take_cash(account: AccountCore, guild_id: int, user_id: int, need: int, reason: str) -> int:
+    """手元の現金から need まで差し押さえる。取れた額を返す。"""
+    take = min(account.raw_balance(guild_id, user_id), need)
+    if take > 0:
+        account.apply(guild_id, user_id, -take, reason)
+    return take
+
+
+class DebtRepo(ScopedRepo, IDebtRepo):
+    """借金・強制執行・種銭・身分・自己破産。"""
+
+    def __init__(
+        self,
+        db: EcoDb,
+        account: AccountCore,
+        notices: Optional[INoticeSink] = None,
+        bank: Optional[IBankCdsBridge] = None,
+        loans: Optional[IOverdueLoanCollector] = None,
+        *,
+        seizure_step: Optional[IAssetSeizureStep] = None,
+        liquidation_step: Optional[ILiquidationStep] = None,
+        seizure_value_step: Optional[ISeizureValueStep] = None,
+        bankrupt_prep_hook: Optional[IBankruptPrepHook] = None,
+        guild_id: int = 0,
+        strict: bool = False,
+    ) -> None:
+        super().__init__(db, guild_id, strict)
+        self._account = account
+        self._notices: INoticeSink = notices or NoOpNoticeSink()
+        self._bank: IBankCdsBridge = bank or NoOpBankCdsBridge()
+        self._loans: IOverdueLoanCollector = loans or NoOpOverdueLoanCollector()
+        self._seizure_step: IAssetSeizureStep = seizure_step or NoOpAssetSeizureStep()
+        self._liquidation_step: ILiquidationStep = liquidation_step or NoOpLiquidationStep()
+        self._seizure_value_step: ISeizureValueStep = seizure_value_step or NoOpSeizureValueStep()
+        self._bankrupt_prep_hook: IBankruptPrepHook = bankrupt_prep_hook or NoOpBankruptPrepHook()
+
+    # 身分・読み取り契約（IStatusReader）
+
+    def status_for(self, guild_id: int, user_id: int, now: float) -> str:
+        """身分。読み取り専用で、口座は作らない。"""
+        with self._lock:
+            row = self._one(
+                "SELECT debt, bankrupt_at, blacklist_until FROM users WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            )
+            if row is None:
+                return teiai.KATAGI
+            if row["bankrupt_at"] is not None and row["debt"] > 0:
+                return teiai.BANKRUPT
+            if row["debt"] > 0 or self._loans.has_overdue_for(guild_id, user_id):
+                return teiai.UNDERGROUND
+            return teiai.KATAGI
+
+    def status(self, user_id: int, now: Optional[float] = None) -> str:
+        return self.status_for(self._g(), user_id, self._now() if now is None else now)
+
+    def loan_blacklisted_for(self, guild_id: int, user_id: int, now: float) -> bool:
+        """破産のブラックリストの間か（貸付を借りられない）。"""
+        with self._lock:
+            row = self._one(
+                "SELECT debt, bankrupt_at, blacklist_until FROM users WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            )
+        if row is None or row["bankrupt_at"] is None:
+            return False
+        return row["debt"] > 0 or row["blacklist_until"] is None or now < row["blacklist_until"]
+
+    def loan_blacklisted(self, user_id: int, now: Optional[float] = None) -> bool:
+        return self.loan_blacklisted_for(self._g(), user_id, self._now() if now is None else now)
+
+    def debt_for(self, guild_id: int, user_id: int) -> int:
+        return self._account.debt_readonly(guild_id, user_id)
+
+    def debt(self, user_id: int) -> int:
+        """借金の残り。口座が無ければ 0（口座は作らない）。"""
+        return self._account.debt_readonly(self._g(), user_id)

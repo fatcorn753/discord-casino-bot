@@ -218,15 +218,12 @@ class QuizCog(commands.Cog, IQuizAdminBridge, IQuizButtonBridge):
     async def withdraw(self, interaction: discord.Interaction, quiz_id: int):
         done = self._quiz.withdraw(ui.guild_id_of(interaction), interaction.user.id, quiz_id)
         if done is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "取り下げられません", "あなたがこのサーバーで出した、終了前の問題の番号を指定してください。"
-                ),
-                ephemeral=True,
+            return await ui.reply_error(
+                interaction,
+                "あなたがこのサーバーで出した、終了前の問題の番号を指定してください。",
+                title="取り下げられません",
             )
-        await interaction.response.send_message(
-            embed=ui.ok_embed(f"クイズ #{quiz_id} を取り下げました", settle_text(done)), ephemeral=True
-        )
+        await ui.reply_ok(interaction, settle_text(done), title=f"クイズ #{quiz_id} を取り下げました")
         if interaction.guild is not None:
             await self.announce_settle(interaction.guild, done)
 

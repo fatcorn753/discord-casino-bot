@@ -43,13 +43,13 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
         """
         items = [
             (r["item_id"], r["qty"])
-            for r in self._conn.execute(
+            for r in self._all(
                 "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0", (guild_id, user_id)
-            ).fetchall()
+            )
         ]
-        prof = self._conn.execute(
+        prof = self._one(
             "SELECT daily_boost, insurance FROM profile WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-        ).fetchone()
+        )
         if prof:
             items.append((shop_mod.DAILY_DOUBLE, prof["daily_boost"]))
             items.append((shop_mod.INSURANCE, prof["insurance"]))
@@ -70,10 +70,10 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
         if rule is None:
             return None
         with self._lock:
-            row = self._conn.execute(
+            row = self._one(
                 "SELECT stock, updated FROM shop_stock WHERE guild_id=? AND user_id=? AND item_id=?",
                 (self._g(), user_id, item_id),
-            ).fetchone()
+            )
         exact = shop_mod.stock_now(rule, row["stock"], row["updated"], now) if row else float(rule.max)
         return {
             "stock": int(exact + 1e-9),
@@ -107,10 +107,10 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
                     fail("shop_out_of_stock", stock=stock["stock"], next_at=stock["next_at"]),
                     self._account.raw_balance(gid, user_id),
                 )
-            have = self._conn.execute(
+            have = self._one(
                 "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=?",
                 (gid, user_id, item_id),
-            ).fetchone()
+            )
             if unique and have:
                 return PurchaseResult(False, fail("already_owned"), self._account.raw_balance(gid, user_id))
             debt = self._account.debt(gid, user_id)
@@ -145,7 +145,7 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
         with self._lock:
             return {
                 r["item_id"]: r["qty"]
-                for r in self._conn.execute(
+                for r in self._all(
                     "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0",
                     (self._g(), user_id),
                 )
@@ -159,12 +159,8 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
         """
         with self._lock:
             gid = self._g()
-            row = self._conn.execute("SELECT * FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id)).fetchone()
-            prof = (
-                dict(row)
-                if row
-                else {"user_id": user_id, **dict.fromkeys(self.SLOTS), "daily_boost": 0, "insurance": 0}
-            )
+            row = self._one("SELECT * FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id))
+            prof = row if row else {"user_id": user_id, **dict.fromkeys(self.SLOTS), "daily_boost": 0, "insurance": 0}
             prof["status"] = self._status_reader.status_for(gid, user_id, self._now())
         prof["frozen"] = prof["status"] != teiai.KATAGI
         if prof["frozen"] and not raw:
@@ -178,12 +174,9 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
             raise ValueError(slot)
         with self._db.tx():
             gid = self._g()
-            if (
-                item_id is not None
-                and not self._conn.execute(
-                    "SELECT 1 FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
-                    (gid, user_id, item_id),
-                ).fetchone()
+            if item_id is not None and not self._one(
+                "SELECT 1 FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
+                (gid, user_id, item_id),
             ):
                 return False
             self._ensure_profile(gid, user_id)

@@ -39,16 +39,12 @@ class StakeModal(discord.ui.Modal):
             ui.guild_id_of(interaction), interaction.user.id, self.fighter["id"], stake
         )
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("賭けられませんでした", format_failure(reason)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(reason), title="賭けられませんでした")
             return
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "賭けました",
-                f"**{self.fighter['name']}** に {ui.pelica(stake)}（的中すれば、賭け金はそのまま戻り、オッズに応じた利益が上乗せされます）",
-            ),
-            ephemeral=True,
+        await ui.reply_ok(
+            interaction,
+            f"**{self.fighter['name']}** に {ui.pelica(stake)}（的中すれば、賭け金はそのまま戻り、オッズに応じた利益が上乗せされます）",
+            title="賭けました",
         )
         await self.panel.refresh()  # 掲示の賭け総額・内訳を、すぐ書き換える
 

@@ -42,9 +42,7 @@ class KindView(ui.OwnerView):
         kind = ui.selected_values(interaction)[0]
         ok, reason = self.panel.company.change_kind(ui.guild_id_of(interaction), interaction.user.id, kind)
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("変えられません", format_failure(reason)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(reason), title="変えられません")
             return
         self.stop()
         await interaction.response.edit_message(
@@ -93,9 +91,7 @@ class CompanyPanel(ui.OwnerView):
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def _fail(self, interaction: discord.Interaction, reason: object) -> None:
-        await interaction.response.send_message(
-            embed=ui.error_embed("できません", format_failure(reason)), ephemeral=True
-        )
+        await ui.reply_error(interaction, format_failure(reason), title="できません")
 
     async def _on_ship(self, interaction: discord.Interaction) -> None:
         ok, result = self.company.ship(ui.guild_id_of(interaction), interaction.user.id)

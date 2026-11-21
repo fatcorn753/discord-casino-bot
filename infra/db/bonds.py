@@ -8,7 +8,7 @@
 """
 
 import random
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from domain import bonds as bonds_mod
 from domain import rates
@@ -83,10 +83,10 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
             return True, ""
 
     def _bond_held(self, guild_id: int, user_id: int, kind_key: str) -> int:
-        return self._conn.execute(
+        return self._scalar(
             "SELECT COALESCE(SUM(principal), 0) FROM bonds WHERE guild_id=? AND user_id=? AND kind=? AND status='active'",
             (guild_id, user_id, kind_key),
-        ).fetchone()[0]
+        )
 
     def bond_values(self) -> dict[int, int]:
         """{ユーザーID: 預けている元本の合計}（このサーバーの、保有中の債券。ランキングの総資産に含める）。"""
@@ -94,7 +94,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
             gid = self._g()
             return {
                 r["user_id"]: r["p"]
-                for r in self._conn.execute(
+                for r in self._all(
                     "SELECT user_id, SUM(principal) AS p FROM bonds WHERE guild_id=? AND status='active' GROUP BY user_id",
                     (gid,),
                 )
@@ -102,7 +102,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
 
     def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
         with self._lock:
-            for r in self._conn.execute(
+            for r in self._all(
                 "SELECT user_id, SUM(principal) AS p FROM bonds WHERE guild_id=? AND status='active' GROUP BY user_id",
                 (guild_id,),
             ):
@@ -111,24 +111,20 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
     def bond_list(self, user_id: int, recent: int = 5) -> HoldingBook:
         """保有中（満期が近い順）と、直近に決着したもの（新しい順）。"""
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM bonds WHERE guild_id=? AND user_id=? ORDER BY id", (self._g(), user_id)
-            ).fetchall()
-        active = sorted((dict(r) for r in rows if r["status"] == "active"), key=lambda r: r["due"])
-        done = [dict(r) for r in reversed(rows) if r["status"] != "active"][:recent]
+            rows = self._all("SELECT * FROM bonds WHERE guild_id=? AND user_id=? ORDER BY id", (self._g(), user_id))
+        active = sorted((r for r in rows if r["status"] == "active"), key=lambda r: r["due"])
+        done = [r for r in reversed(rows) if r["status"] != "active"][:recent]
         return {"active": active, "done": done}
 
-    def bond_settle(self, now: float, rng: Any = None) -> list[Any]:
+    def bond_settle(self, now: float, rng: Optional[random.Random] = None) -> list[dict[str, Any]]:
         """ジャンク債の倒産抽選と、満期を過ぎた債券の決着（このサーバー全員分）。決着した行（status と paid つき）を返す。"""
-        rng = rng or random
+        rng = rng if rng is not None else cast("random.Random", random)
         out = []
         offset = 0  # このバッチの流入（倒産で返さなくてよくなった元本と、満期で返す元本）
         matured = []
         with self._db.tx():
             gid = self._g()
-            for row in self._conn.execute(
-                "SELECT * FROM bonds WHERE guild_id=? AND status='active' ORDER BY id", (gid,)
-            ).fetchall():
+            for row in self._all("SELECT * FROM bonds WHERE guild_id=? AND status='active' ORDER BY id", (gid,)):
                 kind = bonds_mod.KINDS[row["kind"]]
                 until = min(now, row["due"])
                 since = row["checked"] if row["checked"] is not None else row["ts"]
@@ -189,10 +185,10 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         """満期前に、DCF の値段で売る（通常債だけ）。(成功か, 理由か受け取った額) を返す。"""
         with self._db.tx():
             gid = self._g()
-            row = self._conn.execute(
+            row = self._one(
                 "SELECT kind, principal FROM bonds WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
                 (bond_id, gid, user_id),
-            ).fetchone()
+            )
             if row is not None:
                 reason = self._collateral_guard.check_bond_cancel(gid, user_id, row["kind"], row["principal"])
                 if reason is not None:
@@ -203,17 +199,17 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         """持っている（status='active' の）債券（古い順）。呼び出し側のトランザクションの中で使う。"""
         return [
             ActiveBond(id=r["id"], kind=r["kind"], principal=r["principal"])
-            for r in self._conn.execute(
+            for r in self._all(
                 "SELECT id, kind, principal FROM bonds WHERE guild_id=? AND user_id=? AND status='active' ORDER BY id",
                 (guild_id, user_id),
-            ).fetchall()
+            )
         ]
 
     def bond_write_off_for(self, guild_id: int, user_id: int, bond_id: int, payout: int, now: float) -> None:
-        row = self._conn.execute(
+        row = self._one(
             "SELECT principal FROM bonds WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
             (bond_id, guild_id, user_id),
-        ).fetchone()
+        )
         if row is None:
             return
         self._settle_early_for(guild_id, user_id, row["principal"], payout, now, "破産:債券の差し押さえ")
@@ -234,10 +230,10 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         self, guild_id: int, user_id: int, bond_id: int, now: Optional[float] = None
     ) -> tuple[Any, ...]:
         """bond_cancel の本体（呼び出し側が、ロックとトランザクションの中で使う）。"""
-        row = self._conn.execute(
+        row = self._one(
             "SELECT * FROM bonds WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
             (bond_id, guild_id, user_id),
-        ).fetchone()
+        )
         if row is None:
             return False, fail("bond_not_found")
         kind = bonds_mod.KINDS[row["kind"]]

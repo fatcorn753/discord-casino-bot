@@ -109,16 +109,14 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
         days: app_commands.Range[int, loans.MIN_TERM_DAYS, loans.MAX_TERM_DAYS],
     ):
         if member.bot:
-            return await interaction.response.send_message(embed=ui.error_embed("Bot には貸せません"), ephemeral=True)
+            return await ui.reply_error(interaction, "", title="Bot には貸せません")
         guild_id = ui.guild_id_of(interaction)
         assert interaction.channel_id is not None
         ok, result = self._loans.offer(
             guild_id, interaction.user.id, member.id, principal, round(rate * 10), days, interaction.channel_id
         )
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("提案できません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="提案できません")
         loan = self._loans.get(guild_id, result)
         assert loan is not None
         credit = self._loans.credit(guild_id, member.id)
@@ -150,9 +148,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
             guild_id, interaction.user.id, principal, round(rate * 10), days, interaction.channel_id
         )
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("募集できません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="募集できません")
         loan = self._loans.get(guild_id, result)
         assert loan is not None
         credit = self._loans.credit(guild_id, interaction.user.id)
@@ -176,9 +172,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
         guild_id = ui.guild_id_of(interaction)
         ok, result = self._loans.repay(guild_id, loan_id, interaction.user.id, amount)
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("返せません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="返せません")
         loan = self._loans.get(guild_id, loan_id)
         assert loan is not None
         left = self._loans.remaining(guild_id, loan)
