@@ -60,31 +60,6 @@ class BankRepo(Base):
             out[i] += 1
         return out
 
-    def _thermo_net_for(
-        self, guild_id: int, cash: float, net: float, trust_take: int, now: float
-    ) -> tuple[float, float]:
-        """サーモスタットに純額 net を通し、(焼かれた後の手元, 肩代わり額) を返す。"""
-        if net > 0:  # 純額が流入: 入れてよい額を超えた分（burn）は、手元から消える（マイナスにはしない）
-            burn = net - self._thermo_inflow_for(guild_id, int(round(net)), now)
-            return max(cash - burn, 0.0), 0.0
-        # 信託の取り崩し分は負側の器を使わない（0 を超えて流入側へ反転させない）
-        shock = max(0.0, -net - trust_take)
-        if shock <= 0:
-            return cash, 0.0
-        return cash, self._thermo_shock_for(guild_id, int(round(shock)), now)
-
-    def _charge_excess_left(self, guild_id: int, left: int, now: float) -> int:
-        """残りの超過損失を帝愛共済へ請求し、集められた額を返す（足りない分は excess_unpaid へ）。"""
-        if left <= 0:
-            return 0
-        charged = min(left, max(0, self._excess_sink(guild_id, left, now)))
-        if left > charged:
-            self._conn.execute(
-                "UPDATE teiai_bank SET excess_unpaid=excess_unpaid+? WHERE guild_id=?",
-                (left - charged, guild_id),
-            )
-        return charged
-
     def _outflow_for(
         self, guild_id: int, amount: int, now: float, *, use_trust: bool, thermo: bool, offset: float = 0.0
     ) -> int:
@@ -102,11 +77,27 @@ class BankRepo(Base):
         excess = max(0.0, shortfall - trust_take)  # 信託でも受け止めきれない超過損失 Δraw
         bailout = 0.0
         if thermo:
-            cash, bailout = self._thermo_net_for(guild_id, cash, offset - amount, trust_take, now)
+            net = offset - amount  # このバッチの経済的な純額（流入がプラス、流出がマイナス）
+            if net > 0:  # 純額が流入: 入れてよい額を超えた分（burn）は、手元から消える（マイナスにはしない）
+                burn = net - self._thermo_inflow_for(guild_id, int(round(net)), now)
+                cash = max(cash - burn, 0.0)
+            else:
+                # 信託の取り崩し分は負側の器を使わない（0 を超えて流入側へ反転させない）
+                shock = max(0.0, -net - trust_take)
+                if shock > 0:
+                    bailout = self._thermo_shock_for(guild_id, int(round(shock)), now)
         cover = min(excess, bailout)  # 熱浴の肩代わりは、まず超過損失の穴埋めに使う
         cash += bailout - cover  # 余った肩代わりは、手元へ
         # 残りの超過損失は帝愛共済の口の持ち主の負担（#34）。帝愛の持ち口の分は払われずに残る
-        charged = self._charge_excess_left(guild_id, int(excess - cover), now)
+        charged = 0
+        left = int(excess - cover)
+        if left > 0:
+            charged = min(left, max(0, self._excess_sink(guild_id, left, now)))
+            if left > charged:
+                self._conn.execute(
+                    "UPDATE teiai_bank SET excess_unpaid=excess_unpaid+? WHERE guild_id=?",
+                    (left - charged, guild_id),
+                )
         self.bank_set_for(guild_id, cash, state["loaned"])
         return min(amount, int(round(cash_pay + trust_take + cover + charged)))
 

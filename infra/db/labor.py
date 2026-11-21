@@ -376,7 +376,15 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             crit, ore, combo = False, None, False
             if not capped:
                 workers = len(self._workers_of(gid, user_id))
-                pay, crit, ore, combo = self._roll_click_outcome(rng, row, workers, terrain, pay)
+                crit = rng.random() < labor_mod.crit_chance(row["pick"], workers, terrain)
+                if crit:
+                    pay *= labor_mod.CRIT_MULT
+                if crit and rng.random() < labor_mod.CRIT_ORE_CHANCE:
+                    ore = labor_mod.roll_crit_ore(rng, terrain)
+                    pay += labor_mod.ORE_VALUE[ore]  # 手掘りの鉱石の売値も、稼ぎに加える
+                combo = (row["clicks"] + 1) % labor_mod.COMBO_SIZE == 0  # 10回ごとのコンボ
+                if combo:
+                    pay = round(pay * (1 + labor_mod.COMBO_BONUS))
             pay = labor_mod.OVER_CAP_PAY if capped else pay
             if capped:
                 crit, ore, combo = False, None, False
@@ -397,22 +405,6 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             self._labor_log_click(gid, user_id, now, pay, now - row["last_click_before"])
             self._labor_save(gid, user_id, row)
             return {"ok": True, "pay": pay, "crit": crit, "ore": ore, "combo": combo, "terrain": terrain}
-
-    def _roll_click_outcome(
-        self, rng: random.Random, row: dict[str, Any], workers: int, terrain: str, pay: int
-    ) -> tuple[int, bool, Optional[str], bool]:
-        """クリティカル・手掘り鉱石・コンボの抽選をまとめて行い、(pay, crit, ore, combo) を返す。"""
-        crit = rng.random() < labor_mod.crit_chance(row["pick"], workers, terrain)
-        ore: Optional[str] = None
-        if crit:
-            pay *= labor_mod.CRIT_MULT
-            if rng.random() < labor_mod.CRIT_ORE_CHANCE:
-                ore = labor_mod.roll_crit_ore(rng, terrain)
-                pay += labor_mod.ORE_VALUE[ore]  # 手掘りの鉱石の売値も、稼ぎに加える
-        combo = (row["clicks"] + 1) % labor_mod.COMBO_SIZE == 0  # 10回ごとのコンボ
-        if combo:
-            pay = round(pay * (1 + labor_mod.COMBO_BONUS))
-        return pay, crit, ore, combo
 
     def _labor_log_click(self, guild_id: int, user_id: int, now: float, pay: int, gap: float) -> None:
         """「働く」の1回を、1時間ごとの記録に足す（押した回数・稼ぎ・間隔の集計）。"""

@@ -8,17 +8,6 @@ from domain.ports.contracts import BankStatus
 from .deposits import BankRepo as Base
 
 
-def _bank_level(available: float, liabilities: float, ratio: Optional[float]) -> str:
-    """銀行の健全性レベル（frozen / safe / warn / danger）。"""
-    if available <= 0 and liabilities > 0:
-        return "frozen"
-    if ratio is None or ratio >= teiai.RUN_WARN_RATIO:
-        return "safe"
-    if ratio >= teiai.RUN_DANGER_RATIO:
-        return "warn"
-    return "danger"
-
-
 class BankRepo(Base):
     def _bonds_outstanding_for(self, guild_id: int) -> int:
         """帝愛社債（保有中の債券）の元本残高。銀行の負債として準備率に数える（#35）。"""
@@ -56,7 +45,14 @@ class BankRepo(Base):
             state = self.bank_sync_for(gid, now)
             total, bonds, locks, available, ratio = self._reserve_for(gid, state["cash"], now)
             liabilities = total + bonds
-            level = _bank_level(available, liabilities, ratio)
+            if available <= 0 and liabilities > 0:
+                level = "frozen"
+            elif ratio is None or ratio >= teiai.RUN_WARN_RATIO:
+                level = "safe"
+            elif ratio >= teiai.RUN_DANGER_RATIO:
+                level = "warn"
+            else:
+                level = "danger"
             thermo = self._thermo_state_for(gid, now)
             totals = self._one(
                 "SELECT thermo_burned, thermo_bailed, trust_paid, excess_unpaid FROM teiai_bank WHERE guild_id=?",
