@@ -331,11 +331,11 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                 "SELECT kind, symbol, side FROM options WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
                 (option_id, gid, user_id),
             )
-            if (
-                held and held["side"] != "short" and held["kind"] == "call"
-            ):  # 持っているコールは、ストップ安では売れない
-                if reason := self._market.pin_reason(held["symbol"], "sell_call"):
-                    return False, reason
+            # 持っているコールは、ストップ安では売れない
+            if held and held["side"] != "short" and held["kind"] == "call" and (
+                reason := self._market.pin_reason(held["symbol"], "sell_call")
+            ):
+                return False, reason
             return self.option_close_locked_for(gid, user_id, option_id, now)
 
     def option_settle(self, now: float) -> list[OptionSettleRow]:
@@ -371,7 +371,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
             for r, final, gross in sorted(due, key=lambda d: d[0]["side"] != "short"):  # 売り手（入金）が先
                 if r["side"] != "short" and not paid_of:
                     pays = self._bank.bank_pay_batch_for(gid, [g for _, g in longs], now, offset=inflow)
-                    paid_of = {lr["id"]: p for (lr, _), p in zip(longs, pays)}
+                    paid_of = {lr["id"]: p for (lr, _), p in zip(longs, pays, strict=True)}
                 self._account.ensure(gid, r["user_id"])
                 match r["side"]:
                     case "short":
