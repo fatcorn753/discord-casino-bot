@@ -5,6 +5,8 @@
 
 from typing import Optional, TypedDict
 
+from .core import HoldingBook, MarginPosition, MarginStatus, SpotHolding
+
 
 class CryptoHoldingRow(TypedDict):
     """銘柄ごとの現物の保有（crypto 表の行）。"""
@@ -68,15 +70,20 @@ class BondRow(TypedDict):
     rate: Optional[float]
 
 
-class MarketEventRow(TypedDict):
-    """市場イベント（ボラティリティ予告。market_events 表の行）。"""
+class MarketEventPlan(TypedDict):
+    """新しい市場イベントの計画（id はまだ無い。event_step の force 引数・plan_event の返り値）。"""
 
-    id: int
     symbol: str
     announce_ts: float
     start_ts: float
     end_ts: float
     factor: float
+
+
+class MarketEventRow(MarketEventPlan):
+    """市場イベント（ボラティリティ予告。market_events 表の行）。"""
+
+    id: int
 
 
 class EarningsRow(TypedDict):
@@ -165,3 +172,23 @@ class OptionSettleRow(OptionRow):
     """決済したオプションの行（option_settle の返り値の要素）。"""
 
     gross: int
+
+
+class InsiderStock(TypedDict):
+    """裏情報メモの在庫（insider_stock の返り値）。"""
+
+    left: int  # 残り
+    total: int  # 全部の数
+
+
+class HoldingsSnapshot(TypedDict):
+    """保有のスナップショット（services の holdings_snapshot の返り値。満期の決済を済ませたあとの全保有）。"""
+
+    prices: dict[str, float]  # {銘柄: いまの価格}
+    spots: dict[str, SpotHolding]  # {銘柄: (口数,買った総額)}
+    margins: dict[tuple[str, str], MarginPosition]  # {(向き,銘柄): (口数,建てた総額,担保)}
+    options: HoldingBook[OptionRow]
+    bond_data: HoldingBook[BondRow]
+    option_quotes: dict[int, int]  # {オプションID: いまの買い戻し費用/売値}
+    bond_quotes: dict[int, int]  # {債券ID: いま売ったときの手取り}
+    margin_status: Optional[MarginStatus]  # 建玉がなければ None

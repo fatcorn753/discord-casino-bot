@@ -5,9 +5,12 @@ domain/types.py は catalogs を読むため、ポート（domain/ports）から
 """
 
 from dataclasses import dataclass
-from typing import Generic, Optional, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Generic, Optional, TypedDict, TypeVar
 
 from .teiai import CdsRow
+
+if TYPE_CHECKING:
+    from domain.missions import Mission
 
 RowT = TypeVar("RowT")
 
@@ -137,3 +140,77 @@ class HoldingBook(TypedDict, Generic[RowT]):
 
     active: list[RowT]
     done: list[RowT]
+
+
+class UserRow(TypedDict):
+    """ユーザーの口座（users 表の行）。"""
+
+    guild_id: int
+    user_id: int
+    balance: int
+    daily_streak: int
+    last_daily: Optional[str]
+    games_played: int
+    total_wagered: int
+    total_won: int
+    biggest_win: int
+    created_at: float
+    last_slot: Optional[int]
+    debt: int  # 帝愛からの借金（シニア債権）
+    bankrupt_at: Optional[float]
+    blacklist_until: Optional[float]
+
+
+class LedgerEntry(TypedDict):
+    """台帳の1行（ledger 表の読み出し射影）。"""
+
+    delta: int
+    balance_after: int
+    reason: str
+    ts: float
+
+
+class PlaySummary(TypedDict):
+    """ゲームの成績のまとめ（play_state の読み出し射影）。"""
+
+    plays: int
+    wins: int
+    net_total: int
+    best_streak: int
+
+
+class PlayRecord(TypedDict):
+    """1回遊んだ結果の記録（record_play の返り値）。"""
+
+    streak: int  # いまの連勝
+    new_best: bool
+    completed: list[tuple["Mission", int]]  # 達成したミッションと、その報酬
+    bonus: int  # 全ミッション達成ボーナス
+
+
+class WeeklyAward(TypedDict):
+    """週間ランキングの発表の結果（weekly_award の返り値）。"""
+
+    champion: Optional[tuple[int, int, int]]  # 王者 (ユーザーID, 稼ぎ, ゲーム数)。いなければ None
+    previous: list[int]  # 称号を外された人のユーザーID
+    wins: int  # 王者の通算優勝回数
+    standings: list[tuple[int, int, int]]  # (ユーザーID, 稼ぎ, ゲーム数) の並び
+
+
+class GuildStatusRow(TypedDict):
+    """サーバーの承認状態（guild_status 表の行）。"""
+
+    guild_id: int
+    status: str  # pending / approved / denied
+    name: Optional[str]
+    decided_by: Optional[int]
+    updated_at: float
+    notified_at: Optional[float]
+
+
+class LeaderboardRow(TypedDict):
+    """ランキング掲示板の設定（leaderboards 表の行）。"""
+
+    guild_id: int
+    channel_id: int
+    message_id: int
