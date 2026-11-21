@@ -1,8 +1,22 @@
-"""台帳・借金ライフサイクル・返済のブリッジ契約（名目的基底クラスと NoOp 実装）。"""
+"""台帳・借金ライフサイクル・返済のブリッジ契約。
 
+住み分け:
+- 単一メソッドの純粋コールバック契約（DebtRepayHook）は `Callable` 型エイリアス＋ `noop_*` 関数で表す。
+- 複数メソッド・不変条件を持つ契約（IDebtLifecycleHook / IStatusReader / IDebtOps）は名目的基底クラスのまま維持する。
+"""
+
+from collections.abc import Callable
 from typing import Optional
 
 from domain.errors import Outcome, fail
+
+# 単一コールバック契約（Callable 型エイリアス）: (guild_id, user_id, amount, label) -> 充当額
+DebtRepayHook = Callable[[int, int, int, str], int]
+
+
+def noop_debt_repay_hook(guild_id: int, user_id: int, amount: int, label: str) -> int:
+    """返済フック未接続時に 0 充当を返す LSP 準拠の既定動作。"""
+    return 0
 
 
 class IDebtLifecycleHook:
@@ -98,18 +112,4 @@ class NoOpDebtOps(IDebtOps):
         return 0
 
     def accrue_debt_interest_for(self, guild_id: int, user_id: int, now: float) -> int:
-        return 0
-
-
-class IDebtRepayHook:
-    """債券償還など非収入の入金時に借金・延滞貸付へ全額充当する契約。"""
-
-    def repay_all_of_for(self, guild_id: int, user_id: int, amount: int, label: str) -> int:
-        raise NotImplementedError
-
-
-class NoOpDebtRepayHook(IDebtRepayHook):
-    """返済フック未接続時に 0 充当を返す LSP 準拠 Null 実装。"""
-
-    def repay_all_of_for(self, guild_id: int, user_id: int, amount: int, label: str) -> int:
         return 0
