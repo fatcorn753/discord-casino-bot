@@ -1,6 +1,6 @@
 """ショップの Discord ロール・ニックネーム操作。"""
 
-from typing import Any
+from typing import Optional
 
 import discord
 
@@ -20,44 +20,6 @@ def _is_ours(role: discord.Role) -> bool:
     return role.name in names and role.permissions.value == 0 and not role.managed
 
 
-async def _ensure_color_role(guild: discord.Guild, me: discord.Member, item: Any) -> discord.Role:
-    """色ロールを取得（なければ作り、位置も Bot のすぐ下に整える）。使えない名前なら ShopError。"""
-    name = shop.ROLE_PREFIX + item.name
-    same_name = [r for r in guild.roles if r.name == name]
-    reusable = [r for r in same_name if _is_ours(r)]
-    if same_name and not reusable:
-        # 同じ名前のロールがすでにあるが、権限を持っている／連携用などで、色ロールとしては使えない
-        raise ShopError(
-            f"「{name}」という名前のロールがすでにあり、権限を持っているため使えません。サーバーの管理者に、そのロールの名前を変えてもらってください。"
-        )
-    target = reusable[0] if reusable else None
-    try:
-        if target is None:
-            target = await guild.create_role(
-                name=name,
-                colour=discord.Colour(item.value),
-                permissions=discord.Permissions.none(),
-                hoist=False,
-                mentionable=False,
-                reason="ペリカショップ: 名前の色",
-            )
-        elif target.colour.value != item.value:
-            await target.edit(colour=discord.Colour(item.value), reason="ペリカショップ: 色を元に戻す")
-    except discord.Forbidden:
-        raise ShopError("色のロールを作れませんでした。Bot の「ロールの管理」権限を確認してください。")
-    wanted = max(1, me.top_role.position - 1)
-    if target.position != wanted:
-        try:
-            await target.edit(position=wanted, reason="ペリカショップ: Bot のロールのすぐ下に置く")
-        except discord.Forbidden:
-            pass  # 動かせなかった場合は、下の「Bot のロールより上」の検査で案内する
-    if target >= me.top_role:
-        raise ShopError(
-            "色のロールが Bot のロールより上にあるため、付けられません。サーバー設定のロールで、Bot のロールを上に動かしてください。"
-        )
-    return target
-
-
 async def set_color_role(guild: discord.Guild, member: discord.Member, item) -> None:
     """名前の色ロールを付け替える（item=None なら外すだけ）。
 
@@ -70,7 +32,41 @@ async def set_color_role(guild: discord.Guild, member: discord.Member, item) -> 
             "Bot に「ロールの管理」権限がないため、名前の色を変えられません。サーバーの管理者に、Bot のロールへ権限を足してもらってください。"
         )
     mine = [r for r in member.roles if _is_ours(r)]
-    target = await _ensure_color_role(guild, me, item) if item is not None else None
+    target: Optional[discord.Role] = None
+    if item is not None:  # 色ロールを取得（なければ作り、位置も Bot のすぐ下に整える）。使えない名前なら ShopError
+        name = shop.ROLE_PREFIX + item.name
+        same_name = [r for r in guild.roles if r.name == name]
+        reusable = [r for r in same_name if _is_ours(r)]
+        if same_name and not reusable:
+            # 同じ名前のロールがすでにあるが、権限を持っている／連携用などで、色ロールとしては使えない
+            raise ShopError(
+                f"「{name}」という名前のロールがすでにあり、権限を持っているため使えません。サーバーの管理者に、そのロールの名前を変えてもらってください。"
+            )
+        target = reusable[0] if reusable else None
+        try:
+            if target is None:
+                target = await guild.create_role(
+                    name=name,
+                    colour=discord.Colour(item.value),
+                    permissions=discord.Permissions.none(),
+                    hoist=False,
+                    mentionable=False,
+                    reason="ペリカショップ: 名前の色",
+                )
+            elif target.colour.value != item.value:
+                await target.edit(colour=discord.Colour(item.value), reason="ペリカショップ: 色を元に戻す")
+        except discord.Forbidden:
+            raise ShopError("色のロールを作れませんでした。Bot の「ロールの管理」権限を確認してください。")
+        wanted = max(1, me.top_role.position - 1)
+        if target.position != wanted:
+            try:
+                await target.edit(position=wanted, reason="ペリカショップ: Bot のロールのすぐ下に置く")
+            except discord.Forbidden:
+                pass  # 動かせなかった場合は、下の「Bot のロールより上」の検査で案内する
+        if target >= me.top_role:
+            raise ShopError(
+                "色のロールが Bot のロールより上にあるため、付けられません。サーバー設定のロールで、Bot のロールを上に動かしてください。"
+            )
     try:
         remove = [r for r in mine if r != target]
         if remove:

@@ -101,36 +101,24 @@ class ShopCog(commands.Cog, IShopTitleBridge):
                     continue
                 title = self.service.nick_tag(gid, user_id)
                 is_here = here is not None and gid == here.id
-                p, failed = await self._sync_one_nick(guild, gid, user_id, title, is_here, member)
+                try:  # 1サーバー分のニックネーム反映。失敗時は (理由, 他サーバー分の失敗数) を集める
+                    m = (
+                        member
+                        if is_here and member is not None
+                        else (guild.get_member(user_id) or await guild.fetch_member(user_id))
+                    )
+                    await apply_title_nick(guild, m, title, self._guild_repo)
+                    p, failed = "", 0
+                except discord.NotFound:
+                    p, failed = "", 0
+                except ShopError as exc:
+                    p, failed = (str(exc), 0) if is_here else ("", 1)
+                except discord.HTTPException as exc:
+                    _log.warning(f"称号のニックネーム反映に失敗: guild={gid} user={user_id}: {exc!r}")
+                    p, failed = ("Discord 側のエラーで失敗しました。", 0) if is_here else ("", 1)
                 problem = p or problem
                 others_failed += failed
             return problem, others_failed
-
-    async def _sync_one_nick(
-        self,
-        guild: discord.Guild,
-        gid: int,
-        user_id: int,
-        title: Optional[str],
-        is_here: bool,
-        member: discord.Member | None,
-    ) -> tuple[str, int]:
-        """1サーバー分のニックネーム反映。失敗時は (理由, 他サーバー分の失敗数) を返す。"""
-        try:
-            m = (
-                member
-                if is_here and member is not None
-                else (guild.get_member(user_id) or await guild.fetch_member(user_id))
-            )
-            await apply_title_nick(guild, m, title, self._guild_repo)
-        except discord.NotFound:
-            return "", 0
-        except ShopError as exc:
-            return (str(exc), 0) if is_here else ("", 1)
-        except discord.HTTPException as exc:
-            _log.warning(f"称号のニックネーム反映に失敗: guild={gid} user={user_id}: {exc!r}")
-            return ("Discord 側のエラーで失敗しました。", 0) if is_here else ("", 1)
-        return "", 0
 
     async def cog_load(self) -> None:
         self.status_nick_tick.start()

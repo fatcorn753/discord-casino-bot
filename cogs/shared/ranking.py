@@ -53,21 +53,6 @@ def build_embed(
     return e
 
 
-def _final_rank_lines(repos: RankingService, ranked: list, viewer_id: Optional[int]) -> list[str]:
-    """総資産ランキングの表示行。閲覧者が圏外なら、その順位の行も末尾に足す。"""
-    wealthy = repos.wealthy_ids()
-    lines = [
-        f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>{teiai.STATUS_MARK.get(repos.display_status(uid, wealthy), '')}"
-        f"\u3000**{ui.pelica(total)}**"
-        for r, (uid, total, _p) in enumerate(ranked[:TOP_N], 1)
-    ]
-    if viewer_id:
-        for r, (uid, total, _p) in enumerate(ranked, 1):
-            if uid == viewer_id and r > TOP_N:
-                lines.append(f"…\n`{r:>2}` <@{viewer_id}>\u3000**{ui.pelica(total)}**")
-    return lines
-
-
 def build_final_embed(
     repos: RankingService,
     guild_ids: Optional[set],
@@ -80,7 +65,16 @@ def build_final_embed(
     if not ranked:
         e = ui.embed(title, "まだ誰も遊んでいません。`/ペリカ デイリー` から始めましょう。", ui.INFO)
     else:
-        lines = _final_rank_lines(repos, ranked, viewer_id)
+        wealthy = repos.wealthy_ids()
+        lines = [
+            f"{MEDALS.get(r, f'`{r:>2}`')} <@{uid}>{teiai.STATUS_MARK.get(repos.display_status(uid, wealthy), '')}"
+            f"\u3000**{ui.pelica(total)}**"
+            for r, (uid, total, _p) in enumerate(ranked[:TOP_N], 1)
+        ]
+        if viewer_id:  # 閲覧者が圏外なら、その順位の行も末尾に足す
+            me = next(((r, total) for r, (uid, total, _p) in enumerate(ranked, 1) if uid == viewer_id), None)
+            if me is not None and me[0] > TOP_N:
+                lines.append(f"…\n`{me[0]:>2}` <@{viewer_id}>\u3000**{ui.pelica(me[1])}**")
         e = ui.embed(title, "\n".join(lines), ui.GOLD)
     if footer:
         e.set_footer(text=footer)

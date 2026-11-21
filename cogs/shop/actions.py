@@ -199,29 +199,6 @@ async def buy_insider_memo(
         await reply(embed=ui.embed("🕵️ 裏情報メモ（帝愛市）", format_memo(result), ui.DARK), ephemeral=True)
 
 
-async def _reply_precheck_failure(interaction: discord.Interaction, it: Any, pre: Any) -> None:
-    """購入前チェックの失敗理由を、理由に応じた文面で返信する。"""
-    match pre.status:
-        case "owned":
-            await ui.reply_error(
-                interaction, "すでに持っています。「🎒 持ち物」の画面で身につけられます。", title="買えませんでした"
-            )
-        case "out_of_stock":
-            assert pre.stock is not None
-            await ui.reply_error(
-                interaction,
-                f"**{it.name}** の在庫は、いま {pre.stock['stock']}個 です（{stock_text(pre.stock)}）。\n"
-                "在庫は1人ずつ別々で、時間がたつと補充されます。",
-                title="在庫が足りません",
-            )
-        case _:
-            await ui.reply_error(
-                interaction,
-                f"ペリカが足りません（{pre.total:,}ペリカ必要・残高 {pre.balance:,}ペリカ）。\n`/ペリカ デイリー` で6時間ごとにもらえます。",
-                title="買えませんでした",
-            )
-
-
 async def buy_item(
     cog: "ShopCog", interaction: discord.Interaction, item: str, qty: int = 1, *, confirm_fn: Optional[Callable] = None
 ) -> None:
@@ -250,7 +227,27 @@ async def buy_item(
             qty = 1
         pre = cog.service.precheck_buy(gid, uid, it, qty)
         if not pre.ok:
-            await _reply_precheck_failure(interaction, it, pre)
+            match pre.status:  # 失敗理由に応じた文面で返信する
+                case "owned":
+                    await ui.reply_error(
+                        interaction,
+                        "すでに持っています。「🎒 持ち物」の画面で身につけられます。",
+                        title="買えませんでした",
+                    )
+                case "out_of_stock":
+                    assert pre.stock is not None
+                    await ui.reply_error(
+                        interaction,
+                        f"**{it.name}** の在庫は、いま {pre.stock['stock']}個 です（{stock_text(pre.stock)}）。\n"
+                        "在庫は1人ずつ別々で、時間がたつと補充されます。",
+                        title="在庫が足りません",
+                    )
+                case _:
+                    await ui.reply_error(
+                        interaction,
+                        f"ペリカが足りません（{pre.total:,}ペリカ必要・残高 {pre.balance:,}ペリカ）。\n`/ペリカ デイリー` で6時間ごとにもらえます。",
+                        title="買えませんでした",
+                    )
             return
         name_qty = f"**{shop.label(it)}**" + (f" ×{qty}" if qty > 1 else "")
         reply = await confirmed_reply(
