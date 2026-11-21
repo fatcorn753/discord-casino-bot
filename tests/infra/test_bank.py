@@ -493,6 +493,52 @@ def test_thermostat_batch_injects_the_bailout_for_a_net_outflow(eco, monkeypatch
     assert s["thermostat"]["bailed"] == pytest.approx(bailout) and s["cash"] == pytest.approx(bailout)
 
 
+def test_thermostat_enforced_bond_maturity_with_trust_haircut_never_burns_nor_goes_negative(eco, monkeypatch):
+    """ENFORCE でも、手元現金が足りず信託ヘアカットが発生する社債償還では、信託取り崩し分が流入へ反転せず、現金はマイナスにならない。"""
+    from domain import thermostat
+
+    monkeypatch.setattr(thermostat, "ENFORCE", True)
+    eco.wallet.credit(A, 1_000_000, "テスト")
+    eco.bank.bank_deposit(A, 500_000, NOW)  # 信託 50万・手元 10万
+    assert eco.bonds.bond_buy(A, "normal", 30_000, NOW)[0]
+    rate = eco.bonds.bond_list(A)["active"][0]["rate"]
+    interest = int(30_000 * rate / 100)
+    with eco.db.tx():  # 手元現金を 0 にして、償還は信託のヘアカットで払う状態にする
+        cash = eco.bank.bank_sync_for(G, NOW)
+        eco.bank.bank_set_for(G, 0.0, cash["loaned"])
+        eco.db.conn.execute("UPDATE teiai_bank SET ts=? WHERE guild_id=?", (NOW + 10 * 86400, G))  # 地下融資は戻さない
+    done = eco.bonds.bond_settle(NOW + 3 * 86400)
+    assert [(d["status"], d["paid"]) for d in done] == [("paid", 30_000 + interest)]  # 元本+利息を満額払う
+    s = eco.bank.bank_status(NOW + 3 * 86400)
+    # サーモスタットには純額（元本相殺後の利息だけの流出）しか通らず、burn も bailout も発生しない
+    assert s["thermostat"]["burned"] == 0 and s["thermostat"]["bailed"] == 0
+    assert s["cash"] >= 0  # 信託取り崩し分が burn に乗って現金がマイナスにならない
+    assert eco.bank.deposit_of(A) == 500_000 - 30_000 - interest  # 信託が第一損失
+
+
+def test_thermostat_enforced_early_bond_sale_counts_only_the_discount_as_inflow(eco, monkeypatch):
+    """cash=0・信託ありで通常債を中途売却しても、サーモスタットへの流入は元本との差（値引き）の範囲で、現金はマイナスにならない。"""
+    from domain import thermostat
+
+    monkeypatch.setattr(thermostat, "ENFORCE", True)
+    eco.wallet.credit(A, 1_000_000, "テスト")
+    eco.bank.bank_deposit(A, 200_000, NOW)  # 信託 20万
+    assert eco.bonds.bond_buy(A, "normal", 20_000, NOW)[0]
+    with eco.db.tx():
+        cash = eco.bank.bank_sync_for(G, NOW)
+        eco.bank.bank_set_for(G, 0.0, cash["loaned"])
+        eco.db.conn.execute("UPDATE teiai_bank SET ts=? WHERE guild_id=?", (NOW + 10 * 86400, G))  # 地下融資は戻さない
+    bond_id = eco.bonds.bond_list(A)["active"][0]["id"]
+    ok, payout = eco.bonds.bond_cancel(A, bond_id, NOW)
+    assert ok and payout < 20_000  # 買った直後の売却は元本割れ
+    net = 20_000 - payout  # サーモスタットに流入として通る純額（信託取り崩し分は乗らない）
+    _, _, burn = thermostat.absorb_inflow(thermostat.State(), net)
+    s = eco.bank.bank_status(NOW)
+    assert s["thermostat"]["burned"] == pytest.approx(burn, rel=0.01) and s["thermostat"]["bailed"] == 0.0
+    assert s["cash"] >= 0  # burn が手元から引かれてもマイナスにならない
+    assert eco.bank.deposit_of(A) == 200_000 - payout  # 売却代は信託のヘアカットで払った
+
+
 def test_thermostat_state_cools_down_over_time(eco):
     from domain import thermostat
 

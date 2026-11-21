@@ -328,7 +328,7 @@ class BankRepo(ScopedRepo, IBankRepo):
         """入金と支払いが混ざるバッチの支払い amounts を、まとめて1回のウォーターフォールで払う。払えた額を、それぞれ返す。
 
         offset は、このバッチの流入（現金は動かさない。入金は先に thermo=False で済ませておく）。サーモスタットには
-        「offset −（現金で払った分 + 超過損失）」の純額を1回だけ通す。信託の取り崩しは通さないので、
+        「offset − 支払総額」の経済的な純額を1回だけ通す。信託の取り崩し分は負側の器にも流入側にも数えないので、
         ジュニアの信託が第一損失を負ってから、超過損失の分だけ熱浴が肩代わりする（#33）。
         払い切れないとき（帝愛の持ち口の分が残ったとき）は、払えた額を額に応じて按分する。
         """
@@ -362,11 +362,15 @@ class BankRepo(ScopedRepo, IBankRepo):
         excess = max(0.0, shortfall - trust_take)  # 信託でも受け止めきれない超過損失 Δraw
         bailout = 0.0
         if thermo:
-            flow = offset - (cash_pay + excess)  # 流入がプラス
-            if flow < 0:
-                bailout = self._thermo_shock_for(guild_id, int(round(-flow)), now)
-            elif flow > 0:  # 純額が流入: 入れてよい額を超えた分（burn）は、手元から消える
-                cash -= flow - self._thermo_inflow_for(guild_id, int(round(flow)), now)
+            net = offset - amount  # このバッチの経済的な純額（流入がプラス、流出がマイナス）
+            if net > 0:  # 純額が流入: 入れてよい額を超えた分（burn）は、手元から消える（マイナスにはしない）
+                burn = net - self._thermo_inflow_for(guild_id, int(round(net)), now)
+                cash = max(cash - burn, 0.0)
+            elif net < 0:
+                # 信託の取り崩し分は負側の器を使わない（0 を超えて流入側へ反転させない）
+                shock = max(0.0, -net - trust_take)
+                if shock > 0:
+                    bailout = self._thermo_shock_for(guild_id, int(round(shock)), now)
         cover = min(excess, bailout)  # 熱浴の肩代わりは、まず超過損失の穴埋めに使う
         cash += bailout - cover  # 余った肩代わりは、手元へ
         charged = 0
