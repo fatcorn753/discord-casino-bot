@@ -10,6 +10,7 @@
 
 import math
 import random
+from collections.abc import Mapping, Sequence
 from typing import Any, Optional
 
 from domain import market
@@ -43,14 +44,14 @@ def plan_event(now: float, rng: random.Random) -> dict[str, Any]:
     }
 
 
-def phase(ev: dict[str, Any], now: float) -> str:
+def phase(ev: Mapping[str, Any], now: float) -> str:
     """announced（予告中）/ active（発生中）/ done（終了）。"""
     if now >= ev["end_ts"]:
         return "done"
     return "active" if now >= ev["start_ts"] else "announced"
 
 
-def multiplier(events: list[dict[str, Any]], symbol: str, now: float) -> float:
+def multiplier(events: Sequence[Mapping[str, Any]], symbol: str, now: float) -> float:
     """いま、その銘柄の値動きの大きさにかかっている倍率（発生中のイベントだけ。なければ 1）。"""
     m = 1.0
     for ev in events:
@@ -121,7 +122,7 @@ def describe_alert(alert: dict[str, Any]) -> str:
     )
 
 
-def current(events: list[dict[str, Any]], now: float) -> Optional[dict[str, Any]]:
+def current(events: Sequence[Mapping[str, Any]], now: float) -> Optional[Mapping[str, Any]]:
     """終わっていないイベント（予告中か発生中）を1つ返す。"""
     live = [e for e in events if phase(e, now) != "done"]
     return min(live, key=lambda e: e["start_ts"]) if live else None
