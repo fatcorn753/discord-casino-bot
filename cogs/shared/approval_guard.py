@@ -36,9 +36,8 @@ async def guard(interaction: discord.Interaction) -> bool:
     if is_allowed(guild_repo, bot.config, guild_id, interaction.user.id):
         return True
     if not requires_approval(bot.config):
-        await interaction.response.send_message(
-            embed=ui.error_embed("このサーバーでは使えません", "この Bot は、許可されたサーバーだけで遊べます。"),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction, "この Bot は、許可されたサーバーだけで遊べます。", title="このサーバーでは使えません"
         )
         return False
     row = guild_repo.get_guild_status(guild_id)
@@ -49,7 +48,7 @@ async def guard(interaction: discord.Interaction) -> bool:
         msg = "このサーバーでの利用は、Bot の持ち主に許可されていません。"
     else:
         msg = "このサーバーは、まだ Bot の持ち主に承認されていません。承認を依頼しました。承認されるまで、少しお待ちください。"
-    await interaction.response.send_message(embed=ui.warn_embed("承認待ちです", msg), ephemeral=True)
+    await ui.reply_warn(interaction, msg, title="承認待ちです")
     return False
 
 
@@ -70,8 +69,7 @@ async def allow_component(
     guild_id = interaction.guild_id
     if guild_id is not None and approval.is_allowed(guild_repo, config, guild_id, interaction.user.id):
         return feature is None or await feature_guard(interaction, guild_repo, feature)
-    embed = ui.error_embed(title, text) if text is not None else ui.error_embed(title)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await ui.reply_error(interaction, text if text is not None else "", title=title)
     return False
 
 
@@ -84,15 +82,12 @@ async def feature_guard(interaction: discord.Interaction, guild_repo: IGuildRepo
     """機能が止められていれば、本人だけに断りを返して False を返す（止まっていなければ True）。"""
     if not feature_off(guild_repo, interaction.guild_id, feature):
         return True
-    embed = ui.error_embed(
-        "⏸️ 停止中",
+    await ui.reply_error(
+        interaction,
         f"**{features.label(feature)}** は、いま管理者が止めています。再開まで、お待ちください。\n"
         "（止める前に始めたものは、いつもどおり精算されます）",
+        title="⏸️ 停止中",
     )
-    if interaction.response.is_done():
-        await interaction.followup.send(embed=embed, ephemeral=True)
-    else:
-        await interaction.response.send_message(embed=embed, ephemeral=True)
     return False
 
 

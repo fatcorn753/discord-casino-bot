@@ -5,14 +5,16 @@ import logging
 import random
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from domain import events as events_mod
 from domain import skins
+from domain.errors import Notice
 from domain.games import jackpot
 from domain.games.pachinko import SetResult
 from domain.games.rtplevel import DEFAULT_RTP_POLICY, IRtpPolicy
 from domain.ports.clock import IClock
+from domain.ports.contracts import PlayRecord
 from domain.ports.repos import (
     IEscrowRepo,
     IEventRepo,
@@ -46,8 +48,8 @@ class SettleGameResult:
     insured_refund: int = 0
     event_bonus: int = 0
     rtp_shift: int = 0
-    notices: tuple[Any, ...] = ()
-    events: dict[str, Any] | None = None
+    notices: tuple[Notice, ...] = ()
+    events: Optional[PlayRecord] = None
     jackpot_won: int = 0  # 共有ジャックポットを当てた額（当たらなければ 0）
     jackpot_pool: int = 0  # 精算のあとの、ジャックポットの積み立て
 
@@ -162,7 +164,7 @@ class CasinoService:
             return SettleGameResult(duplicate=True, event_bonus=event_bonus, rtp_shift=rtp_shift)
         net, penalty_taken, insured_refund = result
         notices = tuple(notice_repo.take_notices(user_id))
-        ev_result: dict[str, Any] = {}
+        ev_result: Optional[PlayRecord] = None
         try:
             ev_result = record_repo.record_play(user_id, game, bet, net, current_now.date(), tags)
         except Exception:
@@ -181,7 +183,7 @@ class CasinoService:
             jackpot_pool=pool,
         )
 
-    def _draw_jackpot(self, escrow_repo: Any, user_id: int, bet: int) -> tuple[int, int]:
+    def _draw_jackpot(self, escrow_repo: IEscrowRepo, user_id: int, bet: int) -> tuple[int, int]:
         """共有ジャックポットの抽選。(当てた額, 抽選のあとの積み立て)。失敗しても、精算そのものは済んでいる。"""
         try:
             pool = escrow_repo.jackpot_pool()

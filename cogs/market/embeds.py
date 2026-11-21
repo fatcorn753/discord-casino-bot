@@ -1,6 +1,7 @@
 """`/証券` の埋め込み・表示文の組み立て。"""
 
 import math
+from collections.abc import Mapping
 from typing import Any, Optional, Sequence
 
 import discord
@@ -11,7 +12,7 @@ from cogs.shared.messages.market import PIN_ACTION_TEXT
 from domain import bonds, market, market_events
 from domain import options as opt
 from domain.options import name_of
-from domain.ports.contracts import BondQuote, MarginStatus
+from domain.ports.contracts import BondQuote, BondRow, HoldingBook, MarginStatus, OptionRow
 
 TICK_MINUTES = 1
 HOLDER_ROWS = 10  # チャートに載せる保有者の数
@@ -62,11 +63,12 @@ def spot_position_text(units: int, cost: int, price: float) -> str:
     )
 
 
-def describe_option_done(row: dict) -> str:
+def describe_option_done(row: OptionRow) -> str:
     label = name_of(row)
     icon = "⚖️" if row["kind"] == opt.PAIR else opt.KINDS[row["kind"]][1]
+    symbol2 = row["symbol2"] or ""
     target = (
-        f"{market.BY_KEY[row['symbol']].name} vs {market.BY_KEY[row['symbol2']].name}"
+        f"{market.BY_KEY[row['symbol']].name} vs {market.BY_KEY[symbol2].name}"
         if row["kind"] == opt.PAIR
         else market.BY_KEY[row["symbol"]].name
     )
@@ -83,18 +85,21 @@ def describe_option_done(row: dict) -> str:
         return f"{head} → 売却 {ui.pelica(row['paid'])}（{row['paid'] - row['premium']:+,}）"
     if row["status"] == "exercised":
         return f"{head} → 🎯 **当たり** {ui.pelica(row['paid'])}（{row['paid'] - row['premium']:+,}）"
-    return f"{head} → 外れ（満期の価格 {market.fmt(row['final'])}）"
+    return f"{head} → 外れ（満期の価格 {market.fmt(row['final'] if row['final'] is not None else 0.0)}）"
 
 
-def option_line(row: dict, prices: dict) -> str:
+def option_line(row: OptionRow, prices: Mapping[str, float]) -> str:
     """保有のオプションの1行（種類・銘柄・条件・満期）。"""
     label, sym = name_of(row), market.BY_KEY[row["symbol"]]
     icon = "🎰" if row["side"] == "short" else opt.KINDS[row["kind"]][1]
     if row["kind"] == opt.PAIR:
-        other = market.BY_KEY[row["symbol2"]]
-        a, b = prices.get(row["symbol"]), prices.get(row["symbol2"])
+        symbol2 = row["symbol2"]
+        spot2 = row["spot2"]
+        assert symbol2 is not None and spot2 is not None  # PAIR なら発行時に必ず入っている
+        other = market.BY_KEY[symbol2]
+        a, b = prices.get(row["symbol"]), prices.get(symbol2)
         rel = (
-            f"（いま {sym.name} {(a / row['spot'] - 1) * 100:+.1f}%・{other.name} {(b / row['spot2'] - 1) * 100:+.1f}%）"
+            f"（いま {sym.name} {(a / row['spot'] - 1) * 100:+.1f}%・{other.name} {(b / spot2 - 1) * 100:+.1f}%）"
             if a and b
             else ""
         )
@@ -150,7 +155,7 @@ def correlation_table(hist_by_symbol: dict[str, list]) -> str:
     return "```\n" + "\n".join(rows) + "\n```"
 
 
-def event_lines(events_rows: list, now: float) -> str:
+def event_lines(events_rows: Sequence[Mapping[str, Any]], now: float) -> str:
     """市場イベント（ボラティリティ予告）。なければ空文字。"""
     ev = market_events.current(events_rows, now)
     if not ev:
@@ -167,7 +172,7 @@ def event_lines(events_rows: list, now: float) -> str:
     )
 
 
-def earnings_lines(ev: Optional[dict]) -> str:
+def earnings_lines(ev: Optional[Mapping[str, Any]]) -> str:
     """今週の決算発表の予告（月曜9:00から、発表まで）。なければ空文字。"""
     if ev is None:
         return ""
@@ -264,8 +269,8 @@ def chart_embed(
 def summary_embed(
     hist_24h: dict[str, list],
     latest: dict[str, float],
-    upcoming_earnings: Optional[dict],
-    event_rows: list,
+    upcoming_earnings: Optional[Mapping[str, Any]],
+    event_rows: Sequence[Mapping[str, Any]],
     alert_histories: dict[str, list[float]],
     cut_rows: list,
     now: float,
@@ -298,8 +303,8 @@ def holdings_embed(
     prices: dict[str, float],
     spots: dict[str, tuple[int, int]],
     margins: dict[tuple[str, str], tuple[int, float, int]],
-    options: dict[str, list[dict]],
-    bond_data: dict[str, list[dict]],
+    options: HoldingBook[OptionRow],
+    bond_data: HoldingBook[BondRow],
     option_quotes: dict[int, int],
     bond_quotes: dict[int, int],
     margin_status: Optional[MarginStatus],
@@ -377,7 +382,7 @@ def holdings_embed(
     return e
 
 
-def earnings_announce_embed(row: dict) -> discord.Embed:
+def earnings_announce_embed(row: Mapping[str, Any]) -> discord.Embed:
     """今週の決算発表の予告埋め込み。"""
     sym = market.BY_KEY[row["symbol"]]
     return ui.embed(

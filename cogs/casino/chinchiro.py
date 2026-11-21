@@ -162,17 +162,18 @@ class ChinchiroView(GameOwnerView):
         payout, extra = rules.payout(self.ctx.bet, outcome)
         # 負けの倍払い（預かり金で足りない分）は、精算と同じ1回の処理で、残高の範囲まで引く
         net = self.ctx.settle(payout, penalty=extra)
-        if outcome.result == "win":
-            line, color = _role_line(WIN_LINE, skin.role_win if skin else None, player.kind), ui.OK
-            if dealer.kind == rules.HIFUMI:
-                line = "親がヒフミ…！ 倍もらう…！"
-        elif outcome.result == "lose":
-            key = rules.HIFUMI if player.kind == rules.HIFUMI else dealer.kind
-            line, color = _role_line(LOSE_LINE, skin.role_lose if skin else None, key), ui.ERROR
-            if extra and self.ctx.deps.teiai.debt_of(self.ctx.guild_id, self.ctx.user_id) > 0:
-                line += "\n払い切れない…！ 残りは借金になった…"
-        else:
-            line, color = "引き分け…。ざわ……何も動かない…", ui.INFO
+        match outcome.result:
+            case "win":
+                line, color = _role_line(WIN_LINE, skin.role_win if skin else None, player.kind), ui.OK
+                if dealer.kind == rules.HIFUMI:
+                    line = "親がヒフミ…！ 倍もらう…！"
+            case "lose":
+                key = rules.HIFUMI if player.kind == rules.HIFUMI else dealer.kind
+                line, color = _role_line(LOSE_LINE, skin.role_lose if skin else None, key), ui.ERROR
+                if extra and self.ctx.deps.teiai.debt_of(self.ctx.guild_id, self.ctx.user_id) > 0:
+                    line += "\n払い切れない…！ 残りは借金になった…"
+            case _:
+                line, color = "引き分け…。ざわ……何も動かない…", ui.INFO
         mult = f"（{outcome.multiplier}倍）" if outcome.result != "draw" and outcome.multiplier > 1 else ""
         body = "\n\n".join(
             [

@@ -1,5 +1,8 @@
 """債券の表示文・選択肢（`BondCog` と `MarketCog` の双方から参照する）。"""
 
+from collections.abc import Mapping
+from typing import Any
+
 from discord import app_commands
 
 from cogs.shared import ui
@@ -19,7 +22,7 @@ def due_text(due: float) -> str:
     return f"<t:{int(due)}:R>"
 
 
-def describe_done(row: dict) -> str:
+def describe_done(row: Mapping[str, Any]) -> str:
     kind = bonds.KINDS[row["kind"]]
     p = row["principal"]
     if row["status"] == "paid":

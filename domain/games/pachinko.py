@@ -11,6 +11,7 @@
 """
 
 import random
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 
@@ -59,7 +60,7 @@ class SpinInfo:
     omen: str  # 予告の色（予告なしなら ""）
     tier: str  # リーチの格（リーチなしなら ""）
     hit: bool
-    rounds: tuple  # 当たったときの、ラウンドごとの出玉（賭け金の倍数）。連チャンの数だけ並ぶ
+    rounds: tuple[int, ...]  # 当たったときの、ラウンドごとの出玉（賭け金の倍数）。連チャンの数だけ並ぶ
     hit_prob: float  # この演出での、当たる確率（統計用）
 
     @property
@@ -72,7 +73,7 @@ class SetResult:
     """1セット（100発）の結果。"""
 
     starts: int  # スタートに入った玉の数 = 回転数
-    spins: tuple  # SpinInfo の並び
+    spins: tuple[SpinInfo, ...]  # SpinInfo の並び
     raw: int  # 出玉の合計 = 払い戻しの倍数（0 ならハズレ）
 
     @property
@@ -98,11 +99,11 @@ def hit_probability(omen: str, tier: str) -> float:
     return min(1.0, BASE_HIT + OMEN_TABLE[omen][1] + TIER_TABLE[tier][1])
 
 
-def _weighted(weights: dict, rng: random.Random):
+def _weighted(weights: dict[str, float], rng: random.Random) -> str:
     return rng.choices(list(weights), weights=list(weights.values()), k=1)[0]
 
 
-def roll_rounds(rng: random.Random) -> tuple:
+def roll_rounds(rng: random.Random) -> tuple[int, ...]:
     """大当たりから始まる連チャンの、ラウンドごとの出玉（賭け金の倍数）。"""
     rounds = []
     while True:
@@ -135,27 +136,29 @@ def mean_hit_prob() -> float:
     )
 
 
-def hit_rate_by_omen() -> dict:
+def hit_rate_by_omen() -> dict[str, float]:
     return {o: sum(pt * hit_probability(o, t) for t, (pt, _) in TIER_TABLE.items()) for o in OMEN_TABLE}
 
 
-def hit_rate_by_tier() -> dict:
+def hit_rate_by_tier() -> dict[str, float]:
     return {t: sum(po * hit_probability(o, t) for o, (po, _) in OMEN_TABLE.items()) for t in TIER_TABLE}
 
 
-def _convolve(a: list, b: list) -> list:
+def _convolve(a: list[float], b: list[float]) -> list[float]:
     """合計の分布（0〜ANALYSIS_MAX。ANALYSIS_MAX の位置には「それ以上」をまとめる）。"""
     out = [0.0] * (ANALYSIS_MAX + 1)
     for i, pa in enumerate(a):
-        if pa:
-            for j, pb in enumerate(b):
-                if pb:
-                    out[min(i + j, ANALYSIS_MAX)] += pa * pb
+        if not pa:
+            continue
+        for j, pb in enumerate(b):
+            if not pb:
+                continue
+            out[min(i + j, ANALYSIS_MAX)] += pa * pb
     return out
 
 
 @lru_cache(maxsize=None)
-def _set_distribution() -> tuple:
+def _set_distribution() -> tuple[float, ...]:
     """1セットの払い戻しの倍数の分布 [0..ANALYSIS_MAX]（それ以上は ANALYSIS_MAX にまとめる。計算のためだけで、遊びに上限はない）。"""
     one = [0.0] * (ANALYSIS_MAX + 1)
     for _, m, p in ROUNDS:
@@ -189,7 +192,7 @@ def hit_rate() -> float:
     return 1.0 - _set_distribution()[0]
 
 
-def pick_reels(round_mult: int, tier: str, rng: random.Random) -> tuple:
+def pick_reels(round_mult: int, tier: str, rng: random.Random) -> tuple[str, ...]:
     """回転の出目を決める。当たりは3つ揃い（出玉の大きさで絵柄が違う）。ハズレは、リーチなら「あと一歩」、そうでなければバラバラ。"""
     if round_mult == 2:
         s = rng.choice(SMALL)
@@ -205,6 +208,6 @@ def pick_reels(round_mult: int, tier: str, rng: random.Random) -> tuple:
     return tuple(rng.sample(REEL_SYMBOLS, 3))  # 3つとも違う
 
 
-def hit_spins(spins) -> list:
+def hit_spins(spins: Iterable[SpinInfo]) -> list[tuple[int, SpinInfo]]:
     """当たった回転だけを、(何回転目か, 回転) の並びで返す。演出は、ここだけを見せる。"""
     return [(i, s) for i, s in enumerate(spins, start=1) if s.hit]

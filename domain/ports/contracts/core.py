@@ -1,11 +1,18 @@
-"""ポートの戻り値に使う、型付きの入れ物（catalogs に依存しない値型だけを置く）。
+"""ポートの戻り値に使う、型付きの入れ物のうち基礎の値型（catalogs に依存しない値型だけを置く）。
 
 domain/types.py は catalogs を読むため、ポート（domain/ports）からは実行時に import できない。
-ポートの契約に出てくる値型は、ここに置く。
+ポートの契約に出てくる値型は、このパッケージに置く（行モデルは social / games / market / teiai の各サブモジュール）。
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional, TypedDict
+from typing import TYPE_CHECKING, Generic, Optional, TypedDict, TypeVar
+
+from .teiai import CdsRow
+
+if TYPE_CHECKING:
+    from domain.missions import Mission
+
+RowT = TypeVar("RowT")
 
 
 @dataclass(frozen=True)
@@ -100,11 +107,11 @@ class LoanCredit(TypedDict):
     bankrupt_at: Optional[float]
 
 
-class LoanBook(TypedDict):
+class LoanBook(TypedDict, Generic[RowT]):
     """自分が借りている／貸している、終了前の貸付（loans 表の行）。"""
 
-    borrowed: list[dict[str, Any]]
-    lent: list[dict[str, Any]]
+    borrowed: list[RowT]
+    lent: list[RowT]
 
 
 class CdsQuote(TypedDict):
@@ -115,7 +122,7 @@ class CdsQuote(TypedDict):
 
 
 class CdsHoldings(TypedDict):
-    bought: list[dict[str, Any]]  # 自分が買っている有効な CDS（cds 表の行）
+    bought: list[CdsRow]  # 自分が買っている有効な CDS（cds 表の行）
     on_me: int  # 自分に掛けられている件数
 
 
@@ -128,8 +135,82 @@ class MarginStatus(TypedDict):
     ratio: Optional[float]
 
 
-class HoldingBook(TypedDict):
+class HoldingBook(TypedDict, Generic[RowT]):
     """債券・オプションの一覧（表の行）。保有中（期限が近い順）と、直近に決着したもの（新しい順）。"""
 
-    active: list[dict[str, Any]]
-    done: list[dict[str, Any]]
+    active: list[RowT]
+    done: list[RowT]
+
+
+class UserRow(TypedDict):
+    """ユーザーの口座（users 表の行）。"""
+
+    guild_id: int
+    user_id: int
+    balance: int
+    daily_streak: int
+    last_daily: Optional[str]
+    games_played: int
+    total_wagered: int
+    total_won: int
+    biggest_win: int
+    created_at: float
+    last_slot: Optional[int]
+    debt: int  # 帝愛からの借金（シニア債権）
+    bankrupt_at: Optional[float]
+    blacklist_until: Optional[float]
+
+
+class LedgerEntry(TypedDict):
+    """台帳の1行（ledger 表の読み出し射影）。"""
+
+    delta: int
+    balance_after: int
+    reason: str
+    ts: float
+
+
+class PlaySummary(TypedDict):
+    """ゲームの成績のまとめ（play_state の読み出し射影）。"""
+
+    plays: int
+    wins: int
+    net_total: int
+    best_streak: int
+
+
+class PlayRecord(TypedDict):
+    """1回遊んだ結果の記録（record_play の返り値）。"""
+
+    streak: int  # いまの連勝
+    new_best: bool
+    completed: list[tuple["Mission", int]]  # 達成したミッションと、その報酬
+    bonus: int  # 全ミッション達成ボーナス
+
+
+class WeeklyAward(TypedDict):
+    """週間ランキングの発表の結果（weekly_award の返り値）。"""
+
+    champion: Optional[tuple[int, int, int]]  # 王者 (ユーザーID, 稼ぎ, ゲーム数)。いなければ None
+    previous: list[int]  # 称号を外された人のユーザーID
+    wins: int  # 王者の通算優勝回数
+    standings: list[tuple[int, int, int]]  # (ユーザーID, 稼ぎ, ゲーム数) の並び
+
+
+class GuildStatusRow(TypedDict):
+    """サーバーの承認状態（guild_status 表の行）。"""
+
+    guild_id: int
+    status: str  # pending / approved / denied
+    name: Optional[str]
+    decided_by: Optional[int]
+    updated_at: float
+    notified_at: Optional[float]
+
+
+class LeaderboardRow(TypedDict):
+    """ランキング掲示板の設定（leaderboards 表の行）。"""
+
+    guild_id: int
+    channel_id: int
+    message_id: int

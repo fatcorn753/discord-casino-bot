@@ -17,6 +17,7 @@ from cogs.shared.announce import announce_channel
 from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import company as company_mod
+from domain.errors import Failure
 from domain.ports.repos import IGuildRepo
 from services.company import CompanyService
 
@@ -55,10 +56,9 @@ class CompanyCog(commands.Cog):
         gid = ui.guild_id_of(interaction)
         ok, result = self._company.found(gid, interaction.user.id, name, kind.value)
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("設立できません", format_failure(result)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(result), title="設立できません")
             return
+        assert not isinstance(result, Failure)
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "🏢 会社を設立しました",
@@ -80,10 +80,9 @@ class CompanyCog(commands.Cog):
         gid = ui.guild_id_of(interaction)
         ok, result = self._company.stake_invest(gid, interaction.user.id, owner.id, amount)
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("出資できません", format_failure(result)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(result), title="出資できません")
             return
+        assert not isinstance(result, Failure)
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "🤝 出資しました",
@@ -101,15 +100,12 @@ class CompanyCog(commands.Cog):
         gid = ui.guild_id_of(interaction)
         ok, result = self._company.set_dividend(gid, interaction.user.id, percent / 100)
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("配当率を変えられません", format_failure(result)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(result), title="配当率を変えられません")
             return
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "配当率を決めました", f"これからの出荷では、買取代金の **{result:.0%}** を出資者に配ります。"
-            ),
-            ephemeral=True,
+        await ui.reply_ok(
+            interaction,
+            f"これからの出荷では、買取代金の **{result:.0%}** を出資者に配ります。",
+            title="配当率を決めました",
         )
 
     @group.command(name="持分", description="自分の出資先と、受け取った配当を見る")

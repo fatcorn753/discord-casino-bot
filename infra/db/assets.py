@@ -1,7 +1,8 @@
 """ファイナル総資産: ペリカに換算できるものを、すべて合計した資産（ランキングと、人ごとの内訳）。
 
 `/ペリカ ランキング` の純資産（現金・預金・株・債券など）に、馬・持ち物・発掘品・地下作業の工具・預かり中のお金・貸し借りなどを足したもの。
-各資産カテゴリの集計は IAssetCollector を実装する独立コレクタとして分離し、CompositeAssetCollector で合成する（OCP）。
+各資産カテゴリの集計は独立したファクトリ関数が `AssetCollector`（Callable）を返す形に分離し、
+`compose_asset_collectors` で合成する（OCP）。
 """
 
 import json
@@ -13,12 +14,9 @@ from domain import labor as labor_mod
 from domain import shop
 from domain.ports.bridges import (
     AddAssetPart,
-    IAssetCollector,
+    AssetCollector,
     IOverdueLoanCollector,
-    IValuationSource,
-)
-from domain.ports.bridges import (
-    CompositeAssetCollector as CompositeAssetCollector,
+    ValuationSource,
 )
 from domain.ports.contracts import RankEntry
 from domain.ports.repos import IAssetRepo
@@ -32,7 +30,7 @@ from domain.types import (
     LIQUID_KEYS as LIQUID_KEYS,
 )
 from domain.types import PART_KEYS
-from infra.db.base import EcoDb, ScopedRepo
+from infra.db.base import EcoDb, ScopedRepo, fetch_all, fetch_one
 
 
 def _item_worth(item_id: str) -> tuple[int, bool]:
@@ -53,48 +51,45 @@ def default_horse_worth(races: int, wins: int, places: int) -> int:
     return max(0, price + horse_mod.retire_value(races, wins, places))
 
 
-class CashAndDebtCollector(IAssetCollector):
-    def __init__(self, db: EcoDb) -> None:
-        self._conn = db.conn
+def cash_and_debt_collector(db: EcoDb) -> AssetCollector:
+    conn = db.conn
 
-    def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute("SELECT user_id, balance, debt FROM users WHERE guild_id=?", (guild_id,)):
+    def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
+        for r in fetch_all(conn, "SELECT user_id, balance, debt FROM users WHERE guild_id=?", (guild_id,)):
             add(r["user_id"], "cash", r["balance"])
             add(r["user_id"], "debt", -r["debt"])
 
+    return collect
 
-class ValuationSourceCollector(IAssetCollector):
-    """IValuationSource の集計結果を任意の資産カテゴリキー（part_key）へ加算する汎用コレクタ（OCP）。"""
 
-    def __init__(self, part_key: str, source: IValuationSource) -> None:
-        self._part_key = part_key
-        self._source = source
+def valuation_source_collector(part_key: str, source: ValuationSource) -> AssetCollector:
+    """ValuationSource の集計結果を任意の資産カテゴリキー（part_key）へ加算する汎用コレクタ（OCP）。"""
 
-    def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
+    def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
         totals: dict[int, int] = {}
-        self._source.collect_values(guild_id, totals)
+        source(guild_id, totals)
         for uid, v in totals.items():
-            add(uid, self._part_key, v)
+            add(uid, part_key, v)
+
+    return collect
 
 
-class InventoryAssetCollector(IAssetCollector):
-    def __init__(self, db: EcoDb) -> None:
-        self._conn = db.conn
+def inventory_asset_collector(db: EcoDb) -> AssetCollector:
+    conn = db.conn
 
-    def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute(
-            "SELECT user_id, item_id, qty FROM inventory WHERE guild_id=? AND qty>0", (guild_id,)
-        ):
+    def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
+        for r in fetch_all(conn, "SELECT user_id, item_id, qty FROM inventory WHERE guild_id=? AND qty>0", (guild_id,)):
             _add_item_value(add, r["user_id"], r["item_id"], r["qty"])
 
+    return collect
 
-class LaborAssetCollector(IAssetCollector):
-    def __init__(self, db: EcoDb) -> None:
-        self._conn = db.conn
 
-    def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute(
-            "SELECT user_id, relics, pot, pick, glove, dorm FROM labor WHERE guild_id=?", (guild_id,)
+def labor_asset_collector(db: EcoDb) -> AssetCollector:
+    conn = db.conn
+
+    def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
+        for r in fetch_all(
+            conn, "SELECT user_id, relics, pot, pick, glove, dorm FROM labor WHERE guild_id=?", (guild_id,)
         ):
             add(r["user_id"], "pot", r["pot"])
             add(
@@ -111,51 +106,53 @@ class LaborAssetCollector(IAssetCollector):
             for item_id, qty in waiting.items():
                 _add_item_value(add, r["user_id"], item_id, int(qty))
 
+    return collect
 
-class HorseAssetCollector(IAssetCollector):
-    def __init__(self, db: EcoDb, horse_worth_fn: Callable[[int, int, int], int]) -> None:
-        self._conn = db.conn
-        self._horse_worth = horse_worth_fn
 
-    def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute(
+def horse_asset_collector(db: EcoDb, horse_worth_fn: Callable[[int, int, int], int]) -> AssetCollector:
+    conn = db.conn
+
+    def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
+        for r in fetch_all(
+            conn,
             "SELECT owner_id, races, wins, places FROM horses WHERE guild_id=? AND owner_id>0",
             (guild_id,),
         ):
-            add(r["owner_id"], "horses", self._horse_worth(r["races"], r["wins"], r["places"]))
+            add(r["owner_id"], "horses", horse_worth_fn(r["races"], r["wins"], r["places"]))
+
+    return collect
 
 
-class P2PAssetCollector(IAssetCollector):
+def p2p_asset_collector(db: EcoDb, horse_worth_fn: Callable[[int, int, int], int]) -> AssetCollector:
     """競り・出品中の品・馬は売り手、入札中のお金は入札者の資産として加算する。"""
+    conn = db.conn
 
-    def __init__(self, db: EcoDb, horse_worth_fn: Callable[[int, int, int], int]) -> None:
-        self._conn = db.conn
-        self._horse_worth = horse_worth_fn
-
-    def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute("SELECT * FROM market_listings WHERE guild_id=? AND status='active'", (guild_id,)):
+    def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
+        for r in fetch_all(conn, "SELECT * FROM market_listings WHERE guild_id=? AND status='active'", (guild_id,)):
             if r["kind"] == "item":
                 _add_item_value(add, r["seller_id"], r["ref"], r["qty"])
             else:
-                h = self._conn.execute("SELECT races, wins, places FROM horses WHERE id=?", (int(r["ref"]),)).fetchone()
+                h = fetch_one(conn, "SELECT races, wins, places FROM horses WHERE id=?", (int(r["ref"]),))
                 if h:
-                    add(r["seller_id"], "horses", self._horse_worth(h["races"], h["wins"], h["places"]))
+                    add(r["seller_id"], "horses", horse_worth_fn(h["races"], h["wins"], h["places"]))
             if r["bidder_id"]:
                 add(r["bidder_id"], "escrow", r["bid"])
 
+    return collect
 
-class LoanAssetCollector(IAssetCollector):
-    def __init__(self, db: EcoDb, loans: IOverdueLoanCollector) -> None:
-        self._conn = db.conn
-        self._loans = loans
 
-    def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute(
-            "SELECT * FROM loans WHERE guild_id=? AND status IN ('active','overdue')", (guild_id,)
+def loan_asset_collector(db: EcoDb, loans: IOverdueLoanCollector) -> AssetCollector:
+    conn = db.conn
+
+    def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
+        for r in fetch_all(
+            conn, "SELECT * FROM loans WHERE guild_id=? AND status IN ('active','overdue')", (guild_id,)
         ):
-            left = self._loans.loan_remaining(dict(r), now)
+            left = loans.loan_remaining(dict(r), now)
             add(r["lender_id"], "loans_lent", left)
             add(r["borrower_id"], "loans_owed", -left)
+
+    return collect
 
 
 class AssetRepo(ScopedRepo, IAssetRepo):
@@ -164,7 +161,7 @@ class AssetRepo(ScopedRepo, IAssetRepo):
     def __init__(
         self,
         db: EcoDb,
-        collector: IAssetCollector,
+        collector: AssetCollector,
         horse_worth_fn: Optional[Callable[[int, int, int], int]] = None,
         guild_id: int = 0,
         strict: bool = False,
@@ -183,14 +180,14 @@ class AssetRepo(ScopedRepo, IAssetRepo):
             g = self._g()
             parts: dict[int, dict[str, int]] = {
                 r["user_id"]: dict.fromkeys(PART_KEYS, 0)
-                for r in self._conn.execute("SELECT user_id FROM users WHERE guild_id=?", (g,))
+                for r in self._all("SELECT user_id FROM users WHERE guild_id=?", (g,))
             }
 
             def add(uid: int, key: str, value: int) -> None:
                 if uid in parts and value:
                     parts[uid][key] += value
 
-            self._collector.collect(g, add, now)
+            self._collector(g, add, now)
         return parts
 
     def final_assets(

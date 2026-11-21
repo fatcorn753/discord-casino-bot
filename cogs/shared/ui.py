@@ -79,6 +79,38 @@ def warn_embed(title: str, description: str = "") -> discord.Embed:
     return embed(f"⚠️ {title}", description, WARN)
 
 
+async def reply_embed(interaction: discord.Interaction, embed: discord.Embed, *, ephemeral: bool = True) -> None:
+    """interaction への応答。未応答なら response.send_message、応答済みなら followup.send へ送る。
+
+    テストの偽 interaction など is_done を持たない response では、未応答として扱う。
+    """
+    response = getattr(interaction, "response", None)
+    is_done = getattr(response, "is_done", None) if response is not None else None
+    if response is not None and not (callable(is_done) and is_done()):
+        await response.send_message(embed=embed, ephemeral=ephemeral)
+    else:
+        await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+
+
+async def reply_error(
+    interaction: discord.Interaction, text: str, *, title: str = "できません", ephemeral: bool = True
+) -> None:
+    """エラーの返信（見た目は error_embed と同じ。❌ タイトル・ephemeral 既定）という統一入口。"""
+    await reply_embed(interaction, error_embed(title, text), ephemeral=ephemeral)
+
+
+async def reply_warn(
+    interaction: discord.Interaction, text: str, *, title: str = "確認", ephemeral: bool = True
+) -> None:
+    """注意の返信（見た目は warn_embed と同じ）。"""
+    await reply_embed(interaction, warn_embed(title, text), ephemeral=ephemeral)
+
+
+async def reply_ok(interaction: discord.Interaction, text: str, *, title: str = "完了", ephemeral: bool = True) -> None:
+    """成功の返信（見た目は ok_embed と同じ）。"""
+    await reply_embed(interaction, ok_embed(title, text), ephemeral=ephemeral)
+
+
 class OwnerView(discord.ui.View):
     """開いた本人（owner_id）だけが操作できる View の基底クラス。"""
 

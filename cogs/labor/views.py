@@ -7,6 +7,8 @@ from cogs.shared import ui
 from cogs.shared.messages import format_failure
 from domain import labor as lab
 from domain import relics, shop
+from domain.errors import Failure
+from domain.ports.contracts import LaborState
 from services.labor import LaborService
 
 VIEW_TIMEOUT = 900  # 画面が反応する時間（秒）。過ぎたら、`/地下 作業` で開き直す
@@ -27,7 +29,7 @@ class LaborView(ui.OwnerView):
         self._svc = labor_svc
         self.user_id = user_id
         self.guild_id = guild_id
-        self.state: dict = {}
+        self.state: LaborState
         self.tab = "work"
         self.refresh()
 
@@ -150,7 +152,7 @@ class LaborView(ui.OwnerView):
     # -------------------------------------------------------------- #
     async def _work(self, interaction: discord.Interaction):
         r = self._svc.click(self.guild_id, self.user_id, self._svc.clock.now_ts())
-        if not r["ok"]:
+        if r["ok"] is False:
             return await self._show(interaction, "" if r.get("quiet") else f"⚠ {r['reason']}")
         note = f"⛏ **+{r['pay']:,}**"
         if r["crit"]:
@@ -236,6 +238,7 @@ class LaborView(ui.OwnerView):
         ok, result = self._svc.merge_relic(self.guild_id, self.user_id, ui.selected_values(interaction)[0])
         if not ok:
             return await self._show(interaction, f"⚠ {format_failure(result)}")
+        assert not isinstance(result, Failure)
         item = shop.BY_ID[result]
         await self._show(interaction, f"🧬 合体した！　**{item.mark}{item.name}** ができた。{relics.buff_text(result)}")
 

@@ -110,7 +110,7 @@ def find(key: str) -> Optional[Item]:
     return BY_ID.get(key) or BY_NAME.get(key)
 
 
-def find_all(key: str) -> list:
+def find_all(key: str) -> list[Item]:
     """ID・名前・「種類:名前」・表示名のどれかに合う商品をすべて返す（「赤」のように同名が複数ある場合のため）。"""
     key = (key or "").strip()
     return [i for i in CATALOG if key in (i.id, i.name, label(i), f"{KIND_LABEL[i.kind].split(' ', 1)[1]}:{i.name}")]
@@ -122,12 +122,12 @@ def label(item: Item) -> str:
     return f"{KIND_LABEL[item.kind].split(' ', 1)[1]}：{icon}{item.name}"
 
 
-def of_kind(kind: str, include_limited: bool = False) -> list:
+def of_kind(kind: str, include_limited: bool = False) -> list[Item]:
     """その種類の商品。限定品は、販売の一覧には出さない（持ち物や称号の判定では include_limited=True）。"""
     return [i for i in CATALOG if i.kind == kind and (include_limited or not i.limited)]
 
 
-def collection_value(inventory: dict) -> tuple:
+def collection_value(inventory: dict[str, int]) -> tuple[list[Item], int]:
     """持っているコレクションの (商品の並び, 資産価値)。資産価値は、買った値段の合計。"""
     owned = [i for i in of_kind(COLLECTION) if inventory.get(i.id, 0) > 0]
     return owned, sum(i.price for i in owned)

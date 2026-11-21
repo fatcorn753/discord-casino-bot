@@ -18,10 +18,11 @@ NOW = 1_000_000.0
 DAY = 86400
 
 
-class Always:
+class Always(random.Random):
     """乱数を固定する: random() が常に value を返す。"""
 
     def __init__(self, value):
+        super().__init__(0)
         self.value = value
 
     def random(self):

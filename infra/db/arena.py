@@ -9,8 +9,16 @@ from typing import Any, Optional
 
 from domain import arena as arena_mod
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports.bridges import IBankCashFlow
+from domain.ports.contracts import (
+    ArenaBetRow,
+    ArenaFighterRow,
+    ArenaFinalResult,
+    ArenaGroupResult,
+    ArenaSemiResult,
+    ArenaTournamentDetailRow,
+)
 from domain.ports.repos import IArenaRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -37,15 +45,13 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
 
     def arena_tournament_ensure(
         self, fmt: str, now: float, tz_hours: float, rng: Optional[random.Random] = None
-    ) -> dict[str, Any]:
+    ) -> ArenaTournamentDetailRow:
         """今日の、指定した形式の大会を用意する（無ければ作る）。すでにあれば、そのまま返す。"""
         rng = rng or random.SystemRandom()
         day = self.arena_today(now, tz_hours)
         with self._db.tx():
             gid = self._g()
-            row = self._conn.execute(
-                "SELECT id FROM arena_tournaments WHERE guild_id=? AND day=? AND format=?", (gid, day, fmt)
-            ).fetchone()
+            row = self._one("SELECT id FROM arena_tournaments WHERE guild_id=? AND day=? AND format=?", (gid, day, fmt))
             if row is None:
                 cur = self._conn.execute(
                     "INSERT INTO arena_tournaments (guild_id, day, format, status, created) "
@@ -69,29 +75,23 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
 
     def arena_tournaments_ensure_today(
         self, now: float, tz_hours: float, rng: Optional[random.Random] = None
-    ) -> list[dict[str, Any]]:
+    ) -> list[ArenaTournamentDetailRow]:
         """今日の大会を、1on1・バトロワの両方そろえて返す（無ければ作る）。"""
         return [self.arena_tournament_ensure(fmt, now, tz_hours, rng) for fmt in arena_mod.FORMATS]
 
-    def arena_tournament_get_by_day(self, day: str, fmt: str) -> Optional[dict[str, Any]]:
+    def arena_tournament_get_by_day(self, day: str, fmt: str) -> Optional[ArenaTournamentDetailRow]:
         with self._lock:
-            row = self._conn.execute(
+            t = self._one(
                 "SELECT * FROM arena_tournaments WHERE guild_id=? AND day=? AND format=?", (self._g(), day, fmt)
-            ).fetchone()
-            if row is None:
+            )
+            if t is None:
                 return None
-            t = dict(row)
             t["fighters"] = self.arena_fighters(t["id"])
             return t
 
-    def arena_fighters(self, tournament_id: int) -> list[dict[str, Any]]:
+    def arena_fighters(self, tournament_id: int) -> list[ArenaFighterRow]:
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM arena_fighters WHERE tournament_id=? ORDER BY id", (tournament_id,)
-                )
-            ]
+            return self._all("SELECT * FROM arena_fighters WHERE tournament_id=? ORDER BY id", (tournament_id,))
 
     def _arena_seed_spectators(self, tournament_id: int, guild_id: int, now: float, rng: random.Random) -> None:
         """観客（プレイヤー以外）の初期ランダム賭けを仕込む。帝愛の手元現金から、上限つきで補う。"""
@@ -113,19 +113,17 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
         if spent:
             self._bank.bank_set_for(guild_id, state["cash"] - spent, state["loaned"])
 
-    def arena_bet(self, user_id: int, fighter_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def arena_bet(self, user_id: int, fighter_id: int, amount: int, now: float) -> Outcome[str]:
         """戦士に賭ける。(成功か, Failure か空文字)。"""
         if amount < arena_mod.MIN_STAKE or amount > arena_mod.MAX_STAKE:
             return False, fail("arena_stake_range", lo=arena_mod.MIN_STAKE, hi=arena_mod.MAX_STAKE)
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, user_id)
-            fighter = self._conn.execute("SELECT * FROM arena_fighters WHERE id=?", (fighter_id,)).fetchone()
+            fighter = self._one("SELECT * FROM arena_fighters WHERE id=?", (fighter_id,))
             if fighter is None:
                 return False, fail("arena_fighter_not_found")
-            tournament = self._conn.execute(
-                "SELECT * FROM arena_tournaments WHERE id=?", (fighter["tournament_id"],)
-            ).fetchone()
+            tournament = self._one("SELECT * FROM arena_tournaments WHERE id=?", (fighter["tournament_id"],))
             if tournament is None or tournament["guild_id"] != gid:
                 return False, fail("arena_fighter_not_found")
             if fighter["stage"] == "out":
@@ -150,8 +148,8 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
         guild_id: int,
         tournament_id: int,
         stage: str,
-        winner: dict[str, Any],
-        losers: list[dict[str, Any]],
+        winner: ArenaFighterRow,
+        losers: list[ArenaFighterRow],
         win_odds: float,
         now: Optional[float] = None,
     ) -> None:
@@ -161,11 +159,11 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
         if loser_ids:
             placeholders = ",".join("?" * len(loser_ids))
             losers_pool = (
-                self._conn.execute(
+                self._scalar(
                     f"SELECT COALESCE(SUM(amount),0) FROM arena_bets WHERE tournament_id=? AND stage=? "
                     f"AND fighter_id IN ({placeholders})",
                     (tournament_id, stage, *loser_ids),
-                ).fetchone()[0]
+                )
                 or 0
             )
             self._conn.execute(
@@ -176,10 +174,10 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
                 f"UPDATE arena_fighters SET stage='out', result='lost' WHERE id IN ({placeholders})", loser_ids
             )
         rate = win_odds
-        win_bets = self._conn.execute(
+        win_bets = self._all(
             "SELECT * FROM arena_bets WHERE tournament_id=? AND stage=? AND fighter_id=? AND settled=0",
             (tournament_id, stage, winner["id"]),
-        ).fetchall()
+        )
         # 案B(#27): 勝てば元本は必ず戻す。利益は負けた側の賭け金と、足りない分だけ帝愛の手元現金から上限つきで補う
         player_bets = [b for b in win_bets if b["user_id"] > 0]
         # 補填と銀行の収入には時刻が要る。時刻が渡されないとき(古い呼び出し)は補填しない
@@ -202,17 +200,17 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
 
     def arena_run_semis(
         self, tournament_id: int, rng: Optional[random.Random] = None, now: Optional[float] = None
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[ArenaSemiResult]:
         """準決勝の全組を同時に決着させ、決勝へ進む人（組の数ぶん）を決める。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():
             gid = self._g()
-            t = self._conn.execute("SELECT * FROM arena_tournaments WHERE id=?", (tournament_id,)).fetchone()
+            t = self._one("SELECT * FROM arena_tournaments WHERE id=?", (tournament_id,))
             if t is None or t["guild_id"] != gid or t["status"] != "semi_betting":
                 return None
             fighters = self.arena_fighters(tournament_id)
             finalists = []
-            groups: dict[int, dict[str, Any]] = {}
+            groups: dict[int, ArenaGroupResult] = {}
             for group_no in range(1, arena_mod.semi_groups(t["format"]) + 1):
                 group = [f for f in fighters if f["group_no"] == group_no]
                 bet_totals = {f["name"]: f["bet_total"] for f in group}
@@ -229,12 +227,12 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
 
     def arena_run_final(
         self, tournament_id: int, rng: Optional[random.Random] = None, now: Optional[float] = None
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[ArenaFinalResult]:
         """決勝を決着させ、優勝者を決める（準決勝の勝者全員で、同時に戦う）。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():
             gid = self._g()
-            t = self._conn.execute("SELECT * FROM arena_tournaments WHERE id=?", (tournament_id,)).fetchone()
+            t = self._one("SELECT * FROM arena_tournaments WHERE id=?", (tournament_id,))
             if t is None or t["guild_id"] != gid or t["status"] != "final_betting":
                 return None
             finalists = [f for f in self.arena_fighters(tournament_id) if f["stage"] == "final"]
@@ -249,25 +247,22 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
             self._conn.execute("UPDATE arena_tournaments SET status='done' WHERE id=?", (tournament_id,))
             return {"champion": champion["name"], "runner_up": [f["name"] for f in losers]}
 
-    def arena_my_bets(self, tournament_id: int, user_id: int) -> list[dict[str, Any]]:
+    def arena_my_bets(self, tournament_id: int, user_id: int) -> list[ArenaBetRow]:
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT b.*, f.name AS fighter_name FROM arena_bets b JOIN arena_fighters f ON f.id=b.fighter_id "
-                    "WHERE b.tournament_id=? AND b.user_id=? ORDER BY b.id",
-                    (tournament_id, user_id),
-                )
-            ]
+            return self._all(
+                "SELECT b.*, f.name AS fighter_name FROM arena_bets b JOIN arena_fighters f ON f.id=b.fighter_id "
+                "WHERE b.tournament_id=? AND b.user_id=? ORDER BY b.id",
+                (tournament_id, user_id),
+            )
 
-    def arena_bets_breakdown(self, tournament_id: int) -> dict[int, list[dict[str, Any]]]:
+    def arena_bets_breakdown(self, tournament_id: int) -> dict[int, list[ArenaBetRow]]:
         """戦士ごとの、誰がいくら賭けているか（大会を通じた累積）。{戦士ID: [{user_id, amount}]}（金額の多い順）。"""
         with self._lock:
-            rows = self._conn.execute(
+            rows = self._all(
                 "SELECT fighter_id, user_id, SUM(amount) AS amount FROM arena_bets WHERE tournament_id=? "
                 "GROUP BY fighter_id, user_id ORDER BY fighter_id, amount DESC",
                 (tournament_id,),
-            ).fetchall()
+            )
         out: dict[int, list[Any]] = {}
         for r in rows:
             out.setdefault(r["fighter_id"], []).append({"user_id": r["user_id"], "amount": r["amount"]})

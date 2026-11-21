@@ -1,12 +1,13 @@
 """競走馬・競売。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain import horse as horse_mod
 from domain import shop as shop_mod
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import IBankCashFlow, IStatusReader
+from domain.ports.contracts import AuctionHorseRow, HorseRow
 from domain.ports.repos import IHorseRepo
 from domain.shop import CARROT, GOLD_CARROT, HORSE_VOUCHER
 from domain.types import PurchaseResult
@@ -42,16 +43,14 @@ class HorseRepo(ScopedRepo, IHorseRepo):
 
     def horse_count_for(self, guild_id: int, user_id: int) -> int:
         """持っている馬の数。出品中（預かり中）の馬も数える（出品しておけば3頭を超えて持てる、を防ぐ）。"""
-        owned = self._conn.execute(
-            "SELECT COUNT(*) FROM horses WHERE guild_id=? AND owner_id=?", (guild_id, user_id)
-        ).fetchone()[0]
-        listed = self._conn.execute(
+        owned = self._scalar("SELECT COUNT(*) FROM horses WHERE guild_id=? AND owner_id=?", (guild_id, user_id))
+        listed = self._scalar(
             "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND seller_id=? AND kind='horse' AND status='active'",
             (guild_id, user_id),
-        ).fetchone()[0]
+        )
         return owned + listed
 
-    def horse_get_for(self, guild_id: int, horse_id: int) -> Optional[dict[str, Any]]:
+    def horse_get_for(self, guild_id: int, horse_id: int) -> Optional[HorseRow]:
         with self._lock:
             return self._one("SELECT * FROM horses WHERE id=? AND guild_id=?", (horse_id, guild_id))
 
@@ -59,11 +58,14 @@ class HorseRepo(ScopedRepo, IHorseRepo):
         """馬1頭の評価額: 購入価格に、いま引退したときの引退金（成績が悪ければ引退費用）を足す。0 未満にはしない。"""
         return max(0, self.HORSE_PRICE + horse_mod.retire_value(races, wins, places))
 
-    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> tuple[Any, ...]:
+    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> Outcome[int]:
         """購入券を1枚使って、競走馬を迎える。(成功か, 理由か馬の番号)。ステータスは、全部 50 から始まる。"""
-        ok, name = horse_mod.check_name(name)
+        ok, checked = horse_mod.check_name(name)
         if not ok:
-            return False, name
+            assert isinstance(checked, Failure)
+            return False, checked
+        assert isinstance(checked, str)
+        name = checked
         if coat not in horse_mod.COATS or silks not in horse_mod.SILKS:
             return False, fail("horse_invalid_look")
         with self._db.tx():
@@ -80,21 +82,18 @@ class HorseRepo(ScopedRepo, IHorseRepo):
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (gid, user_id, name, coat, silks, s["speed"], s["stamina"], s["power"], s["guts"], self._now()),
             )
-            return True, cur.lastrowid
+            lastrowid = cur.lastrowid
+            assert lastrowid is not None
+            return True, lastrowid
 
-    def horse_list(self, user_id: int) -> list[dict[str, Any]]:
+    def horse_list(self, user_id: int) -> list[HorseRow]:
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM horses WHERE guild_id=? AND owner_id=? ORDER BY id", (self._g(), user_id)
-                )
-            ]
+            return self._all("SELECT * FROM horses WHERE guild_id=? AND owner_id=? ORDER BY id", (self._g(), user_id))
 
-    def horse_get(self, horse_id: int) -> Optional[dict[str, Any]]:
+    def horse_get(self, horse_id: int) -> Optional[HorseRow]:
         return self.horse_get_for(self._g(), horse_id)
 
-    def horse_carrot(self, user_id: int, horse_id: int, src: str, dst: str) -> tuple[Any, ...]:
+    def horse_carrot(self, user_id: int, horse_id: int, src: str, dst: str) -> Outcome[dict[str, int]]:
         """にんじん1本で、ステータスを CARROT_POINTS 点、src から dst へ動かす。(成功か, 理由か新しいステータス)。"""
         with self._db.tx():
             gid = self._g()
@@ -104,6 +103,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             ok, result = horse_mod.move_points({k: h[k] for k in horse_mod.STAT_KEYS}, src, dst)
             if not ok:
                 return False, result
+            assert not isinstance(result, Failure)
             if not self._consume(gid, user_id, CARROT):
                 return False, fail("horse_no_carrot")
             self._conn.execute(
@@ -112,7 +112,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             )
             return True, result
 
-    def horse_retire(self, user_id: int, horse_id: int) -> tuple[Any, ...]:
+    def horse_retire(self, user_id: int, horse_id: int) -> Outcome[int]:
         """馬を引退させる。成績に応じて、引退金をもらう（成績が悪いと、引退費用を払う）。(成功か, 理由かもらった額（払ったらマイナス）)。
 
         出走予定（申し込み中・発売中）の馬は、引退できない。引退した馬は、持ち馬から消える（owner_id=-2）。
@@ -122,11 +122,11 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             h = self.horse_get_for(gid, horse_id)
             if h is None or h["owner_id"] != user_id:
                 return False, fail("horse_select_own")
-            busy = self._conn.execute(
+            busy = self._one(
                 "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
                 "WHERE e.horse_id=? AND r.status IN ('entry','betting')",
                 (horse_id,),
-            ).fetchone()
+            )
             if busy:
                 return False, fail("horse_busy_no_retire")
             value = horse_mod.retire_value(h["races"], h["wins"], h["places"])
@@ -145,7 +145,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             self._conn.execute("UPDATE horses SET owner_id=-2 WHERE id=?", (horse_id,))
             return True, value
 
-    def horse_set_style(self, user_id: int, horse_id: int, style: Optional[str]) -> tuple[Any, ...]:
+    def horse_set_style(self, user_id: int, horse_id: int, style: Optional[str]) -> Outcome[str]:
         """脚質を選ぶ（style=None で、ステータスからの自動判定に戻す）。(成功か, Failure | "")。"""
         if style is not None and style not in horse_mod.STYLE_NAMES:
             return False, fail("horse_select_style")
@@ -156,7 +156,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             self._conn.execute("UPDATE horses SET style=? WHERE id=?", (style, horse_id))
             return True, ""
 
-    def horse_gold_carrot(self, user_id: int, horse_id: int, first: str, second: str) -> tuple[Any, ...]:
+    def horse_gold_carrot(self, user_id: int, horse_id: int, first: str, second: str) -> Outcome[dict[str, int]]:
         """金にんじん1本で、first と second に5点ずつ足す（ステータスの合計が10点増える。1頭に GOLD_CARROT_MAX 本まで）。"""
         with self._db.tx():
             gid = self._g()
@@ -168,6 +168,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             ok, result = horse_mod.add_points({k: h[k] for k in horse_mod.STAT_KEYS}, first, second)
             if not ok:
                 return False, result
+            assert not isinstance(result, Failure)
             if not self._consume(gid, user_id, GOLD_CARROT):
                 return False, fail("horse_no_gold_carrot")
             self._conn.execute(
@@ -188,9 +189,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
 
         出走の申し込み中の馬は取り下げ（出走料は戻らない）。すでに出走馬に決まっている馬は、帝愛の馬（NPC）に替わる。
         """
-        rows = self._conn.execute(
-            "SELECT id FROM horses WHERE guild_id=? AND owner_id=?", (guild_id, user_id)
-        ).fetchall()
+        rows = self._all("SELECT id FROM horses WHERE guild_id=? AND owner_id=?", (guild_id, user_id))
         for r in rows:
             self._conn.execute("UPDATE horses SET owner_id=-1, listed_at=? WHERE id=?", (now, r["id"]))
             self._conn.execute("DELETE FROM horse_entries WHERE horse_id=? AND lane<0", (r["id"],))
@@ -204,17 +203,17 @@ class HorseRepo(ScopedRepo, IHorseRepo):
     def horse_auction_price(self, listed_at: float, now: float) -> int:
         return max(1, round(self.HORSE_PRICE * teiai.auction_rate(listed_at, now)))
 
-    def auction_horses(self, now: float) -> list[dict[str, Any]]:
+    def auction_horses(self, now: float) -> list[AuctionHorseRow]:
         """帝愛の競売に出ている馬。[{馬の行, price, rate}]（出品の早い順）。"""
         with self._lock:
-            rows = self._conn.execute(
+            rows: list[HorseRow] = self._all(
                 "SELECT * FROM horses WHERE guild_id=? AND owner_id=-1 ORDER BY listed_at, id", (self._g(),)
-            ).fetchall()
+            )
         return [
             {
-                **dict(r),
-                "price": self.horse_auction_price(r["listed_at"], now),
-                "rate": teiai.auction_rate(r["listed_at"], now),
+                **r,
+                "price": self.horse_auction_price(r["listed_at"] or 0.0, now),
+                "rate": teiai.auction_rate(r["listed_at"] or 0.0, now),
             }
             for r in rows
         ]
@@ -226,9 +225,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             self._account.ensure(gid, user_id)
             if self._status_reader.status_for(gid, user_id, now) != teiai.KATAGI:
                 return PurchaseResult(False, fail("auction_katagi_only"), self._account.raw_balance(gid, user_id))
-            row = self._conn.execute(
-                "SELECT * FROM horses WHERE id=? AND guild_id=? AND owner_id=-1", (horse_id, gid)
-            ).fetchone()
+            row = self._one("SELECT * FROM horses WHERE id=? AND guild_id=? AND owner_id=-1", (horse_id, gid))
             if row is None:
                 return PurchaseResult(False, fail("auction_horse_sold"), self._account.raw_balance(gid, user_id))
             owned = self.horse_count_for(gid, user_id)  # 出品中の馬も数える

@@ -6,6 +6,7 @@ import discord
 
 from cogs.shared import ui
 from domain import arena as arena_mod
+from domain.ports.contracts import ArenaFighterRow, ArenaFinalResult, ArenaSemiResult, ArenaTournamentDetailRow
 
 FORMAT_NAME = {"duel": "🥊 1on1", "royale": "⚔️ バトルロイヤル"}
 STAGE_LABEL = {
@@ -30,7 +31,7 @@ def bettor_text(uid: int, amount: int) -> str:
     return f"{who} {ui.pelica(amount)}"
 
 
-def fighter_line(f: dict, bettors: list, odds: float) -> str:
+def fighter_line(f: ArenaFighterRow, bettors: list, odds: float) -> str:
     bonus = arena_mod.weapon_bonus(f["bet_total"])
     mark = {"semi": "⏳", "final": "🏅", "out": "💀"}[f["stage"]]
     weapon = f" 🗡️+{bonus:.0%}" if bonus > 0 else ""
@@ -50,13 +51,13 @@ def hp_bar(hp: int, width: int = 10) -> str:
     return "🟥" * filled + "⬛" * (width - filled)
 
 
-def battle_embed(fighters: list, hp: list, title: str) -> discord.Embed:
+def battle_embed(fighters: list[ArenaFighterRow], hp: list, title: str) -> discord.Embed:
     """試合演出（HPバー）の1コマ。勝敗はすでに決まっており、見た目の攻防だけを表示する。"""
     lines = [f"**{f['name']}**　{hp_bar(h)} {h}%" for f, h in zip(fighters, hp)]
     return ui.embed(title, "\n".join(lines), ui.GOLD)
 
 
-def _schedule_line(t: dict, semi_hour: int, final_hour: int, now: float, tz_hours: float) -> str:
+def _schedule_line(t: ArenaTournamentDetailRow, semi_hour: int, final_hour: int, now: float, tz_hours: float) -> str:
     today = datetime.date.fromisoformat(t["day"])
     tz = datetime.timezone(datetime.timedelta(hours=tz_hours))
     semi_at = datetime.datetime.combine(today, datetime.time(semi_hour), tzinfo=tz).timestamp()
@@ -69,14 +70,14 @@ def _schedule_line(t: dict, semi_hour: int, final_hour: int, now: float, tz_hour
 
 
 def tournament_embed(
-    t: dict, semi_hour: int, final_hour: int, breakdown: dict, now: float, tz_hours: float
+    t: ArenaTournamentDetailRow, semi_hour: int, final_hour: int, breakdown: dict, now: float, tz_hours: float
 ) -> discord.Embed:
     fmt_label = FORMAT_NAME.get(t["format"], t["format"])
     status_label = STAGE_LABEL.get(t["status"], t["status"])
     schedule = _schedule_line(t, semi_hour, final_hour, now, tz_hours)
     lines = [f"今日の形式: {fmt_label}　状態: **{status_label}**" + (f"　{schedule}" if schedule else ""), ""]
-    groups: dict[int, list[dict]] = {}
-    finalists = []
+    groups: dict[int, list[ArenaFighterRow]] = {}
+    finalists: list[ArenaFighterRow] = []
     for f in t["fighters"]:
         if f["stage"] == "final":
             finalists.append(f)
@@ -98,7 +99,7 @@ def tournament_embed(
     return ui.embed(title, "\n".join(lines), ui.GOLD)
 
 
-def semis_result_embed(result: dict) -> discord.Embed:
+def semis_result_embed(result: ArenaSemiResult) -> discord.Embed:
     """準決勝の決着（組ごとの勝者と、決勝の顔ぶれ）。"""
     lines = [f"第{g}組: **{r['winner']}** が勝利（敗: {'・'.join(r['losers'])}）" for g, r in result["groups"].items()]
     return ui.embed(
@@ -108,7 +109,7 @@ def semis_result_embed(result: dict) -> discord.Embed:
     )
 
 
-def final_result_embed(result: dict) -> discord.Embed:
+def final_result_embed(result: ArenaFinalResult) -> discord.Embed:
     return ui.embed(
         "👑 決勝、決着！",
         f"優勝: **{result['champion']}**（他: {'・'.join(result['runner_up'])}）",

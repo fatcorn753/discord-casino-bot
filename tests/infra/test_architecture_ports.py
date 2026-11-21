@@ -50,41 +50,65 @@ def test_legacy_facade_and_service_locators_are_removed():
         assert not (ROOT / "domain/ports" / removed).exists()
 
 
-def test_ports_and_bridges_use_nominal_base_classes_without_protocol_or_abc():
-    """domain/ports/（catalogs 除く。bridges はパッケージ）は Protocol・abc.ABC を使わない名目的基底クラスである。"""
-    targets = [p for p in _iter_py("domain/ports") if p.name not in ("catalogs.py",) and "catalog_types" not in p.parts]
-    targets.append(ROOT / "cogs/shared/bridges.py")
+# 住み分けポリシー（python-coding-conventions §3.3 / §7.2）:
+# - 名目的契約層（不変条件・状態・実行時 isinstance 契約あり）では Protocol・abc.ABC を禁止する。
+# - 静的型のみで LSP を 100% 保証できる純粋契約層（単一コールバックの bridges・純粋戦略の games）では
+#   Protocol / Callable 型エイリアスを許可する（ただし abc モジュールと ABC 基底は引き続き禁止）。
+NOMINAL_PORT_DIRS = ("domain/ports/repos", "domain/ports/contracts")
+NOMINAL_PORT_FILES = ("domain/ports/catalogs.py", "domain/ports/clock.py", "domain/ports/session.py")
+NOMINAL_EXTRA_FILES = ("cogs/shared/bridges.py",)
+PURE_CONTRACT_DIRS = ("domain/ports/bridges", "domain/games")
+
+
+def _protocol_or_abc_violations(path: Path, *, allow_protocol: bool) -> list[str]:
     violations: list[str] = []
-    for path in targets:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                for base in node.bases:
-                    base_id = base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
-                    if base_id in ("Protocol", "ABC"):
-                        violations.append(
-                            f"{path.relative_to(ROOT)}:{node.lineno} class {node.name} inherits {base_id}"
-                        )
-            elif isinstance(node, ast.ImportFrom) and node.module in ("abc",):
-                violations.append(f"{path.relative_to(ROOT)}:{node.lineno} imports abc")
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                base_id = base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
+                if base_id == "ABC" or (base_id == "Protocol" and not allow_protocol):
+                    violations.append(f"{path.relative_to(ROOT)}:{node.lineno} class {node.name} inherits {base_id}")
+        elif isinstance(node, ast.ImportFrom) and node.module in ("abc",):
+            violations.append(f"{path.relative_to(ROOT)}:{node.lineno} imports abc")
+    return violations
+
+
+def _in_dirs(path: Path, dirs: tuple[str, ...]) -> bool:
+    rel = str(path.relative_to(ROOT))
+    return any(rel == d or rel.startswith(d + "/") for d in dirs)
+
+
+def test_nominal_port_layers_forbid_protocol_and_abc():
+    """名目的契約層（domain/ports/repos・contracts・catalogs・clock・session と cogs/shared/bridges.py）は
+    Protocol・abc.ABC を使わない名目的基底クラスのままである（不変条件・実行時契約のため）。"""
+    targets = [
+        p
+        for p in _iter_py("domain/ports")
+        if _in_dirs(p, NOMINAL_PORT_DIRS)
+        or str(p.relative_to(ROOT)) in NOMINAL_PORT_FILES
+        or "catalog_types" in p.parts
+    ]
+    targets += [ROOT / f for f in NOMINAL_EXTRA_FILES]
+    violations = [v for path in targets for v in _protocol_or_abc_violations(path, allow_protocol=False)]
+    assert not violations, "\n".join(violations)
+
+
+def test_pure_contract_layers_may_use_protocol_or_callable_but_never_abc():
+    """純粋契約層（domain/ports/bridges の単一コールバック契約・domain/games の純粋戦略）では
+    Protocol / Callable 型エイリアスを許可するが、abc モジュールと ABC 基底は引き続き禁止する。"""
+    targets = [p for d in PURE_CONTRACT_DIRS for p in _iter_py(d)]
+    violations = [v for path in targets for v in _protocol_or_abc_violations(path, allow_protocol=True)]
     assert not violations, "\n".join(violations)
 
 
 def test_bridges_package_reexports_every_submodule_symbol():
-    """domain/ports/bridges/ の各サブモジュールが定義する公開シンボルは、パッケージから漏れなく再エクスポートされる。"""
+    """domain/ports/bridges/ の各サブモジュールが定義する公開シンボル（クラス・関数・型エイリアス）は、
+    パッケージから漏れなく再エクスポートされる。"""
     import domain.ports.bridges as bridges_pkg
 
     pkg_dir = ROOT / "domain" / "ports" / "bridges"
-    defined: dict[str, str] = {}
-    for path in sorted(pkg_dir.glob("*.py")):
-        if path.name == "__init__.py":
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef):
-                defined[node.name] = path.name
-            elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                defined[node.targets[0].id] = path.name
+    defined = _package_defined_symbols(pkg_dir)
     assert defined, "bridges サブモジュールが空です"
     not_exported = [f"{name} ({mod})" for name, mod in defined.items() if not hasattr(bridges_pkg, name)]
     assert not not_exported, "パッケージへの再エクスポート漏れ:\\n" + "\\n".join(not_exported)
@@ -224,7 +248,12 @@ def test_cogs_no_infra_imports_and_no_service_locators():
 
 
 def test_production_follows_python_coding_conventions():
-    """本番コード全体で abc.ABC / @abstractmethod / Protocol / @staticmethod / 不要な @classmethod を禁止する。"""
+    """本番コード全体で abc / abc.ABC / @abstractmethod / @staticmethod / 不要な @classmethod を禁止する。
+
+    Protocol 基底だけは、静的型のみで LSP を 100% 保証できる純粋契約層
+    （domain/ports/bridges/・domain/games/）に限り許可する（住み分けポリシー）。それ以外の
+    名目的契約層（domain/ports/repos/・cogs/shared/bridges.py・infra/db/ など）では禁止のまま。
+    """
     allowed_classmethod_methods = {"from_custom_id"}
     targets = [
         *[p for folder in ("domain", "services", "infra", "cogs") for p in _iter_py(folder)],
@@ -241,9 +270,10 @@ def test_production_follows_python_coding_conventions():
             elif isinstance(node, ast.ImportFrom) and node.module == "abc":
                 violations.append(f"{rel}:{node.lineno} imports from abc")
             elif isinstance(node, ast.ClassDef):
+                protocol_allowed = _in_dirs(path, PURE_CONTRACT_DIRS)
                 for base in node.bases:
                     base_name = base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
-                    if base_name in ("Protocol", "ABC"):
+                    if base_name == "ABC" or (base_name == "Protocol" and not protocol_allowed):
                         violations.append(f"{rel}:{node.lineno} class {node.name}({base_name})")
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 for dec in node.decorator_list:
@@ -255,6 +285,85 @@ def test_production_follows_python_coding_conventions():
                     elif "classmethod" in dec_str and node.name not in allowed_classmethod_methods:
                         violations.append(f"{rel}:{node.lineno} @classmethod on {node.name}")
     assert not violations, "\n".join(violations)
+
+
+def test_production_code_has_no_rng_any_parameter():
+    """本番コード（domain/・services/・infra/・cogs/・main.py・manage.py）で rng 引数への Any 型を禁止する。
+
+    乱数は Optional[random.Random] で注入し、テスト決定性を担保する。
+    """
+    targets = [
+        *[p for folder in ("domain", "services", "infra", "cogs") for p in _iter_py(folder)],
+        ROOT / "main.py",
+        ROOT / "manage.py",
+    ]
+    violations: list[str] = []
+    for path in targets:
+        rel = path.relative_to(ROOT)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+                    if arg.arg == "rng" and arg.annotation is not None and ast.unparse(arg.annotation) == "Any":
+                        violations.append(f"{rel}:{node.lineno} {node.name} の引数 rng: Any")
+    assert not violations, "\n".join(violations)
+
+
+def test_production_code_has_no_tuple_any_ellipsis_annotation():
+    """本番コード（domain/・services/・infra/・cogs/・main.py・manage.py）で `tuple[Any, ...]` の型注釈を禁止する。
+
+    結果タプルは domain.errors.Outcome[T]（または実態の具体型）で表す。
+    """
+    targets = [
+        *[p for folder in ("domain", "services", "infra", "cogs") for p in _iter_py(folder)],
+        ROOT / "main.py",
+        ROOT / "manage.py",
+    ]
+    violations: list[str] = []
+    for path in targets:
+        rel = path.relative_to(ROOT)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        annotations: list[tuple[int, ast.expr]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.returns is not None:
+                    annotations.append((node.lineno, node.returns))
+                for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+                    if arg.annotation is not None:
+                        annotations.append((arg.lineno, arg.annotation))
+            elif isinstance(node, ast.AnnAssign) and node.annotation is not None:
+                annotations.append((node.lineno, node.annotation))
+        for lineno, ann in annotations:
+            if "tuple[Any, ...]" in ast.unparse(ann):
+                violations.append(f"{rel}:{lineno} tuple[Any, ...]")
+    assert not violations, "\n".join(violations)
+
+
+def test_ports_repos_no_dict_any():
+    """domain/ports/repos/ の型注釈に `dict[str, Any]`（大文字 Dict 含む）が 0 件である。
+
+    リポジトリポートの引数・戻り値の辞書契約は domain/ports/contracts/ の TypedDict か
+    正確な組み込み型で表す（ネストした list[dict[str, Any]] 等も検出する）。
+    """
+    violations: list[str] = []
+    for path in _iter_py("domain/ports/repos"):
+        rel = path.relative_to(ROOT)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        annotations: list[tuple[int, ast.expr]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if node.returns is not None:
+                    annotations.append((node.lineno, node.returns))
+                for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
+                    if arg.annotation is not None:
+                        annotations.append((arg.lineno, arg.annotation))
+            elif isinstance(node, ast.AnnAssign) and node.annotation is not None:
+                annotations.append((node.lineno, node.annotation))
+        for lineno, ann in annotations:
+            text = ast.unparse(ann)
+            if "dict[str, Any]" in text or "Dict[str, Any]" in text:
+                violations.append(f"{rel}:{lineno} {text}")
+    assert not violations, "dict[str, Any] が残っています:\\n" + "\\n".join(violations)
 
 
 def test_cogs_have_no_untyped_cog_parameter():
@@ -271,17 +380,86 @@ def test_cogs_have_no_untyped_cog_parameter():
 
 
 def test_debt_repo_does_not_touch_other_domains_tables():
-    """破産・差し押さえは、各リポジトリのポート経由で行う。debt.py は他ドメインの表へ SQL を書かない(#67)。"""
+    """破産・差し押さえは、各リポジトリのポート経由で行う。infra/db/debt/ パッケージは他ドメインの表へ SQL を書かない(#67)。"""
     import re
 
-    source = (ROOT / "infra/db/debt.py").read_text(encoding="utf-8")
+    pkg_dir = ROOT / "infra" / "db" / "debt"
+    assert not (ROOT / "infra/db/debt.py").exists(), "debt.py は debt/ パッケージへ分割済みのはず"
+    sources = sorted(pkg_dir.rglob("*.py"))
+    assert sources, "infra/db/debt/ パッケージが空です"
     foreign = ("options", "bonds", "inventory", "profile", "horses", "seized_items", "crypto", "companies", "loans")
     found = [
-        f"{table}: {m.group(0)}"
+        f"{path.relative_to(ROOT)}:{m.group(0)}"
+        for path in sources
         for table in foreign
-        for m in re.finditer(rf"\b(?:FROM|UPDATE|INTO|JOIN)\s+{table}\b", source, flags=re.IGNORECASE)
+        for m in re.finditer(
+            rf"\b(?:FROM|UPDATE|INTO|JOIN)\s+{table}\b", path.read_text(encoding="utf-8"), flags=re.IGNORECASE
+        )
     ]
-    assert not found, "debt.py が他ドメインの表を直接操作している:\n" + "\n".join(found)
+    assert not found, "infra/db/debt/ が他ドメインの表を直接操作している:\n" + "\n".join(found)
+
+
+def _package_defined_symbols(pkg_dir: Path) -> dict[str, str]:
+    """パッケージのサブモジュール（__init__.py 除く）が定義する公開シンボル {名前: ファイル名}。"""
+    defined: dict[str, str] = {}
+    for path in sorted(pkg_dir.glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        for node in ast.parse(path.read_text(encoding="utf-8"), filename=str(path)).body:
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith(
+                "_"
+            ):
+                defined[node.name] = path.name
+            elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                name = node.targets[0].id
+                if name.startswith("_") or (
+                    isinstance(node.value, ast.Call) and getattr(node.value.func, "id", "") == "TypeVar"
+                ):
+                    continue
+                defined[name] = path.name
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and not node.target.id.startswith("_")
+            ):
+                defined[node.target.id] = path.name
+    return defined
+
+
+def test_split_packages_reexport_every_submodule_symbol():
+    """分割パッケージ（bank/・debt/・kyosai/・orders/・contracts/）はサブモジュールの公開シンボルを漏れなく再エクスポートする。"""
+    import importlib
+
+    packages = ["infra.db.bank", "infra.db.debt", "infra.db.kyosai", "cogs.market.orders", "domain.ports.contracts"]
+    for dotted in packages:
+        pkg = importlib.import_module(dotted)
+        pkg_dir = ROOT.joinpath(*dotted.split("."))
+        defined = _package_defined_symbols(pkg_dir)
+        assert defined, f"{dotted} のサブモジュールが空です"
+        not_exported = [f"{name} ({mod})" for name, mod in defined.items() if not hasattr(pkg, name)]
+        assert not not_exported, f"{dotted} への再エクスポート漏れ:\n" + "\n".join(not_exported)
+        assert set(pkg.__all__) == set(defined), f"{dotted} の __all__ とサブモジュール定義が一致しません"
+    for flat in ("infra/db/bank.py", "infra/db/debt.py", "infra/db/kyosai.py"):
+        assert not (ROOT / flat).exists(), f"{flat} はパッケージへ分割済みのはず"
+
+
+def test_cogs_do_not_bypass_reply_error_with_raw_send():
+    """cogs/ では生の send/send_message に error_embed を渡さない。エラー応答は ui.reply_error（統一入口）へ。"""
+    violations: list[str] = []
+    for path in _iter_py("cogs"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("send", "send_message")
+            ):
+                continue
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and sub.func.attr == "error_embed":
+                    violations.append(f"{path.relative_to(ROOT)}:{node.lineno} raw send with error_embed")
+                    break
+    assert not violations, "ui.reply_error を迂回する生のエラー送信:\n" + "\n".join(violations)
 
 
 def test_cogs_use_services_instead_of_repositories():
@@ -314,3 +492,46 @@ def test_cogs_use_services_instead_of_repositories():
             ):
                 violations.append(f"{rel}:{node.lineno} uses *.repos.{node.attr}")
     assert not violations, "\n".join(violations)
+
+
+def _max_if_for_while_depth(node: ast.AST, depth: int = 0) -> int:
+    """関数本体内の if / for / async for / while の最大ネスト深度（elif は同階層、ネストした関数・クラス定義は別カウント）。"""
+    best = depth
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(child, (ast.If, ast.For, ast.AsyncFor, ast.While)):
+            is_elif = (
+                isinstance(node, ast.If)
+                and isinstance(child, ast.If)
+                and len(node.orelse) == 1
+                and child is node.orelse[0]
+            )
+            next_depth = depth if is_elif else depth + 1
+            best = max(best, _max_if_for_while_depth(child, next_depth))
+        else:
+            best = max(best, _max_if_for_while_depth(child, depth))
+    return best
+
+
+def test_production_if_for_while_nesting_at_most_3():
+    """本番コード（domain/・services/・infra/・cogs/・main.py・manage.py）の if/for/while ネストは 3 以内。
+
+    深い分岐が出たときは、単にプライベートヘルパへ逃がすのではなく、条件知識のコンテキスト側からの注入・
+    多態化・事前絞り込み・ガード節・match/case で本質的に平坦化する。
+    """
+    targets = [
+        *[p for folder in ("domain", "services", "infra", "cogs") for p in _iter_py(folder)],
+        ROOT / "main.py",
+        ROOT / "manage.py",
+    ]
+    violations: list[str] = []
+    for path in targets:
+        rel = path.relative_to(ROOT)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                d = _max_if_for_while_depth(node)
+                if d > 3:
+                    violations.append(f"{rel}:{node.lineno} {node.name} (depth={d})")
+    assert not violations, "if/for/while のネストが 4 以上:\n" + "\n".join(violations)

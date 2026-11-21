@@ -5,14 +5,13 @@ from typing import Any, Optional
 from domain import horse as horse_mod
 from domain import p2p, teiai
 from domain import shop as shop_mod
-from domain.errors import Failure, fail
+from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import (
+    GraceReader,
     IBankCashFlow,
-    IBankruptPrepHook,
-    IGraceEnterHook,
-    IGraceReader,
     IStatusReader,
 )
+from domain.ports.contracts import ListingRow, P2PMine
 from domain.ports.repos import IP2PRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -20,7 +19,7 @@ from infra.db.horse import HorseRepo
 from infra.db.notices import NoticeRepo
 
 
-class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
+class P2PRepo(ScopedRepo, IP2PRepo):
     """プレイヤー間の取引・競り・強制引き戻し。"""
 
     P2P_ORDERS = {
@@ -37,7 +36,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         horses: HorseRepo,
         status_reader: IStatusReader,
         bank: IBankCashFlow,
-        grace_reader: IGraceReader,
+        grace_reader: GraceReader,
         notices: NoticeRepo,
         guild_id: int = 0,
         strict: bool = False,
@@ -47,7 +46,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         self._horses = horses
         self._status_reader = status_reader
         self._bank = bank
-        self._grace_reader = grace_reader
+        self._grace_reader: GraceReader = grace_reader
         self._notices = notices
 
     def prepare(self, guild_id: int, user_id: int, now: float) -> None:
@@ -58,16 +57,16 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
 
     def _p2p_pair_total(self, guild_id: int, a: int, b: int, now: float) -> int:
         """この2人（どちらが売り手でも）の、24時間の取引額の合計。共済の口の譲渡（kyosai_offers）と合わせて数える。"""
-        market_sum = self._conn.execute(
+        market_sum = self._scalar(
             "SELECT COALESCE(SUM(sold_price), 0) FROM market_listings WHERE guild_id=? AND status='sold' AND closed_at>? "
             "AND ((seller_id=? AND buyer_id=?) OR (seller_id=? AND buyer_id=?))",
             (guild_id, now - 86400, a, b, b, a),
-        ).fetchone()[0]
-        kyosai_sum = self._conn.execute(
+        )
+        kyosai_sum = self._scalar(
             "SELECT COALESCE(SUM(price), 0) FROM kyosai_offers WHERE guild_id=? AND status='done' AND done_at>? "
             "AND ((seller=? AND buyer=?) OR (seller=? AND buyer=?))",
             (guild_id, now - 86400, a, b, b, a),
-        ).fetchone()[0]
+        )
         return market_sum + kyosai_sum
 
     def _p2p_can_receive(self, guild_id: int, buyer_id: int, row: Any) -> Optional[Failure]:
@@ -77,12 +76,9 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 return fail("p2p_horse_limit", max_horses=horse_mod.MAX_HORSES)
             return None
         item = shop_mod.BY_ID[row["ref"]]
-        if (
-            item.unique
-            and self._conn.execute(
-                "SELECT 1 FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
-                (guild_id, buyer_id, row["ref"]),
-            ).fetchone()
+        if item.unique and self._one(
+            "SELECT 1 FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
+            (guild_id, buyer_id, row["ref"]),
         ):
             return fail("already_owned")
         return None
@@ -113,7 +109,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         price: int,
         hours: Optional[int] = None,
         now: Optional[float] = None,
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         """出品する。(成功か, Failure か出品の番号)。品・馬は、出品の間、預かる。"""
         now = self._now() if now is None else now
         if kind not in ("item", "horse") or mode not in ("fixed", "auction"):
@@ -123,12 +119,12 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, user_id)
-            if self._grace_reader.grace_until_for(gid, user_id) is not None:
+            if self._grace_reader(gid, user_id) is not None:
                 return False, fail("grace_lock")
-            active = self._conn.execute(
+            active = self._scalar(
                 "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active'",
                 (gid, user_id),
-            ).fetchone()[0]
+            )
             if active >= p2p.MAX_ACTIVE:
                 return False, fail("p2p_max_active", max_active=p2p.MAX_ACTIVE)
             item, have, horse = None, None, None
@@ -137,10 +133,10 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                     return False, fail("p2p_item_not_tradable")
                 item = shop_mod.BY_ID[ref]
                 qty = 1 if item.unique else qty
-                have = self._conn.execute(
+                have = self._one(
                     "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=?",
                     (gid, user_id, ref),
-                ).fetchone()
+                )
                 if qty < 1 or have is None or have["qty"] < qty:
                     return False, fail("p2p_insufficient_qty")
                 lo, hi = p2p.price_range("item", ref, qty)
@@ -149,11 +145,11 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 horse = self._horses.horse_get_for(gid, int(ref)) if str(ref).isdigit() else None
                 if horse is None or horse["owner_id"] != user_id:
                     return False, fail("horse_select_own")
-                if self._conn.execute(
+                if self._one(
                     "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
                     "WHERE e.horse_id=? AND r.status IN ('entry','betting')",
                     (horse["id"],),
-                ).fetchone():
+                ):
                     return False, fail("p2p_horse_in_race")
                 lo, hi = p2p.price_range("horse")
             if not lo <= price <= hi:
@@ -183,7 +179,9 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (gid, user_id, kind, str(ref), qty, mode, price, now, end_at),
             )
-            return True, cur.lastrowid
+            lastrowid = cur.lastrowid
+            assert lastrowid is not None
+            return True, lastrowid
 
     def _p2p_give(self, guild_id: int, user_id: int, row: Any) -> None:
         if row["kind"] == "horse":
@@ -195,7 +193,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 (guild_id, user_id, row["ref"], row["qty"]),
             )
 
-    def _p2p_label_for(self, guild_id: int, row: Any) -> str:
+    def _p2p_label_for(self, guild_id: int, row: ListingRow) -> str:
         if row["kind"] == "horse":
             horse = self._horses.horse_get_for(guild_id, int(row["ref"]))
             return f"{horse['silks']} {horse['name']}" if horse else "競走馬"
@@ -203,7 +201,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         name = shop_mod.label(item) if item else row["ref"]
         return name + (f"×{row['qty']}" if row["qty"] > 1 else "")
 
-    def p2p_label(self, row: Any) -> str:
+    def p2p_label(self, row: ListingRow) -> str:
         """出品の名前（品の名前×個数、または馬の名前）。"""
         return self._p2p_label_for(self._g(), row)
 
@@ -226,12 +224,9 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
             guild_id, row["seller_id"], "p2p_sold", label=label, price=price, fee=fee, net=price - fee
         )
 
-    def p2p_get(self, listing_id: int) -> Any:
+    def p2p_get(self, listing_id: int) -> Optional[ListingRow]:
         with self._lock:
-            r = self._conn.execute(
-                "SELECT * FROM market_listings WHERE id=? AND guild_id=?", (listing_id, self._g())
-            ).fetchone()
-            return dict(r) if r else None
+            return self._one("SELECT * FROM market_listings WHERE id=? AND guild_id=?", (listing_id, self._g()))
 
     def p2p_set_post(self, listing_id: int, channel_id: int, message_id: int) -> None:
         """告知を投稿したチャンネルとメッセージを覚える（入札・売れたときに、書き換えるため）。"""
@@ -241,12 +236,12 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 (channel_id, message_id, listing_id, self._g()),
             )
 
-    def p2p_buy(self, buyer_id: int, listing_id: int, now: float) -> tuple[Any, ...]:
+    def p2p_buy(self, buyer_id: int, listing_id: int, now: float) -> Outcome[int]:
         """定価の出品を買う。(成功か, 理由か支払った額)。"""
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, buyer_id)
-            if self._grace_reader.grace_until_for(gid, buyer_id) is not None:
+            if self._grace_reader(gid, buyer_id) is not None:
                 return False, fail("grace_lock")
             row = self.p2p_get(listing_id)
             if row is None or row["status"] != "active" or row["end_at"] <= now:
@@ -259,12 +254,12 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
             self._p2p_sell(gid, row, buyer_id, row["price"], now)
             return True, row["price"]
 
-    def p2p_bid(self, bidder_id: int, listing_id: int, amount: int, now: float) -> tuple[Any, ...]:
+    def p2p_bid(self, bidder_id: int, listing_id: int, amount: int, now: float) -> Outcome[float]:
         """競りに入札する。お金は、残高から預かる（抜かれたら、返る）。(成功か, Failure か新しい締切)。"""
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, bidder_id)
-            if self._grace_reader.grace_until_for(gid, bidder_id) is not None:
+            if self._grace_reader(gid, bidder_id) is not None:
                 return False, fail("grace_lock")
             row = self.p2p_get(listing_id)
             if row is None or row["status"] != "active" or row["end_at"] <= now:
@@ -293,7 +288,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
             )
             return True, end_at
 
-    def p2p_cancel(self, user_id: int, listing_id: int, now: float) -> tuple[Any, ...]:
+    def p2p_cancel(self, user_id: int, listing_id: int, now: float) -> Outcome[str]:
         """自分の出品を取り消して、品・馬を戻す。競りは、入札が入ったら取り消せない。"""
         with self._db.tx():
             gid = self._g()
@@ -309,13 +304,10 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
     def p2p_pull_back_for(self, guild_id: int, user_id: int, now: float) -> dict[str, int]:
         """その人の出品を、すべて取り下げて品・馬を持ち物へ戻し、最高入札者になっている競りの入札は、お金を返して取り消す。"""
         pulled = {"listings": 0, "bids": 0}
-        for row in [
-            dict(r)
-            for r in self._conn.execute(
-                "SELECT * FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active'",
-                (guild_id, user_id),
-            )
-        ]:
+        for row in self._all(
+            "SELECT * FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active'",
+            (guild_id, user_id),
+        ):
             label = self._p2p_label_for(guild_id, row)
             if row["bidder_id"]:  # 最高入札者に、預かっていたお金を返す
                 self._account.ensure(guild_id, row["bidder_id"])
@@ -328,13 +320,10 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
             self._p2p_give(guild_id, user_id, row)
             self._p2p_close(row["id"], "cancelled", now)
             pulled["listings"] += 1
-        for row in [
-            dict(r)
-            for r in self._conn.execute(
-                "SELECT * FROM market_listings WHERE guild_id=? AND bidder_id=? AND status='active'",
-                (guild_id, user_id),
-            )
-        ]:
+        for row in self._all(
+            "SELECT * FROM market_listings WHERE guild_id=? AND bidder_id=? AND status='active'",
+            (guild_id, user_id),
+        ):
             self._account.apply(
                 guild_id, user_id, row["bid"], f"取引:入札の返金（{self._p2p_label_for(guild_id, row)}・取引停止）"
             )
@@ -345,16 +334,13 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
     def p2p_pull_back(self, user_id: int, now: Optional[float] = None) -> dict[str, int]:
         return self.p2p_pull_back_for(self._g(), user_id, self._now() if now is None else now)
 
-    def p2p_unsynced_posts(self) -> list[Any]:
+    def p2p_unsynced_posts(self) -> list[ListingRow]:
         """終わった（売れた・取り消し・終了）のに、告知の投稿を、まだ書き換えていない出品。"""
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM market_listings WHERE guild_id=? AND status!='active' AND message_id>0 AND post_done=0",
-                    (self._g(),),
-                )
-            ]
+            return self._all(
+                "SELECT * FROM market_listings WHERE guild_id=? AND status!='active' AND message_id>0 AND post_done=0",
+                (self._g(),),
+            )
 
     def p2p_mark_post_done(self, listing_id: int) -> None:
         with self._db.tx():
@@ -362,44 +348,41 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 "UPDATE market_listings SET post_done=1 WHERE id=? AND guild_id=?", (listing_id, self._g())
             )
 
-    def p2p_settle(self, now: float) -> list[Any]:
+    def p2p_settle(self, now: float) -> list[tuple[ListingRow, str]]:
         """締切・期限を過ぎた出品を精算する。[(出品の行, 結果)]（結果は sold / expired / failed）を返す。"""
-        out = []
+        out: list[tuple[ListingRow, str]] = []
         with self._db.tx():
             gid = self._g()
-            rows = [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM market_listings WHERE guild_id=? AND status='active' AND end_at<=? ORDER BY end_at, id",
-                    (gid, now),
-                )
-            ]
+            rows: list[ListingRow] = self._all(
+                "SELECT * FROM market_listings WHERE guild_id=? AND status='active' AND end_at<=? ORDER BY end_at, id",
+                (gid, now),
+            )
             for row in rows:
                 label = self._p2p_label_for(gid, row)
-                if row["mode"] == "auction" and row["bidder_id"]:
-                    buyer = row["bidder_id"]
-                    reason = self._p2p_can_receive(gid, buyer, row)
-                    used = self._p2p_pair_total(gid, row["seller_id"], buyer, now)
-                    if not reason and used + row["bid"] > p2p.PAIR_DAILY_LIMIT:
-                        reason = fail("p2p_pair_limit_short")
-                    if not reason:
-                        self._p2p_sell(gid, row, buyer, row["bid"], now)
-                        self._notices.note_for(gid, buyer, "p2p_won", label=label, bid=row["bid"])
-                        out.append((row, "sold"))
-                        continue
-                    self._account.apply(
-                        gid, buyer, row["bid"], f"取引:入札の返金（{label}）"
-                    )  # 受け取れないので、返金して出品も戻す
-                    self._notices.note_for(gid, buyer, "p2p_won_failed", label=label, reason=reason, refund=row["bid"])
-                    self._p2p_give(gid, row["seller_id"], row)
+                if row["mode"] != "auction" or not row["bidder_id"]:
+                    self._p2p_give(gid, row["seller_id"], row)  # 売れ残り: 売り手へ戻す
                     self._p2p_close(row["id"], "expired", now)
-                    self._notices.note_for(gid, row["seller_id"], "p2p_buyer_cannot_receive", label=label)
-                    out.append((row, "failed"))
+                    self._notices.note_for(gid, row["seller_id"], "p2p_unsold", label=label)
+                    out.append((row, "expired"))
                     continue
-                self._p2p_give(gid, row["seller_id"], row)  # 売れ残り: 売り手へ戻す
+                buyer = row["bidder_id"]
+                reason = self._p2p_can_receive(gid, buyer, row)
+                used = self._p2p_pair_total(gid, row["seller_id"], buyer, now)
+                if not reason and used + row["bid"] > p2p.PAIR_DAILY_LIMIT:
+                    reason = fail("p2p_pair_limit_short")
+                if not reason:
+                    self._p2p_sell(gid, row, buyer, row["bid"], now)
+                    self._notices.note_for(gid, buyer, "p2p_won", label=label, bid=row["bid"])
+                    out.append((row, "sold"))
+                    continue
+                self._account.apply(
+                    gid, buyer, row["bid"], f"取引:入札の返金（{label}）"
+                )  # 受け取れないので、返金して出品も戻す
+                self._notices.note_for(gid, buyer, "p2p_won_failed", label=label, reason=reason, refund=row["bid"])
+                self._p2p_give(gid, row["seller_id"], row)
                 self._p2p_close(row["id"], "expired", now)
-                self._notices.note_for(gid, row["seller_id"], "p2p_unsold", label=label)
-                out.append((row, "expired"))
+                self._notices.note_for(gid, row["seller_id"], "p2p_buyer_cannot_receive", label=label)
+                out.append((row, "failed"))
         return out
 
     def p2p_active(
@@ -409,7 +392,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         limit: int = 25,
         mode: Optional[str] = None,
         order: str = "end",
-    ) -> list[Any]:
+    ) -> list[ListingRow]:
         """出ている出品。kind は horse / item、mode は fixed / auction で絞れる。order は P2P_ORDERS のどれか（既定は締切の近い順）。"""
         now = self._now() if now is None else now
         with self._lock:
@@ -422,32 +405,26 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 sql += " AND mode=?"
                 args.append(mode)
             ordering = self.P2P_ORDERS.get(order, self.P2P_ORDERS["end"])
-            return [dict(r) for r in self._conn.execute(sql + f" ORDER BY {ordering} LIMIT ?", (*args, limit))]
+            return self._all(sql + f" ORDER BY {ordering} LIMIT ?", (*args, limit))
 
     def p2p_count(self, now: float) -> int:
         """出ている出品の数（画面のタブに出す）。"""
         with self._lock:
-            return self._conn.execute(
+            return self._scalar(
                 "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND status='active' AND end_at>?",
                 (self._g(), now),
-            ).fetchone()[0]
+            )
 
-    def p2p_mine(self, user_id: int, now: Optional[float] = None) -> dict[str, Any]:
+    def p2p_mine(self, user_id: int, now: Optional[float] = None) -> P2PMine:
         """自分の出品（出している）と、自分が最高入札者の競り。"""
         with self._lock:
             gid = self._g()
-            selling = [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active' ORDER BY end_at",
-                    (gid, user_id),
-                )
-            ]
-            bidding = [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM market_listings WHERE guild_id=? AND bidder_id=? AND status='active' ORDER BY end_at",
-                    (gid, user_id),
-                )
-            ]
+            selling: list[ListingRow] = self._all(
+                "SELECT * FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active' ORDER BY end_at",
+                (gid, user_id),
+            )
+            bidding: list[ListingRow] = self._all(
+                "SELECT * FROM market_listings WHERE guild_id=? AND bidder_id=? AND status='active' ORDER BY end_at",
+                (gid, user_id),
+            )
         return {"selling": selling, "bidding": bidding}

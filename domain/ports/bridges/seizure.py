@@ -1,8 +1,86 @@
-"""強制執行・自己破産のステップ群のブリッジ契約（名目的基底クラスと NoOp / Composite 実装）。"""
+"""強制執行・自己破産のステップ群のブリッジ契約。
 
-from typing import Any, Optional
+住み分け:
+- 単一メソッドの純粋コールバック契約（AssetSeizureStep / LiquidationStep / SeizureValueStep /
+  BankruptPrepHook / ShopBelongings）は `Callable` 型エイリアス＋ `noop_*` / `compose_*` 関数で表す。
+- 複数メソッド・表の隠蔽という不変条件を持つ契約（IOptionHoldings / IBondHoldings）は名目的基底クラスのまま維持する。
+"""
 
+from collections.abc import Callable
+from typing import Optional
+
+from domain.errors import Outcome
 from domain.ports.contracts import ActiveBond, SeizedBelongings
+
+# 単一コールバック契約（Callable 型エイリアス）: 静的型だけで LSP を 100% 保証できる純粋契約
+ShopBelongings = Callable[[int, int], SeizedBelongings]
+AssetSeizureStep = Callable[[int, int, int, str, float], int]
+LiquidationStep = Callable[[int, int, float], None]
+SeizureValueStep = Callable[[int, int, float], int]
+BankruptPrepHook = Callable[[int, int, float], None]
+
+
+def noop_asset_seizure_step(guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
+    """差し押さえステップ未設定時の LSP 準拠の既定動作。"""
+    return 0
+
+
+def compose_asset_seizure_steps(steps: tuple[AssetSeizureStep, ...]) -> AssetSeizureStep:
+    """複数の差し押さえステップを順に実行し、必要額に達した時点で停止する合成ステップを返す（OCP）。"""
+
+    def seize(guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
+        covered = 0
+        for step in steps:
+            if covered >= need:
+                break
+            covered += step(guild_id, user_id, need - covered, reason, now)
+        return covered
+
+    return seize
+
+
+def noop_liquidation_step(guild_id: int, user_id: int, now: float) -> None:
+    """換金ステップ未設定時の LSP 準拠の既定動作。"""
+    return None
+
+
+def compose_liquidation_steps(steps: tuple[LiquidationStep, ...]) -> LiquidationStep:
+    """複数の換金ステップを順に実行する合成ステップを返す（OCP）。"""
+
+    def liquidate(guild_id: int, user_id: int, now: float) -> None:
+        for step in steps:
+            step(guild_id, user_id, now)
+
+    return liquidate
+
+
+def noop_seizure_value_step(guild_id: int, user_id: int, now: float) -> int:
+    """競売査定ステップ未設定時の LSP 準拠の既定動作。"""
+    return 0
+
+
+def compose_seizure_value_steps(steps: tuple[SeizureValueStep, ...]) -> SeizureValueStep:
+    """複数の競売査定ステップを順に実行し、合計換金額を返す合成ステップを返す（OCP）。"""
+
+    def seize(guild_id: int, user_id: int, now: float) -> int:
+        return sum(step(guild_id, user_id, now) for step in steps)
+
+    return seize
+
+
+def noop_bankrupt_prep_hook(guild_id: int, user_id: int, now: float) -> None:
+    """破産前フック未設定時の LSP 準拠の既定動作。"""
+    return None
+
+
+def compose_bankrupt_prep_hooks(hooks: tuple[BankruptPrepHook, ...]) -> BankruptPrepHook:
+    """複数の破産前フックを順次実行する合成フックを返す（OCP）。"""
+
+    def prepare(guild_id: int, user_id: int, now: float) -> None:
+        for hook in hooks:
+            hook(guild_id, user_id, now)
+
+    return prepare
 
 
 class IOptionHoldings:
@@ -11,7 +89,7 @@ class IOptionHoldings:
     def active_option_ids_for(self, guild_id: int, user_id: int) -> list[int]:
         raise NotImplementedError
 
-    def option_close_locked_for(self, guild_id: int, user_id: int, option_id: int, now: float) -> tuple[Any, ...]:
+    def option_close_locked_for(self, guild_id: int, user_id: int, option_id: int, now: float) -> Outcome[int]:
         raise NotImplementedError
 
 
@@ -23,119 +101,9 @@ class IBondHoldings:
 
     def bond_cancel_locked_for(
         self, guild_id: int, user_id: int, bond_id: int, now: Optional[float] = None
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         raise NotImplementedError
 
     def bond_write_off_for(self, guild_id: int, user_id: int, bond_id: int, payout: int, now: float) -> None:
         """解約できない債券を、payout だけ払い戻して解約済みにする（破産の換金用。払い戻しは帝愛銀行から）。"""
         raise NotImplementedError
-
-
-class IShopBelongings:
-    """破産で、ショップの持ち物・装備・消耗品をすべて没収する契約（inventory・profile 表を外へ見せない）。"""
-
-    def seize_belongings_for(self, guild_id: int, user_id: int) -> SeizedBelongings:
-        raise NotImplementedError
-
-
-class IAssetSeizureStep:
-    """借金返済不足時の強制執行（ファーストロス差し押さえ）の 1 ステップ（OCP）。"""
-
-    def seize(self, guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
-        raise NotImplementedError
-
-
-class NoOpAssetSeizureStep(IAssetSeizureStep):
-    """差し押さえステップ未設定時の LSP 準拠 Null 実装。"""
-
-    def seize(self, guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
-        return 0
-
-
-class CompositeAssetSeizureStep(IAssetSeizureStep):
-    """複数の IAssetSeizureStep を順に実行し、必要額に達した時点で停止する Composite。"""
-
-    def __init__(self, steps: tuple[IAssetSeizureStep, ...]) -> None:
-        self._steps = steps
-
-    def seize(self, guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
-        covered = 0
-        for step in self._steps:
-            if covered >= need:
-                break
-            covered += step.seize(guild_id, user_id, need - covered, reason, now)
-        return covered
-
-
-class ILiquidationStep:
-    """自己破産時の保有金融資産の換金（口座現金への回収）の 1 ステップ（OCP）。"""
-
-    def liquidate(self, guild_id: int, user_id: int, now: float) -> None:
-        raise NotImplementedError
-
-
-class NoOpLiquidationStep(ILiquidationStep):
-    """換金ステップ未設定時の LSP 準拠 Null 実装。"""
-
-    def liquidate(self, guild_id: int, user_id: int, now: float) -> None:
-        return None
-
-
-class CompositeLiquidationStep(ILiquidationStep):
-    """複数の ILiquidationStep を順に実行する Composite。"""
-
-    def __init__(self, steps: tuple[ILiquidationStep, ...]) -> None:
-        self._steps = steps
-
-    def liquidate(self, guild_id: int, user_id: int, now: float) -> None:
-        for step in self._steps:
-            step.liquidate(guild_id, user_id, now)
-
-
-class ISeizureValueStep:
-    """自己破産時の現物・馬などの競売出品と査定額算出の 1 ステップ（OCP）。"""
-
-    def seize(self, guild_id: int, user_id: int, now: float) -> int:
-        raise NotImplementedError
-
-
-class NoOpSeizureValueStep(ISeizureValueStep):
-    """競売査定ステップ未設定時の LSP 準拠 Null 実装。"""
-
-    def seize(self, guild_id: int, user_id: int, now: float) -> int:
-        return 0
-
-
-class CompositeSeizureValueStep(ISeizureValueStep):
-    """複数の ISeizureValueStep を順に実行し、合計換金額を返す Composite。"""
-
-    def __init__(self, steps: tuple[ISeizureValueStep, ...]) -> None:
-        self._steps = steps
-
-    def seize(self, guild_id: int, user_id: int, now: float) -> int:
-        return sum(step.seize(guild_id, user_id, now) for step in self._steps)
-
-
-class IBankruptPrepHook:
-    """自己破産前の資産引き戻しフック（例: P2P出品・入札の引き戻し）。"""
-
-    def prepare(self, guild_id: int, user_id: int, now: float) -> None:
-        raise NotImplementedError
-
-
-class NoOpBankruptPrepHook(IBankruptPrepHook):
-    """破産前フック未設定時の LSP 準拠 Null 実装。"""
-
-    def prepare(self, guild_id: int, user_id: int, now: float) -> None:
-        return None
-
-
-class CompositeBankruptPrepHook(IBankruptPrepHook):
-    """複数の IBankruptPrepHook を順次実行する Composite。"""
-
-    def __init__(self, hooks: tuple[IBankruptPrepHook, ...]) -> None:
-        self._hooks = hooks
-
-    def prepare(self, guild_id: int, user_id: int, now: float) -> None:
-        for hook in self._hooks:
-            hook.prepare(guild_id, user_id, now)

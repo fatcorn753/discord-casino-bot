@@ -10,6 +10,8 @@ from cogs.shared.horse_display import stat_lines
 from cogs.shared.messages import format_failure
 from domain import horse as horse_mod
 from domain import shop
+from domain.errors import Failure
+from domain.ports.contracts import HorseRow
 from services.horse import HorseDesk, HorseService
 
 
@@ -25,10 +27,9 @@ class NameModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         ok, result = horse_mod.check_name(self.name.value)
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("名前を直してください", format_failure(result)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(result), title="名前を直してください")
             return
+        assert not isinstance(result, Failure)
         view = AppearanceView(self.stable, result)
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
@@ -85,9 +86,8 @@ class AppearanceView(discord.ui.View):
     async def _on_go(self, interaction: discord.Interaction):
         ok, result = self.stable.desk(interaction).horse_create(interaction.user.id, self.name, self.coat, self.silks)
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("迎えられません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="迎えられません")
+        assert not isinstance(result, Failure)
         self.stable.horse_id = result
         self.stop()
         await interaction.response.edit_message(
@@ -102,7 +102,7 @@ class AppearanceView(discord.ui.View):
 class StyleView(ui.OwnerView):
     """脚質を選ぶ（選ばなければ、ステータスから自動で決まる）。"""
 
-    def __init__(self, stable: "Stable", user_id: int, horse: dict):
+    def __init__(self, stable: "Stable", user_id: int, horse: HorseRow):
         super().__init__(user_id, timeout=300)
         self.stable, self.user_id, self.horse = stable, user_id, horse
         auto = horse_mod.style_of({k: horse[k] for k in horse_mod.STAT_KEYS})
@@ -135,9 +135,7 @@ class StyleView(ui.OwnerView):
         horses = self.stable.desk(interaction)
         ok, reason = horses.horse_set_style(self.user_id, self.horse["id"], None if value == "auto" else value)
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("選べません", format_failure(reason)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(reason), title="選べません")
         updated = horses.horse_get(self.horse["id"])
         assert updated is not None
         self.horse = updated
@@ -194,9 +192,8 @@ class GoldCarrotView(ui.OwnerView):
             interaction.user.id, self.horse_id, self.first, self.second
         )
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("使えません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="使えません")
+        assert not isinstance(result, Failure)
         self.stop()
         await interaction.response.edit_message(
             embed=ui.ok_embed("金にんじんを使いました", f"{stat_lines(result)}"), view=None
@@ -206,7 +203,7 @@ class GoldCarrotView(ui.OwnerView):
 class RetireView(ui.OwnerView):
     """引退の確認。戦績に応じて、引退金をもらう（戦績が悪いと、引退費用を払う）。"""
 
-    def __init__(self, stable: "Stable", user_id: int, horse: dict, value: int):
+    def __init__(self, stable: "Stable", user_id: int, horse: HorseRow, value: int):
         super().__init__(user_id, timeout=300)
         self.stable, self.user_id, self.horse, self.value = stable, user_id, horse, value
         ok = discord.ui.Button(label="🎌 引退させる", style=discord.ButtonStyle.danger)
@@ -230,9 +227,8 @@ class RetireView(ui.OwnerView):
         horses = self.stable.desk(interaction)
         ok, result = horses.horse_retire(interaction.user.id, self.horse["id"])
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("引退させられません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="引退させられません")
+        assert not isinstance(result, Failure)
         self.stop()
         remaining = horses.horse_list(interaction.user.id)
         self.stable.horse_id = remaining[0]["id"] if remaining else None  # 厩舎の画面で選んでいた馬は、もういない
@@ -378,9 +374,7 @@ class Stable(ui.OwnerView):
         assert self.horse_id is not None
         ok, result = self.desk(interaction).horse_carrot(interaction.user.id, self.horse_id, self.src, self.dst)
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("動かせません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="動かせません")
         await self._redraw(interaction)
 
     async def _on_gold(self, interaction: discord.Interaction):
@@ -391,9 +385,7 @@ class Stable(ui.OwnerView):
         assert self.horse_id is not None
         horse = self.desk(interaction).horse_get(self.horse_id)
         if horse is None or horse["owner_id"] != interaction.user.id:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("選べません", "自分の馬を選んでください。"), ephemeral=True
-            )
+            return await ui.reply_error(interaction, "自分の馬を選んでください。", title="選べません")
         view = StyleView(self, interaction.user.id, horse)
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
@@ -401,9 +393,7 @@ class Stable(ui.OwnerView):
         assert self.horse_id is not None
         horse = self.desk(interaction).horse_get(self.horse_id)
         if horse is None or horse["owner_id"] != interaction.user.id:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("引退させられません", "自分の馬を選んでください。"), ephemeral=True
-            )
+            return await ui.reply_error(interaction, "自分の馬を選んでください。", title="引退させられません")
         value = horse_mod.retire_value(horse["races"], horse["wins"], horse["places"])
         view = RetireView(self, interaction.user.id, horse, value)
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
@@ -416,15 +406,12 @@ class Stable(ui.OwnerView):
         desk = self.desk(interaction)
         race = self._next_entry_race(desk)
         if race is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("申し込めません", "いま、申し込みを受け付けているレースはありません。"),
-                ephemeral=True,
+            return await ui.reply_error(
+                interaction, "いま、申し込みを受け付けているレースはありません。", title="申し込めません"
             )
         ok, reason = desk.race_register(interaction.user.id, self.horse_id, race["id"], desk.clock.now_ts())
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("申し込めません", format_failure(reason)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(reason), title="申し込めません")
         await self._redraw(interaction)
         await refresh_entry_card(interaction, desk, race["id"])
 
@@ -433,14 +420,10 @@ class Stable(ui.OwnerView):
         desk = self.desk(interaction)
         race = self._next_entry_race(desk)
         if race is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("取り下げられません", "申し込み中のレースはありません。"), ephemeral=True
-            )
+            return await ui.reply_error(interaction, "申し込み中のレースはありません。", title="取り下げられません")
         ok, reason = desk.race_withdraw(interaction.user.id, self.horse_id, race["id"], desk.clock.now_ts())
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("取り下げられません", format_failure(reason)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(reason), title="取り下げられません")
         await self._redraw(interaction)
         await refresh_entry_card(interaction, desk, race["id"])
 

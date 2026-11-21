@@ -376,23 +376,24 @@ class MarketCog(commands.Cog):
     async def settle_position(self, interaction: discord.Interaction, code: str, percent: Optional[int] = None) -> None:
         """持ち物（code）を、percent（1〜100。省略で全部）だけ決済する。債券・オプションは全部だけ。"""
         kind, _, target = code.partition(":")
-        if kind == "spot" and target in market.BY_KEY:
-            return await orders.sell_spot(self, interaction, target, percent)
-        if kind in ("short", "long") and target in market.BY_KEY:
-            return await orders.margin_close(self, interaction, kind, target, percent)
-        if kind in ("opt", "bond") and target.isdigit():
-            if percent is not None and percent < 100:  # 黙って全部を決済しない(#80)
-                await interaction.response.send_message(
-                    embed=ui.error_embed("債券・オプションは全部だけです", "割合を省略するか、100%にしてください。"),
-                    ephemeral=True,
-                )
-                return
-            if kind == "opt":
-                return await orders.option_sell(self, interaction, int(target))
-            return await orders.bond_cancel(self, interaction, int(target))
-        await interaction.response.send_message(
-            embed=ui.error_embed("決済できません", "決済する持ち物を、候補から選んでください。"), ephemeral=True
-        )
+        match kind:
+            case "spot" if target in market.BY_KEY:
+                return await orders.sell_spot(self, interaction, target, percent)
+            case "short" | "long" if target in market.BY_KEY:
+                return await orders.margin_close(self, interaction, kind, target, percent)
+            case "opt" | "bond" if target.isdigit():
+                if percent is not None and percent < 100:  # 黙って全部を決済しない(#80)
+                    await ui.reply_error(
+                        interaction,
+                        "割合を省略するか、100%にしてください。",
+                        title="債券・オプションは全部だけです",
+                    )
+                    return
+                if kind == "opt":
+                    return await orders.option_sell(self, interaction, int(target))
+                return await orders.bond_cancel(self, interaction, int(target))
+            case _:
+                await ui.reply_error(interaction, "決済する持ち物を、候補から選んでください。", title="決済できません")
 
     def holdings_embed(self, uid: int, guild_id: int) -> discord.Embed:
         snap = self._market_svc.holdings_snapshot(guild_id, uid, RNG)
