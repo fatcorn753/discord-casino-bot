@@ -5,6 +5,7 @@ import random
 from types import SimpleNamespace
 from typing import cast
 
+import discord
 import pytest
 
 from cogs.casino import blackjack as play_bj
@@ -103,7 +104,7 @@ def test_cannot_start_second_game_while_playing(bot):
 def test_instant_games_settle_and_keep_ledger_consistent(bot, monkeypatch, play):
     monkeypatch.setattr(simple, "RNG", random.Random(5))
     deps = make_casino_deps(bot)
-    for i in range(30):
+    for _ in range(30):
         it = FakeInteraction()
         if play == "slot":
             run(simple.play_slot(as_interaction(it), deps, 100))
@@ -369,10 +370,10 @@ def test_only_the_bettor_can_press_buttons(bot):
     ctx.abort()
 
 
-def test_view_error_refunds_bet(bot):
+def test_view_error_refunds_bet(bot, monkeypatch):
     ctx, view = make_bj(bot, 800, ("10", "9"), ("10", "7"))
     it = FakeInteraction()
-    setattr(it, "channel", SimpleNamespace(send=lambda **k: asyncio.sleep(0)))
+    monkeypatch.setattr(it, "channel", SimpleNamespace(send=lambda **k: asyncio.sleep(0)), raising=False)
     run(view.on_error(as_interaction(it), RuntimeError("x"), as_item(None)))
     assert bot.repos.wallet.balance(1) == INITIAL_BALANCE and view.ctx.done
     assert_clean(bot)
@@ -562,7 +563,7 @@ def test_chinchiro_deleting_message_while_rolling_also_settles(bot, monkeypatch)
 def test_chinchiro_server_error_during_dealer_roll_refunds(bot, monkeypatch):
     monkeypatch.setattr(play_ch, "RNG", random.Random(4))
     it = FakeInteraction(fail_edit_after=0, fail_with=http_error(503))  # Discord 側の障害は、遊ぶ人のせいではない
-    with pytest.raises(Exception):
+    with pytest.raises(discord.HTTPException):
         run(play_ch.play_chinchiro(as_interaction(it), make_casino_deps(bot), 300))
     assert bot.repos.wallet.balance(1) == INITIAL_BALANCE
     assert_clean(bot)
@@ -578,7 +579,7 @@ def test_blackjack_double_press_is_ignored_after_finish(bot):
     assert view.game.player == cards and bot.repos.wallet.balance(1) == INITIAL_BALANCE + 1000
 
 
-def test_transfer_blocked_while_playing_and_needs_min_games(bot, tmp_path):
+def test_transfer_blocked_while_playing_and_needs_min_games(bot, tmp_path, monkeypatch):
     from cogs.economy.cog import TRANSFER_MIN_GAMES, EconomyCog
 
     wallet, escrow = bot.repos.wallet, bot.repos.escrow
@@ -591,7 +592,7 @@ def test_transfer_blocked_while_playing_and_needs_min_games(bot, tmp_path):
     cog = make_economy_cog(bot)
     bot.sessions.try_start(1)
     it = FakeInteraction()
-    setattr(it, "guild", SimpleNamespace(id=10))
+    monkeypatch.setattr(it, "guild", SimpleNamespace(id=10), raising=False)
     member = SimpleNamespace(id=2, bot=False, mention="@b")
     run(invoke(EconomyCog.transfer, cog, it, member, 100))
     assert "遊んでいる" in it.sent[0]["embed"].description

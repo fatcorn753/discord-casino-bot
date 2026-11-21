@@ -286,7 +286,7 @@ def test_broadcast_posts_to_every_allowed_guild_channel(eco, monkeypatch):
         async def send(self, **kw):
             sent.append((kw["embed"].title, len(kw["view"].children)))
 
-    setattr(cog.bot, "guilds", [SimpleNamespace(id=1), SimpleNamespace(id=2), SimpleNamespace(id=3)])
+    monkeypatch.setattr(cog.bot, "guilds", [SimpleNamespace(id=1), SimpleNamespace(id=2), SimpleNamespace(id=3)])
     monkeypatch.setattr("domain.approval.is_allowed", lambda repo_, cfg, gid, uid: gid != 2)  # 2は許可されていない
     monkeypatch.setattr(
         "cogs.quiz.cog.announce_channel", lambda guild, repo_: None if guild.id == 3 else Chan()
@@ -577,7 +577,7 @@ def test_public_button_rejects_the_author(eco):
 def test_run_once_settles_and_announces_the_result(eco, monkeypatch):
     monkeypatch.setattr("domain.approval.is_allowed", lambda *a: True)
     cog, ch = make_cog(eco), Channel()
-    setattr(cog.bot, "guilds", [SimpleNamespace(id=1, get_channel=lambda cid: ch)])
+    monkeypatch.setattr(cog.bot, "guilds", [SimpleNamespace(id=1, get_channel=lambda cid: ch)])
     ok, qid = post(eco, reward=10, days=1, now=1.0)  # とっくに期限切れ
     eco.quiz.quiz_set_message(qid, 4242)
     for uid, pick in ((1, "東京"), (2, "東京"), (3, "大阪"), (4, "大阪"), (5, "京都")):
