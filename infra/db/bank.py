@@ -60,7 +60,7 @@ class BankRepo(ScopedRepo, IBankRepo):
     # ------------------------------------------------------------------ #
     def bank_sync_for(self, guild_id: int, now: float) -> dict[str, float]:
         """銀行の手元を取り出す（なければ作る）。地下融資の回収を、いまの時刻まで反映する。"""
-        row = self._conn.execute("SELECT cash, loaned, ts FROM teiai_bank WHERE guild_id=?", (guild_id,)).fetchone()
+        row = self._one("SELECT cash, loaned, ts FROM teiai_bank WHERE guild_id=?", (guild_id,))
         if row is None:
             self._conn.execute(
                 "INSERT INTO teiai_bank (guild_id, cash, loaned, ts) VALUES (?, 0, 0, ?)", (guild_id, now)
@@ -84,10 +84,11 @@ class BankRepo(ScopedRepo, IBankRepo):
     # ------------------------------------------------------------------ #
     def _thermo_state_for(self, guild_id: int, now: float) -> thermostat.State:
         """いまの時刻まで冷ました状態（銀行の行がある前提。bank_sync_for のあとで呼ぶ）。"""
-        row = self._conn.execute(
+        row = self._one(
             "SELECT thermo_load, thermo_capacity, thermo_ts FROM teiai_bank WHERE guild_id=?",
             (guild_id,),
-        ).fetchone()
+        )
+        assert row is not None  # bank_sync_for のあとで呼ぶので、銀行の行はある
         state = thermostat.State(load=row["thermo_load"], capacity=max(row["thermo_capacity"], thermostat.E_MIN))
         return thermostat.decay(state, (now - row["thermo_ts"]) / 86400)
 
@@ -130,14 +131,14 @@ class BankRepo(ScopedRepo, IBankRepo):
 
     def _bonds_outstanding_for(self, guild_id: int) -> int:
         """帝愛社債（保有中の債券）の元本残高。銀行の負債として準備率に数える（#35）。"""
-        return self._conn.execute(
+        return self._scalar(
             "SELECT COALESCE(SUM(principal), 0) FROM bonds WHERE guild_id=? AND status='active'", (guild_id,)
-        ).fetchone()[0]
+        )
 
     def _deposits_for(self, guild_id: int) -> list[tuple[int, int]]:
         return [
             (r["user_id"], r["amount"])
-            for r in self._conn.execute(
+            for r in self._all(
                 "SELECT user_id, amount FROM teiai_deposits WHERE guild_id=? AND amount>0 ORDER BY user_id",
                 (guild_id,),
             )
@@ -145,10 +146,8 @@ class BankRepo(ScopedRepo, IBankRepo):
 
     def deposit_of_for(self, guild_id: int, user_id: int) -> int:
         with self._lock:
-            r = self._conn.execute(
-                "SELECT amount FROM teiai_deposits WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-            ).fetchone()
-            return r["amount"] if r else 0
+            v = self._scalar("SELECT amount FROM teiai_deposits WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+            return v if v is not None else 0
 
     def deposit_of(self, user_id: int) -> int:
         return self.deposit_of_for(self._g(), user_id)
@@ -166,16 +165,14 @@ class BankRepo(ScopedRepo, IBankRepo):
     def bank_locks_for(self, guild_id: int, now: float) -> float:
         """引当金のロック額: 破産猶予中の人への CDS の配当見込み（対象の借金の上限つき）+ 借金のある人の借金の LOCK_DEBT_RATE。"""
         locks = 0.0
-        for r in self._conn.execute(
-            "SELECT user_id, debt, grace_until FROM users WHERE guild_id=? AND debt>0", (guild_id,)
-        ).fetchall():
+        for r in self._all("SELECT user_id, debt, grace_until FROM users WHERE guild_id=? AND debt>0", (guild_id,)):
             locks += teiai.LOCK_DEBT_RATE * r["debt"]
             if r["grace_until"] is not None:
-                claims = self._conn.execute(
+                claims = self._scalar(
                     "SELECT COALESCE(SUM(stake * odds), 0) FROM cds WHERE guild_id=? AND target_id=? AND buyer_id!=target_id "
                     "AND status='active'",
                     (guild_id, r["user_id"]),
-                ).fetchone()[0]
+                )
                 locks += min(claims, teiai.CDS_PAYOUT_CAP_RATE * r["debt"])
         return locks
 
@@ -204,10 +201,11 @@ class BankRepo(ScopedRepo, IBankRepo):
             else:
                 level = "danger"
             thermo = self._thermo_state_for(gid, now)
-            totals = self._conn.execute(
+            totals = self._one(
                 "SELECT thermo_burned, thermo_bailed, trust_paid, excess_unpaid FROM teiai_bank WHERE guild_id=?",
                 (gid,),
-            ).fetchone()
+            )
+            assert totals is not None
             return {
                 "cash": state["cash"],
                 "loaned": state["loaned"],
@@ -243,8 +241,8 @@ class BankRepo(ScopedRepo, IBankRepo):
         )
 
     def house_balance_for(self, guild_id: int) -> int:
-        row = self._conn.execute("SELECT balance FROM teiai_house WHERE guild_id=?", (guild_id,)).fetchone()
-        return row["balance"] if row else 0
+        v = self._scalar("SELECT balance FROM teiai_house WHERE guild_id=?", (guild_id,))
+        return v if v is not None else 0
 
     def house_receive_for(self, guild_id: int, amount: int) -> None:
         """胴元の口座に、ピンハネ以外の amount を入れる（ピンハネの合計には数えない）。"""
@@ -265,9 +263,7 @@ class BankRepo(ScopedRepo, IBankRepo):
 
     def house_grant_left_for(self, guild_id: int, day: str, cap: int) -> int:
         """会社の買取枠（胴元の口座が足りないとき、帝愛が新しく出す分）の、day の残り。1日の上限は cap。"""
-        row = self._conn.execute(
-            "SELECT grant_day, grant_used FROM teiai_house WHERE guild_id=?", (guild_id,)
-        ).fetchone()
+        row = self._one("SELECT grant_day, grant_used FROM teiai_house WHERE guild_id=?", (guild_id,))
         used = row["grant_used"] if row and row["grant_day"] == day else 0
         return max(0, cap - used)
 
@@ -286,9 +282,7 @@ class BankRepo(ScopedRepo, IBankRepo):
     def house_account(self) -> HouseAccount:
         """帝愛の胴元の口座 {balance: いまの残高, skimmed: これまでのピンハネの合計}。読み取りだけ（なければ 0）。"""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT balance, skimmed FROM teiai_house WHERE guild_id=?", (self._g(),)
-            ).fetchone()
+            row = self._one("SELECT balance, skimmed FROM teiai_house WHERE guild_id=?", (self._g(),))
         return {"balance": row["balance"], "skimmed": row["skimmed"]} if row else {"balance": 0, "skimmed": 0}
 
     def bank_income_for(
@@ -405,8 +399,8 @@ class BankRepo(ScopedRepo, IBankRepo):
     # ------------------------------------------------------------------ #
     def risk_free_per_day_for(self, guild_id: int, now: float) -> float:
         """無リスク金利 r_f（1日あたり。連続複利）。準備率に連動して毎分動く（#18。bank_rf_tick）。未開始なら基準の金利。"""
-        row = self._conn.execute("SELECT rf FROM teiai_bank WHERE guild_id=?", (guild_id,)).fetchone()
-        return row["rf"] if row is not None and row["rf"] > 0 else rates.BASE_RISK_FREE_PER_DAY
+        v = self._scalar("SELECT rf FROM teiai_bank WHERE guild_id=?", (guild_id,))
+        return v if v is not None and v > 0 else rates.BASE_RISK_FREE_PER_DAY
 
     def bank_rf_tick(self, now: float, rng: Optional[random.Random] = None) -> float:
         """r_f を、いまの準備率 θ の目標へ向けて進める（CIR 風。式は domain/rates.py）。新しい r_f を返す。"""
@@ -414,7 +408,8 @@ class BankRepo(ScopedRepo, IBankRepo):
         with self._db.tx():
             gid = self._g()
             state = self.bank_sync_for(gid, now)
-            row = self._conn.execute("SELECT rf, rf_ts FROM teiai_bank WHERE guild_id=?", (gid,)).fetchone()
+            row = self._one("SELECT rf, rf_ts FROM teiai_bank WHERE guild_id=?", (gid,))
+            assert row is not None  # bank_sync_for で銀行の行を作っている
             r = row["rf"] if row["rf"] > 0 else rates.BASE_RISK_FREE_PER_DAY
             if row["rf_ts"] > 0:
                 ratio = self._reserve_for(gid, state["cash"], now)[4]
@@ -428,7 +423,7 @@ class BankRepo(ScopedRepo, IBankRepo):
 
     def trust_premium_for(self, guild_id: int) -> float:
         """信託の上乗せ金利。共済の動議で決まっていればその値、なければ設定の既定値（#34）。"""
-        row = self._conn.execute("SELECT trust_premium FROM teiai_bank WHERE guild_id=?", (guild_id,)).fetchone()
+        row = self._one("SELECT trust_premium FROM teiai_bank WHERE guild_id=?", (guild_id,))
         if row is None or row["trust_premium"] is None:
             return teiai.TRUST_PREMIUM_PER_DAY
         return row["trust_premium"]
@@ -449,9 +444,8 @@ class BankRepo(ScopedRepo, IBankRepo):
         with self._db.tx():
             gid = self._g()
             self.bank_sync_for(gid, now)
-            row = self._conn.execute(
-                "SELECT trust_ts, trust_accrued FROM teiai_bank WHERE guild_id=?", (gid,)
-            ).fetchone()
+            row = self._one("SELECT trust_ts, trust_accrued FROM teiai_bank WHERE guild_id=?", (gid,))
+            assert row is not None  # bank_sync_for で銀行の行を作っている
             if row["trust_ts"] <= 0:
                 self._conn.execute("UPDATE teiai_bank SET trust_ts=? WHERE guild_id=?", (now, gid))
                 return 0
@@ -565,9 +559,7 @@ class BankRepo(ScopedRepo, IBankRepo):
     # ------------------------------------------------------------------ #
     def grace_update_for(self, guild_id: int, user_id: int, now: float) -> None:
         """借金の額に合わせて、破産猶予に入れる／外す。入るときに一言を残す。"""
-        row = self._conn.execute(
-            "SELECT debt, grace_until FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-        ).fetchone()
+        row = self._one("SELECT debt, grace_until FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
         if row is None:
             return
         if row["debt"] >= teiai.GRACE_DEBT and row["grace_until"] is None:
@@ -583,10 +575,7 @@ class BankRepo(ScopedRepo, IBankRepo):
 
     def grace_until_for(self, guild_id: int, user_id: int) -> Optional[float]:
         with self._lock:
-            r = self._conn.execute(
-                "SELECT grace_until FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-            ).fetchone()
-            return r["grace_until"] if r else None
+            return self._scalar("SELECT grace_until FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
 
     def grace_until(self, user_id: int) -> Optional[float]:
         return self.grace_until_for(self._g(), user_id)
@@ -596,7 +585,7 @@ class BankRepo(ScopedRepo, IBankRepo):
         with self._lock:
             return [
                 (r["user_id"], r["debt"], r["grace_until"])
-                for r in self._conn.execute(
+                for r in self._all(
                     "SELECT user_id, debt, grace_until FROM users WHERE guild_id=? AND grace_until IS NOT NULL "
                     "ORDER BY grace_until",
                     (self._g(),),
@@ -611,10 +600,10 @@ class BankRepo(ScopedRepo, IBankRepo):
             self._conn.execute(
                 "UPDATE cds SET status='expired' WHERE guild_id=? AND status='active' AND expires<=?", (gid, now)
             )
-            for r in self._conn.execute(
+            for r in self._all(
                 "SELECT user_id FROM users WHERE guild_id=? AND grace_until IS NOT NULL AND grace_until<=? ORDER BY grace_until",
                 (gid, now),
-            ).fetchall():
+            ):
                 if self._account.debt(gid, r["user_id"]) < teiai.GRACE_DEBT:  # 取りこぼしの保険（外し忘れ）
                     self.grace_update_for(gid, r["user_id"], now)
                     continue
@@ -646,10 +635,7 @@ class BankRepo(ScopedRepo, IBankRepo):
             self._account.ensure(gid, buyer_id)
             if stake < teiai.CDS_MIN_STAKE:
                 return False, fail("cds_min_stake", min_stake=teiai.CDS_MIN_STAKE)
-            if (
-                self._conn.execute("SELECT 1 FROM users WHERE guild_id=? AND user_id=?", (gid, target_id)).fetchone()
-                is None
-            ):
+            if self._one("SELECT 1 FROM users WHERE guild_id=? AND user_id=?", (gid, target_id)) is None:
                 return False, fail("user_not_registered")
             bal = self._account.raw_balance(gid, buyer_id)
             if bal < stake:
@@ -660,11 +646,11 @@ class BankRepo(ScopedRepo, IBankRepo):
                 return False, fail("cds_target_bankrupt")
             odds = self.cds_quote(target_id, now)["odds"]
             if buyer_id == target_id:  # 自分への保証は、積める額に上限がある
-                have = self._conn.execute(
+                have = self._scalar(
                     "SELECT COALESCE(SUM(stake * odds), 0) FROM cds WHERE guild_id=? AND buyer_id=? AND target_id=? "
                     "AND status='active' AND expires>?",
                     (gid, buyer_id, buyer_id, now),
-                ).fetchone()[0]
+                )
                 if have + stake * odds > teiai.CDS_SELF_CAP:
                     room = max(0, int((teiai.CDS_SELF_CAP - have) / odds))
                     return False, fail(
@@ -685,36 +671,33 @@ class BankRepo(ScopedRepo, IBankRepo):
         """自分が買っている CDS（有効なもの）と、自分に掛けられている件数。"""
         with self._lock:
             gid = self._g()
-            mine = [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM cds WHERE guild_id=? AND buyer_id=? AND status='active' ORDER BY id",
-                    (gid, user_id),
-                )
-            ]
-            on_me = self._conn.execute(
+            mine = self._all(
+                "SELECT * FROM cds WHERE guild_id=? AND buyer_id=? AND status='active' ORDER BY id",
+                (gid, user_id),
+            )
+            on_me = self._scalar(
                 "SELECT COUNT(*) FROM cds WHERE guild_id=? AND target_id=? AND buyer_id!=target_id AND status='active'",
                 (gid, user_id),
-            ).fetchone()[0]
+            )
             return {"bought": mine, "on_me": on_me}
 
     def cds_total_claims(self) -> int:
         """このサーバーの、有効な CDS の配当見込みの合計（表示用）。"""
         with self._lock:
             return int(
-                self._conn.execute(
+                self._scalar(
                     "SELECT COALESCE(SUM(stake * odds), 0) FROM cds WHERE guild_id=? AND status='active'", (self._g(),)
-                ).fetchone()[0]
+                )
             )
 
     def cds_cover_self_for(self, guild_id: int, user_id: int, shortfall: int, now: float) -> int:
         """払えなかった shortfall を、自分への CDS が肩代わりする（古い順に、1件ずつ使い切り）。肩代わりした額を返す。現金は渡らない。"""
         covered = 0
-        for r in self._conn.execute(
+        for r in self._all(
             "SELECT id, stake, odds FROM cds WHERE guild_id=? AND buyer_id=? AND target_id=? AND status='active' "
             "AND expires>? ORDER BY id",
             (guild_id, user_id, user_id, now),
-        ).fetchall():
+        ):
             if covered >= shortfall:
                 break
             pay = self.bank_pay_for(guild_id, min(shortfall - covered, int(r["stake"] * r["odds"])), now)
@@ -725,11 +708,11 @@ class BankRepo(ScopedRepo, IBankRepo):
 
     def cds_settle_default_for(self, guild_id: int, target_id: int, debt_before: int, now: float) -> int:
         """対象が強制破産したとき、他人からの CDS に配当を払う。合計は、対象の借金の CDS_PAYOUT_CAP_RATE まで（超える分は、一律に減らす）。払った合計を返す。"""
-        rows = self._conn.execute(
+        rows = self._all(
             "SELECT id, buyer_id, stake, odds FROM cds WHERE guild_id=? AND target_id=? AND buyer_id!=target_id "
             "AND status='active' AND expires>? ORDER BY id",
             (guild_id, target_id, now),
-        ).fetchall()
+        )
         claims = [(r["id"], r["buyer_id"], int(r["stake"] * r["odds"])) for r in rows]
         total_claim = sum(c for _, _, c in claims)
         cap = int(teiai.CDS_PAYOUT_CAP_RATE * debt_before)
