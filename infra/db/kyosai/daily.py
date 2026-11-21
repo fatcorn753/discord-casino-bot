@@ -1,6 +1,5 @@
 """毎日の配当と休眠口座の回収。"""
 
-
 from domain import kyosai
 from domain.ports.contracts import KyosaiDaily
 

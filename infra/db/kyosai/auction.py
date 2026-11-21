@@ -1,6 +1,5 @@
 """帝愛の持ち口の競り（#93。値段は入札で決まる）。"""
 
-
 from domain import kyosai, p2p
 from domain.errors import Outcome, fail
 from domain.ports.contracts import KyosaiAuctionEventRow, KyosaiAuctionRow

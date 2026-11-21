@@ -27,9 +27,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
     # ------------------------------------------------------------------ #
     # 利用できるサーバーの承認                                            #
     # ------------------------------------------------------------------ #
-    def set_guild_status(
-        self, guild_id: int, status: str, name: str | None = None, by: int | None = None
-    ) -> None:
+    def set_guild_status(self, guild_id: int, status: str, name: str | None = None, by: int | None = None) -> None:
         with self._db.tx():
             self._conn.execute(
                 "INSERT INTO guild_status (guild_id, status, name, decided_by, updated_at) VALUES (?, ?, ?, ?, ?) "

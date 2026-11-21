@@ -1,6 +1,5 @@
 """帝愛銀行リポジトリの基礎部分: コンストラクタと手元現金の同期。"""
 
-
 from domain import teiai
 from domain.ports.bridges import (
     BankruptExecutor,

@@ -1,6 +1,5 @@
 """会社の画面の部品（CompanyPanel と、種類の入力）。"""
 
-
 import discord
 
 from cogs.company.embeds import company_embed, guide_embed, kind_label

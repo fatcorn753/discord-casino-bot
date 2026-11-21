@@ -26,9 +26,7 @@ class ArenaService:
         ts = self.clock.now_ts() if now is None else now
         return self._arena.for_guild(guild_id).arena_tournament_ensure(fmt, ts, self.clock.offset_hours())
 
-    def current_tournament(
-        self, guild_id: int, fmt: str, now: float | None = None
-    ) -> ArenaTournamentDetailRow | None:
+    def current_tournament(self, guild_id: int, fmt: str, now: float | None = None) -> ArenaTournamentDetailRow | None:
         """今日の大会（無ければ作らずに None）。闘技場を止めているあいだの見回り用。"""
         ts = self.clock.now_ts() if now is None else now
         repo = self._arena.for_guild(guild_id)
@@ -40,14 +38,10 @@ class ArenaService:
         ts = self.clock.now_ts() if now is None else now
         return self._arena.for_guild(guild_id).arena_bet(user_id, fighter_id, stake, ts)
 
-    def run_semis(
-        self, guild_id: int, tournament_id: int, rng: random.Random | None = None
-    ) -> ArenaSemiResult | None:
+    def run_semis(self, guild_id: int, tournament_id: int, rng: random.Random | None = None) -> ArenaSemiResult | None:
         return self._arena.for_guild(guild_id).arena_run_semis(tournament_id, rng, self.clock.now_ts())
 
-    def run_final(
-        self, guild_id: int, tournament_id: int, rng: random.Random | None = None
-    ) -> ArenaFinalResult | None:
+    def run_final(self, guild_id: int, tournament_id: int, rng: random.Random | None = None) -> ArenaFinalResult | None:
         return self._arena.for_guild(guild_id).arena_run_final(tournament_id, rng, self.clock.now_ts())
 
     def tournament_by_day(self, guild_id: int, day: str, fmt: str) -> ArenaTournamentDetailRow | None:

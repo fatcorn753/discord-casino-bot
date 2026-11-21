@@ -1,6 +1,5 @@
 """証券の市場価格・ストップ高安・チャート掲示。"""
 
-
 from domain import market as market_mod
 from domain.errors import Failure
 from domain.market import DEFAULT

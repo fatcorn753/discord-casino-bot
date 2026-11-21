@@ -1,6 +1,5 @@
 """会社（帝愛の子会社）の設立・出資・出荷・増築・定時精算のアプリケーションサービス。"""
 
-
 from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import (

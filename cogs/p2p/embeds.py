@@ -1,6 +1,5 @@
 """プレイヤー間の市場と競りの埋め込み・表示文の組み立て。"""
 
-
 import discord
 
 from cogs.shared import ui

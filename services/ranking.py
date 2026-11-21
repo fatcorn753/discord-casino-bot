@@ -1,6 +1,5 @@
 """ランキング（`/ペリカ ランキング`・掲示板・週間発表）の読み取り専用の問い合わせ。"""
 
-
 from domain.ports.contracts import RankEntry
 from domain.ports.repos import IAssetRepo, IBondRepo, ICryptoRepo, IWalletRepo
 

@@ -1,6 +1,5 @@
 """帝愛信託の預金: 残高の読み取り・利率の決定・入出金と強制差し押さえ。"""
 
-
 from domain import teiai
 from domain.errors import Outcome, fail
 

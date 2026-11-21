@@ -1,6 +1,5 @@
 """借金のライフサイクル: 利息・後始末・収入からの天引き・非収入の全額充当。"""
 
-
 from domain import teiai
 
 from .base import DebtRepo as Base

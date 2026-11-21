@@ -1,6 +1,5 @@
 """プレイヤー間の市場と競り（出品・購入・入札・取り消し・締切の精算）のアプリケーションサービス。"""
 
-
 from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import HorseRow, ListingRow, P2PMine

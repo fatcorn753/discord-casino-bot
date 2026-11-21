@@ -143,9 +143,7 @@ class IEscrowRepo(IGuildScopedRepo):
     def settle(self, escrow_id: int, payout: int, game: str) -> int | None:
         raise NotImplementedError
 
-    def settle_with_penalty(
-        self, escrow_id: int, payout: int, game: str, penalty: int
-    ) -> tuple[int, int, int] | None:
+    def settle_with_penalty(self, escrow_id: int, payout: int, game: str, penalty: int) -> tuple[int, int, int] | None:
         raise NotImplementedError
 
     def refund(self, escrow_id: int) -> bool:

@@ -38,9 +38,7 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
         self._account = account
         self._bank = bank
 
-    def earnings_ensure(
-        self, now: float, tz_hours: float, rng: random.Random | None = None
-    ) -> EarningsRow | None:
+    def earnings_ensure(self, now: float, tz_hours: float, rng: random.Random | None = None) -> EarningsRow | None:
         """発表前の決算が無ければ、次の決算を決めて登録する。登録したら、その行を返す。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():

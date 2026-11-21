@@ -1,6 +1,5 @@
 """抽選の募集・結果・中止の画面。"""
 
-
 import discord
 
 from cogs.shared import ui

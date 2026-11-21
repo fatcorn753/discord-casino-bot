@@ -3,7 +3,6 @@
 表の定義は infra/db/schema/tables.py（polls・poll_votes）。数字は domain/poll.py。
 """
 
-
 from domain import poll
 from domain.errors import Outcome, fail
 from domain.ports.contracts import PollRigResult, PollRow, PollView

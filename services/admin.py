@@ -1,6 +1,5 @@
 """Bot の持ち主が使う運営の操作（ペリカの付与・残高の設定・還元率・パチンコの集計）のアプリケーションサービス。"""
 
-
 from domain.ports.contracts import PachinkoStats
 from domain.ports.repos import IPachinkoRepo, IRtpRepo, IWalletRepo
 

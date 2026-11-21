@@ -1,6 +1,5 @@
 """動議（信託の上乗せ金利。#94: いくつも並行でき、締めた順に後勝ち）。"""
 
-
 from domain import kyosai
 from domain.errors import Outcome, fail
 from domain.ports.contracts import KyosaiMotionProposeRow, KyosaiMotionRow, KyosaiMotionViewRow

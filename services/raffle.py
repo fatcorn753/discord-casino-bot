@@ -1,6 +1,5 @@
 """抽選（参加費を預かり、締切で 1 人に全額を渡す）のアプリケーションサービス。"""
 
-
 from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import RaffleResult, RaffleView

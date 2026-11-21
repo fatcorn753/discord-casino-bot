@@ -1,6 +1,5 @@
 """競馬の厩舎画面（Stable）と調教・引退 View（GoldCarrotView / RetireView）。"""
 
-
 import discord
 
 from cogs.horse.cards import race_title, refresh_entry_card

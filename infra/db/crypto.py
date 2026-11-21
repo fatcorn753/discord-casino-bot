@@ -1,6 +1,5 @@
 """証券の現物保有・売買。"""
 
-
 from domain import market as market_mod
 from domain.errors import fail
 from domain.market import DEFAULT

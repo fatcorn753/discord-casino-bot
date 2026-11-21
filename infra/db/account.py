@@ -1,6 +1,5 @@
 """台帳・口座残高プリミティブ（全リポジトリがコンポジションで共有する口座台帳）。"""
 
-
 from domain.ports.bridges import IDebtLifecycleHook, NoOpDebtLifecycleHook
 from domain.types import INITIAL_BALANCE
 from infra.db.base import EcoDb, fetch_scalar

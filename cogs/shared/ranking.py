@@ -1,6 +1,5 @@
 """ランキングの表示（`/ペリカ ランキング` と、自動更新のランキング掲示板で共通）。"""
 
-
 import discord
 
 from cogs.shared import ui

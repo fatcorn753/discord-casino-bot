@@ -149,9 +149,7 @@ class QuizBulkConfirm(ui.OwnerView):
 class AnnounceModal(discord.ui.Modal, title="お知らせの本文"):
     body = discord.ui.TextInput(label="本文（改行できます）", style=discord.TextStyle.paragraph, max_length=2000)
 
-    def __init__(
-        self, cog: "ApprovalCog", guilds: list, heading: str, image: discord.Attachment | None, channel=None
-    ):
+    def __init__(self, cog: "ApprovalCog", guilds: list, heading: str, image: discord.Attachment | None, channel=None):
         super().__init__()
         self.cog, self.guilds, self.heading, self.image, self.channel = cog, guilds, heading, image, channel
 

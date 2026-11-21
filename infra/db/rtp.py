@@ -3,7 +3,6 @@
 表の定義は infra/db/schema/tables.py にある。レベルの意味と計算は domain/games/rtplevel.py。
 """
 
-
 from domain.games import rtplevel
 from domain.ports.repos import IRtpRepo
 from infra.db.base import EcoDb, ScopedRepo

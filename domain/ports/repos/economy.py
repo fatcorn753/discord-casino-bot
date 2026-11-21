@@ -70,9 +70,7 @@ class IRecordRepo(IGuildScopedRepo):
 class IGuildApprovalRepo(IGuildScopedRepo):
     """サーバーの承認状態の読み書き。"""
 
-    def set_guild_status(
-        self, guild_id: int, status: str, name: str | None = None, by: int | None = None
-    ) -> None:
+    def set_guild_status(self, guild_id: int, status: str, name: str | None = None, by: int | None = None) -> None:
         raise NotImplementedError
 
     def get_guild_status(self, guild_id: int) -> GuildStatusRow | None:

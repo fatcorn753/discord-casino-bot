@@ -1,6 +1,5 @@
 """準備率と引当金のロック、銀行の状態（準備率 θ の計算と表示）。"""
 
-
 from domain import rates, teiai, thermostat
 from domain.ports.contracts import BankStatus
 

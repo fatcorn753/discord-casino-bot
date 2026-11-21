@@ -85,9 +85,7 @@ async def pick_guild(bot, interaction: discord.Interaction, guild_id: str) -> di
     return guild
 
 
-async def pick_channel(
-    interaction: discord.Interaction, guild: discord.Guild | None, channel_id: str | None
-) -> tuple:
+async def pick_channel(interaction: discord.Interaction, guild: discord.Guild | None, channel_id: str | None) -> tuple:
     """指定されたチャンネルを探す。(続けてよいか, チャンネルか None) を返す。続けてはいけないときは、理由を返信済み。"""
     if not channel_id:
         return True, None

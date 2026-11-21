@@ -1,6 +1,5 @@
 """口の譲渡（プレイヤー間の売買）: 申し出・承諾・取消と、送金抜け道対策の上限。"""
 
-
 from domain import kyosai, p2p
 from domain.errors import Outcome, fail
 from domain.ports.contracts import KyosaiOfferDoneRow, KyosaiOfferRow

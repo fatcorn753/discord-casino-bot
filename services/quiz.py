@@ -1,6 +1,5 @@
 """クイズ（出題・挑戦・回答・取り下げ・期限の精算・運営の追加と削除）のアプリケーションサービス。"""
 
-
 from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import (

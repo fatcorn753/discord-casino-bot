@@ -1,6 +1,5 @@
 """自分からの借金返済。"""
 
-
 from domain.errors import Outcome, fail
 
 from .ops import DebtRepo as Base

@@ -1,6 +1,5 @@
 """競走馬・競売。"""
 
-
 from domain import horse as horse_mod
 from domain import shop as shop_mod
 from domain import teiai

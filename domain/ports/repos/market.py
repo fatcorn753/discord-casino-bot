@@ -104,9 +104,7 @@ class IMarketEventRepo(IGuildScopedRepo):
 
 
 class IEarningsRepo(IGuildScopedRepo):
-    def earnings_ensure(
-        self, now: float, tz_hours: float, rng: random.Random | None = None
-    ) -> EarningsRow | None:
+    def earnings_ensure(self, now: float, tz_hours: float, rng: random.Random | None = None) -> EarningsRow | None:
         raise NotImplementedError
 
     def earnings_jumps(self, now: float, seconds: float) -> list[EarningsJump]:

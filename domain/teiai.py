@@ -10,7 +10,6 @@
 - 自己破産: 全財産とショップの全品を差し押さえ、換金して債権者へ配当する。貸付の残りは免責、帝愛の借金は BANKRUPT_FLOOR まで圧縮
 """
 
-
 from domain.ports import get_catalogs
 
 _CFG = get_catalogs().teiai()

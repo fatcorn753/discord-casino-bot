@@ -1,6 +1,5 @@
 """地下作業のアプリケーションサービス（日付キー解決・クリック不正検知レポート）。"""
 
-
 from domain import labor as labor_mod
 from domain.errors import Outcome
 from domain.ports.clock import IClock

@@ -200,9 +200,7 @@ def test_option_gains_value_when_the_price_moves_in_favour(eco):
 
 def test_options_count_in_the_ranking_and_are_seized_for_debt(eco):
     ok, res = eco.options.option_buy(U, opt.CALL, "cs", 1_000, time.time())
-    assert (
-        {u: v for _, u, v in eco.wallet.top(5)}[U] > INITIAL_BALANCE - res["cost"]
-    )  # 掛け金は、評価額として残る
+    assert {u: v for _, u, v in eco.wallet.top(5)}[U] > INITIAL_BALANCE - res["cost"]  # 掛け金は、評価額として残る
     eco.wallet.debit_up_to(U, eco.wallet.balance(U), "テスト")
     with eco.db.tx():
         covered = eco.debt._seize_assets_for(eco.debt.guild_id, U, 10_000, "テスト")

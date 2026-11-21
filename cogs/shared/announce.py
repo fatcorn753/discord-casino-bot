@@ -1,6 +1,5 @@
 """複数の Cog で共有する Discord 依存の小さな部品（読み込まれる Cog ではない）。"""
 
-
 import discord
 
 from domain.ports.repos import ILeaderboardConfigRepo

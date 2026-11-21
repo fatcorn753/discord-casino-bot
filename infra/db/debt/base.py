@@ -1,6 +1,5 @@
 """帝愛ファイナンスリポジトリの基礎部分: コンストラクタと身分・借金の読み取り。"""
 
-
 from domain import teiai
 from domain.ports.bridges import (
     AssetSeizureStep,

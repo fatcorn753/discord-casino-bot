@@ -5,7 +5,6 @@
 表の定義は infra/db/schema/tables.py にある。記録は統計のためだけで、ゲームの結果には影響しない。
 """
 
-
 from domain.games.pachinko import SetResult
 from domain.ports.contracts import PachinkoStats
 from domain.ports.repos import IPachinkoRepo

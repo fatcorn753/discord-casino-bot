@@ -1,6 +1,5 @@
 """地下闘技場の賭けパネル（BetPanel）と賭け金モーダル（StakeModal）。賭けが入ると、掲示を自動で書き換える。"""
 
-
 import discord
 
 from cogs.arena.embeds import tournament_embed
