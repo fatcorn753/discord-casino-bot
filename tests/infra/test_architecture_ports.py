@@ -293,17 +293,23 @@ def test_cogs_have_no_untyped_cog_parameter():
 
 
 def test_debt_repo_does_not_touch_other_domains_tables():
-    """破産・差し押さえは、各リポジトリのポート経由で行う。debt.py は他ドメインの表へ SQL を書かない(#67)。"""
+    """破産・差し押さえは、各リポジトリのポート経由で行う。infra/db/debt/ パッケージは他ドメインの表へ SQL を書かない(#67)。"""
     import re
 
-    source = (ROOT / "infra/db/debt.py").read_text(encoding="utf-8")
+    pkg_dir = ROOT / "infra" / "db" / "debt"
+    assert not (ROOT / "infra/db/debt.py").exists(), "debt.py は debt/ パッケージへ分割済みのはず"
+    sources = sorted(pkg_dir.rglob("*.py"))
+    assert sources, "infra/db/debt/ パッケージが空です"
     foreign = ("options", "bonds", "inventory", "profile", "horses", "seized_items", "crypto", "companies", "loans")
     found = [
-        f"{table}: {m.group(0)}"
+        f"{path.relative_to(ROOT)}:{m.group(0)}"
+        for path in sources
         for table in foreign
-        for m in re.finditer(rf"\b(?:FROM|UPDATE|INTO|JOIN)\s+{table}\b", source, flags=re.IGNORECASE)
+        for m in re.finditer(
+            rf"\b(?:FROM|UPDATE|INTO|JOIN)\s+{table}\b", path.read_text(encoding="utf-8"), flags=re.IGNORECASE
+        )
     ]
-    assert not found, "debt.py が他ドメインの表を直接操作している:\n" + "\n".join(found)
+    assert not found, "infra/db/debt/ が他ドメインの表を直接操作している:\n" + "\n".join(found)
 
 
 def test_cogs_use_services_instead_of_repositories():

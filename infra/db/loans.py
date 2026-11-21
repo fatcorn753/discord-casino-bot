@@ -75,7 +75,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
     def collect_overdue_for(self, guild_id: int, user_id: int, budget: int) -> int:
         """延滞中の貸付（ジュニア債権）を、この人の残高から、古い順に最大 budget まで回収する。回収した合計を返す。
 
-        帝愛への返済のあとの、天引きの残りで呼ばれる（infra/db/debt.py の withhold_income）。
+        帝愛への返済のあとの、天引きの残りで呼ばれる（infra/db/debt/ の withhold_income）。
         """
         total = 0
         now = self._now()
