@@ -12,6 +12,7 @@ from cogs.shared import approval_guard, ui
 from cogs.shared.messages import format_notices
 from domain import features, missions, teiai
 from domain.games.rtplevel import MIN_BET as MIN_BET
+from domain.ports.contracts import PlayRecord
 from domain.ports.repos import IGuildRepo
 from services.casino import CasinoService
 from services.teiai import TeiaiService
@@ -63,7 +64,7 @@ class GameContext:
         self.insured_refund = 0  # 保険券で戻った額
         self.event_bonus = 0  # 突発イベントで上乗せされた額
         self.rtp_shift = 0  # 還元率レベルで増減した払い戻し（表示の払い戻しに足す。レベルそのものは見せない）
-        self.events: dict[str, Any] = {}  # 連勝・ミッションの結果（演出の表示に使う）
+        self.events: PlayRecord | None = None  # 連勝・ミッションの結果（演出の表示に使う）
         self.skin: Any = None  # 装備中の、演出の変更品（domain/skins.py）。見た目だけが変わる
         self.notices: list[str] = []  # 精算で起きた、強制執行・種銭などの一言（infra/db/notices.py）
         self.jackpot_won = 0  # 共有ジャックポットを当てた額
@@ -139,32 +140,28 @@ async def start_game(
     res = deps.casino.begin_game(guild_id, uid, bet, game, balance_factor=balance_factor)
 
     if not res.ok:
-        if res.reason_kind == "session":
-            await interaction.response.send_message(
-                embed=ui.error_embed("まだ始められません", res.reason), ephemeral=True
-            )
-        elif res.reason_kind == "min_bet":
-            await interaction.response.send_message(
-                embed=ui.error_embed("賭け金が少なすぎます", f"{ui.pelica(MIN_BET)} 以上で指定してください。"),
-                ephemeral=True,
-            )
-        elif res.reason_kind == "balance_factor":
-            msg = (
-                f"{factor_reason}賭け金の **{balance_factor}倍**（{ui.pelica(bet * balance_factor)}）以上の残高が必要です（いまの残高: {ui.pelica(res.balance)}）。\n"
-                f"いまの残高なら、**{ui.pelica(res.balance // balance_factor)}** まで賭けられます。"
-            )
-            await interaction.response.send_message(embed=ui.error_embed("ペリカが足りません", msg), ephemeral=True)
-        elif res.reason_kind == "balance":
-            msg = f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。\n`/ペリカ デイリー` で6時間ごとにもらえます。"
-            await interaction.response.send_message(embed=ui.error_embed("ペリカが足りません", msg), ephemeral=True)
-        else:
-            await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "ペリカが足りません",
+        match res.reason_kind:
+            case "session":
+                await ui.reply_error(interaction, res.reason, title="まだ始められません")
+            case "min_bet":
+                await ui.reply_error(
+                    interaction, f"{ui.pelica(MIN_BET)} 以上で指定してください。", title="賭け金が少なすぎます"
+                )
+            case "balance_factor":
+                msg = (
+                    f"{factor_reason}賭け金の **{balance_factor}倍**（{ui.pelica(bet * balance_factor)}）以上の残高が必要です（いまの残高: {ui.pelica(res.balance)}）。\n"
+                    f"いまの残高なら、**{ui.pelica(res.balance // balance_factor)}** まで賭けられます。"
+                )
+                await ui.reply_error(interaction, msg, title="ペリカが足りません")
+            case "balance":
+                msg = f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。\n`/ペリカ デイリー` で6時間ごとにもらえます。"
+                await ui.reply_error(interaction, msg, title="ペリカが足りません")
+            case _:
+                await ui.reply_error(
+                    interaction,
                     f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。",
-                ),
-                ephemeral=True,
-            )
+                    title="ペリカが足りません",
+                )
         return None
     ctx = GameContext(
         deps, uid, res.escrow_id, game, bet, guild_id, getattr(interaction.user, "display_name", "") or ""

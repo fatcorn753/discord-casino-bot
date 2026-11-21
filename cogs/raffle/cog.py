@@ -8,7 +8,7 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord.ext import commands, tasks
@@ -23,6 +23,7 @@ from cogs.shared.bridges import BotBridges, IRaffleAdminBridge
 from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain.ports import get_catalogs
+from domain.ports.contracts import RaffleResult
 from domain.ports.repos import IGuildRepo
 from services.raffle import RaffleService
 
@@ -36,6 +37,7 @@ MIN_FEE = _RAFFLE_CFG.min_fee  # 参加費の最小。上限はない
 RANDOM_FEE_RANGE = _RAFFLE_CFG.random_fee_range  # 参加費を省略したときの、ランダムの範囲
 DEFAULT_MINUTES = _RAFFLE_CFG.default_minutes
 MAX_MINUTES = _RAFFLE_CFG.max_minutes
+RNG = random.SystemRandom()  # 参加費を省略したときの乱数。テストは rng を注入して決定性を担保する
 
 
 class RaffleCog(commands.Cog, IRaffleAdminBridge):
@@ -66,9 +68,10 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
         self,
         guild: discord.Guild,
         host_id: int,
-        fee: Optional[int] = None,
+        fee: int | None = None,
         minutes: int = DEFAULT_MINUTES,
-        channel: Optional[discord.abc.Messageable] = None,
+        channel: discord.abc.Messageable | None = None,
+        rng: random.Random | None = None,
     ) -> tuple[bool, str]:
         """そのサーバーの告知チャンネル（channel を渡せば、そのチャンネル）に、抽選の募集を出す。(成功か, 説明) を返す。"""
         target = channel or announce_channel(guild, self._guild_repo)
@@ -77,7 +80,8 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
                 False,
                 "投稿できるチャンネルがありません（ランキング掲示のチャンネル、またはシステムチャンネルに、投稿の権限が必要です）。",
             )
-        fee = fee or random.randint(RANDOM_FEE_RANGE[0] // 100, RANDOM_FEE_RANGE[1] // 100) * 100
+        r = rng if rng is not None else RNG
+        fee = fee or r.randint(RANDOM_FEE_RANGE[0] // 100, RANDOM_FEE_RANGE[1] // 100) * 100
         target_id = getattr(target, "id", 0) or 0
         ok, reason = self._raffle.open(guild.id, host_id, fee, minutes, target_id)
         if not ok:
@@ -99,7 +103,7 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
         mention = getattr(target, "mention", str(target))
         return True, f"{guild.name} の {mention} に投稿しました（参加費 {ui.pelica(fee)}・{minutes}分）。"
 
-    async def repost(self, guild: discord.Guild, channel: Optional[discord.abc.Messageable] = None) -> tuple[bool, str]:
+    async def repost(self, guild: discord.Guild, channel: discord.abc.Messageable | None = None) -> tuple[bool, str]:
         """募集中の抽選の投稿を、告知チャンネル（channel を渡せば、そのチャンネル）に出し直す（古い投稿は消す）。"""
         raffle = self._raffle.current(guild.id)
         if raffle is None:
@@ -152,13 +156,11 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
         raffle = self._raffle.current(gid)
 
         if raffle is None or interaction.message is None or raffle["message_id"] != interaction.message.id:
-            await interaction.response.send_message(embed=ui.error_embed("募集は終わりました"), ephemeral=True)
+            await ui.reply_error(interaction, "", title="募集は終わりました")
             return
         ok, reason = self._raffle.join(gid, interaction.user.id)
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("参加できません", format_failure(reason)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(reason), title="参加できません")
             return
         raffle = self._raffle.current(gid)
         assert raffle is not None
@@ -197,7 +199,7 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
             error_label="抽選を締められません",
         )
 
-    async def _finish_message(self, guild: discord.Guild, raffle: dict, embed: discord.Embed) -> None:
+    async def _finish_message(self, guild: discord.Guild, raffle: RaffleResult, embed: discord.Embed) -> None:
         """募集の投稿からボタンを外し、結果を同じチャンネルへ出す（当選者にはメンションする）。"""
         channel = guild.get_channel(raffle["channel_id"]) if guild else None
         if channel is None:

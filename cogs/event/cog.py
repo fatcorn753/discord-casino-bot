@@ -6,7 +6,7 @@ Bot が止まっていて開始を逃しても、告知はやり直さない（�
 
 import datetime
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord.ext import commands, tasks
@@ -18,6 +18,7 @@ from cogs.shared.bridges import BotBridges, IEventAdminBridge
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import events
 from domain.ports.clock import IClock
+from domain.ports.contracts import ManualEventRow
 from domain.ports.repos import IGuildRepo
 from services.event import EventService
 
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from cogs.shared.bot import CasinoBot
 
 
-def _event_channel(guild: discord.Guild, m: dict) -> Optional[discord.abc.GuildChannel]:
+def _event_channel(guild: discord.Guild, m: ManualEventRow) -> discord.abc.GuildChannel | None:
     """特別イベントの開始を告知したチャンネル（消えていれば None → 告知チャンネルに出す）。"""
     return guild.get_channel(m["channel_id"]) if m.get("channel_id") else None
 
@@ -78,7 +79,7 @@ class EventCog(commands.Cog, IEventAdminBridge):
         )
         return ui.embed(f"🔥 突発イベント発生！ {title}", text, ui.GOLD)
 
-    def manual_embed(self, m: dict, ended: bool) -> discord.Embed:
+    def manual_embed(self, m: ManualEventRow, ended: bool) -> discord.Embed:
         title, blurb = event_copy(m["game"])  # 廃止したゲームのイベントが残っていても落ちない
         if ended:
             return ui.embed(f"{title} は終了しました", "また次のイベントをお楽しみに！", ui.INFO)
@@ -95,7 +96,7 @@ class EventCog(commands.Cog, IEventAdminBridge):
         game: str,
         boost_pct: int,
         minutes: int,
-        channel: Optional[discord.abc.Messageable] = None,
+        channel: discord.abc.Messageable | None = None,
     ) -> tuple[bool, str]:
         """持ち主が開く特別イベント。いま開催中のものがあれば置き換える。channel を渡すと、そこに告知する（終了の告知も同じ所）。"""
         replaced, started = self._events.start_manual(

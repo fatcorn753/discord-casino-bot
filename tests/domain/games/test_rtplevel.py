@@ -121,7 +121,7 @@ def test_approx_rtp_table_matches_the_proposal():
 def test_levels_are_saved_per_guild_and_game_with_three_as_default(tmp_path):
     eco = open_repositories(str(tmp_path / "t.db"))
     a, b = eco.rtp.for_guild(10), eco.rtp.for_guild(20)
-    assert a.rtp_levels() == {g: 3 for g in rtplevel.GAMES}
+    assert a.rtp_levels() == dict.fromkeys(rtplevel.GAMES, 3)
     assert (
         a.rtp_level_set("スロット", 5) == ["スロット"]
         and a.rtp_level_get("スロット") == 5
@@ -246,9 +246,9 @@ def test_commands_are_owner_only_and_change_the_chosen_game(tmp_path, monkeypatc
 
 
 def test_table_embed_marks_changed_games_and_names_every_level():
-    e = rtp_table_embed({g: 3 for g in rtplevel.GAMES}, "t")
+    e = rtp_table_embed(dict.fromkeys(rtplevel.GAMES, 3), "t")
     assert "標準から変更中" not in must(e.description) and must(e.description).count("標準") >= 5
-    changed = {**{g: 3 for g in rtplevel.GAMES}, "パチンコ": 1}
+    changed = {**dict.fromkeys(rtplevel.GAMES, 3), "パチンコ": 1}
     assert "パチンコ**　レベル **1**（かなり渋い）　還元率 約89.0%　⚠️ 標準から変更中" in must(
         rtp_table_embed(changed, "t").description
     )

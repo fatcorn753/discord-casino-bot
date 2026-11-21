@@ -10,8 +10,11 @@
 
 import math
 import random
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from domain.ports import get_catalogs
+from domain.ports.contracts import LaborClickReport
 
 _CFG = get_catalogs().labor()
 
@@ -84,7 +87,7 @@ def bar(fatigue: float, width: int = 10) -> str:
     return "🟥" * n + "⬜" * (width - n)
 
 
-def click_outcome(pick: int, glove: int, fatigue: float) -> dict:
+def click_outcome(pick: int, glove: int, fatigue: float) -> dict[str, Any]:
     """1回押した結果（残高などは見ない）。{pay, fatigue}。fatigue は押したあとの疲労。"""
     return {"pay": click_pay(pick, fatigue), "fatigue": min(FATIGUE_MAX, fatigue + fatigue_gain(glove))}
 
@@ -200,7 +203,7 @@ def foreman_luck(foremen: int) -> float:
     return FOREMAN_LUCK * max(0, foremen)
 
 
-def idle_rate(counts: dict) -> float:
+def idle_rate(counts: dict[str, int]) -> float:
     """作業員たちの、1時間あたりの稼ぎ（ペリカ。鉱石は含まない）。counts は {種類: 人数}。"""
     return sum(WORKER_RATE[k] * counts.get(k, 0) for k in WORKERS)
 
@@ -212,13 +215,13 @@ def ore_ev(kind: str, luck: float = 0.0) -> float:
     return sum(p * v * (1 if oid in FLAT else ORE_POWER[kind] * (1 + luck)) for oid, _, _, p, v in ORES)
 
 
-def roll_ores(kind: str, hours: float, luck: float, rng) -> dict:
+def roll_ores(kind: str, hours: float, luck: float, rng: random.Random) -> dict[str, int]:
     """作業員1人が hours 時間ぶん働いて掘った鉱石 {id: 個数}。端数の時間は、確率で1回にする。"""
     n = int(hours)
     if hours > n and rng.random() < hours - n:
         n += 1
     scale = ORE_POWER[kind] * (1 + luck)
-    found: dict = {}
+    found: dict[str, int] = {}
     if ORE_POWER[kind] <= 0:  # 監督は掘らない
         return found
     for _ in range(n):
@@ -231,10 +234,10 @@ def roll_ores(kind: str, hours: float, luck: float, rng) -> dict:
     return found
 
 
-def roll_relics(kind: str, hours: float, luck: float, rng) -> dict:
+def roll_relics(kind: str, hours: float, luck: float, rng: random.Random) -> dict[str, int]:
     """作業員1人が hours 時間ぶん働いて見つけた発掘品 {id: 個数}。端数の時間は、確率で1回にする。監督の運が効く（監督は探さない）。"""
     power = RELIC_POWER.get(kind, 0.0)
-    found: dict = {}
+    found: dict[str, int] = {}
     if power <= 0:
         return found
     n = int(hours)
@@ -256,7 +259,7 @@ def relic_ev(kind: str, luck: float = 0.0) -> float:
     return sum(p * v * RELIC_POWER.get(kind, 0.0) * (1 + luck) for _, _, _, p, v in RELICS)
 
 
-def ore_gain(found: dict) -> int:
+def ore_gain(found: dict[str, int]) -> int:
     return sum(ORE_VALUE[k] * n for k, n in found.items())
 
 
@@ -266,16 +269,16 @@ def idle_hours(since: float, now: float) -> float:
 
 
 def settle_plan(
-    workers: list,
+    workers: list[dict[str, Any]],
     renew: bool,
     idle_at: float,
     now: float,
     pot: int,
     balance: int,
-    rng=None,
+    rng: random.Random | None = None,
     wage_bonus: float = 0.0,
     luck_bonus: float = 0.0,
-) -> dict:
+) -> dict[str, Any]:
     """作業員の稼ぎと契約の決算（DB に触らない）。workers は [{id, kind, expires_at}]。
 
     稼ぎに数える時間は、最後に数えてから（STOCK_HOURS まで）。契約が切れた人は、
@@ -292,7 +295,7 @@ def settle_plan(
     expired = sorted((w for w in workers if w["expires_at"] <= now), key=lambda w: -CONTRACT_FEE[w["kind"]])
 
     def counts_of(ws):
-        c = {k: 0 for k in WORKERS}
+        c = dict.fromkeys(WORKERS, 0)
         for w in ws:
             c[w["kind"]] += 1
         return c
@@ -317,9 +320,11 @@ def settle_plan(
     staying = active + [w for w in expired if w["id"] in renewed_ids]
     gain = idle_rate(counts_of(staying)) * (1 + wage_bonus) * hours
     luck = foreman_luck(counts_of(staying)["foreman"]) + luck_bonus  # 発掘品（隕石の欠片）の効果が、出やすさに足される
-    ores: dict = {}
-    relics: dict = {}  # 作業員が見つけた発掘品 {ショップの品のID: 個数}
-    finds: list = []  # 掘り出しの履歴 [(時刻, 作業員の種類, 鉱石か発掘品のID, 個数)]。抽選は1時間ごとなので、時刻は、その時間枠の終わりにそろえる
+    ores: dict[str, int] = {}
+    relics: dict[str, int] = {}  # 作業員が見つけた発掘品 {ショップの品のID: 個数}
+    finds: list[
+        tuple[float, str, str, int]
+    ] = []  # 掘り出しの履歴 [(時刻, 作業員の種類, 鉱石か発掘品のID, 個数)]。抽選は1時間ごとなので、時刻は、その時間枠の終わりにそろえる
 
     def dig(kind, h, begin):
         slots = max(1, math.ceil(h))
@@ -361,7 +366,7 @@ MECH_MIN_CLICKS = _CFG.mech_min_clicks
 SUSPECT_HOURS = _CFG.suspect_hours
 
 
-def is_mechanical_hour(h: dict) -> bool:
+def is_mechanical_hour(h: Mapping[str, Any]) -> bool:
     """1時間の記録（labor_click_hours() の1行）が、機械的に規則正しいか。"""
     if h["gaps"] < 2 or h["clicks"] < MECH_MIN_CLICKS:
         return False
@@ -372,7 +377,7 @@ def is_mechanical_hour(h: dict) -> bool:
     return math.sqrt(var) / mean < MECH_CV_MAX
 
 
-def auto_click_suspected(hour_rows: list, current_hour: int) -> bool:
+def auto_click_suspected(hour_rows: Sequence[Mapping[str, Any]], current_hour: int) -> bool:
     """直近 SUSPECT_HOURS 時間（いまの時間は、まだ集計中なので含めない）、ずっと機械的に規則正しければ True。
 
     hour_rows は、infra/db/labor.py の labor_click_hours() の結果（{hour, clicks, gaps, sum_gap, sum_gap2, ...} の並び）。
@@ -382,7 +387,7 @@ def auto_click_suspected(hour_rows: list, current_hour: int) -> bool:
     return all(h in by_hour and is_mechanical_hour(by_hour[h]) for h in watch)
 
 
-def click_report(hours: list) -> dict:
+def click_report(hours: Sequence[Mapping[str, Any]]) -> LaborClickReport:
     """1時間ごとの記録 [{hour, clicks, pay, gaps, sum_gap, sum_gap2, min_gap}]（古い順）を、画面用に集計する。
 
     {clicks, pay, active_hours（押した時間の数）, longest_run（休まず押し続けた連続の時間数）, rows: [{hour, clicks, pay, mean_gap, cv, min_gap}]}。

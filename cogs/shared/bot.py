@@ -4,7 +4,7 @@ main.py と各 Cog が共有する依存コンテナ（config, repos, sessions, 
 動的な後付けではなく型付き属性として定義する。
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from discord.ext import commands
 
@@ -29,8 +29,8 @@ class CasinoBot(commands.Bot):
         config: dict[str, Any],
         repos: IRepositoryBundle,
         sessions: ISessionGuard,
-        services: Optional[ServiceRegistry] = None,
-        bridges: Optional[BotBridges] = None,
+        services: ServiceRegistry | None = None,
+        bridges: BotBridges | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)

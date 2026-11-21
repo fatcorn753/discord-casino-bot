@@ -47,7 +47,7 @@ def tradable(item_id: str) -> bool:
     return item.price > 0 and item.kind in TRADABLE_KINDS and not item.limited
 
 
-def price_range(kind: str, item_id: str = "", qty: int = 1) -> tuple:
+def price_range(kind: str, item_id: str = "", qty: int = 1) -> tuple[int, int]:
     """出品の値段（ペリカ）の幅 (下限, 上限)。品は定価 × 個数 の割合、馬は決まった幅。"""
     if kind == "horse":
         return HORSE_PRICE_RANGE

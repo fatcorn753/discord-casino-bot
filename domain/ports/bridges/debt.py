@@ -1,12 +1,27 @@
-"""台帳・借金ライフサイクル・返済のブリッジ契約（名目的基底クラスと NoOp 実装）。"""
+"""台帳・借金ライフサイクル・返済のブリッジ契約。
 
-from typing import Any, Optional
+住み分け:
+- 単一メソッドの純粋コールバック契約（DebtRepayHook）は `Callable` 型エイリアス＋ `noop_*` 関数で表す。
+- 複数メソッド・不変条件を持つ契約（IDebtLifecycleHook / IStatusReader / IDebtOps）は名目的基底クラスのまま維持する。
+"""
+
+from collections.abc import Callable
+
+from domain.errors import Outcome, fail
+
+# 単一コールバック契約（Callable 型エイリアス）: (guild_id, user_id, amount, label) -> 充当額
+DebtRepayHook = Callable[[int, int, int, str], int]
+
+
+def noop_debt_repay_hook(guild_id: int, user_id: int, amount: int, label: str) -> int:
+    """返済フック未接続時に 0 充当を返す LSP 準拠の既定動作。"""
+    return 0
 
 
 class IDebtLifecycleHook:
     """台帳更新に連動する借金利息・天引き・猶予更新のブリッジ契約。"""
 
-    def accrue_interest(self, guild_id: int, user_id: int, now: Optional[float] = None) -> int:
+    def accrue_interest(self, guild_id: int, user_id: int, now: float | None = None) -> int:
         raise NotImplementedError
 
     def after_debt_change(self, guild_id: int, user_id: int) -> None:
@@ -19,7 +34,7 @@ class IDebtLifecycleHook:
 class NoOpDebtLifecycleHook(IDebtLifecycleHook):
     """借金フック未接続時に安全に何もしない LSP 準拠実装。"""
 
-    def accrue_interest(self, guild_id: int, user_id: int, now: Optional[float] = None) -> int:
+    def accrue_interest(self, guild_id: int, user_id: int, now: float | None = None) -> int:
         return 0
 
     def after_debt_change(self, guild_id: int, user_id: int) -> None:
@@ -58,10 +73,10 @@ class NoOpStatusReader(IStatusReader):
 class IDebtOps:
     """信用取引・クイズ・預かり金・ウォレットが利用する借金・種銭操作契約。"""
 
-    def borrow_seed_for(self, guild_id: int, user_id: int) -> tuple[Any, ...]:
+    def borrow_seed_for(self, guild_id: int, user_id: int) -> Outcome[int]:
         raise NotImplementedError
 
-    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> tuple[Any, ...]:
+    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> Outcome[str]:
         raise NotImplementedError
 
     def seed_for(self, guild_id: int, user_id: int, amount: int) -> None:
@@ -80,11 +95,11 @@ class IDebtOps:
 class NoOpDebtOps(IDebtOps):
     """借金操作契約未接続時の LSP 準拠 Null 実装。"""
 
-    def borrow_seed_for(self, guild_id: int, user_id: int) -> tuple[Any, ...]:
-        return False, ""
+    def borrow_seed_for(self, guild_id: int, user_id: int) -> Outcome[int]:
+        return False, fail("unavailable")
 
-    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> tuple[Any, ...]:
-        return False, ""
+    def can_borrow_for_bet_for(self, guild_id: int, user_id: int, need: int) -> Outcome[str]:
+        return False, fail("unavailable")
 
     def seed_for(self, guild_id: int, user_id: int, amount: int) -> None:
         return None
@@ -96,18 +111,4 @@ class NoOpDebtOps(IDebtOps):
         return 0
 
     def accrue_debt_interest_for(self, guild_id: int, user_id: int, now: float) -> int:
-        return 0
-
-
-class IDebtRepayHook:
-    """債券償還など非収入の入金時に借金・延滞貸付へ全額充当する契約。"""
-
-    def repay_all_of_for(self, guild_id: int, user_id: int, amount: int, label: str) -> int:
-        raise NotImplementedError
-
-
-class NoOpDebtRepayHook(IDebtRepayHook):
-    """返済フック未接続時に 0 充当を返す LSP 準拠 Null 実装。"""
-
-    def repay_all_of_for(self, guild_id: int, user_id: int, amount: int, label: str) -> int:
         return 0

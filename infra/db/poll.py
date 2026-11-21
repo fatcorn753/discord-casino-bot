@@ -3,10 +3,9 @@
 表の定義は infra/db/schema/tables.py（polls・poll_votes）。数字は domain/poll.py。
 """
 
-from typing import Any, Optional
-
 from domain import poll
-from domain.errors import fail
+from domain.errors import Outcome, fail
+from domain.ports.contracts import PollRigResult, PollRow, PollView
 from domain.ports.repos import IPollRepo
 from infra.db.account import AccountCore
 from infra.db.bank import BankRepo
@@ -24,29 +23,29 @@ class PollRepo(ScopedRepo, IPollRepo):
         self._bank = bank
 
     def _real_for(self, poll_id: int) -> tuple[int, int]:
-        row = self._conn.execute(
-            "SELECT COALESCE(SUM(yes), 0), COUNT(*) FROM poll_votes WHERE poll_id=?", (poll_id,)
-        ).fetchone()
-        return row[0], row[1] - row[0]
+        row = self._one(
+            "SELECT COALESCE(SUM(yes), 0) AS yes, COUNT(*) AS n FROM poll_votes WHERE poll_id=?", (poll_id,)
+        )
+        assert row is not None  # 集計なので必ず1行返る
+        return row["yes"], row["n"] - row["yes"]
 
-    def _view_for(self, guild_id: int, poll_id: int) -> Optional[dict[str, Any]]:
-        row = self._conn.execute("SELECT * FROM polls WHERE guild_id=? AND id=?", (guild_id, poll_id)).fetchone()
-        if row is None:
+    def _view_for(self, guild_id: int, poll_id: int) -> PollView | None:
+        d = self._one("SELECT * FROM polls WHERE guild_id=? AND id=?", (guild_id, poll_id))
+        if d is None:
             return None
-        d = dict(row)
         real_yes, real_no = self._real_for(poll_id)
         d["voters"] = real_yes + real_no
         d["yes"] = poll.shown(real_yes, d["adj_yes"])
         d["no"] = poll.shown(real_no, d["adj_no"])
         return d
 
-    def _open_for(self, guild_id: int, poll_id: int, now: float) -> Any:
+    def _open_for(self, guild_id: int, poll_id: int, now: float) -> PollRow | None:
         """受付中の投票の行。締切を過ぎていれば（見回りの前でも）None。"""
-        return self._conn.execute(
+        return self._one(
             "SELECT * FROM polls WHERE guild_id=? AND id=? AND status='open' AND closes>?", (guild_id, poll_id, now)
-        ).fetchone()
+        )
 
-    def poll_create(self, creator: int, title: str, closes: float, channel_id: int, now: float) -> tuple[Any, ...]:
+    def poll_create(self, creator: int, title: str, closes: float, channel_id: int, now: float) -> Outcome[int]:
         """投票を作る。(成功か, 番号 か Failure)。"""
         title = title.strip()
         if not title or len(title) > poll.TITLE_MAX:
@@ -55,16 +54,18 @@ class PollRepo(ScopedRepo, IPollRepo):
             return False, fail("poll_bad_duration", max_minutes=poll.MAX_MINUTES)
         with self._db.tx():
             gid = self._g()
-            mine = self._conn.execute(
+            mine = self._scalar(
                 "SELECT COUNT(*) FROM polls WHERE guild_id=? AND creator=? AND status='open'", (gid, creator)
-            ).fetchone()[0]
+            )
             if mine >= poll.MAX_OPEN_PER_USER:
                 return False, fail("poll_too_many", max=poll.MAX_OPEN_PER_USER)
             cur = self._conn.execute(
                 "INSERT INTO polls (guild_id, creator, title, closes, channel_id) VALUES (?, ?, ?, ?, ?)",
                 (gid, creator, title, closes, channel_id),
             )
-            return True, cur.lastrowid
+            lastrowid = cur.lastrowid
+            assert lastrowid is not None
+            return True, lastrowid
 
     def poll_set_message(self, poll_id: int, channel_id: int, message_id: int) -> None:
         with self._db.tx():
@@ -73,11 +74,11 @@ class PollRepo(ScopedRepo, IPollRepo):
                 (channel_id, message_id, self._g(), poll_id),
             )
 
-    def poll_get(self, poll_id: int) -> Optional[dict[str, Any]]:
+    def poll_get(self, poll_id: int) -> PollView | None:
         with self._lock:
             return self._view_for(self._g(), poll_id)
 
-    def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> tuple[Any, ...]:
+    def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> Outcome[PollView]:
         """1人1票。あとから変えられる。(成功か, 投票 か Failure)。"""
         with self._db.tx():
             gid = self._g()
@@ -88,9 +89,11 @@ class PollRepo(ScopedRepo, IPollRepo):
                 "ON CONFLICT(poll_id, user_id) DO UPDATE SET yes=excluded.yes",
                 (poll_id, user_id, int(yes)),
             )
-            return True, self._view_for(gid, poll_id)
+            view = self._view_for(gid, poll_id)
+            assert view is not None  # 直前に open を確認済み
+            return True, view
 
-    def poll_rig(self, user_id: int, poll_id: int, yes: int, no: int, now: float) -> tuple[Any, ...]:
+    def poll_rig(self, user_id: int, poll_id: int, yes: int, no: int, now: float) -> Outcome[PollRigResult]:
         """作った人だけが、RIG_COST を払って、表示する票数を yes・no に書き換えられる。代金は帝愛銀行の収入。
 
         (成功か, {"poll": 書き換え後, "before": (賛成, 反対)} か Failure)。あとから入る本物の票は、書き換えた数に足される。
@@ -118,15 +121,18 @@ class PollRepo(ScopedRepo, IPollRepo):
                 "UPDATE polls SET adj_yes=?, adj_no=?, rigs=rigs+1 WHERE guild_id=? AND id=?",
                 (yes - real_yes, no - real_no, gid, poll_id),
             )
-            return True, {"poll": self._view_for(gid, poll_id), "before": (before["yes"], before["no"])}
+            after = self._view_for(gid, poll_id)
+            assert after is not None  # 直前まで開いていた投票が、書き換えで閉じることはない
+            result: PollRigResult = {"poll": after, "before": (before["yes"], before["no"])}
+            return True, result
 
-    def poll_close_due(self, now: float) -> list[dict[str, Any]]:
+    def poll_close_due(self, now: float) -> list[PollView]:
         """締切を過ぎた投票を締めて、締めたものを返す。"""
         with self._db.tx():
             gid = self._g()
             ids = [
-                r[0]
-                for r in self._conn.execute(
+                r["id"]
+                for r in self._all(
                     "SELECT id FROM polls WHERE guild_id=? AND status='open' AND closes<=? ORDER BY id", (gid, now)
                 )
             ]

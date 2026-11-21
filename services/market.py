@@ -2,13 +2,30 @@
 
 import logging
 import random
-from typing import Any, Optional
+from collections.abc import Mapping
 
 from domain import bonds, earnings, market, market_events
 from domain import options as opt
+from domain.errors import Outcome
 from domain.options import name_of
 from domain.ports.clock import IClock
-from domain.ports.contracts import BondQuote, PricePoint
+from domain.ports.contracts import (
+    BondQuote,
+    ChartBoardRow,
+    ChartPostRow,
+    EarningsAnnouncement,
+    EarningsAnnounceRow,
+    EarningsRow,
+    HoldingsSnapshot,
+    MarginPosition,
+    MarginStatus,
+    MarketEventRow,
+    OptionBuyResult,
+    OptionRow,
+    OptionWriteResult,
+    PricePoint,
+    SpotHolding,
+)
 from domain.ports.repos import (
     IBondRepo,
     ICryptoRepo,
@@ -18,6 +35,7 @@ from domain.ports.repos import (
     IMarketEventRepo,
     IOptionRepo,
 )
+from domain.types import CryptoResult
 
 _log = logging.getLogger(__name__)
 
@@ -65,7 +83,7 @@ class MarketService:
                 out[sym.key] = hist[0][1]
         return out
 
-    def step_prices(self, earnings_results: list[dict[str, Any]], rng: random.Random) -> tuple[dict[str, float], int]:
+    def step_prices(self, earnings_results: list[EarningsRow], rng: random.Random) -> tuple[dict[str, float], int]:
         """全銘柄の価格を1ステップ進め、(新価格辞書, 有事フラグ) を返す。"""
         current = self.latest_prices()
         fair = {k: self._market.market_fair_get(k) or p for k, p in current.items()}
@@ -91,7 +109,7 @@ class MarketService:
             self._market.market_fair_set(key, new_fair[key], pins.get(key, 0), ts)
         return new, event
 
-    def histories(self, minutes: int, now: Optional[float] = None) -> dict[str, list[PricePoint]]:
+    def histories(self, minutes: int, now: float | None = None) -> dict[str, list[PricePoint]]:
         now = self.clock.now_ts() if now is None else now
         since = now - minutes * 60
         return {s.key: self._market.market_history(since, s.key) for s in market.SYMBOLS}
@@ -118,7 +136,7 @@ class MarketService:
                 out.append((f"bond:{r['id']}", f"{k.emoji} {k.name} #{r['id']} 売却"))
         return out
 
-    def holdings_snapshot(self, guild_id: int, uid: int, rng: random.Random) -> dict[str, Any]:
+    def holdings_snapshot(self, guild_id: int, uid: int, rng: random.Random) -> HoldingsSnapshot:
         """保有画面表示用に満期債券・オプションを決済したうえで全保有スナップショットを返す。"""
         now = self.clock.now_ts()
         crypto_g = self._crypto.for_guild(guild_id)
@@ -180,13 +198,13 @@ class MarketService:
     def market_pin(self, symbol: str) -> int:
         return self._market.market_pin(symbol)
 
-    def market_events(self, now: float) -> list[dict[str, Any]]:
+    def market_events(self, now: float) -> list[MarketEventRow]:
         return self._market_events.market_events(now)
 
-    def earnings_upcoming(self, now: float) -> Optional[dict[str, Any]]:
+    def earnings_upcoming(self, now: float) -> EarningsAnnouncement | None:
         return self._earnings.earnings_upcoming(now)
 
-    def earnings_to_announce(self, now: float) -> list[dict[str, Any]]:
+    def earnings_to_announce(self, now: float) -> list[EarningsAnnounceRow]:
         return self._earnings.earnings_to_announce(now)
 
     def crypto_holders(self, guild_id: int, rows: int, symbol: str) -> list[tuple[int, int, int]]:
@@ -198,12 +216,12 @@ class MarketService:
     def margin_cut_map(self, guild_id: int, prices: dict[str, float]) -> list[tuple[str, str, float, int]]:
         return self._margin.for_guild(guild_id).margin_cut_map(prices)
 
-    def live_chart_posts(self) -> list[dict[str, Any]]:
+    def live_chart_posts(self) -> list[ChartPostRow]:
         return self._market.live_chart_posts()
 
     def swap_chart_post(
         self, channel_id: int, message_id: int, guild_id: int, period: str, now: float, symbol: str
-    ) -> Optional[int]:
+    ) -> int | None:
         return self._market.swap_chart_post(channel_id, message_id, guild_id, period, now, symbol)
 
     def end_chart_post(self, channel_id: int) -> None:
@@ -215,37 +233,39 @@ class MarketService:
     def delete_guild_chart_posts(self, guild_id: int) -> None:
         self._market.delete_guild_chart_posts(guild_id)
 
-    def list_chart_boards(self) -> list[dict[str, Any]]:
+    def list_chart_boards(self) -> list[ChartBoardRow]:
         return self._market.list_chart_boards()
 
     def delete_chart_board(self, guild_id: int) -> None:
         self._market.delete_chart_board(guild_id)
 
     # ------------------------------ 現物 ------------------------------ #
-    def crypto_holding(self, guild_id: int, uid: int, symbol: str) -> tuple[Any, ...]:
+    def crypto_holding(self, guild_id: int, uid: int, symbol: str) -> SpotHolding:
         return self._crypto.for_guild(guild_id).crypto_holding(uid, symbol)
 
-    def crypto_buy(self, guild_id: int, uid: int, amount: int, price: float, symbol: str) -> Any:
+    def crypto_buy(self, guild_id: int, uid: int, amount: int, price: float, symbol: str) -> CryptoResult:
         return self._crypto.for_guild(guild_id).crypto_buy(uid, amount, price, symbol)
 
-    def crypto_sell(self, guild_id: int, uid: int, units: Optional[int], price: float, symbol: str) -> Any:
+    def crypto_sell(self, guild_id: int, uid: int, units: int | None, price: float, symbol: str) -> CryptoResult:
         return self._crypto.for_guild(guild_id).crypto_sell(uid, units, price, symbol)
 
     # ------------------------------ 信用取引 ------------------------------ #
-    def margin_position(self, guild_id: int, uid: int, symbol: str, side: str) -> tuple[Any, ...]:
+    def margin_position(self, guild_id: int, uid: int, symbol: str, side: str) -> MarginPosition:
         return self._margin.for_guild(guild_id).margin_position(uid, symbol, side)
 
     def margin_open(
         self, guild_id: int, uid: int, side: str, units: int, price: float, leverage: int, symbol: str
-    ) -> Any:
+    ) -> CryptoResult:
         """side が "short" なら空売り、それ以外は信用買いを建てる。"""
         repo = self._margin.for_guild(guild_id)
         return (repo.short_open if side == "short" else repo.long_open)(uid, units, price, leverage, symbol)
 
-    def margin_close(self, guild_id: int, uid: int, side: str, units: Optional[int], price: float, symbol: str) -> Any:
+    def margin_close(
+        self, guild_id: int, uid: int, side: str, units: int | None, price: float, symbol: str
+    ) -> CryptoResult:
         return self._margin.for_guild(guild_id).margin_close(uid, side, units, price, symbol)
 
-    def margin_status(self, guild_id: int, uid: int, prices: dict[str, float]) -> Any:
+    def margin_status(self, guild_id: int, uid: int, prices: Mapping[str, float]) -> MarginStatus:
         return self._margin.for_guild(guild_id).margin_status(uid, prices)
 
     # ------------------------------ オプション ------------------------------ #
@@ -257,16 +277,16 @@ class MarketService:
         symbol: str,
         amount: int,
         *,
-        symbol2: Optional[str] = None,
-        strike_pct: Optional[float] = None,
-    ) -> tuple[Any, ...]:
+        symbol2: str | None = None,
+        strike_pct: float | None = None,
+    ) -> Outcome[OptionBuyResult]:
         return self._options.for_guild(guild_id).option_buy(
             uid, kind, symbol, amount, self.clock.now_ts(), symbol2=symbol2, strike_pct=strike_pct
         )
 
     def option_write(
-        self, guild_id: int, uid: int, kind: str, symbol: str, amount: int, *, strike_pct: Optional[float] = None
-    ) -> tuple[Any, ...]:
+        self, guild_id: int, uid: int, kind: str, symbol: str, amount: int, *, strike_pct: float | None = None
+    ) -> Outcome[OptionWriteResult]:
         return self._options.for_guild(guild_id).option_write(
             uid, kind, symbol, amount, self.clock.now_ts(), strike_pct=strike_pct
         )
@@ -274,27 +294,27 @@ class MarketService:
     def option_settle(self, guild_id: int, now: float) -> None:
         self._options.for_guild(guild_id).option_settle(now)
 
-    def active_options(self, guild_id: int, uid: int) -> list[Any]:
+    def active_options(self, guild_id: int, uid: int) -> list[OptionRow]:
         return self._options.for_guild(guild_id).option_list(uid)["active"]
 
-    def option_close_cost(self, guild_id: int, row: dict[str, Any], now: float, prices: dict[str, float]) -> int:
+    def option_close_cost(self, guild_id: int, row: OptionRow, now: float, prices: dict[str, float]) -> int:
         return self._options.for_guild(guild_id).option_close_cost(row, now, prices)
 
-    def option_value(self, guild_id: int, row: dict[str, Any], now: float, prices: dict[str, float]) -> int:
+    def option_value(self, guild_id: int, row: OptionRow, now: float, prices: dict[str, float]) -> int:
         return self._options.for_guild(guild_id).option_value(row, now, prices)
 
-    def option_sell(self, guild_id: int, uid: int, option_id: int) -> tuple[Any, ...]:
+    def option_sell(self, guild_id: int, uid: int, option_id: int) -> Outcome[int]:
         return self._options.for_guild(guild_id).option_sell(uid, option_id, self.clock.now_ts())
 
     # ------------------------------ 債券 ------------------------------ #
     def bond_settle(self, guild_id: int, now: float, rng: random.Random) -> None:
         self._bonds.for_guild(guild_id).bond_settle(now, rng)
 
-    def bond_buy(self, guild_id: int, uid: int, kind: str, amount: int, now: float) -> tuple[Any, ...]:
+    def bond_buy(self, guild_id: int, uid: int, kind: str, amount: int, now: float) -> Outcome[str]:
         return self._bonds.for_guild(guild_id).bond_buy(uid, kind, amount, now)
 
     def bond_quote(self, guild_id: int, kind: str, amount: int, now: float) -> BondQuote:
         return self._bonds.for_guild(guild_id).bond_quote(kind, amount, now)
 
-    def bond_cancel(self, guild_id: int, uid: int, bond_id: int) -> tuple[Any, ...]:
+    def bond_cancel(self, guild_id: int, uid: int, bond_id: int) -> Outcome[int]:
         return self._bonds.for_guild(guild_id).bond_cancel(uid, bond_id)

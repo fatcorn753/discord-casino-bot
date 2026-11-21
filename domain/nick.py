@@ -5,8 +5,8 @@
 称号の名前に一致する末尾の【…】だけを外す（利用者が自分で付けた【…】は消さない）。
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Optional
 
 NICK_LIMIT = 32  # Discord のニックネームの最大文字数
 
@@ -20,7 +20,7 @@ def suffix(title: str) -> str:
     return f"【{title}】"
 
 
-def strip_title(name: Optional[str], titles) -> str:
+def strip_title(name: str | None, titles) -> str:
     """末尾の「【既知の称号】」を外した名前を返す。"""
     name = name or ""
     for title in sorted(titles, key=len, reverse=True):
@@ -43,11 +43,13 @@ def build(base: str, title: str) -> str:
 
 @dataclass(frozen=True)
 class NickState:
-    original: Optional[str]  # 付ける前のニックネーム（None はニックネームなし）
+    original: str | None  # 付ける前のニックネーム（None はニックネームなし）
     applied: str  # Bot が実際に設定したニックネーム
 
 
-def plan(current: Optional[str], state: Optional[NickState], default_name: str, titles, title: Optional[str]) -> tuple:
+def plan(
+    current: str | None, state: NickState | None, default_name: str, titles: Iterable[str], title: str | None
+) -> tuple[str | None, NickState | None]:
     """(設定すべきニックネーム, 記録しておく状態) を返す。title=None は、称号を外して元に戻す。
 
     - 前回 Bot が設定したままなら、記録した元のニックネームを使う（長い名前が切り詰められていても戻せる）

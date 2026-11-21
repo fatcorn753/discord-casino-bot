@@ -7,7 +7,7 @@
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -20,6 +20,8 @@ from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import poll
 from domain.duration import format_minutes, parse_duration
+from domain.errors import Failure
+from domain.ports.contracts import PollView
 from domain.ports.repos import IGuildRepo
 from services.poll import PollService
 
@@ -30,7 +32,7 @@ if TYPE_CHECKING:
 
 
 async def _error(interaction: discord.Interaction, text: str) -> None:
-    await interaction.response.send_message(embed=ui.error_embed("できません", text), ephemeral=True)
+    await ui.reply_error(interaction, text, title="できません")
 
 
 class PollCog(commands.Cog, IPollButtonBridge):
@@ -62,19 +64,18 @@ class PollCog(commands.Cog, IPollButtonBridge):
         self,
         interaction: discord.Interaction,
         title: app_commands.Range[str, 1, poll.TITLE_MAX],
-        duration: Optional[str] = None,
+        duration: str | None = None,
     ):
         try:
             minutes = parse_duration(duration) if duration else poll.DEFAULT_MINUTES
         except ValueError as exc:
-            return await interaction.response.send_message(embed=ui.error_embed("できません", str(exc)), ephemeral=True)
+            return await ui.reply_error(interaction, str(exc), title="できません")
         gid = ui.guild_id_of(interaction)
         channel_id = interaction.channel_id or 0
         ok, result = self._poll.create(gid, interaction.user.id, title, minutes, channel_id)
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("できません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="できません")
+        assert not isinstance(result, Failure)
         p = self._poll.get(gid, result)
         assert p is not None
         await interaction.response.send_message(
@@ -105,6 +106,7 @@ class PollCog(commands.Cog, IPollButtonBridge):
         if not ok:
             await _error(interaction, format_failure(result))
             return
+        assert not isinstance(result, Failure)
         await interaction.response.edit_message(embed=poll_embed(result))
         await interaction.followup.send(f"**{'賛成' if act == 'yes' else '反対'}** に入れました。", ephemeral=True)
 
@@ -115,6 +117,7 @@ class PollCog(commands.Cog, IPollButtonBridge):
         if not ok:
             await _error(interaction, format_failure(result))
             return
+        assert not isinstance(result, Failure)
         p, (old_yes, old_no) = result["poll"], result["before"]
         await interaction.response.send_message(
             embed=ui.warn_embed(
@@ -126,7 +129,7 @@ class PollCog(commands.Cog, IPollButtonBridge):
         )
         await self._refresh(interaction.guild, p)
 
-    async def _refresh(self, guild: Optional[discord.Guild], p: dict[str, Any], *, closed: bool = False) -> None:
+    async def _refresh(self, guild: discord.Guild | None, p: PollView, *, closed: bool = False) -> None:
         """投票の投稿の票数を直す。締め切ったときは、ボタンを外す。"""
         channel = guild.get_channel(p["channel_id"]) if guild else None
         msg = ui.partial_message(channel, p["message_id"]) if channel is not None and p["message_id"] else None

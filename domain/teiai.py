@@ -10,8 +10,6 @@
 - 自己破産: 全財産とショップの全品を差し押さえ、換金して債権者へ配当する。貸付の残りは免責、帝愛の借金は BANKRUPT_FLOOR まで圧縮
 """
 
-from typing import Optional
-
 from domain.ports import get_catalogs
 
 _CFG = get_catalogs().teiai()
@@ -100,7 +98,7 @@ def labor_skim(amount: int) -> int:
     return int(amount * LABOR_SKIM_RATE)
 
 
-def cds_odds(status: str, debt: int, margin_ratio: Optional[float] = None) -> float:
+def cds_odds(status: str, debt: int, margin_ratio: float | None = None) -> float:
     """CDS のオッズ（倍率）。"""
     r = 0.04 if status == KATAGI else 0.25 + 0.5 * min(1.0, debt / GRACE_DEBT)
     if margin_ratio is not None and margin_ratio < 1.5:

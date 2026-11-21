@@ -1,5 +1,6 @@
 """証券市場の定期告知・ライブチャート更新・古い掲示板の片付け（Discord 投稿層）。"""
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import discord
@@ -44,7 +45,7 @@ async def earnings_posts(
 
 
 async def refresh_post(
-    bot: discord.Client, market_svc: MarketService, cog: "MarketCog", post: dict, now: float, cache: dict
+    bot: discord.Client, market_svc: MarketService, cog: "MarketCog", post: Mapping[str, Any], now: float, cache: dict
 ) -> None:
     """出したチャートを、最新に書き換える。時間が来たら、最後に1回だけ書き換えて、更新を終える。"""
     ends = post["ts"] + LIVE_MINUTES * 60

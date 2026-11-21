@@ -8,7 +8,6 @@
 
 import math
 from dataclasses import dataclass
-from typing import Optional
 
 from domain.ports import get_catalogs
 
@@ -35,13 +34,13 @@ NORMAL = KINDS["normal"]
 JUNK = KINDS["junk"]
 
 
-def interest(kind: Kind, principal: int, rate_pct: Optional[float] = None) -> int:
+def interest(kind: Kind, principal: int, rate_pct: float | None = None) -> int:
     """満期の利息。rate_pct は買ったときに決まった利率（％。#18）。None なら種類の基準の利率。"""
     rate = kind.rate if rate_pct is None else rate_pct
     return int(principal * rate / 100)
 
 
-def maturity_payout(kind: Kind, principal: int, rate_pct: Optional[float] = None) -> int:
+def maturity_payout(kind: Kind, principal: int, rate_pct: float | None = None) -> int:
     return principal + interest(kind, principal, rate_pct)
 
 
@@ -67,7 +66,7 @@ def sale_value(
     principal: int,
     now: float,
     due: float,
-    rate_pct: Optional[float] = None,
+    rate_pct: float | None = None,
     discount_per_hour: float = SALE_DISCOUNT_PER_HOUR,
 ) -> int:
     """満期前に売ったときの手取り（DCF）。満期の受取額を、残り時間 τ だけ割り引く: payout × exp(-割引率 × τ)。切り捨て。

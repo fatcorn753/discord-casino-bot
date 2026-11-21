@@ -2,11 +2,18 @@
 
 import datetime
 from dataclasses import dataclass
-from typing import Any, Optional
 
 from domain import missions as missions_mod
 from domain.earnings import MemoInfo
 from domain.ports.clock import IClock
+from domain.ports.contracts import (
+    LedgerEntry,
+    PlaySummary,
+    ProfileView,
+    RankEntry,
+    UserRow,
+    WeeklyAward,
+)
 from domain.ports.repos import (
     IBondRepo,
     ICryptoRepo,
@@ -23,15 +30,15 @@ from domain.types import INITIAL_BALANCE, DailyResult, TransferResult
 class BalanceCard:
     """`/ペリカ 残高` に出す値（表示の組み立ては cogs/economy/embeds.py）。"""
 
-    stats: dict[str, Any]
-    rank: Optional[tuple[Any, ...]]
+    stats: UserRow
+    rank: RankEntry | None
     display_status: str
-    profile: dict[str, Any]
+    profile: ProfileView
     has_frozen_equipment: bool  # 差し押さえ中の称号・カード・演出を、元は装備していたか
-    inventory: dict[str, Any]
+    inventory: dict[str, int]
     crypto_held: int
     bonds_held: int
-    play: dict[str, Any]
+    play: PlaySummary
 
 
 @dataclass(frozen=True)
@@ -47,7 +54,7 @@ class MissionBoard:
 @dataclass(frozen=True)
 class DailyClaimOutcome:
     result: DailyResult
-    memo: Optional[MemoInfo] = None
+    memo: MemoInfo | None = None
 
 
 class EconomyService:
@@ -82,10 +89,10 @@ class EconomyService:
         stats = self._wallet.for_guild(guild_id).peek_stats(user_id)
         return stats["balance"] if stats else INITIAL_BALANCE
 
-    def history(self, guild_id: int, user_id: int, limit: int) -> list[dict[str, Any]]:
+    def history(self, guild_id: int, user_id: int, limit: int) -> list[LedgerEntry]:
         return self._wallet.for_guild(guild_id).history(user_id, limit)
 
-    def balance_card(self, guild_id: int, viewer_id: int, target_id: int) -> Optional[BalanceCard]:
+    def balance_card(self, guild_id: int, viewer_id: int, target_id: int) -> BalanceCard | None:
         """残高カードの値。本人なら口座を作って読み、他人は読み取り専用で調べる（見るだけで口座を作らない）。
 
         口座がなければ None。
@@ -138,7 +145,7 @@ class EconomyService:
         fee_rate: float,
         daily_limit: int,
         min_games: int,
-        now: Optional[datetime.datetime] = None,
+        now: datetime.datetime | None = None,
     ) -> TransferResult:
         now = self.clock.now() if now is None else now
         day_start = datetime.datetime.combine(now.date(), datetime.time(), tzinfo=now.tzinfo).timestamp()
@@ -146,13 +153,13 @@ class EconomyService:
             sender_id, receiver_id, amount, fee_rate, daily_limit, day_start, min_games
         )
 
-    def weekly_last_announced(self, guild_id: int) -> Optional[str]:
+    def weekly_last_announced(self, guild_id: int) -> str | None:
         return self._records.for_guild(guild_id).weekly_last_announced()
 
     def set_weekly_announced(self, guild_id: int, week: str) -> None:
         self._records.for_guild(guild_id).set_weekly_announced(week)
 
-    def weekly_award(self, guild_id: int, week: str) -> Optional[dict[str, Any]]:
+    def weekly_award(self, guild_id: int, week: str) -> WeeklyAward | None:
         """その週の王者に限定称号を贈り、順位を返す（発表済みなら None）。"""
         return self._records.for_guild(guild_id).weekly_award(week)
 

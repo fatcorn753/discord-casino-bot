@@ -1,6 +1,6 @@
 """海外逃亡チャンス！！: 船の ASCII アートが進んで、数秒後に「成功！」か「失敗！」が出る（cogs/teiai/panel.py から使う）。
 
-当たり外れは、押した時点で infra/db/debt.py の escape_attempt が決める。ここは見せ方だけ（読み込まれる Cog ではない）。
+当たり外れは、押した時点で infra/db/debt/ の escape_attempt が決める。ここは見せ方だけ（読み込まれる Cog ではない）。
 """
 
 import asyncio
@@ -29,6 +29,7 @@ from cogs.teiai.texts import (
     WAVES as WAVES,
 )
 from domain import teiai
+from domain.errors import Failure
 from services.teiai import TeiaiService
 
 
@@ -66,9 +67,8 @@ async def run_escape(
         return
     done, result = teiai_svc.escape_attempt(gid, uid)
     if not done:
-        return await interaction.followup.send(
-            embed=ui.error_embed("逃亡できません", format_failure(result)), ephemeral=True
-        )
+        return await ui.reply_error(interaction, format_failure(result), title="逃亡できません")
+    assert not isinstance(result, Failure)
     name = interaction.user.display_name
     title = f"🚢 {name} が、海外逃亡を試みる！！"
     message = await interaction.followup.send(
@@ -80,6 +80,7 @@ async def run_escape(
     await asyncio.sleep(FRAME_SECONDS)
     if result["escaped"]:
         b = result["bankrupt"]
+        assert b is not None  # 成功時は自己破産の結果が入っている
         text = (
             f"{block(SUCCESS_ART)}\n**成功！！** 帝愛の借金は、**ゼロ**になりました。\n"
             f"置いてきた財産: {ui.pelica(b['seized'])}（帝愛への配当 {ui.pelica(b['senior_paid'])}・"

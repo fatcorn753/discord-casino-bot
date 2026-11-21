@@ -1,7 +1,7 @@
 """テスト用の共有ビルダー（RepositoryBundle・ServiceRegistry・BotBridges・各 Cog の Constructor DI 組み立て）。"""
 
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any
 
 from cogs.shared.bridges import (
     BotBridges,
@@ -27,11 +27,11 @@ from services.session import Sessions
 def make_test_bot(
     db_path: str = ":memory:",
     *,
-    legacy_guild_id: Optional[int] = None,
+    legacy_guild_id: int | None = None,
     strict: bool = False,
-    config: Optional[dict[str, Any]] = None,
-    sessions: Optional[ISessionGuard] = None,
-    repos: Optional[RepositoryBundle] = None,
+    config: dict[str, Any] | None = None,
+    sessions: ISessionGuard | None = None,
+    repos: RepositoryBundle | None = None,
 ) -> SimpleNamespace:
     """テスト用の軽量 Bot コンテナ（repos / services / sessions / bridges / config を保持）を組み立てる。"""
     cfg = {} if config is None else config

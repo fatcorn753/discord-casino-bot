@@ -9,7 +9,7 @@
 import asyncio
 import logging
 import random
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -22,6 +22,7 @@ from cogs.shared.announce import announce_channel
 from cogs.shared.bridges import BotBridges, IArenaAdminBridge
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import arena as arena_mod
+from domain.ports.contracts import ArenaFighterRow, ArenaFinalResult, ArenaSemiResult, ArenaTournamentDetailRow
 from domain.ports.repos import IGuildRepo
 from services.arena import ArenaService
 
@@ -91,10 +92,10 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
     async def _before(self) -> None:
         await self.bot.wait_until_ready()
 
-    async def _channel(self, guild: discord.Guild) -> Optional[discord.abc.GuildChannel]:
+    async def _channel(self, guild: discord.Guild) -> discord.abc.GuildChannel | None:
         return announce_channel(guild, self._guild_repo)
 
-    async def _post(self, channel: object, **kw: Any) -> Optional[discord.Message]:
+    async def _post(self, channel: object, **kw: Any) -> discord.Message | None:
         try:
             return await ui.send_channel(channel, allowed_mentions=NONE, **kw)
         except discord.HTTPException as exc:
@@ -103,7 +104,7 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
             return None
 
     async def _animate_match(
-        self, channel: object, fighters: list[dict[str, Any]], winner_idx: int, title: str
+        self, channel: object, fighters: list[ArenaFighterRow], winner_idx: int, title: str
     ) -> None:
         """戦闘演出（HPバーのメッセージ書き換え）。勝敗はすでに決まっており、見た目だけ。"""
         frames = arena_mod.battle_frames(len(fighters), winner_idx, random.Random(), ANIM_FRAMES)
@@ -119,8 +120,8 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
             logthrottle.warn(("arena-anim", cid), f"闘技場の演出を表示できません: {exc!r}")
 
     async def _advance_semis(
-        self, guild: discord.Guild, t: dict[str, Any], day_key: DayKey
-    ) -> Optional[dict[str, Any]]:
+        self, guild: discord.Guild, t: ArenaTournamentDetailRow, day_key: DayKey
+    ) -> ArenaSemiResult | None:
         """準決勝を決着させ、演出・結果投稿・パネル更新まで行う（時刻は見ない。呼ぶ側が判断する）。"""
         pre_fighters = t["fighters"]
         result = self._arena.run_semis(guild.id, t["id"])
@@ -137,8 +138,8 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
         return result
 
     async def _advance_final(
-        self, guild: discord.Guild, t: dict[str, Any], day_key: DayKey
-    ) -> Optional[dict[str, Any]]:
+        self, guild: discord.Guild, t: ArenaTournamentDetailRow, day_key: DayKey
+    ) -> ArenaFinalResult | None:
         """決勝を決着させ、演出・結果投稿・パネル更新まで行う（時刻は見ない。呼ぶ側が判断する）。"""
         pre_finalists = [f for f in t["fighters"] if f["stage"] == "final"]
         result = self._arena.run_final(guild.id, t["id"])
@@ -158,9 +159,9 @@ class ArenaCog(commands.Cog, IArenaAdminBridge):
     async def host_now(
         self,
         guild: discord.Guild,
-        channel: Optional[discord.abc.Messageable],
+        channel: discord.abc.Messageable | None,
         advance: bool,
-        fmt: Optional[str] = None,
+        fmt: str | None = None,
     ) -> str:
         """[管理者用] 今日の大会を、時刻を待たずに出す（無ければ作成）。advance なら、現在の段をすぐ決着させる。
 

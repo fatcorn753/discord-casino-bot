@@ -1,7 +1,8 @@
 """クイズの入力検証・Embed 構築・結果整形（プレゼンテーション部品）。"""
 
 import re
-from typing import Optional
+from collections.abc import Mapping
+from typing import Any
 
 import discord
 
@@ -11,6 +12,7 @@ from cogs.shared import ui
 from cogs.shared.amount import typed_amount
 from domain import quizpay
 from domain.ports import get_catalogs
+from domain.ports.contracts import QuizAnswerResult, QuizView
 
 _QUIZ_CFG = get_catalogs().economy().quizpay
 MAX_CHOICE_LEN = _QUIZ_CFG.max_choice_len
@@ -38,7 +40,7 @@ def parse_int(text: str, label: str) -> int:
     return value
 
 
-def creator_label(q: dict) -> str:
+def creator_label(q: Mapping[str, Any]) -> str:
     """問題に出す制作者の名前。登録時の名前、なければ（古い問題）出題者のメンション、持ち主の問題なら「運営」。"""
     if q.get("creator_name"):
         return q["creator_name"]
@@ -64,7 +66,7 @@ def parse_verdicts(text: str) -> tuple:
     return right, wrong
 
 
-def verdict(q: Optional[dict], correct: bool) -> str:
+def verdict(q: Mapping[str, Any] | None, correct: bool) -> str:
     """正解・不正解の見出しの言葉。出題者が決めていなければ既定。"""
     if q:
         text = (q.get("msg_right") if correct else q.get("msg_wrong")) or ""
@@ -73,7 +75,7 @@ def verdict(q: Optional[dict], correct: bool) -> str:
     return DEFAULT_RIGHT if correct else DEFAULT_WRONG
 
 
-def question_embed(q: dict, order: list, remaining: int) -> discord.Embed:
+def question_embed(q: Mapping[str, Any], order: list, remaining: int) -> discord.Embed:
     body = (
         q["question"]
         + "\n\n"
@@ -85,7 +87,7 @@ def question_embed(q: dict, order: list, remaining: int) -> discord.Embed:
     return e
 
 
-def result_embed(result: dict, more: int, quiz: Optional[dict] = None) -> discord.Embed:
+def result_embed(result: QuizAnswerResult, more: int, quiz: QuizView | None = None) -> discord.Embed:
     if result["correct"] and result["reward_blocked"]:
         e = ui.embed(
             f"⭕ {verdict(quiz, True)}",
@@ -103,7 +105,7 @@ def result_embed(result: dict, more: int, quiz: Optional[dict] = None) -> discor
     return e
 
 
-def public_embed(q: dict) -> discord.Embed:
+def public_embed(q: Mapping[str, Any]) -> discord.Embed:
     body = q["question"] + "\n\n" + "\n".join(f"**{LETTERS[i]}.** {c}" for i, c in enumerate(q["order"]))
     body += f"\n\n出題: **{creator_label(q)}**" + (
         "（出題者は答えられません。正解の報酬は出題者が払います）" if q["author_id"] else ""
@@ -129,7 +131,7 @@ def names_field(user_ids: list, limit: int = 900) -> str:
     return " ".join(out)
 
 
-def settle_text(q: dict) -> str:
+def settle_text(q: Mapping[str, Any]) -> str:
     n, c = q["participants"], q["correct_count"]
     total = q["base"] + q["bonus"] + q["part"]
     if total == 0:
@@ -141,7 +143,7 @@ def settle_text(q: dict) -> str:
     )
 
 
-def result_with_names(q: dict) -> discord.Embed:
+def result_with_names(q: Mapping[str, Any]) -> discord.Embed:
     e = ui.embed(f"📰 クイズ #{q['id']} 終了", settle_text(q), ui.INFO)
     e.add_field(name=f"⭕ 正解者（{len(q['right_users'])}人）", value=names_field(q["right_users"]), inline=False)
     e.add_field(name=f"❌ 不正解者（{len(q['wrong_users'])}人）", value=names_field(q["wrong_users"]), inline=False)

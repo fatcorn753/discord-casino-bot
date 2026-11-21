@@ -5,7 +5,7 @@
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -63,7 +63,7 @@ class ShopCog(commands.Cog, IShopTitleBridge):
         shop_svc: ShopService,
         guild_repo: IGuildRepo,
         sessions: ISessionGuard,
-        p2p_bridge: Optional[IP2PNavigationBridge] = None,
+        p2p_bridge: IP2PNavigationBridge | None = None,
     ) -> None:
         self.bot = bot
         self._config = config
@@ -101,26 +101,23 @@ class ShopCog(commands.Cog, IShopTitleBridge):
                     continue
                 title = self.service.nick_tag(gid, user_id)
                 is_here = here is not None and gid == here.id
-                try:
+                try:  # 1サーバー分のニックネーム反映。失敗時は (理由, 他サーバー分の失敗数) を集める
                     m = (
                         member
                         if is_here and member is not None
                         else (guild.get_member(user_id) or await guild.fetch_member(user_id))
                     )
                     await apply_title_nick(guild, m, title, self._guild_repo)
+                    p, failed = "", 0
                 except discord.NotFound:
-                    continue
+                    p, failed = "", 0
                 except ShopError as exc:
-                    if is_here:
-                        problem = str(exc)
-                    else:
-                        others_failed += 1
+                    p, failed = (str(exc), 0) if is_here else ("", 1)
                 except discord.HTTPException as exc:
                     _log.warning(f"称号のニックネーム反映に失敗: guild={gid} user={user_id}: {exc!r}")
-                    if is_here:
-                        problem = "Discord 側のエラーで失敗しました。"
-                    else:
-                        others_failed += 1
+                    p, failed = ("Discord 側のエラーで失敗しました。", 0) if is_here else ("", 1)
+                problem = p or problem
+                others_failed += failed
             return problem, others_failed
 
     async def cog_load(self) -> None:

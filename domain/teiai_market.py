@@ -11,7 +11,6 @@ DB にも Discord にも触らない。乱数は呼び出し側から渡す。
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Optional
 
 from domain import shop as shop_mod
 from domain import teiai
@@ -95,7 +94,7 @@ def reveal(item_id: str, rng: random.Random, items: list[shop_mod.Item]) -> tupl
 
 def _neighbor(
     shown: shop_mod.Item, outcome: str, items: list[shop_mod.Item], rng: random.Random, same_kind: bool
-) -> Optional[shop_mod.Item]:
+) -> shop_mod.Item | None:
     cands = [
         it
         for it in items

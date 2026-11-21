@@ -4,8 +4,6 @@
 いつもどおり精算する（止めると、預かったペリカが戻らなくなるため）。
 """
 
-from typing import Optional
-
 # 機能のキー（DB に入る値。変えないこと）→ 表示名。並びは管理コマンドの選択肢の順
 FEATURES: dict[str, str] = {
     "chinchiro": "チンチロ",
@@ -68,7 +66,7 @@ ALWAYS_ALLOWED: frozenset[str] = frozenset(
 )
 
 
-def feature_of_command(qualified_name: str) -> Optional[str]:
+def feature_of_command(qualified_name: str) -> str | None:
     """コマンドが属する機能のキー（止められない・止める対象でないコマンドは None）。"""
     if qualified_name in ALWAYS_ALLOWED:
         return None

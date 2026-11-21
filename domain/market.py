@@ -6,8 +6,8 @@
 
 import math
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional
 
 from domain.errors import Failure, fail
 from domain.ports import get_catalogs
@@ -62,7 +62,7 @@ def drift_per_minute(sym: "Symbol", price: float) -> float:
 DAILY_LIMIT = _CFG.daily_limit  # 値幅制限。24時間前の価格から、上下にこの割合まで（ストップ高・ストップ安）
 
 
-def limit_to_day(prices: dict, reference: dict, limit: float = DAILY_LIMIT) -> dict:
+def limit_to_day(prices: dict[str, float], reference: dict[str, float], limit: float = DAILY_LIMIT) -> dict[str, float]:
     """価格を、24時間前の価格（reference）の ±limit の範囲に収める。基準のない銘柄は、そのまま。"""
     out = {}
     for key, price in prices.items():
@@ -71,7 +71,7 @@ def limit_to_day(prices: dict, reference: dict, limit: float = DAILY_LIMIT) -> d
     return out
 
 
-def pin_states(fair: dict, reference: dict, limit: float = DAILY_LIMIT) -> dict:
+def pin_states(fair: dict[str, float], reference: dict[str, float], limit: float = DAILY_LIMIT) -> dict[str, int]:
     """理論価格が値幅の外にある銘柄の、張り付きの向き {銘柄: 1（ストップ高）/ -1（ストップ安）/ 0}。基準のない銘柄は 0。"""
     out = {}
     for key, price in fair.items():
@@ -84,7 +84,7 @@ def pin_states(fair: dict, reference: dict, limit: float = DAILY_LIMIT) -> dict:
 PIN_LOCKS = dict(_CFG.pin_locks)
 
 
-def pin_lock_failure(symbol: str, pin: int, action: str) -> Optional[Failure]:
+def pin_lock_failure(symbol: str, pin: int, action: str) -> Failure | None:
     """張り付き中で action が約定しないなら Failure を返す。通るなら None。"""
     if action not in PIN_LOCKS.get(pin, ()):
         return None
@@ -132,25 +132,25 @@ def correlation(a: str, b: str) -> float:
     return CORRELATION.get((a, b), CORRELATION.get((b, a), 0.0))
 
 
-def covariance_matrix() -> list:
+def covariance_matrix() -> list[list[float]]:
     """分散共分散行列 Σ（Σ_ij = σ_i σ_j ρ_ij）。SYMBOLS の並びの順。"""
     return [[a.sigma * b.sigma * correlation(a.key, b.key) for b in SYMBOLS] for a in SYMBOLS]
 
 
-def cholesky(matrix: list) -> list:
+def cholesky(matrix: list[list[float]]) -> list[list[float]]:
     """コレスキー分解 Σ = L Lᵀ の下三角行列 L。正定値でなければ ValueError。"""
     n = len(matrix)
     low = [[0.0] * n for _ in range(n)]
     for i in range(n):
         for j in range(i + 1):
             total = sum(low[i][k] * low[j][k] for k in range(j))
-            if i == j:
-                diag = matrix[i][i] - total
-                if diag <= 0:
-                    raise ValueError("相関の数字が正しくありません（行列が正定値ではありません）")
-                low[i][j] = math.sqrt(diag)
-            else:
+            if i != j:
                 low[i][j] = (matrix[i][j] - total) / low[j][j]
+                continue
+            diag = matrix[i][i] - total
+            if diag <= 0:
+                raise ValueError("相関の数字が正しくありません（行列が正定値ではありません）")
+            low[i][j] = math.sqrt(diag)
     return low
 
 
@@ -158,7 +158,9 @@ COVARIANCE = covariance_matrix()
 CHOLESKY = cholesky(COVARIANCE)
 
 
-def next_prices(prices: dict, rng: random.Random, vol: Optional[dict] = None) -> tuple:
+def next_prices(
+    prices: dict[str, float], rng: random.Random, vol: dict[str, float] | None = None
+) -> tuple[dict[str, float], int]:
     """1分後の全銘柄の価格と、有事の出来事（+1 急騰 / -1 急落 / 0 なし）。
 
     独立な標準正規乱数 z から、相関のある揺れ ε = L z を作り、P_i ← P_i · exp(-Σ_ii/2 + ε_i) と動かす（Σ = L Lᵀ）。
@@ -193,7 +195,7 @@ LOSSCUT_RATIO = _CFG.losscut_ratio  # 維持率がこれを下回ったら、損
 COLLATERAL_HAIRCUT = dict(_CFG.collateral_haircut)  # 現物・通常債・ジャンク債を、担保として数える掛目
 
 
-def required_margin(exposure: dict) -> float:
+def required_margin(exposure: dict[str, float]) -> float:
     """必要証拠金。exposure は {銘柄: 符号つきの建玉額（買い建てが＋、空売りが−）}。
 
     RISK_K × √(wᵀΣw)。相関のある建玉（CSの買いとTEIOの売りなど）は、互いの値動きを打ち消すので、必要額が小さくなる。
@@ -212,7 +214,7 @@ def _fee(gross: int) -> int:
     return math.ceil(gross * FEE_RATE)
 
 
-def buy_quote(amount: int, price: float) -> tuple:
+def buy_quote(amount: int, price: float) -> tuple[int, int, int]:
     """amount ペリカの範囲で買える最大の口数。(口数, 支払い総額, うち手数料)。買えなければ (0, 0, 0)。"""
     units = int(amount * UNIT // (price * (1 + FEE_RATE)))
     while units > 0:
@@ -224,7 +226,7 @@ def buy_quote(amount: int, price: float) -> tuple:
     return 0, 0, 0
 
 
-def sell_quote(units: int, price: float) -> tuple:
+def sell_quote(units: int, price: float) -> tuple[int, int]:
     """units 口を売ったときの (受け取る額, 手数料)。"""
     gross = int(round(units * price / UNIT, 6) // 1)  # 小数の誤差で1ペリカずれないよう丸めてから切り捨てる
     fee = _fee(gross)
@@ -264,22 +266,24 @@ def lots(units: int) -> str:
     return f"{units / UNIT:,.3f}枚"
 
 
-def correlation_from_history(hist_a: list, hist_b: list) -> Optional[float]:
+def correlation_from_history(
+    hist_a: Sequence[tuple[float, float, int]], hist_b: Sequence[tuple[float, float, int]]
+) -> float | None:
     """2つの銘柄の価格の履歴 [(時刻, 価格, 出来事), ...] から、1分ごとの値動き（対数の変化）の相関を求める。足りなければ None。"""
     a = {t: p for t, p, _ in hist_a}
     pairs = [(a[t], p) for t, p, _ in hist_b if t in a]  # 同じ時刻の価格だけを使う
     if len(pairs) < 30:
         return None
-    ra = [math.log(y[0] / x[0]) for x, y in zip(pairs, pairs[1:])]
-    rb = [math.log(y[1] / x[1]) for x, y in zip(pairs, pairs[1:])]
+    ra = [math.log(y[0] / x[0]) for x, y in zip(pairs, pairs[1:], strict=False)]
+    rb = [math.log(y[1] / x[1]) for x, y in zip(pairs, pairs[1:], strict=False)]
     ma, mb = sum(ra) / len(ra), sum(rb) / len(rb)
     va, vb = sum((x - ma) ** 2 for x in ra), sum((x - mb) ** 2 for x in rb)
     if va <= 0 or vb <= 0:
         return None
-    return sum((x - ma) * (y - mb) for x, y in zip(ra, rb)) / math.sqrt(va * vb)
+    return sum((x - ma) * (y - mb) for x, y in zip(ra, rb, strict=True)) / math.sqrt(va * vb)
 
 
-def describe_correlation(value: Optional[float]) -> str:
+def describe_correlation(value: float | None) -> str:
     """相関を、ひと目で分かる言葉にする。"""
     if value is None:
         return "—"
@@ -299,14 +303,14 @@ LEVELS = _CFG.levels
 PERIODS = {k: (v.label, v.seconds) for k, v in _CFG.periods.items()}
 
 
-def downsample(prices: list, width: int) -> list:
+def downsample(prices: list[float], width: int) -> list[float]:
     """価格の列を width 個にまとめる（各区間の最後の値）。足りなければそのまま。"""
     if len(prices) <= width:
         return list(prices)
     return [prices[min(len(prices) - 1, (i + 1) * len(prices) // width - 1)] for i in range(width)]
 
 
-def render_chart(prices: list, width: int = 32, height: int = 8) -> str:
+def render_chart(prices: list[float], width: int = 32, height: int = 8) -> str:
     """棒の高さで価格を表す面グラフ（コードブロックの中に入れて使う）。縦は height 行 × 8段階。"""
     if not prices:
         return "（まだデータがありません）"
@@ -326,7 +330,7 @@ def render_chart(prices: list, width: int = 32, height: int = 8) -> str:
     return "\n".join(rows)
 
 
-def summary(prices: list) -> Optional[dict]:
+def summary(prices: list[float]) -> dict[str, float] | None:
     if not prices:
         return None
     first, last = prices[0], prices[-1]

@@ -6,7 +6,6 @@
 """
 
 import math
-from typing import Optional
 
 from domain import bonds, teiai
 
@@ -31,14 +30,14 @@ _NOISE_MAX_DAYS = 1 / 24  # 止まっていたあとの1回の揺らぎは、1�
 SALE_SPREAD_PER_HOUR = max(0.0, bonds.SALE_DISCOUNT_PER_HOUR - BASE_RISK_FREE_PER_DAY / 24)
 
 
-def rf_target(theta: Optional[float]) -> float:
+def rf_target(theta: float | None) -> float:
     """準備率 θ のときの r_f の目標 μ(θ)（1日あたり）。θ が None（信託も社債もない）なら基準の金利。"""
     if theta is None:
         return BASE_RISK_FREE_PER_DAY
     return RF_MIN + (RF_MAX - RF_MIN) * math.exp(-teiai.RF_ALPHA * max(0.0, theta))
 
 
-def rf_step(r: float, theta: Optional[float], days: float, z: float) -> float:
+def rf_step(r: float, theta: float | None, days: float, z: float) -> float:
     """r_f を days 日だけ進める（CIR 風）。z は標準正規乱数。
 
     平均回帰は厳密に（μ + (r − μ)·exp(−κ·dt)）、揺らぎは σ·√(r·dt)·z。結果は [下限, 上限] に収める。

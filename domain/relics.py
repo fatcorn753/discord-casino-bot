@@ -4,6 +4,7 @@
 """
 
 import random
+from collections.abc import Iterable
 
 from domain.ports import get_catalogs
 
@@ -15,7 +16,7 @@ STAR_MAX = _CFG.star_max  # ★の最大。★が1つ増えるごとに、効果
 BUFFS = {k: (v.effect, v.description) for k, v in _CFG.buffs.items()}
 
 
-def split_id(item_id: str) -> tuple:
+def split_id(item_id: str) -> tuple[str, int]:
     """品のID → (★なしの品のID, ★の数)。ID は ★なしが `relic_fossil`、★n が `relic_fossil_sn`。"""
     head, sep, tail = item_id.rpartition("_s")
     if sep and tail.isdigit() and head in BUFFS:
@@ -32,7 +33,7 @@ def stars(star: int) -> str:
     return "★" * star
 
 
-def buffs_of(held) -> dict:
+def buffs_of(held: dict[str, int] | Iterable[str]) -> dict[str, float]:
     """持っている発掘品から、効果ごとの上がり幅 {効果の名前: 0.01 × 個数}。持っていない効果は入らない。
 
     held は {品のID: 個数}、または品のIDの並び（同じIDが複数あれば、その個数）。
@@ -41,7 +42,7 @@ def buffs_of(held) -> dict:
     if not isinstance(held, dict):
         for i in held:
             counts[i] = counts.get(i, 0) + 1
-    out: dict = {}
+    out: dict[str, float] = {}
     for item_id, qty in counts.items():
         base, star = split_id(item_id)
         if base in BUFFS and qty > 0:

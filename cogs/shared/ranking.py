@@ -1,7 +1,5 @@
 """ランキングの表示（`/ペリカ ランキング` と、自動更新のランキング掲示板で共通）。"""
 
-from typing import Optional
-
 import discord
 
 from cogs.shared import ui
@@ -15,11 +13,11 @@ TOP_N = 10
 
 def build_embed(
     repos: RankingService,
-    guild_ids: Optional[set],
+    guild_ids: set | None,
     title: str,
-    viewer_id: Optional[int] = None,
+    viewer_id: int | None = None,
     header: str = "",
-    footer: Optional[str] = None,
+    footer: str | None = None,
 ) -> discord.Embed:
     """上位 TOP_N 人のランキングの埋め込みを作る。guild_ids を渡すと、その人たちの中での順位。
 
@@ -55,10 +53,10 @@ def build_embed(
 
 def build_final_embed(
     repos: RankingService,
-    guild_ids: Optional[set],
+    guild_ids: set | None,
     title: str,
-    viewer_id: Optional[int] = None,
-    footer: Optional[str] = None,
+    viewer_id: int | None = None,
+    footer: str | None = None,
 ) -> discord.Embed:
     """総資産（馬・持ち物・発掘品なども、ペリカに換算しての総額）の上位 TOP_N 人。"""
     ranked = repos.final_assets(guild_ids)
@@ -71,10 +69,10 @@ def build_final_embed(
             f"\u3000**{ui.pelica(total)}**"
             for r, (uid, total, _p) in enumerate(ranked[:TOP_N], 1)
         ]
-        if viewer_id:
-            for r, (uid, total, _p) in enumerate(ranked, 1):
-                if uid == viewer_id and r > TOP_N:
-                    lines.append(f"…\n`{r:>2}` <@{viewer_id}>\u3000**{ui.pelica(total)}**")
+        if viewer_id:  # 閲覧者が圏外なら、その順位の行も末尾に足す
+            me = next(((r, total) for r, (uid, total, _p) in enumerate(ranked, 1) if uid == viewer_id), None)
+            if me is not None and me[0] > TOP_N:
+                lines.append(f"…\n`{me[0]:>2}` <@{viewer_id}>\u3000**{ui.pelica(me[1])}**")
         e = ui.embed(title, "\n".join(lines), ui.GOLD)
     if footer:
         e.set_footer(text=footer)
