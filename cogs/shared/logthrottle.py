@@ -2,7 +2,8 @@
 
 import logging
 import time
-from typing import Hashable, Optional
+from collections.abc import Hashable
+from typing import Optional
 
 _LOG = logging.getLogger(__name__)
 _last: dict[Hashable, float] = {}

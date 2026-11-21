@@ -3,7 +3,8 @@
 表の定義は infra/db/schema/tables.py にある。
 """
 
-from typing import Iterable, Optional
+from collections.abc import Iterable
+from typing import Optional
 
 from domain.ports.bridges import WealthyReader, noop_wealthy_reader
 from domain.ports.contracts import GuildStatusRow, LeaderboardRow, ProfileRow

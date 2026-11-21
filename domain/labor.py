@@ -295,7 +295,7 @@ def settle_plan(
     expired = sorted((w for w in workers if w["expires_at"] <= now), key=lambda w: -CONTRACT_FEE[w["kind"]])
 
     def counts_of(ws):
-        c = {k: 0 for k in WORKERS}
+        c = dict.fromkeys(WORKERS, 0)
         for w in ws:
             c[w["kind"]] += 1
         return c

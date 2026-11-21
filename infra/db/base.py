@@ -36,7 +36,7 @@ class EcoDb:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
-        self.notices: dict[tuple[int, int], list["Notice"]] = {}
+        self.notices: dict[tuple[int, int], list[Notice]] = {}
         self._tx_depth = 0
 
     @contextmanager

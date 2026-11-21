@@ -1,7 +1,8 @@
 """経済・通知・履歴・ギルド設定・資産集計のリポジトリポート契約。"""
 
 import datetime
-from typing import TYPE_CHECKING, Iterable, Optional
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Optional
 
 from domain.ports.bridges import INoticeSink
 from domain.ports.contracts import (

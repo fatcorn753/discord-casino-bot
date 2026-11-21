@@ -542,7 +542,7 @@ def test_parse_user_id_and_autocomplete(tmp_path):
     assert (
         asyncio.run(cog.guild_autocomplete(as_interaction(dm(FRIEND, [])), "友達")) == []
     )  # 持ち主以外には候補も出さない
-    inter.namespace = SimpleNamespace(**{"サーバー": "5"})
+    inter.namespace = SimpleNamespace(サーバー="5")
     assert [c.value for c in asyncio.run(cog.user_autocomplete(as_interaction(inter), "ありす"))] == [
         "1"
     ]  # Bot は出ない

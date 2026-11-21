@@ -134,8 +134,8 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         """最近の掘り出し（石炭は除く）。すでにペリカ等を受け取り済みのものは出さない。新しい順。[{at, kind, ore}]。"""
         with self._lock:
             return self._all(
-                "SELECT at, kind, ore FROM labor_finds WHERE guild_id=? AND user_id=? AND collected=0 AND ore NOT IN (%s) "
-                "ORDER BY at DESC, id DESC LIMIT ?" % ",".join("?" * len(labor_mod.FLAT)),
+                "SELECT at, kind, ore FROM labor_finds WHERE guild_id=? AND user_id=? AND collected=0 AND ore NOT IN ({}) "
+                "ORDER BY at DESC, id DESC LIMIT ?".format(",".join("?" * len(labor_mod.FLAT))),
                 (self._g(), user_id, *labor_mod.FLAT, limit),
             )
 
@@ -257,21 +257,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             row: dict[str, Any] = (
                 r
                 if r
-                else {
-                    k: 0
-                    for k in (
-                        "pick",
-                        "glove",
-                        "pot",
-                        "pot_workers",
-                        "day_earned",
-                        "day_click",
-                        "clicks",
-                        "earned_total",
-                        "dorm",
-                        "idle_at",
-                    )
-                }
+                else dict.fromkeys(("pick", "glove", "pot", "pot_workers", "day_earned", "day_click", "clicks", "earned_total", "dorm", "idle_at"), 0)
                 | {
                     "fatigue": 0.0,
                     "fatigue_at": now,

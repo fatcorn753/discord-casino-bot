@@ -41,7 +41,7 @@ def _at(day: datetime.date, hm: tuple[int, int], tz_hours: float) -> float:
 def next_release(now: float, tz_hours: float) -> float:
     """now より後の、いちばん近い決算発表（火曜 13:30）の時刻。"""
     today = _local(now, tz_hours).date()
-    for d in range(0, 8):
+    for d in range(8):
         day = today + datetime.timedelta(days=d)
         if day.weekday() == RELEASE_WEEKDAY:
             t = _at(day, RELEASE_TIME, tz_hours)

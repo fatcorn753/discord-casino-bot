@@ -1,6 +1,7 @@
 """現物の売買（買い・売り）。"""
 
-from typing import TYPE_CHECKING, Callable, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Optional
 
 import discord
 
