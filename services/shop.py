@@ -7,6 +7,7 @@ from domain import shop, teiai
 from domain.earnings import MemoInfo
 from domain.errors import Outcome
 from domain.ports.clock import IClock
+from domain.ports.contracts import AuctionHorseRow, ListingRow
 from domain.ports.repos import (
     IAuctionRepo,
     IDebtRepo,
@@ -123,7 +124,7 @@ class ShopService:
         resolved_tab = tab if tab is not None else ("players" if p2p_enabled and p2p_total else "teiai")
         if not p2p_enabled:
             resolved_tab = "teiai"
-        p2p_rows: list[tuple[dict[str, Any], str]] = []
+        p2p_rows: list[tuple[ListingRow, str]] = []
         if resolved_tab == "players":
             rows = p2p_repo.p2p_active(kind, now, limit=limit, mode=mode, order=order)
             p2p_rows = [(r, p2p_repo.p2p_label(r)) for r in rows]
@@ -182,7 +183,7 @@ class ShopService:
     def market_buy(self, guild_id: int, user_id: int, listing_id: int, qty: int) -> MarketPurchase:
         return self._auction.for_guild(guild_id).market_buy(user_id, listing_id, qty, self._clock.now_ts())
 
-    def auction_horses(self, guild_id: int) -> list[dict[str, Any]]:
+    def auction_horses(self, guild_id: int) -> list[AuctionHorseRow]:
         return self._horses.for_guild(guild_id).auction_horses(self._clock.now_ts())
 
     def auction_buy_horse(self, guild_id: int, user_id: int, horse_id: int) -> Any:
