@@ -44,15 +44,15 @@
 | パス | 内容 |
 |---|---|
 | `loader.py` | 読み込む Cog モジュール一覧（`COG_MODULES`）と `load_all_cogs()`（`main.py` とテストで共有） |
-| `shared/` | 共通 Discord 基盤（`bot.py` / `bridges.py` / `ui.py` / `texts.py` / `tasks.py` / `confirm.py` / `messages/` / `approval_guard.py` / `ranking.py` / `announce.py` / `amount.py` / `horse_display.py` / `logthrottle.py`）。`CasinoBot` と Cog 間ブリッジ（`bridges.py`: `BotBridges`・`resolve_bridge` / `require_bridge`・名目的基底クラス群）により Service Locator なしで疎結合に連携、`tasks.py` で承認済みギルド走査を共通化、`logthrottle.py` で同じ原因の警告ログを間引く。`cogs/` は `infra/` を import しない（ログは標準 `logging`） |
-| `casino/` | `/カジノ`。`cog.py` と進行演出・静的台本（`common.py`・`simple.py`・`blackjack.py`・`chinchiro.py`・`pachinko.py`・`texts.py`） |
+| `shared/` | 共通 Discord 基盤（`bot.py` / `bridges.py` / `ui.py` / `texts.py` / `tasks.py` / `confirm.py` / `messages/` / `approval_guard.py` / `ranking.py` / `announce.py` / `amount.py` / `horse_display.py` / `logthrottle.py`）。`CasinoBot` と Cog 間ブリッジ（`bridges.py`: `BotBridges`・`resolve_bridge` / `require_bridge`・名目的基底クラス群。運営パネル操作の共通基底 `IAdminPanelBridge` を挟み `(成功か, 説明)` 返却の契約を明示）により Service Locator なしで疎結合に連携、`tasks.py` で承認済みギルド走査を共通化、`logthrottle.py` で同じ原因の警告ログを間引く。`ui.py` の応答ヘルパ（`reply_embed` / `reply_error` / `reply_warn` / `reply_ok`）が `interaction.response.is_done()` を見て `response.send_message` / `followup.send` を振り分けるので、全 Cog のエラー応答はそれらへ統一されている。`cogs/` は `infra/` を import しない（ログは標準 `logging`） |
+| `casino/` | `/カジノ`。`cog.py` と進行演出・静的台本（`common.py`・`simple.py`・`blackjack.py`・`chinchiro.py`・`chinchiro_table.py`（チンチロの卓・賭け台の描画。#104）・`pachinko.py`・`texts.py`） |
 | `economy/` | `/ペリカ`。`cog.py`・`embeds.py`（残高・デイリー・返済・破産・ミッション・履歴の画面）・`boards.py`（ランキング・掲示板自動更新） |
 | `teiai/` | `/ペリカ 帝愛` のパネル（`panel.py`）と海外逃亡の演出（`escape.py`）、静的 AA・状態文言（`texts.py`） |
 | `kyosai/` | `/共済`。帝愛共済（#34）の持ち口の譲渡・競り・動議と配当（`cog.py`） |
 | `poll/` | `/投票`。誰でも作れる賛成・反対の二択投票（`cog.py`・`views.py`） |
 | `shop/` | `/ショップ`。`cog.py`・`actions.py`・`embeds.py`・`texts.py`・`views.py`・`discord_ops.py`（ロール・ニックネーム反映） |
 | `horse/` | `/競馬`。`cog.py`・`cards.py`・`betting.py`・`stable.py`・`views.py`（ファサード） |
-| `market/` | `/証券` と債券定期処理。`cog.py`・`feed.py`・`bond_cog.py`・`embeds.py`・`bond_embeds.py`・`orders.py`・`views.py` |
+| `market/` | `/証券` と債券定期処理。`cog.py`・`feed.py`・`bond_cog.py`・`embeds.py`・`bond_embeds.py`・`orders/`（注文フローのパッケージ: `common.py`（確認・セッション・口数計算）・`spot.py`・`margin.py`・`option.py`・`bond.py`、`__init__.py` で従来どおり全シンボルを再エクスポート）・`views.py` |
 | `loan/` | `/貸付`。ユーザー同士の貸し借り（`cog.py`・`embeds.py`・`views.py`） |
 | `p2p/` | プレイヤー間の市場と競り（`cog.py`・`embeds.py`・`views.py`） |
 | `labor/` | `/地下 作業`・`/地下 ランキング`。クリッカー、作業員の雇用、鉱石の掘り出し（`cog.py`・`embeds.py`・`views.py`） |
@@ -62,7 +62,7 @@
 | `raffle/` | 抽選。参加費を預かり、締切で 1 人に全額を渡す（`cog.py`・`embeds.py`・`views.py`） |
 | `event/` | 突発イベントの告知（`cog.py`・`texts.py`、1 日 1 回、30 分だけ勝ち分が増える） |
 | `weekly/` | 週間ランキングの自動発表（毎週月曜 0 時）と限定称号の付与（`cog.py`・`embeds.py`） |
-| `admin/` | サーバー承認と `/運営` コマンド（`cog.py`・`approval_ops.py`・`economy_ops.py`・`content_ops.py`・`feature_ops.py`・`embeds.py`・`texts.py`・`views.py`・`purge.py`・`targets.py`） |
+| `admin/` | サーバー承認と `/運営` コマンド。`cog.py` はコマンド宣言・ブリッジ提供・リスナの薄い入口で、ビジネスロジックとハンドラ本体は `approval_ops.py`（承認・`owner_only`・パネル操作・`handle_button`）・`economy_ops.py`・`content_ops.py`・`feature_ops.py` へ、対象ギルド解決は `targets.py` へ寄せている（ほかに `embeds.py`・`texts.py`・`views.py`・`purge.py`） |
 | `help/` | `/help`。カテゴリ別の案内（`cog.py`・`texts.py`） |
 
 ## `services/` — アプリケーションサービス
@@ -115,6 +115,7 @@
 | `roulette.py` | ルーレット。賭け方と払い戻し |
 | `blackjack.py` | ブラックジャックのルール |
 | `chinchiro.py` | チンチロの役と勝敗 |
+| `jackpot.py` | チンチロのジャックポット抽選と配当計算（#104） |
 | `pachinko.py` | パチンコ。当たりの確率、リーチ・予告の抽選、還元率の計算 |
 | `rtplevel.py` | 還元率のレベル（1〜6）と `MIN_BET` |
 
@@ -161,13 +162,16 @@
 
 | パス | 内容 |
 |---|---|
-| `base.py` | `EcoDb`（共有 DB 接続・ロック・`tx()`・`close()`）、`ScopedRepo`（ギルドスコープ共通基底。`_one()`/`_all()` は行→辞書の定型取得）、`validate_guild_id()` |
+| `base.py` | `EcoDb`（共有 DB 接続・ロック・`tx()`・`close()`）、`ScopedRepo`（ギルドスコープ共通基底。`_one()`/`_all()`/`_scalar()` は行→辞書・単一値の定型取得）、`validate_guild_id()` |
 | `schema/` | DB の表定義（`tables.py`）と旧版からの列追加・データ移行（`migrations.py`） |
 | `repositories.py` | `RepositoryBundle` と `open_repositories()`（全リポジトリの構築・ブリッジ接続・`for_guild(gid)` スコープ切り替え・`db` 管理） |
 | `lazy_bridges.py` | 初期化時の循環参照を解決する遅延解決ブリッジラッパー（`Lazy*`） |
 | `account.py` | `AccountCore`（口座残高・台帳記帳・借金ライフサイクルフックの共有プリミティブ） |
 | `escrow.py` / `wallet.py` | 賭け金預かり・精算（`EscrowRepo`）と残高・デイリー・ランキング・統計・送金（`WalletRepo`） |
-| `assets.py` / `auction.py` / `bank.py` / `bonds.py` / `company.py` / `crypto.py` / `debt.py` / `earnings.py` / `events.py` / `guild.py` / `horse.py` / `kyosai.py` / `labor.py` / `loans.py` / `margin.py` / `market.py` / `market_events.py` / `notices.py` / `options.py` / `p2p.py` / `pachinko.py` / `poll.py` / `quiz.py` / `race.py` / `raffle.py` / `records.py` / `relics.py` / `rtp.py` / `shop.py` / `arena.py` | 機能別の独立リポジトリ群と `IAssetCollector` / `IAssetSeizureStep` / `ILiquidationStep` 戦略群（各 `domain/ports/repos/` 契約を継承実装） |
+| `assets.py` / `auction.py` / `bonds.py` / `company.py` / `crypto.py` / `earnings.py` / `events.py` / `guild.py` / `horse.py` / `labor.py` / `loans.py` / `margin.py` / `market.py` / `market_events.py` / `notices.py` / `options.py` / `p2p.py` / `pachinko.py` / `poll.py` / `quiz.py` / `race.py` / `raffle.py` / `records.py` / `relics.py` / `rtp.py` / `shop.py` / `arena.py` | 機能別の独立リポジトリ群と `IAssetCollector` / `IAssetSeizureStep` / `ILiquidationStep` 戦略群（各 `domain/ports/repos/` 契約を継承実装） |
+| `bank/` | `BankRepo`（帝愛銀行・破産猶予・CDS）の責務別パッケージ。逐次継承チェーンで `base.py`（コンストラクタ・手元現金の同期）→ `thermostat.py`（熱浴の内部状態）→ `deposits.py`（信託預金の読取・利率・入出金）→ `reserve.py`（準備率・ロック・`bank_status`）→ `flow.py`（入出金ウォーターフォール）→ `interest.py`（金利遷移・信託利息・利得税）→ `house.py`（胴元口座）→ `grace.py`（破産猶予）→ `cds.py`（CDS）。`__init__.py` が最終クラス `BankRepo` を再エクスポートし、`from infra.db.bank import BankRepo` は従来どおり使える |
+| `debt/` | `DebtRepo`（借金・身分・強制執行・種銭・自己破産・海外逃亡）の責務別パッケージ。逐次継承チェーンで `base.py`（コンストラクタ・身分と借金の読み取り）→ `lifecycle.py`（利息・後始末・天引き）→ `ops.py`（強制執行と借金の発生）→ `repay.py`（返済）→ `escape.py`（海外逃亡）→ `bankrupt.py`（自己破産）。差し押さえ `seizure.py`・換金 `liquidation.py`・競売査定 `seizure_value.py` は独立戦略クラス群。`__init__.py` が最終クラス `DebtRepo` と戦略ステップ群を再エクスポートし、`from infra.db.debt import DebtRepo` は従来どおり使える |
+| `kyosai/` | `KyosaiRepo`（帝愛共済 #34。口・配当・超過損失の請求・回収と帝愛の持ち口の競り・譲渡・動議）の責務別パッケージ。逐次継承チェーンで `base.py`（コンストラクタ・口の管理と引き戻し・`DAY`）→ `excess.py`（超過損失の請求）→ `daily.py`（毎日の配当と休眠回収）→ `auction.py`（競り）→ `offers.py`（譲渡）→ `motions.py`（動議と投票）→ `status.py`（表示用まとめ）。`__init__.py` が最終クラス `KyosaiRepo` と `DAY` を再エクスポートし、`from infra.db.kyosai import KyosaiRepo` は従来どおり使える |
 
 ## `tests/` — 自動テスト
 
