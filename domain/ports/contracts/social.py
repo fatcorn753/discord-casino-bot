@@ -453,7 +453,7 @@ class LaborClickFail(TypedDict):
 
 
 LaborClick = LaborClickOk | LaborClickFail
-"""「働く」を1回押した結果。ok で成否が分かる。"""
+"""「働く」を1回押した結果。`r["ok"] is True / is False` で成否の枝に絞れる。"""
 
 
 class LaborCollectDetail(TypedDict):
