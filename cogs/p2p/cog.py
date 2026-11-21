@@ -37,6 +37,7 @@ from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
 from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain.ports import get_catalogs
+from domain.ports.contracts import HorseRow, ListingRow
 from domain.ports.repos import IGuildRepo
 from domain.ports.session import ISessionGuard
 from services.p2p import P2PService
@@ -75,7 +76,7 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
             bridges.unregister(IP2PListingBridge, self)
             bridges.unregister(IP2PNavigationBridge, self)
 
-    def _post_args(self, guild_id: int, row: dict[str, Any]) -> tuple[str, Optional[dict[str, Any]]]:
+    def _post_args(self, guild_id: int, row: ListingRow) -> tuple[str, Optional[HorseRow]]:
         return self.p2p.label(guild_id, row), self.p2p.horse_of(guild_id, row)
 
     # ------------------------------ 出品の告知（チャンネルへの投稿） ------------------------------ #

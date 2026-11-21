@@ -23,6 +23,7 @@ from cogs.shared.bridges import BotBridges, IRaffleAdminBridge
 from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain.ports import get_catalogs
+from domain.ports.contracts import RaffleResult
 from domain.ports.repos import IGuildRepo
 from services.raffle import RaffleService
 
@@ -198,7 +199,7 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
             error_label="抽選を締められません",
         )
 
-    async def _finish_message(self, guild: discord.Guild, raffle: dict, embed: discord.Embed) -> None:
+    async def _finish_message(self, guild: discord.Guild, raffle: RaffleResult, embed: discord.Embed) -> None:
         """募集の投稿からボタンを外し、結果を同じチャンネルへ出す（当選者にはメンションする）。"""
         channel = guild.get_channel(raffle["channel_id"]) if guild else None
         if channel is None:

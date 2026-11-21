@@ -18,6 +18,7 @@ from cogs.shared.bridges import BotBridges, IEventAdminBridge
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import events
 from domain.ports.clock import IClock
+from domain.ports.contracts import ManualEventRow
 from domain.ports.repos import IGuildRepo
 from services.event import EventService
 
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from cogs.shared.bot import CasinoBot
 
 
-def _event_channel(guild: discord.Guild, m: dict) -> Optional[discord.abc.GuildChannel]:
+def _event_channel(guild: discord.Guild, m: ManualEventRow) -> Optional[discord.abc.GuildChannel]:
     """特別イベントの開始を告知したチャンネル（消えていれば None → 告知チャンネルに出す）。"""
     return guild.get_channel(m["channel_id"]) if m.get("channel_id") else None
 
@@ -78,7 +79,7 @@ class EventCog(commands.Cog, IEventAdminBridge):
         )
         return ui.embed(f"🔥 突発イベント発生！ {title}", text, ui.GOLD)
 
-    def manual_embed(self, m: dict, ended: bool) -> discord.Embed:
+    def manual_embed(self, m: ManualEventRow, ended: bool) -> discord.Embed:
         title, blurb = event_copy(m["game"])  # 廃止したゲームのイベントが残っていても落ちない
         if ended:
             return ui.embed(f"{title} は終了しました", "また次のイベントをお楽しみに！", ui.INFO)

@@ -21,6 +21,7 @@ from cogs.shared.tasks import run_for_allowed_guilds
 from domain import poll
 from domain.duration import format_minutes, parse_duration
 from domain.errors import Failure
+from domain.ports.contracts import PollView
 from domain.ports.repos import IGuildRepo
 from services.poll import PollService
 
@@ -128,7 +129,7 @@ class PollCog(commands.Cog, IPollButtonBridge):
         )
         await self._refresh(interaction.guild, p)
 
-    async def _refresh(self, guild: Optional[discord.Guild], p: dict[str, Any], *, closed: bool = False) -> None:
+    async def _refresh(self, guild: Optional[discord.Guild], p: PollView, *, closed: bool = False) -> None:
         """投票の投稿の票数を直す。締め切ったときは、ボタンを外す。"""
         channel = guild.get_channel(p["channel_id"]) if guild else None
         msg = ui.partial_message(channel, p["message_id"]) if channel is not None and p["message_id"] else None

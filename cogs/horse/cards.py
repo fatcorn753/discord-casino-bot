@@ -2,6 +2,7 @@
 
 import datetime
 import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 import discord
@@ -10,6 +11,7 @@ from cogs.shared import ui
 from cogs.shared.bridges import IHorseButtonBridge, NoOpHorseButtonBridge
 from domain import horse as horse_mod
 from domain import skins
+from domain.ports.contracts import RaceRow
 from services.horse import HorseDesk
 
 if TYPE_CHECKING:
@@ -18,18 +20,18 @@ if TYPE_CHECKING:
 MEDAL = ui.MEDALS
 
 
-def record_text(e: dict) -> str:
+def record_text(e: Mapping[str, Any]) -> str:
     """成績（オッズの元）。初出走は、そう書く。"""
     if not e.get("races"):
         return "初出走"
     return f"{e['races']}戦{e['wins']}勝（3着内{e['places']}）"
 
 
-def stat_short(e: dict) -> str:
+def stat_short(e: Mapping[str, Any]) -> str:
     return f"速{e['speed']} ス{e['stamina']} パ{e['power']} 根{e['guts']}"
 
 
-def race_title(desk: HorseDesk, race: dict) -> str:
+def race_title(desk: HorseDesk, race: RaceRow) -> str:
     tag = "（臨時）" if race["kind"] == "special" else ("🏆重賞" if desk.is_major_race(race) else "")
     return f"🏇 第{desk.race_number(race['id'])}競走{tag}"
 
@@ -56,13 +58,13 @@ async def refresh_entry_card(
         pass
 
 
-def house_mark(e: dict, now: datetime.datetime) -> str:
+def house_mark(e: Mapping[str, Any], now: datetime.datetime) -> str:
     """名前の前の印。季節演出の期間中は、帝愛の馬（馬主なし）だけに季節の絵を付ける（見た目だけ）。"""
     icon = "" if e["owner_id"] else skins.house_horse_icon(now)
     return f"{icon} " if icon else ""
 
 
-def runner_icon(e: dict, now: datetime.datetime) -> str:
+def runner_icon(e: Mapping[str, Any], now: datetime.datetime) -> str:
     """走路を走る絵。帝愛の馬は、季節演出の期間中は季節の絵（例: 🦌）になる。"""
     return ("" if e["owner_id"] else skins.house_horse_icon(now)) or "🐎"
 
@@ -74,7 +76,7 @@ def when(ts: float, now: float) -> str:
     return f"<t:{int(ts)}:t>（<t:{int(ts)}:R>）"
 
 
-def card_embed(desk: HorseDesk, race: dict, closed: bool = False) -> discord.Embed:
+def card_embed(desk: HorseDesk, race: RaceRow, closed: bool = False) -> discord.Embed:
     """出馬表。申し込み中は申し込みの馬、発売中は枠・オッズ・調子、終わったら着順。"""
     title = race_title(desk, race)
     now = desk.clock.now_ts()
@@ -107,7 +109,7 @@ def card_embed(desk: HorseDesk, race: dict, closed: bool = False) -> discord.Emb
                 f"馬券の発売: **{when(race['bet_close'], now)}** まで（単勝=1着・複勝=3着以内。**オッズは成績で決まり、賭けた時点で確定**）",
             ]
 
-        def entry_style(e: dict) -> str:
+        def entry_style(e: Mapping[str, Any]) -> str:
             return e["style"] or horse_mod.style_of({k: e[k] for k in horse_mod.STAT_KEYS})
 
         rows = [
@@ -124,7 +126,7 @@ def card_embed(desk: HorseDesk, race: dict, closed: bool = False) -> discord.Emb
         return e
     order = sorted(entries, key=lambda x: x["finish"])
 
-    def place(x: dict) -> str:
+    def place(x: Mapping[str, Any]) -> str:
         return MEDAL.get(x["finish"], str(x["finish"]) + "着")
 
     rows = [

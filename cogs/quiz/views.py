@@ -22,6 +22,7 @@ from cogs.shared.messages import format_failure
 from domain import quizpay
 from domain.duration import format_minutes, parse_duration
 from domain.errors import Failure
+from domain.ports.contracts import QuizView
 from domain.ports.repos import IGuildRepo
 from services.quiz import QuizService
 
@@ -103,7 +104,7 @@ def public_view(qid: int) -> discord.ui.View:
 class AnswerView(ui.OwnerView):
     """4択のボタン。押した人が挑戦者本人のときだけ受け付け、答えたらボタンを外す。"""
 
-    def __init__(self, quiz_svc: QuizService, user_id: int, quiz: dict, order: list):
+    def __init__(self, quiz_svc: QuizService, user_id: int, quiz: QuizView, order: list):
         super().__init__(user_id, timeout=600)
         self._quiz = quiz_svc
         self.user_id, self.quiz, self.order = user_id, quiz, order

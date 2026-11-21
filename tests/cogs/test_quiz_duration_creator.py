@@ -2,6 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -213,7 +214,7 @@ def test_bulk_and_old_schema_keep_the_creator(tmp_path):
     ids = eco.quiz.quiz_add_many(quizzes, NOW, "持ち主さん")
     assert (
         must(eco.quiz.quiz_get(ids[0]))["creator_name"] == "持ち主さん"
-        and abs(must(eco.quiz.quiz_get(ids[0]))["expires"] - NOW - 7200) < 1
+        and abs(cast(float, must(eco.quiz.quiz_get(ids[0]))["expires"]) - NOW - 7200) < 1
     )
     eco.db.conn.commit()
     eco.db.close()
