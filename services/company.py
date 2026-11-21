@@ -20,7 +20,7 @@ class CompanyService:
     def get(self, guild_id: int, user_id: int) -> Optional[dict[str, Any]]:
         return self._repo(guild_id).company_get(user_id, self._clock.now_ts())
 
-    def found(self, guild_id: int, user_id: int, name: str, kind: str) -> Outcome[str | dict[str, Any]]:
+    def found(self, guild_id: int, user_id: int, name: str, kind: str) -> Outcome[dict[str, Any]]:
         return self._repo(guild_id).company_found(user_id, name, kind, self._clock.now_ts())
 
     def invest(self, guild_id: int, user_id: int, amount: int) -> Outcome[int]:

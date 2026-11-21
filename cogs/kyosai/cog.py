@@ -24,6 +24,7 @@ from cogs.shared.bridges import BotBridges, IKyosaiVoteBridge, NoOpKyosaiVoteBri
 from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import kyosai, p2p
+from domain.errors import Failure
 from domain.ports.repos import IGuildRepo
 from services.kyosai import KyosaiService
 
@@ -169,6 +170,7 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         ok, result = self._kyosai.bid(ui.guild_id_of(interaction), interaction.user.id, amount)
         if not ok:
             return await self._fail(interaction, result)
+        assert not isinstance(result, Failure)
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "🔨 入札しました",
@@ -217,6 +219,7 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         ok, result = self._kyosai.accept(ui.guild_id_of(interaction), interaction.user.id, offer_id)
         if not ok:
             return await self._fail(interaction, result)
+        assert not isinstance(result, Failure)
         await interaction.response.send_message(
             embed=ui.ok_embed(
                 "🏛️ 譲渡が成立しました",
@@ -253,6 +256,7 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         ok, result = self._kyosai.propose(gid, interaction.user.id, premium / 100)
         if not ok:
             return await self._fail(interaction, result)
+        assert not isinstance(result, Failure)
         motion_id = result["id"]
         m = self._kyosai.motion(gid, motion_id) or result
         channel = announce_channel(interaction.guild, self._guild_repo) if interaction.guild else None
@@ -285,6 +289,7 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         ok, result = self._kyosai.vote(gid, interaction.user.id, choice.value == "yes", motion_id)
         if not ok:
             return await self._fail(interaction, result)
+        assert not isinstance(result, Failure)
         m = self._kyosai.motion(gid, result)
         if m is not None and interaction.guild is not None:
             await _edit_open_post(interaction.guild, m)  # 告知の投稿も最新の票数に書き換える（ボタンは残す）

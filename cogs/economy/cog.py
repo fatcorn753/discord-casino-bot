@@ -18,6 +18,7 @@ from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
 from cogs.shared.messages import format_failure, format_memo
 from cogs.teiai.panel import TeiaiPanel, panel_embed
 from domain import approval, skins
+from domain.errors import Failure
 from domain.ports import get_catalogs
 from domain.ports.clock import IClock
 from domain.ports.repos import IGuildRepo
@@ -150,6 +151,7 @@ class EconomyCog(commands.Cog):
             return await interaction.response.send_message(
                 embed=ui.error_embed("返せません", format_failure(result)), ephemeral=True
             )
+        assert not isinstance(result, Failure)
         await interaction.response.send_message(
             embed=embeds.repaid_embed(result, self._teiai.debt_of(gid, uid)), ephemeral=True
         )
@@ -181,6 +183,7 @@ class EconomyCog(commands.Cog):
             return await interaction.followup.send(
                 embed=ui.error_embed("破産できません", format_failure(result)), ephemeral=True
             )
+        assert not isinstance(result, Failure)
         await interaction.followup.send(  # 公開（見せ場）。誰が破産したかも出す
             embed=embeds.bankrupt_result_embed(result, interaction.user.display_name)
         )

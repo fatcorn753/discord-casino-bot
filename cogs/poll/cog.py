@@ -20,6 +20,7 @@ from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import poll
 from domain.duration import format_minutes, parse_duration
+from domain.errors import Failure
 from domain.ports.repos import IGuildRepo
 from services.poll import PollService
 
@@ -75,6 +76,7 @@ class PollCog(commands.Cog, IPollButtonBridge):
             return await interaction.response.send_message(
                 embed=ui.error_embed("できません", format_failure(result)), ephemeral=True
             )
+        assert not isinstance(result, Failure)
         p = self._poll.get(gid, result)
         assert p is not None
         await interaction.response.send_message(
@@ -105,6 +107,7 @@ class PollCog(commands.Cog, IPollButtonBridge):
         if not ok:
             await _error(interaction, format_failure(result))
             return
+        assert not isinstance(result, Failure)
         await interaction.response.edit_message(embed=poll_embed(result))
         await interaction.followup.send(f"**{'賛成' if act == 'yes' else '反対'}** に入れました。", ephemeral=True)
 
@@ -115,6 +118,7 @@ class PollCog(commands.Cog, IPollButtonBridge):
         if not ok:
             await _error(interaction, format_failure(result))
             return
+        assert not isinstance(result, Failure)
         p, (old_yes, old_no) = result["poll"], result["before"]
         await interaction.response.send_message(
             embed=ui.warn_embed(

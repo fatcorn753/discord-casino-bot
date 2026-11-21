@@ -7,6 +7,7 @@ from cogs.shared import ui
 from cogs.shared.messages import format_failure
 from domain import labor as lab
 from domain import relics, shop
+from domain.errors import Failure
 from services.labor import LaborService
 
 VIEW_TIMEOUT = 900  # 画面が反応する時間（秒）。過ぎたら、`/地下 作業` で開き直す
@@ -236,6 +237,7 @@ class LaborView(ui.OwnerView):
         ok, result = self._svc.merge_relic(self.guild_id, self.user_id, ui.selected_values(interaction)[0])
         if not ok:
             return await self._show(interaction, f"⚠ {format_failure(result)}")
+        assert not isinstance(result, Failure)
         item = shop.BY_ID[result]
         await self._show(interaction, f"🧬 合体した！　**{item.mark}{item.name}** ができた。{relics.buff_text(result)}")
 

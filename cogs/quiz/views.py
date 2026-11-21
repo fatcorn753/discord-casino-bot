@@ -21,6 +21,7 @@ from cogs.shared.bridges import IQuizAdminBridge, IQuizButtonBridge, NoOpQuizBut
 from cogs.shared.messages import format_failure
 from domain import quizpay
 from domain.duration import format_minutes, parse_duration
+from domain.errors import Failure
 from domain.ports.repos import IGuildRepo
 from services.quiz import QuizService
 
@@ -50,6 +51,7 @@ async def record_answer(
             embed=ui.error_embed("答えられません", format_failure(result)), ephemeral=True
         )
         return
+    assert not isinstance(result, Failure)
     await interaction.response.send_message(
         embed=result_embed(result, quiz_svc.next_for(guild_id, interaction.user.id)[1], quiz), ephemeral=True
     )
@@ -124,6 +126,7 @@ class AnswerView(ui.OwnerView):
                 return await interaction.response.edit_message(
                     embed=ui.error_embed("答えられません", format_failure(result)), view=None
                 )
+            assert not isinstance(result, Failure)
             _, more = self._quiz.next_for(gid, self.user_id)
             self.stop()
             await interaction.response.edit_message(embed=result_embed(result, more, self.quiz), view=None)
@@ -279,6 +282,7 @@ class UserModal(QuizForm, title="クイズを出題"):
                 embed=ui.error_embed("出題できません", format_failure(result)), ephemeral=True
             )
             return
+        assert not isinstance(result, Failure)
         quiz_row = self._quiz.get_in(gid, result)
         assert quiz_row is not None
         await interaction.response.send_message(

@@ -24,6 +24,7 @@ from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
 from cogs.shared.messages import format_failure
 from domain import bonds, market
 from domain import options as opt
+from domain.errors import Failure
 from domain.ports import get_catalogs
 from domain.ports.session import ISessionGuard
 
@@ -385,6 +386,7 @@ async def option_buy(
         if not res_ok:
             await reply(embed=ui.error_embed(f"{name}を買えませんでした", format_failure(res)), ephemeral=True)
             return
+        assert not isinstance(res, Failure)
         await reply(
             embed=ui.ok_embed(
                 f"{emoji} 【{name}】{title_sym}（{opt.OPTION_HOURS}時間満期）",
@@ -455,6 +457,7 @@ async def option_write(
         if not ok:
             await reply(embed=ui.error_embed(f"{label}できませんでした", format_failure(res)), ephemeral=True)
             return
+        assert not isinstance(res, Failure)
         await reply(
             embed=ui.ok_embed(
                 f"🎰 【{label}】{sym.name}（{opt.OPTION_HOURS}時間満期）",
@@ -514,6 +517,7 @@ async def option_sell(
     if not ok:
         await reply(embed=ui.error_embed("できませんでした", format_failure(got)), ephemeral=True)
         return
+    assert not isinstance(got, Failure)
     if short:
         pnl = row["premium"] + got - row["margin"]  # got は、証拠金の戻り（マイナスなら、借金にした額）
         body = f"買い戻しました。証拠金の戻り: **{ui.pelica(max(0, got))}**" + (
@@ -559,6 +563,7 @@ async def bond_cancel(cog: "MarketCog", interaction: discord.Interaction, bond_i
             embed=ui.error_embed("売れません", format_failure(result)), ephemeral=True
         )
         return
+    assert not isinstance(result, Failure)
     await interaction.response.send_message(  # 公開（ほかの売買の結果と同じ）
         embed=ui.ok_embed(
             f"{interaction.user.display_name} が債券を売りました", f"{ui.pelica(result)}を残高に戻しました。"

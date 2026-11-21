@@ -12,6 +12,7 @@ from cogs.shared.bridges import IP2PListingBridge
 from cogs.shared.messages import format_failure
 from domain import p2p
 from domain import shop as shop_mod
+from domain.errors import Failure
 
 if TYPE_CHECKING:
     from cogs.p2p.cog import P2PCog
@@ -145,6 +146,7 @@ class SellModal(discord.ui.Modal):
                 embed=ui.error_embed("出品できません", format_failure(result)), ephemeral=True
             )
             return
+        assert not isinstance(result, Failure)
         row = p2p_svc.get(gid, result)
         assert row is not None
         self.view.stop()

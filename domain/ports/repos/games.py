@@ -72,7 +72,7 @@ class IRelicRepo(IGuildScopedRepo):
 class IHorseRepo(IGuildScopedRepo):
     HORSE_PRICE: int
 
-    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> Outcome[str | int]:
+    def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> Outcome[int]:
         raise NotImplementedError
 
     def horse_list(self, user_id: int) -> list[dict[str, Any]]:

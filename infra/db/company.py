@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from domain import company as company_mod
 from domain import teiai
-from domain.errors import Outcome, fail
+from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import (
     IAssetSeizureStep,
     IBankCashFlow,
@@ -151,11 +151,14 @@ class CompanyRepo(ScopedRepo, ICompanyRepo, IValuationSource):
             c = self._current(self._g(), user_id, now)
             return self._view(c, now) if c else None
 
-    def company_found(self, user_id: int, name: str, kind: str, now: float) -> Outcome[str | dict[str, Any]]:
+    def company_found(self, user_id: int, name: str, kind: str, now: float) -> Outcome[dict[str, Any]]:
         """会社を設立する（設立費と、Lv1 の建設費を払う）。(成功か, Failure か会社)。"""
-        ok, name = company_mod.check_name(name)
+        ok, checked = company_mod.check_name(name)
         if not ok:
-            return False, name
+            assert isinstance(checked, Failure)
+            return False, checked
+        assert isinstance(checked, str)
+        name = checked
         if kind not in company_mod.KINDS:
             return False, fail("company_kind_unknown")
         cost = company_mod.FOUND_FEE + company_mod.BUILD_COSTS[0]

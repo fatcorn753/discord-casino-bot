@@ -4,6 +4,7 @@ import pytest
 
 from domain import company as co
 from domain import teiai
+from domain.errors import Failure
 from infra.db.repositories import open_repositories
 
 pytestmark = pytest.mark.real_scope
@@ -38,9 +39,13 @@ def house(eco):
 # ----------------------------- 数字 ----------------------------- #
 def test_check_name_rejects_empty_long_and_markup():
     assert co.check_name("  帝愛商事 ") == (True, "帝愛商事")
-    assert co.check_name("")[1].code == "company_name_empty"
-    assert co.check_name("あ" * (co.NAME_MAX + 1))[1].code == "company_name_too_long"
-    assert co.check_name("@everyone")[1].code == "company_name_invalid_chars"
+    for bad, code in [
+        ("", "company_name_empty"),
+        ("あ" * (co.NAME_MAX + 1), "company_name_too_long"),
+        ("@everyone", "company_name_invalid_chars"),
+    ]:
+        res = co.check_name(bad)
+        assert not res[0] and isinstance(res[1], Failure) and res[1].code == code
 
 
 def test_invested_and_upgrade_cost_follow_the_build_table():

@@ -11,7 +11,7 @@ import datetime
 import random
 from dataclasses import dataclass
 
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports import get_catalogs
 from domain.ports.catalog_types.company import CompanyConditionContract, CompanyKindContract
 
@@ -48,7 +48,7 @@ class DayState:
         return self.condition.yield_mult
 
 
-def check_name(name: str) -> tuple:
+def check_name(name: str) -> Outcome[str]:
     """社名が使えるか。(使えるか, 整えた社名か Failure)。メンション・リンク・装飾に使う文字は禁止。"""
     name = name.strip()
     if not name:

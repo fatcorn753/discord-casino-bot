@@ -16,6 +16,7 @@ from cogs.teiai.texts import LEVEL_MARK as LEVEL_MARK
 from cogs.teiai.texts import LEVEL_TEXT as LEVEL_TEXT
 from cogs.teiai.texts import THERMOSTAT_OBSERVING, THERMOSTAT_TITLE
 from domain import teiai
+from domain.errors import Failure
 from domain.ports.contracts import BankStatus, BankThermostat, CdsHoldings, HouseAccount
 from services.teiai import TeiaiService
 
@@ -161,6 +162,7 @@ class StakeModal(discord.ui.Modal):
                 embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True
             )
             return
+        assert not isinstance(result, Failure)
         mine = self.target_id == uid
         text = (
             f"**{result}倍**で買いました（掛け金 {ui.pelica(stake)}・配当の見込み {ui.pelica(int(stake * result))}）。\n"
@@ -239,12 +241,20 @@ class TeiaiPanel(ui.OwnerView):
 
     async def _deposit(self, interaction: discord.Interaction, amount: Optional[int]) -> None:
         ok, result = self.teiai.deposit(ui.guild_id_of(interaction), interaction.user.id, amount or 0)
-        text = f"帝愛信託に入れました。いまの信託: **{ui.pelica(result)}**" if ok else format_failure(result)
+        if ok:
+            assert not isinstance(result, Failure)
+            text = f"帝愛信託に入れました。いまの信託: **{ui.pelica(result)}**"
+        else:
+            text = format_failure(result)
         await self._reply_bank(interaction, ok, text)
 
     async def _withdraw(self, interaction: discord.Interaction, amount: Optional[int]) -> None:
         ok, result = self.teiai.withdraw(ui.guild_id_of(interaction), interaction.user.id, amount)  # None は全額
-        text = f"**{ui.pelica(result)}** を引き出しました。" if ok else format_failure(result)
+        if ok:
+            assert not isinstance(result, Failure)
+            text = f"**{ui.pelica(result)}** を引き出しました。"
+        else:
+            text = format_failure(result)
         await self._reply_bank(interaction, ok, text)
 
     async def _reply_bank(self, interaction: discord.Interaction, ok: bool, text: str) -> None:
@@ -268,6 +278,7 @@ class TeiaiPanel(ui.OwnerView):
     async def seed(self, interaction: discord.Interaction, button: discord.ui.Button):
         ok, result = self.teiai.borrow_seed(ui.guild_id_of(interaction), interaction.user.id)
         if ok:  # 成功は公開（「💸 ○○ が帝愛から種銭を借りた」）。失敗は本人だけ
+            assert not isinstance(result, Failure)
             return await interaction.response.send_message(
                 embed=ui.embed(
                     f"💸 {interaction.user.display_name} が帝愛から種銭を借りました",

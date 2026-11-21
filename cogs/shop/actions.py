@@ -10,6 +10,7 @@ from cogs.shared.messages import format_failure, format_memo
 from cogs.shop.discord_ops import ShopError, apply_title_nick, nick_blocker, set_color_role
 from cogs.shop.embeds import SLOT_OF_KIND, UNEQUIP_NAMES, market_label, stock_text
 from domain import relics, shop
+from domain.errors import Failure
 
 if TYPE_CHECKING:
     from cogs.shop.cog import ShopCog
@@ -200,6 +201,7 @@ async def buy_insider_memo(
         if not done:
             await reply(embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True)
             return
+        assert not isinstance(result, Failure)
         await reply(embed=ui.embed("🕵️ 裏情報メモ（帝愛市）", format_memo(result), ui.DARK), ephemeral=True)
 
 
