@@ -66,9 +66,7 @@ async def run_escape(
         return
     done, result = teiai_svc.escape_attempt(gid, uid)
     if not done:
-        return await interaction.followup.send(
-            embed=ui.error_embed("逃亡できません", format_failure(result)), ephemeral=True
-        )
+        return await ui.reply_error(interaction, format_failure(result), title="逃亡できません")
     name = interaction.user.display_name
     title = f"🚢 {name} が、海外逃亡を試みる！！"
     message = await interaction.followup.send(

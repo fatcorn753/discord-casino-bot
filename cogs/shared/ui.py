@@ -84,11 +84,12 @@ async def reply_embed(interaction: discord.Interaction, embed: discord.Embed, *,
 
     テストの偽 interaction など is_done を持たない response では、未応答として扱う。
     """
-    is_done = getattr(interaction.response, "is_done", None)
-    if callable(is_done) and is_done():
-        await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+    response = getattr(interaction, "response", None)
+    is_done = getattr(response, "is_done", None) if response is not None else None
+    if response is not None and not (callable(is_done) and is_done()):
+        await response.send_message(embed=embed, ephemeral=ephemeral)
     else:
-        await interaction.response.send_message(embed=embed, ephemeral=ephemeral)
+        await interaction.followup.send(embed=embed, ephemeral=ephemeral)
 
 
 async def reply_error(

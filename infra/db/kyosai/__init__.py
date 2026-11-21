@@ -8,6 +8,7 @@ teiai_bank の kyosai_* と trust_premium）。数字と考え方は domain/kyos
 `__init__.py` が最終クラス `KyosaiRepo` を再エクスポートし、`from infra.db.kyosai import KyosaiRepo` は従来どおり使える。
 """
 
+from .base import DAY
 from .status import KyosaiRepo
 
-__all__ = ["KyosaiRepo"]
+__all__ = ["DAY", "KyosaiRepo"]

@@ -122,7 +122,7 @@ class NoOpHorseButtonBridge(IHorseButtonBridge):
 
 
 class IRaffleAdminBridge:
-    """運営向け抽選操作（Admin → RaffleCog）のブリッジ契約。"""
+    """運営向け抽選操作（Admin → RaffleCog）のブリッジ契約（host/repost/cancel はすべて (成功か, 説明) を返す）。"""
 
     async def host(
         self,

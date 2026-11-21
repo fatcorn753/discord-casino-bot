@@ -89,9 +89,7 @@ async def handle_lend(loan_svc: LoanService, interaction: discord.Interaction, l
         return
     ok, reason = loan_svc.lend(guild_id, loan_id, interaction.user.id)
     if not ok:
-        return await interaction.followup.send(
-            embed=ui.error_embed("貸せませんでした", format_failure(reason)), ephemeral=True
-        )
+        return await ui.reply_error(interaction, format_failure(reason), title="貸せませんでした")
     loan = loan_svc.get(guild_id, loan_id)
     assert loan is not None
     embed = _accepted_embed(loan)
