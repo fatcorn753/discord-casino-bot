@@ -481,6 +481,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
     casino = next(p for p in payloads if p["name"] == "カジノ")
     assert {o["name"] for o in casino["options"]} == {
         "チンチロ",
+        "チンチロ卓",
         "パチンコ",
         "スロット",
         "ブラックジャック",

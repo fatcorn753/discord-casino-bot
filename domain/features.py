@@ -40,6 +40,7 @@ CASINO_GAMES: dict[str, str] = {
 # スラッシュコマンドの名前（親から順に空白区切り）→ 機能のキー。長い名前が優先される
 COMMANDS: dict[str, str] = {
     **{f"カジノ {name}": key for name, key in CASINO_GAMES.items()},
+    "カジノ チンチロ卓": "chinchiro",
     "闘技場": "arena",
     "競馬": "horse",
     "証券 注文": "market",

@@ -2,12 +2,14 @@
 
 import datetime
 import logging
+import random
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from domain import events as events_mod
 from domain import skins
+from domain.games import jackpot
 from domain.games.pachinko import SetResult
 from domain.games.rtplevel import DEFAULT_RTP_POLICY, IRtpPolicy
 from domain.ports.clock import IClock
@@ -46,6 +48,8 @@ class SettleGameResult:
     rtp_shift: int = 0
     notices: tuple[Any, ...] = ()
     events: dict[str, Any] | None = None
+    jackpot_won: int = 0  # 共有ジャックポットを当てた額（当たらなければ 0）
+    jackpot_pool: int = 0  # 精算のあとの、ジャックポットの積み立て
 
 
 class CasinoService:
@@ -64,6 +68,7 @@ class CasinoService:
         clock: IClock,
         rtp_policy: IRtpPolicy = DEFAULT_RTP_POLICY,
         pachinko: Optional[IPachinkoRepo] = None,
+        rng: Optional[random.Random] = None,
     ) -> None:
         self._wallet = wallet
         self._escrow = escrow
@@ -76,6 +81,7 @@ class CasinoService:
         self.clock = clock
         self._rtp_policy = rtp_policy
         self._pachinko = pachinko
+        self._rng = rng or random.Random()  # ジャックポットの抽選
 
     def begin_game(
         self,
@@ -161,6 +167,7 @@ class CasinoService:
             ev_result = record_repo.record_play(user_id, game, bet, net, current_now.date(), tags)
         except Exception:
             _log.exception("連勝・ミッションの記録に失敗: %s", game)
+        won, pool = self._draw_jackpot(escrow_repo, user_id, bet)
         return SettleGameResult(
             duplicate=False,
             net=net,
@@ -170,7 +177,20 @@ class CasinoService:
             rtp_shift=rtp_shift,
             notices=notices,
             events=ev_result,
+            jackpot_won=won,
+            jackpot_pool=pool,
         )
+
+    def _draw_jackpot(self, escrow_repo: Any, user_id: int, bet: int) -> tuple[int, int]:
+        """共有ジャックポットの抽選。(当てた額, 抽選のあとの積み立て)。失敗しても、精算そのものは済んでいる。"""
+        try:
+            pool = escrow_repo.jackpot_pool()
+            if jackpot.draw(self._rng, bet, pool):
+                return escrow_repo.jackpot_claim(user_id), escrow_repo.jackpot_pool()
+            return 0, pool
+        except Exception:
+            _log.exception("ジャックポットの抽選に失敗")
+            return 0, 0
 
     def abort_game(self, guild_id: int, user_id: int, escrow_id: int) -> None:
         escrow_repo = self._escrow.for_guild(guild_id)

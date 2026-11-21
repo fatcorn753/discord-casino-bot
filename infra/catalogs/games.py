@@ -19,6 +19,7 @@ from domain.ports.catalog_types.games import (
     GoingContract,
     HorseCatalogContract,
     HorseStatContract,
+    JackpotContract,
     LaborCatalogContract,
     MissionContract,
     MissionsCatalogContract,
@@ -293,6 +294,14 @@ class GamesCommonSection(GamesCommonContract):
 
 
 @pydantic_dataclass(frozen=True, config=STRICT_CONFIG, kw_only=True)
+class JackpotSection(JackpotContract):
+    share: float = Field(gt=0, lt=0.5)
+    pelica_per_certain: int = Field(gt=0)
+    max_chance: float = Field(gt=0, le=1)
+    min_pool: int = Field(ge=0)
+
+
+@pydantic_dataclass(frozen=True, config=STRICT_CONFIG, kw_only=True)
 class SlotSymbolConfig(SlotSymbolContract):
     symbol: str = Field(min_length=1)
     weight: int = Field(gt=0)
@@ -394,6 +403,7 @@ class RtplevelSection(RtplevelSectionContract):
 @pydantic_dataclass(frozen=True, config=STRICT_CONFIG, kw_only=True)
 class GamesCatalog(GamesCatalogContract):
     common: GamesCommonSection
+    jackpot: JackpotSection
     slot: SlotSection
     roulette: RouletteSection
     blackjack: BlackjackSection

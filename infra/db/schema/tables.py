@@ -78,6 +78,13 @@ def create_tables(conn: sqlite3.Connection) -> None:
             ts            REAL NOT NULL
         );
         CREATE INDEX IF NOT EXISTS ledger_user ON ledger (guild_id, user_id, id);
+        CREATE TABLE IF NOT EXISTS jackpot (          -- 共有ジャックポット（サーバーごと。domain/games/jackpot.py）
+            guild_id    INTEGER PRIMARY KEY,
+            pool        INTEGER NOT NULL DEFAULT 0,  -- いまの積み立て
+            last_user   INTEGER,                     -- 最後に当てた人
+            last_amount INTEGER NOT NULL DEFAULT 0,
+            last_at     REAL    NOT NULL DEFAULT 0
+        );
         CREATE TABLE IF NOT EXISTS escrow (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id   INTEGER NOT NULL DEFAULT 0,

@@ -8,6 +8,7 @@ from discord.ext import commands
 
 from cogs.casino.blackjack import play_blackjack
 from cogs.casino.chinchiro import play_chinchiro
+from cogs.casino.chinchiro_table import open_table
 from cogs.casino.common import MIN_BET, CasinoDeps
 from cogs.casino.pachinko import play_pachinko
 from cogs.casino.simple import play_roulette, play_slot
@@ -53,6 +54,13 @@ class Casino(commands.Cog):
     @app_commands.autocomplete(bet=_bet_autocomplete)
     async def chinchiro(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET]):
         await play_chinchiro(interaction, self._deps, bet)
+
+    @casino.command(name="チンチロ卓", description="🎲 チンチロの卓を立てる。みんなで同じ親と勝負（60秒で締切）")
+    @app_commands.rename(bet="賭け金")
+    @app_commands.describe(bet="1人あたりの賭け金（座る人は全員この額）")
+    @app_commands.autocomplete(bet=_bet_autocomplete)
+    async def chinchiro_table(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET]):
+        await open_table(interaction, self._deps, bet)
 
     @casino.command(name="パチンコ", description="🎰 玉を打ち出して、入った数だけ回転。当たれば連チャン")
     @app_commands.rename(bet="賭け金", sets="回数")

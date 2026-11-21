@@ -3,6 +3,7 @@
 from typing import Any, Optional
 
 from domain import teiai
+from domain.games import jackpot
 from domain.ports.bridges import IBankCashFlow, IDebtOps
 from domain.ports.repos import IEscrowRepo
 from domain.types import INSURANCE_CAP
@@ -127,9 +128,16 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                     income=max(0, payout - amount),
                 )
             self._conn.execute("DELETE FROM escrow WHERE id=? AND guild_id=?", (escrow_id, gid))
+            lost = max(0, amount - total)
             self._bank.bank_income_for(
-                gid, int(max(0, amount - total) * teiai.LOSS_SHARE), self._now()
+                gid, int(lost * teiai.LOSS_SHARE), self._now()
             )  # 負けた額の一部が、帝愛銀行の収入になる
+            if jackpot.contribution(lost) > 0:  # 負けて消える分の一部を、共有ジャックポットに積む
+                self._conn.execute(
+                    "INSERT INTO jackpot (guild_id, pool) VALUES (?, ?) "
+                    "ON CONFLICT(guild_id) DO UPDATE SET pool = pool + excluded.pool",
+                    (gid, jackpot.contribution(lost)),
+                )
             taken = -self._account.apply(gid, user_id, -penalty, f"追加の支払い:{game}") if penalty > 0 else 0
             if penalty > taken:  # 残高で足りない分は、強制執行したうえで、残りを帝愛の借金にする
                 self._debt.owe_for(gid, user_id, penalty - taken, f"{game}の倍払い")
@@ -141,6 +149,28 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                 (total, net, gid, user_id),
             )
             return net, taken, insured
+
+    def jackpot_pool(self) -> int:
+        """いまの共有ジャックポットの積み立て。"""
+        with self._lock:
+            row = self._conn.execute("SELECT pool FROM jackpot WHERE guild_id=?", (self._g(),)).fetchone()
+            return row["pool"] if row else 0
+
+    def jackpot_claim(self, user_id: int) -> int:
+        """積み立てを全額 user_id に払い、0 に戻す。払った額を返す（収入として扱う。借金があれば天引きされる）。"""
+        with self._db.tx():
+            gid = self._g()
+            row = self._conn.execute("SELECT pool FROM jackpot WHERE guild_id=?", (gid,)).fetchone()
+            pool = row["pool"] if row else 0
+            if pool <= 0:
+                return 0
+            self._account.ensure(gid, user_id)
+            self._account.apply(gid, user_id, pool, "ジャックポット", income=pool)
+            self._conn.execute(
+                "UPDATE jackpot SET pool=0, last_user=?, last_amount=?, last_at=? WHERE guild_id=?",
+                (user_id, pool, self._now(), gid),
+            )
+            return pool
 
     def refund(self, escrow_id: int) -> bool:
         """エラー時の返金。賭け金（追加分を含む）を全額返す。成績（遊んだ回数・勝ち額）には数えない。"""

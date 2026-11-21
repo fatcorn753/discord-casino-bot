@@ -66,6 +66,8 @@ class GameContext:
         self.events: dict[str, Any] = {}  # 連勝・ミッションの結果（演出の表示に使う）
         self.skin: Any = None  # 装備中の、演出の変更品（domain/skins.py）。見た目だけが変わる
         self.notices: list[str] = []  # 精算で起きた、強制執行・種銭などの一言（infra/db/notices.py）
+        self.jackpot_won = 0  # 共有ジャックポットを当てた額
+        self.jackpot_pool = 0  # 精算のあとの、ジャックポットの積み立て
 
     def settle(
         self,
@@ -104,6 +106,7 @@ class GameContext:
         self.notices = format_notices(list(res.notices))
         if res.events is not None:
             self.events = res.events
+        self.jackpot_won, self.jackpot_pool = res.jackpot_won, res.jackpot_pool
         return res.net
 
     def release(self) -> None:
@@ -199,6 +202,8 @@ def result_lines(ctx: GameContext, payout: int, net: int, extra: str = "") -> st
     if debt:
         stats.append(f"借金: **{ui.pelica(debt)}**（収入の{int(teiai.REPAY_RATE * 100)}%が天引きで返済されます）")
     stats += ctx.notices  # 強制執行・種銭の一言
+    if ctx.jackpot_pool and not ctx.jackpot_won:  # 当てたときは、上の演出で出す
+        stats.append(f"💰 共有ジャックポット: いま **{ui.pelica(ctx.jackpot_pool)}**")
     head, tail = _celebration(ctx, net)
     if top and head:
         top.append("")
@@ -213,6 +218,8 @@ def result_color(bet: int, net: int, base: int) -> int:
 def _celebration(ctx: GameContext, net: int) -> tuple[list[str], list[str]]:
     """(結果の数字の前に出す、大勝ち・連勝の演出, 最後に出す、ミッション達成の通知)。"""
     ev, head, tail = ctx.events, [], []
+    if ctx.jackpot_won:
+        head.append(f"# 💰 共有ジャックポット！！ 💰\n**+{ui.pelica(ctx.jackpot_won)}** を総取り！")
     if missions.is_jackpot(ctx.bet, net):
         head.append(JACKPOT_ART)
     if line := big_win_line(ctx.bet, net):

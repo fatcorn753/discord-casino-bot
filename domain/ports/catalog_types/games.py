@@ -324,8 +324,17 @@ class RtplevelSectionContract:
 
 
 @dataclass(frozen=True)
+class JackpotContract:
+    share: float
+    pelica_per_certain: int
+    max_chance: float
+    min_pool: int
+
+
+@dataclass(frozen=True)
 class GamesCatalogContract:
     common: GamesCommonContract
+    jackpot: JackpotContract
     slot: SlotSectionContract
     roulette: RouletteSectionContract
     blackjack: BlackjackSectionContract

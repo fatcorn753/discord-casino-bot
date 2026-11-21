@@ -120,6 +120,12 @@ class IEscrowRepo(IGuildScopedRepo):
     def refund(self, escrow_id: int) -> bool:
         raise NotImplementedError
 
+    def jackpot_pool(self) -> int:
+        raise NotImplementedError
+
+    def jackpot_claim(self, user_id: int) -> int:
+        raise NotImplementedError
+
     def refund_all_escrows(self) -> int:
         raise NotImplementedError
 
