@@ -315,7 +315,7 @@ async def use_item(cog: "ShopCog", interaction: discord.Interaction, item: str) 
             async with cog._role_lock(gid):
                 await set_color_role(guild, member, it)
         except ShopError as exc:
-            await interaction.followup.send(embed=ui.error_embed("名前の色を変えられません", str(exc)), ephemeral=True)
+            await ui.reply_error(interaction, str(exc), title="名前の色を変えられません")
             return
         await interaction.followup.send(
             embed=ui.ok_embed(
@@ -358,7 +358,7 @@ async def unequip_item(cog: "ShopCog", interaction: discord.Interaction, slot: s
             async with cog._role_lock(gid):
                 await set_color_role(guild, member, None)
         except ShopError as exc:
-            await interaction.followup.send(embed=ui.error_embed("外せません", str(exc)), ephemeral=True)
+            await ui.reply_error(interaction, str(exc), title="外せません")
             return
         await interaction.followup.send(embed=ui.ok_embed("外しました", "名前の色を元に戻しました。"), ephemeral=True)
         return
@@ -394,9 +394,7 @@ async def set_title_display(cog: "ShopCog", interaction: discord.Interaction, mo
         if problem:
             if not was_on:
                 guild_repo.set_nick_pref(gid, uid, False)
-            await interaction.followup.send(
-                embed=ui.error_embed("ニックネームに付けられません", problem), ephemeral=True
-            )
+            await ui.reply_error(interaction, problem, title="ニックネームに付けられません")
             return
         msg = (
             f"称号 **{title}** をニックネームの後ろに付けました。"

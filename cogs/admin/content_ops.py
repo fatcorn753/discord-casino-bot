@@ -153,9 +153,7 @@ async def _raffle_panel_op(
         return
     await interaction.response.defer(ephemeral=True)
     ok, text = await op(raffle_bridge, guild, channel)
-    await interaction.followup.send(
-        embed=ui.ok_embed(ok_title, text) if ok else ui.error_embed(ng_title, text), ephemeral=True
-    )
+    await ui.reply_embed(interaction, ui.ok_embed(ok_title, text) if ok else ui.error_embed(ng_title, text))
 
 
 async def raffle_start(
@@ -249,9 +247,8 @@ async def quiz_bulk(
     try:
         text = (await file.read()).decode("utf-8-sig")
     except UnicodeDecodeError:
-        await interaction.followup.send(
-            embed=ui.error_embed("文字コードを読めません", "UTF-8 で保存したテキストファイルを添付してください。"),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction, "UTF-8 で保存したテキストファイルを添付してください。", title="文字コードを読めません"
         )
         return
     quizzes, errors = quizimport.parse_bulk(text)
@@ -264,11 +261,10 @@ async def quiz_bulk(
         ]
     if errors:
         more = f"\n…ほか{len(errors) - 15}件" if len(errors) > 15 else ""
-        await interaction.followup.send(
-            embed=ui.error_embed(
-                f"登録できません（誤り{len(errors)}件・1問も登録していません）", "\n".join(errors[:15]) + more
-            ),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction,
+            "\n".join(errors[:15]) + more,
+            title=f"登録できません（誤り{len(errors)}件・1問も登録していません）",
         )
         return
     view = QuizBulkConfirm(cog, interaction.user.id, quizzes, announce_flag, guild, channel)

@@ -194,9 +194,7 @@ class BlackjackView(GameOwnerView):
             ):
                 return
             if not casino.add_to_escrow(gid, eid, self.ctx.bet, credit=True):
-                return await interaction.followup.send(
-                    embed=ui.error_embed("ダブルできません", "帝愛から借りられませんでした。"), ephemeral=True
-                )
+                return await ui.reply_error(interaction, "帝愛から借りられませんでした。", title="ダブルできません")
             self.ctx.bet = casino.escrow_amount(gid, eid)
             self.game.double()
             return await self._after_origin()

@@ -178,9 +178,7 @@ class EconomyCog(commands.Cog):
             return
         ok, result = self._teiai.bankrupt(gid, uid)
         if not ok:
-            return await interaction.followup.send(
-                embed=ui.error_embed("破産できません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="破産できません")
         assert not isinstance(result, Failure)
         await interaction.followup.send(  # 公開（見せ場）。誰が破産したかも出す
             embed=embeds.bankrupt_result_embed(result, interaction.user.display_name)
