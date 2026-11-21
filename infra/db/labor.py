@@ -123,7 +123,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             (guild_id, user_id, guild_id, user_id, self.FINDS_KEEP),
         )
 
-    def labor_finds(self, user_id: int, limit: int = 6) -> list[Any]:
+    def labor_finds(self, user_id: int, limit: int = 6) -> list[dict[str, Any]]:
         """最近の掘り出し（石炭は除く）。すでにペリカ等を受け取り済みのものは出さない。新しい順。[{at, kind, ore}]。"""
         with self._lock:
             return [
@@ -442,7 +442,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         if hour % 24 == 0:  # 古い記録は、1日1回ほど掃除する
             self._conn.execute("DELETE FROM labor_click_hours WHERE hour<?", (hour - self.CLICK_LOG_DAYS * 24,))
 
-    def labor_click_hours(self, user_id: int, since: float) -> list[Any]:
+    def labor_click_hours(self, user_id: int, since: float) -> list[dict[str, Any]]:
         """since 以降の、1時間ごとの押した記録（古い順）。"""
         with self._lock:
             return [
@@ -454,7 +454,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 )
             ]
 
-    def labor_collect(self, user_id: int, now: float, day: str = "", detail: bool = False) -> Any:
+    def labor_collect(self, user_id: int, now: float, day: str = "", detail: bool = False) -> int | dict[str, Any]:
         """受け取る前の稼ぎから、帝愛のピンハネを引いて、残高に移す。移した額（借金の天引きの前）を返す。
 
         detail=True なら {amount（移した額）, skimmed（帝愛のピンハネ）, donated（これまでの寄付の合計）, ores（掘った鉱石）, relics（見つけた発掘品）}。

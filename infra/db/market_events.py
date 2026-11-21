@@ -17,7 +17,7 @@ class MarketEventRepo(ScopedRepo, IMarketEventRepo):
     def __init__(self, db: EcoDb, guild_id: int = 0, strict: bool = False) -> None:
         super().__init__(db, guild_id, strict)
 
-    def market_events(self, now: float) -> list[Any]:
+    def market_events(self, now: float) -> list[dict[str, Any]]:
         """終わっていないイベントと、直近に終わったもの（古い順）。"""
         with self._lock:
             return [

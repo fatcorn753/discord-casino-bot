@@ -59,7 +59,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
         """張り付き中で、この売買が約定しないなら Failure を返す。通るなら None。"""
         return market_mod.pin_lock_failure(symbol, self.market_pin(symbol), action)
 
-    def market_history(self, since: float, symbol: str = DEFAULT) -> list[Any]:
+    def market_history(self, since: float, symbol: str = DEFAULT) -> list[PricePoint]:
         """since（UNIX時間）以降の価格の列 [(時刻, 価格, 出来事), ...]。古い順。"""
         with self._lock:
             return [
@@ -87,7 +87,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
             )
             return prev["message_id"] if prev else None
 
-    def live_chart_posts(self) -> list[Any]:
+    def live_chart_posts(self) -> list[dict[str, Any]]:
         """自動で更新中のチャート。"""
         with self._lock:
             return [dict(r) for r in self._conn.execute("SELECT * FROM chart_posts WHERE live=1")]
@@ -108,7 +108,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
         with self._db.tx():
             self._conn.execute("DELETE FROM chart_posts WHERE ts<? AND live=0", (before_ts,))
 
-    def list_chart_boards(self) -> list[Any]:
+    def list_chart_boards(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(r) for r in self._conn.execute("SELECT * FROM chart_boards")]
 

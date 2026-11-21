@@ -69,7 +69,7 @@ class IHorseRepo(IGuildScopedRepo):
     def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> tuple[Any, ...]:
         raise NotImplementedError
 
-    def horse_list(self, user_id: int) -> list[Any]:
+    def horse_list(self, user_id: int) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def horse_get(self, horse_id: int) -> Optional[dict[str, Any]]:
@@ -90,7 +90,7 @@ class IHorseRepo(IGuildScopedRepo):
     def horse_auction_price(self, listed_at: float, now: float) -> int:
         raise NotImplementedError
 
-    def auction_horses(self, now: float) -> list[Any]:
+    def auction_horses(self, now: float) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def auction_buy_horse(self, user_id: int, horse_id: int, now: float) -> "PurchaseResult":
@@ -104,7 +104,7 @@ class IRaceRepo(IGuildScopedRepo):
     def race_number(self, race_id: int) -> int:
         raise NotImplementedError
 
-    def race_open(self) -> list[Any]:
+    def race_open(self) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def race_slots(self, now: float, tz_hours: float) -> list[float]:
@@ -119,7 +119,7 @@ class IRaceRepo(IGuildScopedRepo):
     def race_set_message(self, race_id: int, channel_id: int, message_id: int) -> None:
         raise NotImplementedError
 
-    def race_entries(self, race_id: int, registered_only: bool = False) -> list[Any]:
+    def race_entries(self, race_id: int, registered_only: bool = False) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def race_register(self, user_id: int, horse_id: int, race_id: int, now: float) -> tuple[Any, ...]:
@@ -134,17 +134,19 @@ class IRaceRepo(IGuildScopedRepo):
     def race_set_odds(self, race_id: int, odds: Any) -> None:
         raise NotImplementedError
 
-    def race_odds(self, race_id: int, kind: str, lanes: Any) -> Optional[float]:
+    def race_odds(self, race_id: int, kind: str, lanes: list[int]) -> Optional[float]:
         raise NotImplementedError
 
-    def race_bets(self, user_id: int, race_id: int) -> list[Any]:
+    def race_bets(self, user_id: int, race_id: int) -> list[dict[str, Any]]:
         raise NotImplementedError
 
-    def race_bet(self, user_id: int, race_id: int, kind: str, lane: Any, stake: int, now: float) -> tuple[Any, ...]:
+    def race_bet(
+        self, user_id: int, race_id: int, kind: str, lane: int | list[int], stake: int, now: float
+    ) -> tuple[Any, ...]:
         raise NotImplementedError
 
     def race_bet_many(
-        self, user_id: int, race_id: int, kind: str, lanes: list[Any], stake: int, now: float
+        self, user_id: int, race_id: int, kind: str, lanes: list[int], stake: int, now: float
     ) -> tuple[Any, ...]:
         raise NotImplementedError
 
@@ -169,7 +171,7 @@ class IArenaRepo(IGuildScopedRepo):
     def arena_tournament_get_by_day(self, day: str, fmt: str) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def arena_fighters(self, tournament_id: int) -> list[Any]:
+    def arena_fighters(self, tournament_id: int) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def arena_bet(self, user_id: int, fighter_id: int, amount: int, now: float) -> tuple[Any, ...]:
@@ -185,8 +187,8 @@ class IArenaRepo(IGuildScopedRepo):
     ) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def arena_my_bets(self, tournament_id: int, user_id: int) -> list[Any]:
+    def arena_my_bets(self, tournament_id: int, user_id: int) -> list[dict[str, Any]]:
         raise NotImplementedError
 
-    def arena_bets_breakdown(self, tournament_id: int) -> dict[int, list[Any]]:
+    def arena_bets_breakdown(self, tournament_id: int) -> dict[int, list[dict[str, Any]]]:
         raise NotImplementedError

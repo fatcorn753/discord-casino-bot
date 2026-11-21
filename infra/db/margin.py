@@ -99,7 +99,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         """建てている信用買い [(銘柄, 口数, 建てた総額, 担保), ...]（全銘柄）。"""
         return [row[1:] for row in self.margin_positions(user_id) if row[0] == "long"]
 
-    def short_holders(self, limit: int = 10, symbol: str = DEFAULT) -> list[Any]:
+    def short_holders(self, limit: int = 10, symbol: str = DEFAULT) -> list[tuple[int, int, int]]:
         """[(ユーザーID, 口数, 建てた総額)] 建てている口数が多い順。チャートの表示用。"""
         with self._lock:
             return [
@@ -390,7 +390,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             cut.append((symbol, side, -res.profit))
         return cut
 
-    def margin_cut_map(self, prices: Optional[dict[str, Any]] = None) -> list[Any]:
+    def margin_cut_map(self, prices: Optional[dict[str, Any]] = None) -> list[tuple[str, str, float, int]]:
         """このサーバーの、信用建玉のロスカット水準の地図 [(銘柄, 向き, ロスカットされる価格, 建玉額), ...]。"""
         out = []
         with self._lock:
@@ -464,7 +464,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                         done.append((gid, r["user_id"], r["symbol"], side, charge))
         return done
 
-    def margin_losscut(self, prices: dict[str, Any]) -> list[Any]:
+    def margin_losscut(self, prices: dict[str, Any]) -> list[tuple[int, int, str, str, int]]:
         """全サーバーの口座を調べ、維持率が LOSSCUT_RATIO を下回る口座を、連鎖ロスカットする。prices は {銘柄: いまの価格}。[(サーバー, ユーザー, 銘柄, 向き, 損失)]。"""
         done = []
         with self._db.tx():

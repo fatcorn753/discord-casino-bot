@@ -20,13 +20,13 @@ class P2PService:
         return self._p2p.for_guild(guild_id)
 
     # ------------------------------ 照会 ------------------------------ #
-    def get(self, guild_id: int, listing_id: int) -> Any:
+    def get(self, guild_id: int, listing_id: int) -> Optional[dict[str, Any]]:
         return self._repo(guild_id).p2p_get(listing_id)
 
-    def label(self, guild_id: int, row: Any) -> str:
+    def label(self, guild_id: int, row: dict[str, Any]) -> str:
         return self._repo(guild_id).p2p_label(row)
 
-    def horse_of(self, guild_id: int, row: Any) -> Optional[dict[str, Any]]:
+    def horse_of(self, guild_id: int, row: dict[str, Any]) -> Optional[dict[str, Any]]:
         """馬の出品なら、その馬。それ以外は None。"""
         return self._horses.for_guild(guild_id).horse_get(int(row["ref"])) if row["kind"] == "horse" else None
 
@@ -36,7 +36,7 @@ class P2PService:
     def sellable_items(self, guild_id: int, user_id: int) -> dict[str, Any]:
         return self._shop.for_guild(guild_id).inventory(user_id)
 
-    def sellable_horses(self, guild_id: int, user_id: int) -> list[Any]:
+    def sellable_horses(self, guild_id: int, user_id: int) -> list[dict[str, Any]]:
         return self._horses.for_guild(guild_id).horse_list(user_id)
 
     def balance_of(self, guild_id: int, user_id: int) -> int:
@@ -65,7 +65,7 @@ class P2PService:
     def cancel(self, guild_id: int, user_id: int, listing_id: int) -> tuple[Any, ...]:
         return self._repo(guild_id).p2p_cancel(user_id, listing_id, self._clock.now_ts())
 
-    def settle(self, guild_id: int) -> list[Any]:
+    def settle(self, guild_id: int) -> list[tuple[dict[str, Any], str]]:
         """締切の来た出品を精算する。[(出品, 結果), ...]。"""
         return self._repo(guild_id).p2p_settle(self._clock.now_ts())
 
@@ -76,5 +76,5 @@ class P2PService:
     def mark_post_done(self, guild_id: int, listing_id: int) -> None:
         self._repo(guild_id).p2p_mark_post_done(listing_id)
 
-    def unsynced_posts(self, guild_id: int) -> list[Any]:
+    def unsynced_posts(self, guild_id: int) -> list[dict[str, Any]]:
         return self._repo(guild_id).p2p_unsynced_posts()

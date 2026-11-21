@@ -27,23 +27,25 @@ class HorseDesk:
     def race_number(self, race_id: int) -> int:
         return self._races.race_number(race_id)
 
-    def race_open(self) -> list[Any]:
+    def race_open(self) -> list[dict[str, Any]]:
         return self._races.race_open()
 
-    def race_entries(self, race_id: int) -> list[Any]:
+    def race_entries(self, race_id: int) -> list[dict[str, Any]]:
         return self._races.race_entries(race_id)
 
-    def race_odds(self, race_id: int, kind: str, lanes: Any) -> Optional[float]:
+    def race_odds(self, race_id: int, kind: str, lanes: list[int]) -> Optional[float]:
         return self._races.race_odds(race_id, kind, lanes)
 
-    def race_bets(self, user_id: int, race_id: int) -> list[Any]:
+    def race_bets(self, user_id: int, race_id: int) -> list[dict[str, Any]]:
         return self._races.race_bets(user_id, race_id)
 
-    def race_bet(self, user_id: int, race_id: int, kind: str, lane: Any, stake: int, now: float) -> tuple[Any, ...]:
+    def race_bet(
+        self, user_id: int, race_id: int, kind: str, lane: int | list[int], stake: int, now: float
+    ) -> tuple[Any, ...]:
         return self._races.race_bet(user_id, race_id, kind, lane, stake, now)
 
     def race_bet_many(
-        self, user_id: int, race_id: int, kind: str, lanes: list[Any], stake: int, now: float
+        self, user_id: int, race_id: int, kind: str, lanes: list[int], stake: int, now: float
     ) -> tuple[Any, ...]:
         return self._races.race_bet_many(user_id, race_id, kind, lanes, stake, now)
 
@@ -63,7 +65,7 @@ class HorseDesk:
     def horse_get(self, horse_id: int) -> Optional[dict[str, Any]]:
         return self._horses.horse_get(horse_id)
 
-    def horse_list(self, user_id: int) -> list[Any]:
+    def horse_list(self, user_id: int) -> list[dict[str, Any]]:
         return self._horses.horse_list(user_id)
 
     def horse_create(self, user_id: int, name: str, coat: str, silks: str) -> tuple[Any, ...]:

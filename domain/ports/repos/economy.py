@@ -26,7 +26,7 @@ class IRecordRepo(IGuildScopedRepo):
     def mission_status(self, user_id: int, day: datetime.date) -> list[Any]:
         raise NotImplementedError
 
-    def weekly_top(self, week: str, limit: int = 10) -> list[Any]:
+    def weekly_top(self, week: str, limit: int = 10) -> list[tuple[int, int, int]]:
         raise NotImplementedError
 
     def weekly_rank(self, week: str, user_id: int) -> Optional[WeeklyRankEntry]:
@@ -65,7 +65,7 @@ class IGuildApprovalRepo(IGuildScopedRepo):
     def get_guild_status(self, guild_id: int) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def list_guild_status(self) -> list[Any]:
+    def list_guild_status(self) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def mark_guild_notified(self, guild_id: int) -> None:
@@ -81,7 +81,7 @@ class ILeaderboardConfigRepo(IGuildScopedRepo):
     def get_leaderboard(self, guild_id: int) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def list_leaderboards(self) -> list[Any]:
+    def list_leaderboards(self) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def delete_leaderboard(self, guild_id: int) -> None:
@@ -100,19 +100,19 @@ class INickPrefRepo(IGuildScopedRepo):
     def nick_managed(self, guild_id: int, user_id: int) -> bool:
         raise NotImplementedError
 
-    def status_nick_targets(self) -> list[Any]:
+    def status_nick_targets(self) -> list[int]:
         raise NotImplementedError
 
-    def get_nick_state(self, guild_id: int, user_id: int) -> Any:
+    def get_nick_state(self, guild_id: int, user_id: int) -> Optional[tuple[Optional[str], str]]:
         raise NotImplementedError
 
-    def set_nick_state(self, guild_id: int, user_id: int, original: Any, applied: Any) -> None:
+    def set_nick_state(self, guild_id: int, user_id: int, original: Optional[str], applied: Optional[str]) -> None:
         raise NotImplementedError
 
     def delete_guild_nick_prefs(self, guild_id: int) -> None:
         raise NotImplementedError
 
-    def nick_pref_guilds(self, user_id: int) -> list[Any]:
+    def nick_pref_guilds(self, user_id: int) -> list[int]:
         raise NotImplementedError
 
     def nick_pref(self, guild_id: int, user_id: int) -> bool:
@@ -183,13 +183,13 @@ class IWalletRankingReader(IGuildScopedRepo):
     def wealthy_ids(self) -> set[int]:
         raise NotImplementedError
 
-    def display_status(self, user_id: int, wealthy: Optional[set[Any]] = None) -> str:
+    def display_status(self, user_id: int, wealthy: Optional[set[int]] = None) -> str:
         raise NotImplementedError
 
-    def top(self, limit: int = 10, user_ids: Optional[set[Any]] = None) -> list[Any]:
+    def top(self, limit: int = 10, user_ids: Optional[set[int]] = None) -> list[RankEntry]:
         raise NotImplementedError
 
-    def rank_of(self, user_id: int, user_ids: Optional[set[Any]] = None) -> Optional[RankEntry]:
+    def rank_of(self, user_id: int, user_ids: Optional[set[int]] = None) -> Optional[RankEntry]:
         raise NotImplementedError
 
 
@@ -202,7 +202,7 @@ class IWalletStatsReader(IGuildScopedRepo):
     def stats(self, user_id: int) -> dict[str, Any]:
         raise NotImplementedError
 
-    def history(self, user_id: int, limit: int = 10) -> list[Any]:
+    def history(self, user_id: int, limit: int = 10) -> list[dict[str, Any]]:
         raise NotImplementedError
 
 
@@ -217,11 +217,13 @@ class IAssetRepo(IGuildScopedRepo):
     def asset_parts(self, now: float) -> dict[int, dict[str, int]]:
         raise NotImplementedError
 
-    def final_assets(self, user_ids: Optional[set[Any]] = None, now: Optional[float] = None) -> list[Any]:
+    def final_assets(
+        self, user_ids: Optional[set[int]] = None, now: Optional[float] = None
+    ) -> list[tuple[int, int, dict[str, int]]]:
         raise NotImplementedError
 
-    def final_top(self, limit: int = 10, user_ids: Optional[set[Any]] = None) -> list[Any]:
+    def final_top(self, limit: int = 10, user_ids: Optional[set[int]] = None) -> list[RankEntry]:
         raise NotImplementedError
 
-    def final_rank_of(self, user_id: int, user_ids: Optional[set[Any]] = None) -> Optional[RankEntry]:
+    def final_rank_of(self, user_id: int, user_ids: Optional[set[int]] = None) -> Optional[RankEntry]:
         raise NotImplementedError

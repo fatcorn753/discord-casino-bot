@@ -83,7 +83,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             )
             return True, cur.lastrowid
 
-    def horse_list(self, user_id: int) -> list[Any]:
+    def horse_list(self, user_id: int) -> list[dict[str, Any]]:
         with self._lock:
             return [
                 dict(r)
@@ -205,7 +205,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
     def horse_auction_price(self, listed_at: float, now: float) -> int:
         return max(1, round(self.HORSE_PRICE * teiai.auction_rate(listed_at, now)))
 
-    def auction_horses(self, now: float) -> list[Any]:
+    def auction_horses(self, now: float) -> list[dict[str, Any]]:
         """帝愛の競売に出ている馬。[{馬の行, price, rate}]（出品の早い順）。"""
         with self._lock:
             rows = self._conn.execute(

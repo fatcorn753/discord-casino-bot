@@ -81,7 +81,7 @@ class IAuctionRepo(IGuildScopedRepo):
     def auction_price(self, item_id: str, listed_at: float, now: float) -> int:
         raise NotImplementedError
 
-    def auction_list(self, now: float) -> list[Any]:
+    def auction_list(self, now: float) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def auction_buy(self, user_id: int, item_id: str, qty: int = 1, now: Optional[float] = None) -> "PurchaseResult":
@@ -130,7 +130,7 @@ class IQuizAdminRepo(IGuildScopedRepo):
     def quiz_add(
         self,
         question: str,
-        choices: list[Any],
+        choices: list[str],
         explanation: str,
         reward: int,
         expires: Optional[float],
@@ -141,16 +141,16 @@ class IQuizAdminRepo(IGuildScopedRepo):
     ) -> int:
         raise NotImplementedError
 
-    def quiz_add_many(self, items: list[Any], now: float, creator_name: str = "") -> list[Any]:
+    def quiz_add_many(self, items: list[dict[str, Any]], now: float, creator_name: str = "") -> list[int]:
         raise NotImplementedError
 
-    def quiz_existing_questions(self) -> set[Any]:
+    def quiz_existing_questions(self) -> set[str]:
         raise NotImplementedError
 
     def quiz_get(self, quiz_id: int) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
-    def quiz_list(self) -> list[Any]:
+    def quiz_list(self) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def quiz_delete(self, quiz_id: int) -> bool:
@@ -170,7 +170,7 @@ class IQuizPlayRepo(IGuildScopedRepo):
         self,
         author_id: int,
         question: str,
-        choices: list[Any],
+        choices: list[str],
         explanation: str,
         reward: int,
         minutes: int,
@@ -182,13 +182,13 @@ class IQuizPlayRepo(IGuildScopedRepo):
     ) -> tuple[Any, ...]:
         raise NotImplementedError
 
-    def quiz_own_open(self, user_id: int, now: float) -> list[Any]:
+    def quiz_own_open(self, user_id: int, now: float) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def quiz_set_message(self, quiz_id: int, message_id: int) -> None:
         raise NotImplementedError
 
-    def quiz_settle(self, now: float) -> list[Any]:
+    def quiz_settle(self, now: float) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def quiz_withdraw(self, user_id: int, quiz_id: int, now: float) -> Optional[dict[str, Any]]:
@@ -203,7 +203,7 @@ class ILaborRepo(IGuildScopedRepo):
     def labor_donated_total(self) -> int:
         raise NotImplementedError
 
-    def labor_finds(self, user_id: int, limit: int = 6) -> list[Any]:
+    def labor_finds(self, user_id: int, limit: int = 6) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def labor_state(self, user_id: int, now: float, day: str = "") -> dict[str, Any]:
@@ -217,10 +217,10 @@ class ILaborRepo(IGuildScopedRepo):
     ) -> dict[str, Any]:
         raise NotImplementedError
 
-    def labor_click_hours(self, user_id: int, since: float) -> list[Any]:
+    def labor_click_hours(self, user_id: int, since: float) -> list[dict[str, Any]]:
         raise NotImplementedError
 
-    def labor_collect(self, user_id: int, now: float, day: str = "", detail: bool = False) -> Any:
+    def labor_collect(self, user_id: int, now: float, day: str = "", detail: bool = False) -> int | dict[str, Any]:
         raise NotImplementedError
 
     def labor_drink(self, user_id: int, now: float, day: str = "") -> tuple[Any, ...]:
@@ -256,10 +256,10 @@ class IP2PRepo(IGuildScopedRepo):
     ) -> tuple[Any, ...]:
         raise NotImplementedError
 
-    def p2p_label(self, row: Any) -> str:
+    def p2p_label(self, row: dict[str, Any]) -> str:
         raise NotImplementedError
 
-    def p2p_get(self, listing_id: int) -> Any:
+    def p2p_get(self, listing_id: int) -> Optional[dict[str, Any]]:
         raise NotImplementedError
 
     def p2p_set_post(self, listing_id: int, channel_id: int, message_id: int) -> None:
@@ -277,13 +277,13 @@ class IP2PRepo(IGuildScopedRepo):
     def p2p_pull_back(self, user_id: int, now: Optional[float] = None) -> dict[str, int]:
         raise NotImplementedError
 
-    def p2p_unsynced_posts(self) -> list[Any]:
+    def p2p_unsynced_posts(self) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def p2p_mark_post_done(self, listing_id: int) -> None:
         raise NotImplementedError
 
-    def p2p_settle(self, now: float) -> list[Any]:
+    def p2p_settle(self, now: float) -> list[tuple[dict[str, Any], str]]:
         raise NotImplementedError
 
     def p2p_active(
@@ -293,7 +293,7 @@ class IP2PRepo(IGuildScopedRepo):
         limit: int = 25,
         mode: Optional[str] = None,
         order: str = "end",
-    ) -> list[Any]:
+    ) -> list[dict[str, Any]]:
         raise NotImplementedError
 
     def p2p_count(self, now: float) -> int:

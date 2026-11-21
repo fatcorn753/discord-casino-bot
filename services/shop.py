@@ -167,7 +167,7 @@ class ShopService:
         """slot に item_id を身につける（None なら外す）。"""
         return self._shop.for_guild(guild_id).equip(user_id, slot, item_id)
 
-    def auction_list(self, guild_id: int) -> list[Any]:
+    def auction_list(self, guild_id: int) -> list[dict[str, Any]]:
         return self._auction.for_guild(guild_id).auction_list(self._clock.now_ts())
 
     def auction_buy(self, guild_id: int, user_id: int, item_id: str, qty: int) -> Any:
@@ -180,7 +180,7 @@ class ShopService:
     def market_buy(self, guild_id: int, user_id: int, listing_id: int, qty: int) -> MarketPurchase:
         return self._auction.for_guild(guild_id).market_buy(user_id, listing_id, qty, self._clock.now_ts())
 
-    def auction_horses(self, guild_id: int) -> list[Any]:
+    def auction_horses(self, guild_id: int) -> list[dict[str, Any]]:
         return self._horses.for_guild(guild_id).auction_horses(self._clock.now_ts())
 
     def auction_buy_horse(self, guild_id: int, user_id: int, horse_id: int) -> Any:

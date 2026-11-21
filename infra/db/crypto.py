@@ -59,7 +59,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
     def holdings(self, user_id: int) -> list[Any]:
         return self.holdings_for(self._g(), user_id)
 
-    def crypto_holders(self, limit: int = 10, symbol: str = DEFAULT) -> list[Any]:
+    def crypto_holders(self, limit: int = 10, symbol: str = DEFAULT) -> list[tuple[int, int, int]]:
         """このサーバーのその銘柄の保有者 [(user_id, 口数, 買った総額), ...]。買った額の大きい順。"""
         with self._lock:
             return [

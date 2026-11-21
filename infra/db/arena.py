@@ -84,7 +84,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
             t["fighters"] = self.arena_fighters(t["id"])
             return t
 
-    def arena_fighters(self, tournament_id: int) -> list[Any]:
+    def arena_fighters(self, tournament_id: int) -> list[dict[str, Any]]:
         with self._lock:
             return [
                 dict(r)
@@ -249,7 +249,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
             self._conn.execute("UPDATE arena_tournaments SET status='done' WHERE id=?", (tournament_id,))
             return {"champion": champion["name"], "runner_up": [f["name"] for f in losers]}
 
-    def arena_my_bets(self, tournament_id: int, user_id: int) -> list[Any]:
+    def arena_my_bets(self, tournament_id: int, user_id: int) -> list[dict[str, Any]]:
         with self._lock:
             return [
                 dict(r)
@@ -260,7 +260,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
                 )
             ]
 
-    def arena_bets_breakdown(self, tournament_id: int) -> dict[int, list[Any]]:
+    def arena_bets_breakdown(self, tournament_id: int) -> dict[int, list[dict[str, Any]]]:
         """戦士ごとの、誰がいくら賭けているか（大会を通じた累積）。{戦士ID: [{user_id, amount}]}（金額の多い順）。"""
         with self._lock:
             rows = self._conn.execute(

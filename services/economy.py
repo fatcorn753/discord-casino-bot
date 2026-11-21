@@ -81,7 +81,7 @@ class EconomyService:
         stats = self._wallet.for_guild(guild_id).peek_stats(user_id)
         return stats["balance"] if stats else INITIAL_BALANCE
 
-    def history(self, guild_id: int, user_id: int, limit: int) -> list[Any]:
+    def history(self, guild_id: int, user_id: int, limit: int) -> list[dict[str, Any]]:
         return self._wallet.for_guild(guild_id).history(user_id, limit)
 
     def balance_card(self, guild_id: int, viewer_id: int, target_id: int) -> Optional[BalanceCard]:

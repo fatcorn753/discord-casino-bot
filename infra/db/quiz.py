@@ -46,7 +46,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
     def quiz_add(
         self,
         question: str,
-        choices: list[Any],
+        choices: list[str],
         explanation: str,
         reward: int,
         expires: Optional[float],
@@ -75,7 +75,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             assert cur.lastrowid is not None
             return cur.lastrowid
 
-    def quiz_add_many(self, items: list[Any], now: float, creator_name: str = "") -> list[Any]:
+    def quiz_add_many(self, items: list[dict[str, Any]], now: float, creator_name: str = "") -> list[int]:
         """まとめて登録する（全部成功するか、全部なしか）。items は {question, choices, explanation, reward, minutes} の並び（minutes が None なら無期限）。番号のリストを返す。"""
         with self._db.tx():
             return [
@@ -91,7 +91,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
                 for i in items
             ]
 
-    def quiz_existing_questions(self) -> set[Any]:
+    def quiz_existing_questions(self) -> set[str]:
         """登録済みの問題文（同じファイルを2回登録してしまわないための照合用）。"""
         with self._lock:
             return {r[0] for r in self._conn.execute("SELECT question FROM quiz_questions")}
@@ -100,7 +100,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         with self._lock:
             return _quiz_row(self._conn.execute("SELECT * FROM quiz_questions WHERE id=?", (quiz_id,)).fetchone())
 
-    def quiz_list(self) -> list[Any]:
+    def quiz_list(self) -> list[dict[str, Any]]:
         """全問題（新しい順）。回答数と正解数つき。"""
         with self._lock:
             rows = self._conn.execute(
@@ -217,7 +217,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         self,
         author_id: int,
         question: str,
-        choices: list[Any],
+        choices: list[str],
         explanation: str,
         reward: int,
         minutes: int,
@@ -264,7 +264,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             )
             return True, cur.lastrowid
 
-    def quiz_own_open(self, user_id: int, now: float) -> list[Any]:
+    def quiz_own_open(self, user_id: int, now: float) -> list[dict[str, Any]]:
         """このサーバーで自分が出した、終了前の問題（古い順）。取り下げの候補に使う。"""
         with self._lock:
             return [
@@ -279,7 +279,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         with self._db.tx():
             self._conn.execute("UPDATE quiz_questions SET message_id=? WHERE id=?", (message_id, quiz_id))
 
-    def quiz_settle(self, now: float) -> list[Any]:
+    def quiz_settle(self, now: float) -> list[dict[str, Any]]:
         """期限を過ぎたユーザーの問題の、出題者への報酬を決着させる（このサーバーの分）。決着した問題を、成績つきで返す。"""
         out = []
         with self._db.tx():

@@ -50,5 +50,5 @@ class ArenaService:
     def tournament_by_day(self, guild_id: int, day: str, fmt: str) -> Optional[dict[str, Any]]:
         return self._arena.for_guild(guild_id).arena_tournament_get_by_day(day, fmt)
 
-    def bets_breakdown(self, guild_id: int, tournament_id: int) -> dict[int, list[Any]]:
+    def bets_breakdown(self, guild_id: int, tournament_id: int) -> dict[int, list[dict[str, Any]]]:
         return self._arena.for_guild(guild_id).arena_bets_breakdown(tournament_id)

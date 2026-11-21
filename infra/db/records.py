@@ -114,7 +114,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
                 out.append((m, r["progress"] if r else 0, bool(r and r["done"])))
             return out
 
-    def weekly_top(self, week: str, limit: int = 10) -> list[Any]:
+    def weekly_top(self, week: str, limit: int = 10) -> list[tuple[int, int, int]]:
         """[(ユーザーID, 稼ぎ, ゲーム数), ...]。その週の稼ぎが多い順（同じなら、ゲーム数が少ない順）。"""
         with self._lock:
             return [

@@ -66,7 +66,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
         """1つあたりの、いまの値段（ペリカ）。"""
         return max(1, round(shop_mod.BY_ID[item_id].price * teiai.auction_rate(listed_at, now)))
 
-    def auction_list(self, now: float) -> list[Any]:
+    def auction_list(self, now: float) -> list[dict[str, Any]]:
         """競売の棚。品ごとに、残りの数と、いちばん安い（古い）出品の値段。[{item_id, qty, price, rate}]"""
         with self._lock:
             rows = self._conn.execute(

@@ -47,7 +47,7 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
             self._conn.execute("DELETE FROM earnings WHERE released=1 AND release_at<?", (now - 30 * 86400,))
             return {**p, "id": cur.lastrowid}
 
-    def earnings_jumps(self, now: float, seconds: float) -> list[Any]:
+    def earnings_jumps(self, now: float, seconds: float) -> list[dict[str, Any]]:
         """now から seconds 秒の間に発表がある決算を、オプションの値付け用の形にする（対象・発表の時刻・分散）。方向は入れない。"""
         with self._lock:
             return [
@@ -68,7 +68,7 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
             ).fetchone()
             return dict(r) if r else None
 
-    def earnings_to_announce(self, now: float) -> list[Any]:
+    def earnings_to_announce(self, now: float) -> list[dict[str, Any]]:
         """告知の時刻を過ぎて、まだ告知していない決算。呼ぶと、告知ずみにする。"""
         with self._db.tx():
             rows = [
@@ -82,7 +82,7 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
                 self._conn.execute("UPDATE earnings SET announced=1 WHERE id=?", (r["id"],))
             return rows
 
-    def earnings_release_due(self, now: float) -> list[Any]:
+    def earnings_release_due(self, now: float) -> list[dict[str, Any]]:
         """発表の時刻を過ぎた決算（まだ発表していないもの）を、発表ずみにして返す。理論価格に反映するのは、呼び出し側。"""
         with self._db.tx():
             rows = [

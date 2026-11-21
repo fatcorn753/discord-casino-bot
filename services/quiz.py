@@ -20,19 +20,19 @@ class QuizService:
     def get(self, quiz_id: int) -> Optional[dict[str, Any]]:
         return self._quiz.quiz_get(quiz_id)
 
-    def list_all(self) -> list[Any]:
+    def list_all(self) -> list[dict[str, Any]]:
         return self._quiz.quiz_list()
 
     def delete(self, quiz_id: int) -> bool:
         return self._quiz.quiz_delete(quiz_id)
 
-    def existing_questions(self) -> set[Any]:
+    def existing_questions(self) -> set[str]:
         return self._quiz.quiz_existing_questions()
 
     def add(
         self,
         question: str,
-        choices: list[Any],
+        choices: list[str],
         explanation: str,
         reward: int,
         minutes: Optional[int],
@@ -47,7 +47,7 @@ class QuizService:
             question, choices, explanation, reward, expires, now, creator_name, msg_right, msg_wrong
         )
 
-    def add_many(self, items: list[Any], creator_name: str = "") -> list[Any]:
+    def add_many(self, items: list[dict[str, Any]], creator_name: str = "") -> list[int]:
         return self._quiz.quiz_add_many(items, self._clock.now_ts(), creator_name)
 
     # ------------------------------ サーバーごとの挑戦・出題 ------------------------------ #
@@ -63,7 +63,7 @@ class QuizService:
         guild_id: int,
         author_id: int,
         question: str,
-        choices: list[Any],
+        choices: list[str],
         explanation: str,
         reward: int,
         minutes: int,
@@ -93,12 +93,12 @@ class QuizService:
     def set_message(self, guild_id: int, quiz_id: int, message_id: int) -> None:
         self._quiz.for_guild(guild_id).quiz_set_message(quiz_id, message_id)
 
-    def own_open(self, guild_id: int, user_id: int) -> list[Any]:
+    def own_open(self, guild_id: int, user_id: int) -> list[dict[str, Any]]:
         return self._quiz.for_guild(guild_id).quiz_own_open(user_id, self._clock.now_ts())
 
     def withdraw(self, guild_id: int, user_id: int, quiz_id: int) -> Optional[dict[str, Any]]:
         return self._quiz.for_guild(guild_id).quiz_withdraw(user_id, quiz_id, self._clock.now_ts())
 
-    def settle(self, guild_id: int) -> list[Any]:
+    def settle(self, guild_id: int) -> list[dict[str, Any]]:
         """期限の来たプレイヤーの問題を精算する（出題者への報酬）。"""
         return self._quiz.for_guild(guild_id).quiz_settle(self._clock.now_ts())

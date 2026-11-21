@@ -1,6 +1,6 @@
 """地下作業のアプリケーションサービス（日付キー解決・クリック不正検知レポート）。"""
 
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from domain import labor as labor_mod
 from domain.ports.clock import IClock
@@ -35,9 +35,10 @@ class LaborService:
     def drink(self, guild_id: int, user_id: int, now: float) -> tuple[Any, ...]:
         return self._repo(guild_id).labor_drink(user_id, now, self.today_key())
 
-    def collect(self, guild_id: int, user_id: int, now: float) -> Any:
+    def collect(self, guild_id: int, user_id: int, now: float) -> dict[str, Any]:
         """稼ぎ・鉱石・発掘品を受け取る（内訳つき）。"""
-        return self._repo(guild_id).labor_collect(user_id, now, self.today_key(), detail=True)
+        # detail=True なら必ず内訳の辞書が返る
+        return cast("dict[str, Any]", self._repo(guild_id).labor_collect(user_id, now, self.today_key(), detail=True))
 
     def hire(self, guild_id: int, user_id: int, kind: str, now: float) -> tuple[Any, ...]:
         return self._repo(guild_id).labor_hire(user_id, kind, now, self.today_key())

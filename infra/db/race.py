@@ -67,7 +67,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 "SELECT COUNT(*) FROM horse_races WHERE guild_id=? AND id<=?", (self._g(), race_id)
             ).fetchone()[0]
 
-    def race_open(self) -> list[Any]:
+    def race_open(self) -> list[dict[str, Any]]:
         """まだ終わっていないレース（申し込み中・発売中）。発走の早い順。"""
         with self._lock:
             return [
@@ -122,7 +122,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 "UPDATE horse_races SET channel_id=?, message_id=? WHERE id=?", (channel_id, message_id, race_id)
             )
 
-    def race_entries(self, race_id: int, registered_only: bool = False) -> list[Any]:
+    def race_entries(self, race_id: int, registered_only: bool = False) -> list[dict[str, Any]]:
         with self._lock:
             return [
                 dict(r)
@@ -283,7 +283,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                     [(race_id, kind, key, o) for key, o in odds.get(kind, {}).items()],
                 )
 
-    def race_odds(self, race_id: int, kind: str, lanes: Any) -> Optional[float]:
+    def race_odds(self, race_id: int, kind: str, lanes: list[int]) -> Optional[float]:
         """その馬券のオッズ（なければ None）。lanes は、選んだ枠の並び（単勝・複勝は1つ）。"""
         with self._lock:
             if kind in ("win", "place"):
@@ -298,7 +298,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             ).fetchone()
             return r["odds"] if r else None
 
-    def race_bets(self, user_id: int, race_id: int) -> list[Any]:
+    def race_bets(self, user_id: int, race_id: int) -> list[dict[str, Any]]:
         with self._lock:
             return [
                 dict(r)
@@ -307,7 +307,9 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 )
             ]
 
-    def race_bet(self, user_id: int, race_id: int, kind: str, lane: Any, stake: int, now: float) -> tuple[Any, ...]:
+    def race_bet(
+        self, user_id: int, race_id: int, kind: str, lane: int | list[int], stake: int, now: float
+    ) -> tuple[Any, ...]:
         """馬券を買う。賭けた時点のオッズで確定する。(成功か, 理由か馬券の辞書)。賭け金は、その場で引かれる。
 
         lane は、単勝・複勝なら枠番、組み合わせの馬券（馬連・ワイド・馬単・三連複）なら、選んだ枠番の並び
@@ -371,7 +373,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             }
 
     def race_bet_many(
-        self, user_id: int, race_id: int, kind: str, lanes: list[Any], stake: int, now: float
+        self, user_id: int, race_id: int, kind: str, lanes: list[int], stake: int, now: float
     ) -> tuple[Any, ...]:
         """単勝・複勝を、何頭かまとめて買う（1頭ごとに stake ずつ、別々の馬券になる）。(成功か, 理由か馬券の辞書の並び)。
 

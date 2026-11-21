@@ -217,7 +217,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
     # ------------------------------------------------------------------ #
     # ランキング・統計・履歴                                              #
     # ------------------------------------------------------------------ #
-    def _ranked(self, guild_id: int, user_ids: Optional[set[Any]]) -> list[tuple[int, int]]:
+    def _ranked(self, guild_id: int, user_ids: Optional[set[int]]) -> list[tuple[int, int]]:
         """[(ユーザーID, 純資産)] を多い順に。純資産は、残高から借金を引き、CS・預金・債券・オプションの評価額を足したもの。"""
         with self._db.tx():
             targets = (
@@ -255,7 +255,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
     def wealthy_ids(self) -> set[int]:
         return self.wealthy_ids_for(self._g())
 
-    def display_status(self, user_id: int, wealthy: Optional[set[Any]] = None) -> str:
+    def display_status(self, user_id: int, wealthy: Optional[set[int]] = None) -> str:
         """表示用の身分。status() と同じで、カタギで純資産が WEALTHY_ASSETS 以上なら WEALTHY。wealthy を渡すと再計算しない。"""
         gid = self._g()
         status = self._status_reader.status_for(gid, user_id, self._now())
@@ -264,11 +264,11 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
         ids = self.wealthy_ids_for(gid) if wealthy is None else wealthy
         return teiai.WEALTHY if user_id in ids else teiai.KATAGI
 
-    def top(self, limit: int = 10, user_ids: Optional[set[Any]] = None) -> list[Any]:
+    def top(self, limit: int = 10, user_ids: Optional[set[int]] = None) -> list[RankEntry]:
         """[(順位, ユーザーID, 純資産), ...]。このサーバーの口座だけで並べる。user_ids を渡すと、さらにその人たちに絞る。"""
         return [(i + 1, uid, bal) for i, (uid, bal) in enumerate(self._ranked(self._g(), user_ids)[:limit])]
 
-    def rank_of(self, user_id: int, user_ids: Optional[set[Any]] = None) -> Optional[RankEntry]:
+    def rank_of(self, user_id: int, user_ids: Optional[set[int]] = None) -> Optional[RankEntry]:
         """(順位, 純資産, 対象人数)。登録がなければ None。"""
         ranked = self._ranked(self._g(), user_ids)
         for i, (uid, bal) in enumerate(ranked):
@@ -295,7 +295,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
                 self._conn.execute("SELECT * FROM users WHERE guild_id=? AND user_id=?", (gid, user_id)).fetchone()
             )
 
-    def history(self, user_id: int, limit: int = 10) -> list[Any]:
+    def history(self, user_id: int, limit: int = 10) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT delta, balance_after, reason, ts FROM ledger WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT ?",

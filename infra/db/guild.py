@@ -42,7 +42,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
             row = self._conn.execute("SELECT * FROM guild_status WHERE guild_id=?", (guild_id,)).fetchone()
         return dict(row) if row else None
 
-    def list_guild_status(self) -> list[Any]:
+    def list_guild_status(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(r) for r in self._conn.execute("SELECT * FROM guild_status ORDER BY updated_at DESC")]
 
@@ -66,7 +66,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
             row = self._conn.execute("SELECT * FROM leaderboards WHERE guild_id=?", (guild_id,)).fetchone()
         return dict(row) if row else None
 
-    def list_leaderboards(self) -> list[Any]:
+    def list_leaderboards(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(r) for r in self._conn.execute("SELECT * FROM leaderboards")]
 
@@ -130,7 +130,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
                 is not None
             )
 
-    def status_nick_targets(self) -> list[Any]:
+    def status_nick_targets(self) -> list[int]:
         """身分のニックネームを、付ける・外す必要があるかもしれない人（このサーバー）。"""
         with self._lock:
             gid = self._g()
@@ -145,14 +145,14 @@ class GuildRepo(ScopedRepo, IGuildRepo):
             ]
         return rows + sorted(self._wealthy_reader.wealthy_ids_for(gid))
 
-    def get_nick_state(self, guild_id: int, user_id: int) -> Any:
+    def get_nick_state(self, guild_id: int, user_id: int) -> Optional[tuple[Optional[str], str]]:
         with self._lock:
             row = self._conn.execute(
                 "SELECT original_nick, applied_nick FROM nick_prefs WHERE guild_id=? AND user_id=?", (guild_id, user_id)
             ).fetchone()
         return None if row is None or row["applied_nick"] is None else (row["original_nick"], row["applied_nick"])
 
-    def set_nick_state(self, guild_id: int, user_id: int, original: Any, applied: Any) -> None:
+    def set_nick_state(self, guild_id: int, user_id: int, original: Optional[str], applied: Optional[str]) -> None:
         with self._db.tx():
             self._conn.execute(
                 "UPDATE nick_prefs SET original_nick=?, applied_nick=? WHERE guild_id=? AND user_id=?",
@@ -164,7 +164,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
         with self._db.tx():
             self._conn.execute("DELETE FROM nick_prefs WHERE guild_id=?", (guild_id,))
 
-    def nick_pref_guilds(self, user_id: int) -> list[Any]:
+    def nick_pref_guilds(self, user_id: int) -> list[int]:
         with self._lock:
             return [
                 r["guild_id"] for r in self._conn.execute("SELECT guild_id FROM nick_prefs WHERE user_id=?", (user_id,))
