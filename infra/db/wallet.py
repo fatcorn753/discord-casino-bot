@@ -10,8 +10,7 @@ from domain.ports.bridges import (
     IDebtOps,
     IHouseAccount,
     IStatusReader,
-    IValuationSource,
-    IWealthyReader,
+    ValuationSource,
 )
 from domain.ports.contracts import RankEntry
 from domain.ports.repos import IWalletRepo
@@ -22,7 +21,7 @@ from infra.db.base import EcoDb, ScopedRepo
 from infra.db.relics import RelicRepo
 
 
-class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
+class WalletRepo(ScopedRepo, IWalletRepo):
     """残高操作・デイリーボーナス・ランキング・統計・履歴・送金。"""
 
     DAILY_BASE = DAILY_BASE
@@ -37,7 +36,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
         debt: IDebtOps,
         status_reader: IStatusReader,
         relics: RelicRepo,
-        valuation_source: IValuationSource,
+        valuation_source: ValuationSource,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -47,7 +46,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
         self._debt = debt
         self._status_reader = status_reader
         self._relics = relics
-        self._valuation_source = valuation_source
+        self._valuation_source: ValuationSource = valuation_source
 
     # ------------------------------------------------------------------ #
     # 残高                                                                #
@@ -226,7 +225,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
                 self._debt.accrue_debt_interest_for(guild_id, uid, self._now())
             rows = self._all("SELECT user_id, balance - debt AS balance FROM users WHERE guild_id=?", (guild_id,))
             values: dict[int, int] = {}
-            self._valuation_source.collect_values(guild_id, values)
+            self._valuation_source(guild_id, values)
         total = [
             (r["user_id"], r["balance"] + values.get(r["user_id"], 0))
             for r in rows

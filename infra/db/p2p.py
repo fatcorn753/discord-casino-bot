@@ -7,10 +7,8 @@ from domain import p2p, teiai
 from domain import shop as shop_mod
 from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import (
+    GraceReader,
     IBankCashFlow,
-    IBankruptPrepHook,
-    IGraceEnterHook,
-    IGraceReader,
     IStatusReader,
 )
 from domain.ports.contracts import ListingRow, P2PMine
@@ -21,7 +19,7 @@ from infra.db.horse import HorseRepo
 from infra.db.notices import NoticeRepo
 
 
-class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
+class P2PRepo(ScopedRepo, IP2PRepo):
     """プレイヤー間の取引・競り・強制引き戻し。"""
 
     P2P_ORDERS = {
@@ -38,7 +36,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         horses: HorseRepo,
         status_reader: IStatusReader,
         bank: IBankCashFlow,
-        grace_reader: IGraceReader,
+        grace_reader: GraceReader,
         notices: NoticeRepo,
         guild_id: int = 0,
         strict: bool = False,
@@ -48,7 +46,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         self._horses = horses
         self._status_reader = status_reader
         self._bank = bank
-        self._grace_reader = grace_reader
+        self._grace_reader: GraceReader = grace_reader
         self._notices = notices
 
     def prepare(self, guild_id: int, user_id: int, now: float) -> None:
@@ -121,7 +119,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, user_id)
-            if self._grace_reader.grace_until_for(gid, user_id) is not None:
+            if self._grace_reader(gid, user_id) is not None:
                 return False, fail("grace_lock")
             active = self._scalar(
                 "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active'",
@@ -243,7 +241,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, buyer_id)
-            if self._grace_reader.grace_until_for(gid, buyer_id) is not None:
+            if self._grace_reader(gid, buyer_id) is not None:
                 return False, fail("grace_lock")
             row = self.p2p_get(listing_id)
             if row is None or row["status"] != "active" or row["end_at"] <= now:
@@ -261,7 +259,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, bidder_id)
-            if self._grace_reader.grace_until_for(gid, bidder_id) is not None:
+            if self._grace_reader(gid, bidder_id) is not None:
                 return False, fail("grace_lock")
             row = self.p2p_get(listing_id)
             if row is None or row["status"] != "active" or row["end_at"] <= now:

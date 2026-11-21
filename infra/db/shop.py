@@ -8,7 +8,7 @@ from typing import Any, Optional
 from domain import shop as shop_mod
 from domain import teiai
 from domain.errors import fail
-from domain.ports.bridges import IShopBelongings, IStatusReader
+from domain.ports.bridges import IStatusReader
 from domain.ports.contracts import SeizedBelongings
 from domain.ports.repos import IShopRepo
 from domain.types import CONSUMABLE_EFFECTS, PurchaseResult
@@ -16,7 +16,7 @@ from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
 
 
-class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
+class ShopRepo(ScopedRepo, IShopRepo):
     """ショップの持ち物・装備・消耗品。"""
 
     SLOTS = ("title", "card_color", "card_icon", "skin_dice", "skin_table")

@@ -91,7 +91,7 @@ class BankRepo(Base):
         charged = 0
         left = int(excess - cover)
         if left > 0:  # 残りは帝愛共済の口の持ち主の負担（#34）。帝愛の持ち口の分は払われずに残る
-            charged = min(left, max(0, self._excess_sink.charge_excess_for(guild_id, left, now)))
+            charged = min(left, max(0, self._excess_sink(guild_id, left, now)))
             if left > charged:
                 self._conn.execute(
                     "UPDATE teiai_bank SET excess_unpaid=excess_unpaid+? WHERE guild_id=?",

@@ -5,7 +5,7 @@
 
 from typing import Any, Iterable, Optional
 
-from domain.ports.bridges import IWealthyReader, NoOpWealthyReader
+from domain.ports.bridges import WealthyReader, noop_wealthy_reader
 from domain.ports.repos import IGuildRepo
 from infra.db.base import EcoDb, ScopedRepo
 
@@ -16,12 +16,12 @@ class GuildRepo(ScopedRepo, IGuildRepo):
     def __init__(
         self,
         db: EcoDb,
-        wealthy_reader: Optional[IWealthyReader] = None,
+        wealthy_reader: Optional[WealthyReader] = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
         super().__init__(db, guild_id, strict)
-        self._wealthy_reader: IWealthyReader = wealthy_reader or NoOpWealthyReader()
+        self._wealthy_reader: WealthyReader = wealthy_reader or noop_wealthy_reader
 
     # ------------------------------------------------------------------ #
     # 利用できるサーバーの承認                                            #
@@ -133,7 +133,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
                     (gid, gid),
                 )
             ]
-        return rows + sorted(self._wealthy_reader.wealthy_ids_for(gid))
+        return rows + sorted(self._wealthy_reader(gid))
 
     def get_nick_state(self, guild_id: int, user_id: int) -> Optional[tuple[Optional[str], str]]:
         with self._lock:

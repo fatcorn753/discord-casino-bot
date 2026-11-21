@@ -15,7 +15,7 @@ class DebtRepo(Base):
         covered = _take_cash(self._account, guild_id, user_id, need, reason)
         if covered >= need:
             return covered
-        return covered + self._seizure_step.seize(guild_id, user_id, need - covered, reason, now)
+        return covered + self._seizure_step(guild_id, user_id, need - covered, reason, now)
 
     def seed_for(self, guild_id: int, user_id: int, amount: int) -> None:
         """帝愛が種銭を貸し付ける。手元に入り、同じ額が借金に加わる（天引きの対象にはならない）。"""
