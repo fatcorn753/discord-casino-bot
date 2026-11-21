@@ -9,7 +9,7 @@ import os
 import sqlite3
 import threading
 from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import TYPE_CHECKING, Any, Optional, Self
 
 from domain.ports.clock import IClock
@@ -46,10 +46,8 @@ class EcoDb:
             is_outer = self._tx_depth == 0
             self._tx_depth += 1
             try:
-                if is_outer:
-                    with self.conn:
-                        yield self.conn
-                else:
+                # 最外層だけ conn のコンテキストマネージャ（COMMIT/ROLLBACK）で包む
+                with self.conn if is_outer else nullcontext(self.conn):
                     yield self.conn
             finally:
                 self._tx_depth -= 1

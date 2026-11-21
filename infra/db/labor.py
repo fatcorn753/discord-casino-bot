@@ -388,9 +388,9 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 crit = rng.random() < labor_mod.crit_chance(row["pick"], workers, terrain)
                 if crit:
                     pay *= labor_mod.CRIT_MULT
-                    if rng.random() < labor_mod.CRIT_ORE_CHANCE:
-                        ore = labor_mod.roll_crit_ore(rng, terrain)
-                        pay += labor_mod.ORE_VALUE[ore]  # 手掘りの鉱石の売値も、稼ぎに加える
+                if crit and rng.random() < labor_mod.CRIT_ORE_CHANCE:
+                    ore = labor_mod.roll_crit_ore(rng, terrain)
+                    pay += labor_mod.ORE_VALUE[ore]  # 手掘りの鉱石の売値も、稼ぎに加える
                 combo = (row["clicks"] + 1) % labor_mod.COMBO_SIZE == 0  # 10回ごとのコンボ
                 if combo:
                     pay = round(pay * (1 + labor_mod.COMBO_BONUS))

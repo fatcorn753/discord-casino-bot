@@ -131,22 +131,20 @@ class WalletRepo(ScopedRepo, IWalletRepo):
                 return DailyResult(
                     False, streak=row["daily_streak"], balance=self._account.raw_balance(gid, user_id)
                 )  # 時計が戻っても二重に受け取れない
-            guarded = 0
             if last == today:
-                streak = max(1, row["daily_streak"])
+                streak, guarded = max(1, row["daily_streak"]), 0
             elif last == today - datetime.timedelta(days=1):
-                streak = row["daily_streak"] + 1
+                streak, guarded = row["daily_streak"] + 1, 0
             else:
-                streak = 1
-                # 受け取れなかった日が、連続守り券の枚数以内なら、1枚で1日ぶん埋めて連続をつなぐ（足りなければ1枚も使わない）
+                # 受け取れなかった日が守り券の枚数以内なら、1枚で1日ぶん埋めて連続をつなぐ（足りなければ1枚も使わない）
                 missed = (today - last).days - 1 if last is not None else 0
+                streak, guarded = 1, 0
                 if missed > 0 and row["daily_streak"] > 0:
                     cur = self._conn.execute(
                         "UPDATE inventory SET qty = qty - ? WHERE guild_id=? AND user_id=? AND item_id=? AND qty>=?",
                         (missed, gid, user_id, STREAK_GUARD, missed),
                     )
-                    if cur.rowcount:
-                        streak, guarded = row["daily_streak"] + 1, missed
+                    streak, guarded = (row["daily_streak"] + 1, missed) if cur.rowcount else (1, 0)
             amount = self.DAILY_BASE + self.DAILY_STREAK_BONUS * min(streak - 1, self.DAILY_STREAK_CAP)
             prof = self._one("SELECT daily_boost FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id))
             boosted = bool(prof and prof["daily_boost"] > 0)

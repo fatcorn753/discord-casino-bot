@@ -133,13 +133,13 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
                 kind = bonds_mod.KINDS[row["kind"]]
                 until = min(now, row["due"])
                 since = row["checked"] if row["checked"] is not None else row["ts"]
-                if kind.default_pct and until > since:
-                    if rng.random() < bonds_mod.default_probability(kind, (until - since) / 3600):
-                        self._conn.execute("UPDATE bonds SET status='defaulted', paid=0 WHERE id=?", (row["id"],))
-                        # 返さなくてよくなった元本は、銀行の儲け（流入）になる
-                        offset += row["principal"]
-                        out.append({**row, "status": "defaulted", "paid": 0})
-                        continue
+                roll = bool(kind.default_pct) and until > since  # ジャンク債の倒産抽選の対象か
+                if roll and rng.random() < bonds_mod.default_probability(kind, (until - since) / 3600):
+                    self._conn.execute("UPDATE bonds SET status='defaulted', paid=0 WHERE id=?", (row["id"],))
+                    offset += row["principal"]  # 返さなくてよくなった元本は、銀行の儲け（流入）になる
+                    out.append({**row, "status": "defaulted", "paid": 0})
+                    continue
+                if roll:
                     self._conn.execute("UPDATE bonds SET checked=? WHERE id=?", (until, row["id"]))
                 if row["due"] > now:
                     continue

@@ -32,10 +32,9 @@ class KyosaiRepo(Base):
             if to_users > 0:
                 # 配当は余剰の分配で損失ではないため、サーモスタットに通さない（L < 0 のときに熱浴の現金が湧かないように）
                 self._bank.bank_pay_for(gid, to_users, now, thermo=False)
-
-                for user_id, share in shares.items():
-                    if user_id == kyosai.HOUSE or share <= 0:
-                        continue
+                paid = 0
+                payouts = [(uid, s) for uid, s in shares.items() if uid != kyosai.HOUSE and s > 0]
+                for user_id, share in payouts:  # 帝愛の持ち口の分は、銀行に残す
                     self._account.ensure(gid, user_id)
                     self._account.apply(gid, user_id, share, "共済:配当", income=share)
                     paid += share

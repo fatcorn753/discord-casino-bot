@@ -359,30 +359,30 @@ class P2PRepo(ScopedRepo, IP2PRepo):
             )
             for row in rows:
                 label = self._p2p_label_for(gid, row)
-                if row["mode"] == "auction" and row["bidder_id"]:
-                    buyer = row["bidder_id"]
-                    reason = self._p2p_can_receive(gid, buyer, row)
-                    used = self._p2p_pair_total(gid, row["seller_id"], buyer, now)
-                    if not reason and used + row["bid"] > p2p.PAIR_DAILY_LIMIT:
-                        reason = fail("p2p_pair_limit_short")
-                    if not reason:
-                        self._p2p_sell(gid, row, buyer, row["bid"], now)
-                        self._notices.note_for(gid, buyer, "p2p_won", label=label, bid=row["bid"])
-                        out.append((row, "sold"))
-                        continue
-                    self._account.apply(
-                        gid, buyer, row["bid"], f"取引:入札の返金（{label}）"
-                    )  # 受け取れないので、返金して出品も戻す
-                    self._notices.note_for(gid, buyer, "p2p_won_failed", label=label, reason=reason, refund=row["bid"])
-                    self._p2p_give(gid, row["seller_id"], row)
+                if row["mode"] != "auction" or not row["bidder_id"]:
+                    self._p2p_give(gid, row["seller_id"], row)  # 売れ残り: 売り手へ戻す
                     self._p2p_close(row["id"], "expired", now)
-                    self._notices.note_for(gid, row["seller_id"], "p2p_buyer_cannot_receive", label=label)
-                    out.append((row, "failed"))
+                    self._notices.note_for(gid, row["seller_id"], "p2p_unsold", label=label)
+                    out.append((row, "expired"))
                     continue
-                self._p2p_give(gid, row["seller_id"], row)  # 売れ残り: 売り手へ戻す
+                buyer = row["bidder_id"]
+                reason = self._p2p_can_receive(gid, buyer, row)
+                used = self._p2p_pair_total(gid, row["seller_id"], buyer, now)
+                if not reason and used + row["bid"] > p2p.PAIR_DAILY_LIMIT:
+                    reason = fail("p2p_pair_limit_short")
+                if not reason:
+                    self._p2p_sell(gid, row, buyer, row["bid"], now)
+                    self._notices.note_for(gid, buyer, "p2p_won", label=label, bid=row["bid"])
+                    out.append((row, "sold"))
+                    continue
+                self._account.apply(
+                    gid, buyer, row["bid"], f"取引:入札の返金（{label}）"
+                )  # 受け取れないので、返金して出品も戻す
+                self._notices.note_for(gid, buyer, "p2p_won_failed", label=label, reason=reason, refund=row["bid"])
+                self._p2p_give(gid, row["seller_id"], row)
                 self._p2p_close(row["id"], "expired", now)
-                self._notices.note_for(gid, row["seller_id"], "p2p_unsold", label=label)
-                out.append((row, "expired"))
+                self._notices.note_for(gid, row["seller_id"], "p2p_buyer_cannot_receive", label=label)
+                out.append((row, "failed"))
         return out
 
     def p2p_active(

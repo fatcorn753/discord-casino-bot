@@ -81,16 +81,17 @@ class BankRepo(Base):
             if net > 0:  # 純額が流入: 入れてよい額を超えた分（burn）は、手元から消える（マイナスにはしない）
                 burn = net - self._thermo_inflow_for(guild_id, int(round(net)), now)
                 cash = max(cash - burn, 0.0)
-            elif net < 0:
+            else:
                 # 信託の取り崩し分は負側の器を使わない（0 を超えて流入側へ反転させない）
                 shock = max(0.0, -net - trust_take)
                 if shock > 0:
                     bailout = self._thermo_shock_for(guild_id, int(round(shock)), now)
         cover = min(excess, bailout)  # 熱浴の肩代わりは、まず超過損失の穴埋めに使う
         cash += bailout - cover  # 余った肩代わりは、手元へ
+        # 残りの超過損失は帝愛共済の口の持ち主の負担（#34）。帝愛の持ち口の分は払われずに残る
         charged = 0
         left = int(excess - cover)
-        if left > 0:  # 残りは帝愛共済の口の持ち主の負担（#34）。帝愛の持ち口の分は払われずに残る
+        if left > 0:
             charged = min(left, max(0, self._excess_sink(guild_id, left, now)))
             if left > charged:
                 self._conn.execute(
