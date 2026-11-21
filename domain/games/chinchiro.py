@@ -35,17 +35,19 @@ class Hand:
     @property
     def strength(self) -> int:
         """大きいほど強い。同じ値なら引き分け。"""
-        if self.kind == HIFUMI:
-            return 0
-        if self.kind == MENASHI:
-            return 1
-        if self.kind == ME:
-            return 10 + self.value
-        if self.kind == SHIGORO:
-            return 30
-        if self.kind == ARASHI:
-            return 40 + self.value
-        return 100
+        match self.kind:
+            case "hifumi":  # HIFUMI
+                return 0
+            case "menashi":  # MENASHI
+                return 1
+            case "me":  # ME
+                return 10 + self.value
+            case "shigoro":  # SHIGORO
+                return 30
+            case "arashi":  # ARASHI
+                return 40 + self.value
+            case _:  # PINZORO（デフォルト）
+                return 100
 
     @property
     def name(self) -> str:
@@ -72,11 +74,11 @@ def classify(dice) -> Hand:
     return Hand(MENASHI)
 
 
-def roll_dice(rng: random.Random) -> tuple:
+def roll_dice(rng: random.Random) -> tuple[int, ...]:
     return tuple(rng.randint(1, 6) for _ in range(3))
 
 
-def play_hand(rng: random.Random) -> list:
+def play_hand(rng: random.Random) -> list[tuple[tuple[int, ...], Hand]]:
     """目が出る（またはヒフミ・3回）まで振る。[(出目, 役), ...] を返す。最後の要素が確定した役。"""
     rolls = []
     for _ in range(MAX_ROLLS):
@@ -112,7 +114,7 @@ def compare(player: Hand, dealer: Hand) -> Outcome:
     return Outcome("lose", mult)
 
 
-def payout(bet: int, outcome: Outcome) -> tuple:
+def payout(bet: int, outcome: Outcome) -> tuple[int, int]:
     """(預かり金から払い戻す総額, 預かり金以外から追加で引く額) を返す。
 
     - 勝ち: 賭け金 + 賭け金×倍率 を受け取る

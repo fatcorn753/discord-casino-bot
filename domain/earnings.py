@@ -7,7 +7,9 @@
 
 import datetime
 import math
+import random
 from dataclasses import dataclass
+from typing import Any
 
 from domain.ports import get_catalogs
 
@@ -31,7 +33,7 @@ def _local(ts: float, tz_hours: float) -> datetime.datetime:
     return datetime.datetime.fromtimestamp(ts, datetime.timezone(datetime.timedelta(hours=tz_hours)))
 
 
-def _at(day: datetime.date, hm: tuple, tz_hours: float) -> float:
+def _at(day: datetime.date, hm: tuple[int, int], tz_hours: float) -> float:
     tz = datetime.timezone(datetime.timedelta(hours=tz_hours))
     return datetime.datetime.combine(day, datetime.time(*hm), tzinfo=tz).timestamp()
 
@@ -39,7 +41,7 @@ def _at(day: datetime.date, hm: tuple, tz_hours: float) -> float:
 def next_release(now: float, tz_hours: float) -> float:
     """now より後の、いちばん近い決算発表（火曜 13:30）の時刻。"""
     today = _local(now, tz_hours).date()
-    for d in range(0, 8):
+    for d in range(8):
         day = today + datetime.timedelta(days=d)
         if day.weekday() == RELEASE_WEEKDAY:
             t = _at(day, RELEASE_TIME, tz_hours)
@@ -54,7 +56,7 @@ def announce_time(release_at: float, tz_hours: float) -> float:
     return _at(day, ANNOUNCE_TIME, tz_hours)
 
 
-def plan(now: float, tz_hours: float, rng) -> dict:
+def plan(now: float, tz_hours: float, rng: random.Random) -> dict[str, Any]:
     """次の決算を決める。{symbol, announce_at, release_at, direction（1 好決算 / -1 悪決算）, size}。結果は、ここで決まっている。"""
     release = next_release(now, tz_hours)
     surprise = rng.random() < SURPRISE_PROB

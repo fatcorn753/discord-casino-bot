@@ -1,5 +1,6 @@
 """`/ショップ` の操作パネル（View）。"""
 
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Optional
 
 import discord
@@ -18,6 +19,7 @@ from cogs.shop.embeds import (
     tab_items,
 )
 from domain import shop
+from domain.ports.contracts import ListingRow
 
 if TYPE_CHECKING:
     from cogs.shop.cog import ShopCog
@@ -48,7 +50,7 @@ class ShopView(ui.OwnerView):
         )
         self.auction_tab: str | None = None  # 競売の画面のタブ（players / teiai）。None は、開いたときに決める
         self.p2p_filter, self.p2p_order = "all", "end"  # プレイヤーの出品の、絞り込みと並び順
-        self._screen_data: dict[str, Any] = {}
+        self._screen_data: Mapping[str, Any] = {}
         self._build()
 
     # ---- 見た目 ---- #
@@ -78,12 +80,13 @@ class ShopView(ui.OwnerView):
 
     def _build(self) -> None:
         self.clear_items()
-        if self.screen == "inv":
-            self._build_inventory()
-        elif self.screen == "auction":
-            self._build_auction()
-        else:
-            self._build_shop()
+        match self.screen:
+            case "inv":
+                self._build_inventory()
+            case "auction":
+                self._build_auction()
+            case _:
+                self._build_shop()
 
     def _build_shop(self) -> None:
         """上の2段が売り場のボタン（いまの売り場は青）。その下に、買う景品の選択肢（トップでは出ない）。"""
@@ -247,7 +250,7 @@ class ShopView(ui.OwnerView):
 
         return callback
 
-    def _build_auction_players(self, p2p_rows: list[tuple[dict[str, Any], str]]) -> None:
+    def _build_auction_players(self, p2p_rows: Sequence[tuple[ListingRow, str]]) -> None:
         """プレイヤーの出品のタブ: 絞り込み・並べ替え・出品の選択肢。"""
         for key, (label, _kind, _mode) in self.P2P_FILTERS.items():
             btn = discord.ui.Button(
@@ -404,10 +407,7 @@ class ShopView(ui.OwnerView):
 
     # ---- 操作 ---- #
     async def _reject_non_owner(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(
-            embed=ui.error_embed("これは他の人のパネルです", "`/ショップ` で自分のパネルを開けます。"),
-            ephemeral=True,
-        )
+        await ui.reply_error(interaction, "`/ショップ` で自分のパネルを開けます。", title="これは他の人のパネルです")
 
     async def _redraw(self, interaction: discord.Interaction) -> None:
         self._build()
@@ -432,19 +432,19 @@ class ShopView(ui.OwnerView):
 
     async def _on_purchase(self, interaction: discord.Interaction):
         if self.picked is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("景品を選んでください", "買う景品を選んでから、「🛒 購入」を押してください。"),
-                ephemeral=True,
+            return await ui.reply_error(
+                interaction, "買う景品を選んでから、「🛒 購入」を押してください。", title="景品を選んでください"
             )
         kind, value = self.picked
-        if kind == "horse":
-            await actions.buy_auction_horse(self.cog, interaction, int(value))
-        elif kind == "auction" and value.startswith("tm:"):
-            await actions.buy_teiai_market(self.cog, interaction, int(value[3:]), self.qty)
-        elif kind == "auction":
-            await actions.buy_auction(self.cog, interaction, value, self.qty)
-        else:
-            await actions.buy_item(self.cog, interaction, value, self.qty if self.tab in ("item", "horse") else 1)
+        match kind:
+            case "horse":
+                await actions.buy_auction_horse(self.cog, interaction, int(value))
+            case "auction" if value.startswith("tm:"):
+                await actions.buy_teiai_market(self.cog, interaction, int(value[3:]), self.qty)
+            case "auction":
+                await actions.buy_auction(self.cog, interaction, value, self.qty)
+            case _:
+                await actions.buy_item(self.cog, interaction, value, self.qty if self.tab in ("item", "horse") else 1)
 
     async def _to_auction(self, interaction: discord.Interaction):
         self.screen, self.qty, self.picked, self.auction_tab = "auction", 1, None, None  # タブは、開くたびに決め直す

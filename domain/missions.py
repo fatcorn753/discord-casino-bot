@@ -4,6 +4,7 @@
 報酬は小さめ（デイリーボーナスの半分程度）にして、遊ぶきっかけになっても経済を壊さないようにしている。
 """
 
+import datetime
 import random
 from dataclasses import dataclass
 from typing import Optional
@@ -58,7 +59,7 @@ POOL = UNIVERSAL + OTHER_GAMES + BLACKJACK_MISSIONS + [BIG_WIN]
 BY_ID = {m.id: m for m in POOL}
 
 
-def today_missions(day) -> list:
+def today_missions(day: datetime.date) -> list[Mission]:
     """その日のミッション（全員共通）。日付が同じなら何度呼んでも同じ。
 
     毎日、(1) どのゲームでも進むもの、(2) ブラックジャック向け、(3) 残り全部からランダムに1つ。
@@ -72,23 +73,25 @@ def today_missions(day) -> list:
 
 def progress_after(m: Mission, current: int, game: str, bet: int, net: int, streak: int, tags=()) -> int:
     """1回遊んだあとの、そのミッションの進み具合。"""
-    if m.kind == "play":
-        return current + 1
-    if m.kind == "win":
-        return current + (1 if net > 0 else 0)
-    if m.kind == "wager":
-        return current + bet
-    if m.kind == "streak":
-        return max(current, streak)
-    if m.kind == "big_win":
-        return max(current, net // bet if net > 0 and bet > 0 else 0)
-    if m.kind == "play_game":
-        return current + (1 if game == m.game else 0)
-    if m.kind == "game_win":
-        return current + (1 if game == m.game and net > 0 else 0)
-    if m.kind == "tag":
-        return current + (1 if m.tag in tags else 0)
-    return current
+    match m.kind:
+        case "play":
+            return current + 1
+        case "win":
+            return current + (1 if net > 0 else 0)
+        case "wager":
+            return current + bet
+        case "streak":
+            return max(current, streak)
+        case "big_win":
+            return max(current, net // bet if net > 0 and bet > 0 else 0)
+        case "play_game":
+            return current + (1 if game == m.game else 0)
+        case "game_win":
+            return current + (1 if game == m.game and net > 0 else 0)
+        case "tag":
+            return current + (1 if m.tag in tags else 0)
+        case _:
+            return current
 
 
 def is_jackpot(bet: int, net: int) -> bool:

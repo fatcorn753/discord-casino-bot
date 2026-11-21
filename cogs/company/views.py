@@ -9,7 +9,7 @@ from cogs.shared import ui
 from cogs.shared.amount import AmountModal
 from cogs.shared.messages import format_failure
 from domain import company as company_mod
-from domain.errors import fail
+from domain.errors import Failure, fail
 from services.company import CompanyService
 
 
@@ -42,9 +42,7 @@ class KindView(ui.OwnerView):
         kind = ui.selected_values(interaction)[0]
         ok, reason = self.panel.company.change_kind(ui.guild_id_of(interaction), interaction.user.id, kind)
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("変えられません", format_failure(reason)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(reason), title="変えられません")
             return
         self.stop()
         await interaction.response.edit_message(
@@ -93,14 +91,13 @@ class CompanyPanel(ui.OwnerView):
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def _fail(self, interaction: discord.Interaction, reason: object) -> None:
-        await interaction.response.send_message(
-            embed=ui.error_embed("できません", format_failure(reason)), ephemeral=True
-        )
+        await ui.reply_error(interaction, format_failure(reason), title="できません")
 
     async def _on_ship(self, interaction: discord.Interaction) -> None:
         ok, result = self.company.ship(ui.guild_id_of(interaction), interaction.user.id)
         if not ok:
             return await self._fail(interaction, result)
+        assert not isinstance(result, Failure)
         note = f"出荷しました: 会社資金 +{ui.pelica(result['paid'])}（ピンハネ {ui.pelica(result['pinhane'])}）"
         if result.get("dividends"):
             note += f"\n出資者へ配当 {ui.pelica(result['dividends'])} を配りました（会社資金から）"

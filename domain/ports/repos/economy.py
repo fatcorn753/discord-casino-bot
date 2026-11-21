@@ -1,14 +1,27 @@
 """経済・通知・履歴・ギルド設定・資産集計のリポジトリポート契約。"""
 
 import datetime
-from typing import TYPE_CHECKING, Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Optional
 
 from domain.ports.bridges import INoticeSink
-from domain.ports.contracts import RankEntry, WeeklyRankEntry
+from domain.ports.contracts import (
+    GuildStatusRow,
+    LeaderboardRow,
+    LedgerEntry,
+    PlayRecord,
+    PlaySummary,
+    ProfileRow,
+    RankEntry,
+    UserRow,
+    WeeklyAward,
+    WeeklyRankEntry,
+)
 from domain.ports.repos.base import IGuildScopedRepo
 
 if TYPE_CHECKING:
     from domain.errors import Notice
+    from domain.missions import Mission
     from domain.types import DailyResult, TransferResult
 
 
@@ -20,10 +33,10 @@ class INoticeRepo(IGuildScopedRepo, INoticeSink):
 class IRecordRepo(IGuildScopedRepo):
     def record_play(
         self, user_id: int, game: str, bet: int, net: int, day: datetime.date, tags: Iterable[str] = ()
-    ) -> dict[str, Any]:
+    ) -> PlayRecord:
         raise NotImplementedError
 
-    def mission_status(self, user_id: int, day: datetime.date) -> list[Any]:
+    def mission_status(self, user_id: int, day: datetime.date) -> list[tuple["Mission", int, bool]]:
         raise NotImplementedError
 
     def weekly_top(self, week: str, limit: int = 10) -> list[tuple[int, int, int]]:
@@ -41,16 +54,16 @@ class IRecordRepo(IGuildScopedRepo):
     def weekly_champion_count(self, user_id: int) -> int:
         raise NotImplementedError
 
-    def weekly_award(self, week: str) -> Optional[dict[str, Any]]:
+    def weekly_award(self, week: str) -> Optional[WeeklyAward]:
         raise NotImplementedError
 
     def backfill_weekly(self, utc_offset_hours: float = 9) -> int:
         raise NotImplementedError
 
-    def play_summary(self, user_id: int) -> dict[str, Any]:
+    def play_summary(self, user_id: int) -> PlaySummary:
         raise NotImplementedError
 
-    def win_streak(self, user_id: int) -> tuple[Any, ...]:
+    def win_streak(self, user_id: int) -> tuple[int, int]:
         raise NotImplementedError
 
 
@@ -62,10 +75,10 @@ class IGuildApprovalRepo(IGuildScopedRepo):
     ) -> None:
         raise NotImplementedError
 
-    def get_guild_status(self, guild_id: int) -> Optional[dict[str, Any]]:
+    def get_guild_status(self, guild_id: int) -> Optional[GuildStatusRow]:
         raise NotImplementedError
 
-    def list_guild_status(self) -> list[dict[str, Any]]:
+    def list_guild_status(self) -> list[GuildStatusRow]:
         raise NotImplementedError
 
     def mark_guild_notified(self, guild_id: int) -> None:
@@ -78,10 +91,10 @@ class ILeaderboardConfigRepo(IGuildScopedRepo):
     def set_leaderboard(self, guild_id: int, channel_id: int, message_id: int) -> None:
         raise NotImplementedError
 
-    def get_leaderboard(self, guild_id: int) -> Optional[dict[str, Any]]:
+    def get_leaderboard(self, guild_id: int) -> Optional[LeaderboardRow]:
         raise NotImplementedError
 
-    def list_leaderboards(self) -> list[dict[str, Any]]:
+    def list_leaderboards(self) -> list[LeaderboardRow]:
         raise NotImplementedError
 
     def delete_leaderboard(self, guild_id: int) -> None:
@@ -122,7 +135,7 @@ class INickPrefRepo(IGuildScopedRepo):
 class IProfileDisplayReader(IGuildScopedRepo):
     """ランキングの称号表示に使う、プロフィールのまとめ読み。"""
 
-    def profiles_of(self, user_ids: Iterable[int]) -> dict[int, dict[str, Any]]:
+    def profiles_of(self, user_ids: Iterable[int]) -> dict[int, ProfileRow]:
         raise NotImplementedError
 
 
@@ -149,7 +162,7 @@ class IWalletBalanceRepo(IGuildScopedRepo):
     def credit(self, user_id: int, amount: int, reason: str) -> int:
         raise NotImplementedError
 
-    def set_balance(self, user_id: int, amount: int, reason: str) -> tuple[Any, ...]:
+    def set_balance(self, user_id: int, amount: int, reason: str) -> tuple[int, int, int, int]:
         raise NotImplementedError
 
     def debit_up_to(self, user_id: int, amount: int, reason: str) -> int:
@@ -196,13 +209,13 @@ class IWalletRankingReader(IGuildScopedRepo):
 class IWalletStatsReader(IGuildScopedRepo):
     """成績と取引履歴（読み取り）。"""
 
-    def peek_stats(self, user_id: int) -> Optional[dict[str, Any]]:
+    def peek_stats(self, user_id: int) -> Optional[UserRow]:
         raise NotImplementedError
 
-    def stats(self, user_id: int) -> dict[str, Any]:
+    def stats(self, user_id: int) -> UserRow:
         raise NotImplementedError
 
-    def history(self, user_id: int, limit: int = 10) -> list[dict[str, Any]]:
+    def history(self, user_id: int, limit: int = 10) -> list[LedgerEntry]:
         raise NotImplementedError
 
 

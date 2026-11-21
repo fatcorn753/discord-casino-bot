@@ -8,7 +8,7 @@
 import datetime
 from collections.abc import Callable, Coroutine
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import aiohttp
 import discord
@@ -58,7 +58,10 @@ def as_bot(fake: object) -> commands.Bot:
     return cast(commands.Bot, fake)
 
 
-def must[T](value: T | None) -> T:
+_T = TypeVar("_T")
+
+
+def must(value: _T | None) -> _T:
     """discord の Optional な値（埋め込みの本文など）が、テストの場面では必ずあることを確かめて返す。"""
     assert value is not None
     return value

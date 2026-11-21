@@ -84,9 +84,9 @@ def test_margin_equity_counts_longs_in_the_ranking(eco):
     a = eco.for_guild(G)
     set_price(eco, "cs", 100.0)
     a.margin.long_open(U, 10_000, 100.0, 2)
-    assert dict((u, v) for _, u, v in a.wallet.top(5))[U] == INITIAL_BALANCE  # 担保 + 含み損益（0）
+    assert {u: v for _, u, v in a.wallet.top(5)}[U] == INITIAL_BALANCE  # 担保 + 含み損益（0）
     set_price(eco, "cs", 110.0)
-    assert dict((u, v) for _, u, v in a.wallet.top(5))[U] == INITIAL_BALANCE + 100
+    assert {u: v for _, u, v in a.wallet.top(5)}[U] == INITIAL_BALANCE + 100
 
 
 # ----------------------------- 維持率と建玉の受付 ----------------------------- #

@@ -1,6 +1,62 @@
-"""銀行・猶予・CDS・通知・価格・胴元・破産実行のブリッジ契約（名目的基底クラスと NoOp / Composite 実装）。"""
+"""銀行・猶予・CDS・通知・価格・胴元・破産実行のブリッジ契約。
 
+住み分け:
+- 単一メソッドの純粋コールバック契約は `Callable` 型エイリアス（形式的型付け）で表し、
+  関数・クロージャ・束縛メソッドをそのまま渡せる。既定動作は `noop_*` 関数（LSP 準拠）、
+  束ねは `compose_*` 関数（OCP）が担う。
+- 複数メソッド・状態・不変条件を持つ契約（INoticeSink / IBankCashFlow / IHouseAccount /
+  IBankCdsBridge）は名目的基底クラスのまま維持する。
+"""
+
+from collections.abc import Callable
 from typing import Any, Optional
+
+from domain.errors import Outcome, fail
+from domain.ports.contracts import BankruptResult
+
+# 単一コールバック契約（Callable 型エイリアス）: 静的型だけで LSP を 100% 保証できる純粋契約
+MarketPriceReader = Callable[[], dict[str, float]]
+GraceReader = Callable[[int, int], Optional[float]]
+GraceEnterHook = Callable[[int, int, float], None]
+ExcessLossSink = Callable[[int, int, float], int]
+# (guild_id, user_id, forced, escape) -> (成功か, 結果 | Failure)
+BankruptExecutor = Callable[[int, int, bool, bool], Outcome[BankruptResult]]
+GainsTaxCollector = Callable[[int, int, int, bool, str], int]
+
+
+def noop_market_price_reader() -> dict[str, float]:
+    """価格ソース未接続時に空辞書を返す LSP 準拠の既定動作。"""
+    return {}
+
+
+def noop_grace_reader(guild_id: int, user_id: int) -> Optional[float]:
+    """猶予読み取り未接続時に None を返す LSP 準拠の既定動作。"""
+    return None
+
+
+def noop_grace_enter_hook(guild_id: int, user_id: int, now: float) -> None:
+    """猶予入りフック未接続時の LSP 準拠の既定動作。"""
+    return None
+
+
+def compose_grace_enter_hooks(hooks: tuple[GraceEnterHook, ...]) -> GraceEnterHook:
+    """複数の猶予入りフックを順次適用する合成フックを返す（OCP: 既存を修正せず追加できる）。"""
+
+    def run(guild_id: int, user_id: int, now: float) -> None:
+        for hook in hooks:
+            hook(guild_id, user_id, now)
+
+    return run
+
+
+def noop_excess_loss_sink(guild_id: int, amount: int, now: float) -> int:
+    """負う先が無いとき: 何も集めない（超過損失は払われない）。"""
+    return 0
+
+
+def noop_bankrupt_executor(guild_id: int, user_id: int, forced: bool, escape: bool) -> Outcome[BankruptResult]:
+    """破産実行未接続時に失敗を返す LSP 準拠の既定動作。"""
+    return False, fail("unavailable")
 
 
 class INoticeSink:
@@ -15,20 +71,6 @@ class NoOpNoticeSink(INoticeSink):
 
     def note_for(self, guild_id: int, user_id: int, code: str, **params: Any) -> None:
         return None
-
-
-class IMarketPriceReader:
-    """保有資産の評価額算出・強制決済に使う最新市場価格の読み取り契約。"""
-
-    def latest_prices(self) -> dict[str, float]:
-        raise NotImplementedError
-
-
-class NoOpMarketPriceReader(IMarketPriceReader):
-    """価格ソース未接続時に空辞書を返す LSP 準拠 Null 実装。"""
-
-    def latest_prices(self) -> dict[str, float]:
-        return {}
 
 
 class IBankCashFlow:
@@ -91,29 +133,11 @@ class IHouseAccount:
         raise NotImplementedError
 
 
-class IGainsTaxCollector:
-    """キャピタルゲイン課税の徴収契約。"""
-
-    def charge_gains_tax_for(self, guild_id: int, user_id: int, profit: int, taxable: bool, what: str) -> int:
-        raise NotImplementedError
-
-
-class IGraceReader:
-    """破産猶予の終了時刻を参照する読み取り契約。"""
-
-    def grace_until_for(self, guild_id: int, user_id: int) -> Optional[float]:
-        raise NotImplementedError
-
-
-class NoOpGraceReader(IGraceReader):
-    """猶予読み取り未接続時に None を返す LSP 準拠 Null 実装。"""
-
-    def grace_until_for(self, guild_id: int, user_id: int) -> Optional[float]:
-        return None
-
-
-class IBankCdsBridge(IGraceReader):
+class IBankCdsBridge:
     """DebtRepo が BankRepo 具体型に依存せず猶予更新と CDS 精算を行う契約。"""
+
+    def grace_until_for(self, guild_id: int, user_id: int) -> Optional[float]:
+        raise NotImplementedError
 
     def grace_update_for(self, guild_id: int, user_id: int, now: float) -> None:
         raise NotImplementedError
@@ -145,57 +169,3 @@ class NoOpBankCdsBridge(IBankCdsBridge):
 
     def cds_void_for(self, guild_id: int, target_id: int) -> None:
         return None
-
-
-class IGraceEnterHook:
-    """破産猶予入り時に連動して実行するフック契約（例: P2P出品引き戻し）。"""
-
-    def on_grace_enter(self, guild_id: int, user_id: int, now: float) -> None:
-        raise NotImplementedError
-
-
-class IExcessLossSink:
-    """帝愛信託でも受け止めきれない超過損失のうち、熱浴が肩代わりしない分を負う先（#34 の帝愛共済）。"""
-
-    def charge_excess_for(self, guild_id: int, amount: int, now: float) -> int:
-        """amount を請求し、集められた額を返す（銀行の手元には入れず、そのまま支払いに充てる）。"""
-        raise NotImplementedError
-
-
-class NoOpExcessLossSink(IExcessLossSink):
-    """負う先が無いとき: 何も集めない（超過損失は払われない）。"""
-
-    def charge_excess_for(self, guild_id: int, amount: int, now: float) -> int:
-        return 0
-
-
-class NoOpGraceEnterHook(IGraceEnterHook):
-    """猶予入りフック未接続時の LSP 準拠 Null 実装。"""
-
-    def on_grace_enter(self, guild_id: int, user_id: int, now: float) -> None:
-        return None
-
-
-class CompositeGraceEnterHook(IGraceEnterHook):
-    """複数の IGraceEnterHook を束ねて順次適用する Composite。"""
-
-    def __init__(self, hooks: tuple[IGraceEnterHook, ...]) -> None:
-        self._hooks = hooks
-
-    def on_grace_enter(self, guild_id: int, user_id: int, now: float) -> None:
-        for hook in self._hooks:
-            hook.on_grace_enter(guild_id, user_id, now)
-
-
-class IBankruptExecutor:
-    """猶予期限切れなどから強制破産を実行する契約。"""
-
-    def bankrupt_for(self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False) -> tuple[Any, ...]:
-        raise NotImplementedError
-
-
-class NoOpBankruptExecutor(IBankruptExecutor):
-    """破産実行未接続時に失敗タプルを返す LSP 準拠 Null 実装。"""
-
-    def bankrupt_for(self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False) -> tuple[Any, ...]:
-        return False, ""

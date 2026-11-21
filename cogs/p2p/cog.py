@@ -37,6 +37,7 @@ from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
 from cogs.shared.messages import format_failure
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain.ports import get_catalogs
+from domain.ports.contracts import HorseRow, ListingRow
 from domain.ports.repos import IGuildRepo
 from domain.ports.session import ISessionGuard
 from services.p2p import P2PService
@@ -75,7 +76,7 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
             bridges.unregister(IP2PListingBridge, self)
             bridges.unregister(IP2PNavigationBridge, self)
 
-    def _post_args(self, guild_id: int, row: dict[str, Any]) -> tuple[str, Optional[dict[str, Any]]]:
+    def _post_args(self, guild_id: int, row: ListingRow) -> tuple[str, Optional[HorseRow]]:
         return self.p2p.label(guild_id, row), self.p2p.horse_of(guild_id, row)
 
     # ------------------------------ 出品の告知（チャンネルへの投稿） ------------------------------ #
@@ -145,9 +146,7 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
         gid = ui.guild_id_of(interaction)
         row = self.p2p.get(gid, listing_id)
         if row is None or row["status"] != "active":
-            await interaction.response.send_message(
-                embed=ui.error_embed(fail_title, "その出品は、もうありません。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "その出品は、もうありません。", title=fail_title)
             return
         async with user_session(self._sessions, interaction, busy_title) as ok:
             if not ok:
@@ -166,7 +165,7 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
                 return
             done, result = execute(gid, uid)
             if not done:
-                await reply(embed=ui.error_embed(error_title, format_failure(result)), ephemeral=True)
+                await ui.reply_error(interaction, format_failure(result), title=error_title)
                 return
             balance = self.p2p.balance_of(gid, uid)
             await reply(
@@ -222,9 +221,7 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
         gid = ui.guild_id_of(interaction)
         row = self.p2p.get(gid, listing_id)
         if row is None or row["status"] != "active":
-            await interaction.response.send_message(
-                embed=ui.error_embed("もうありません", "その出品は、終わりました。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "その出品は、終わりました。", title="もうありません")
             return
         view = DetailView(self, interaction.user.id, row["id"], row["mode"])
         if row["seller_id"] == interaction.user.id:
@@ -239,11 +236,10 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
 
         view = SellView(self, interaction.user.id, ui.guild_id_of(interaction))
         if not view.options:
-            await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "出せるものがありません", "売れる品（消耗品・カードの色など・発掘品）か、馬を、持っていません。"
-                ),
-                ephemeral=True,
+            await ui.reply_error(
+                interaction,
+                "売れる品（消耗品・カードの色など・発掘品）か、馬を、持っていません。",
+                title="出せるものがありません",
             )
             return
         await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)

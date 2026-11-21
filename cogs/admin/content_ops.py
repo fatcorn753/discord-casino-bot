@@ -1,5 +1,6 @@
 """運営向けのコンテンツ・メッセージ操作（臨時競馬・お知らせ・発言削除・抽選・クイズ）。"""
 
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Optional
 
 import discord
@@ -44,12 +45,10 @@ async def special_race(
     if horse_bridge is None:
         return
     race_id = await horse_bridge.start_special(guild, entry_min, bet_min, channel)
-    await interaction.response.send_message(
-        embed=ui.ok_embed(
-            "臨時レースを開催しました",
-            f"{guild.name} で、臨時レース（#{race_id}）の申し込みを始めました（掲示は{channel.mention if channel else '告知チャンネル'}）。申し込み {entry_min}分 → 馬券 {bet_min}分 → 発走（2分後）。",
-        ),
-        ephemeral=True,
+    await ui.reply_ok(
+        interaction,
+        f"{guild.name} で、臨時レース（#{race_id}）の申し込みを始めました（掲示は{channel.mention if channel else '告知チャンネル'}）。申し込み {entry_min}分 → 馬券 {bet_min}分 → 発走（2分後）。",
+        title="臨時レースを開催しました",
     )
 
 
@@ -71,12 +70,10 @@ async def host_arena(
     if arena_bridge is None:
         return
     status = await arena_bridge.host_now(guild, channel, advance, fmt)
-    await interaction.response.send_message(
-        embed=ui.ok_embed(
-            "闘技場を開催しました",
-            f"{guild.name} で、今日の大会を出しました（掲示は{channel.mention if channel else '告知チャンネル'}）。状態: {status}",
-        ),
-        ephemeral=True,
+    await ui.reply_ok(
+        interaction,
+        f"{guild.name} で、今日の大会を出しました（掲示は{channel.mention if channel else '告知チャンネル'}）。状態: {status}",
+        title="闘技場を開催しました",
     )
 
 
@@ -89,9 +86,7 @@ async def announce(
     channel_id: Optional[str],
 ) -> None:
     if image is not None and not ((image.content_type or "").startswith("image/") and image.size <= MAX_IMAGE_BYTES):
-        await interaction.response.send_message(
-            embed=ui.error_embed("画像を使えません", "画像ファイル（8MBまで）を添付してください。"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "画像ファイル（8MBまで）を添付してください。", title="画像を使えません")
         return
     if guild_id:
         guild = await pick_guild(cog.bot, interaction, guild_id)
@@ -104,9 +99,7 @@ async def announce(
     if not ok:
         return
     if not guilds:
-        await interaction.response.send_message(
-            embed=ui.error_embed("送り先がありません", "許可されているサーバーがありません。"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "許可されているサーバーがありません。", title="送り先がありません")
         return
     await interaction.response.send_modal(AnnounceModal(cog, guilds, (title or "").strip()[:200], image, channel))
 
@@ -121,12 +114,10 @@ async def purge_own_messages(
     if not ok:
         return
     if not can_read_history(channel, guild):
-        await interaction.response.send_message(
-            embed=ui.error_embed(
-                "履歴を読めません",
-                f"Bot は #{channel.name} の「メッセージ履歴を読む」権限がありません。招待URLの権限に足して（README を参照）、もう一度試してください。",
-            ),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction,
+            f"Bot は #{channel.name} の「メッセージ履歴を読む」権限がありません。招待URLの権限に足して（README を参照）、もう一度試してください。",
+            title="履歴を読めません",
         )
         return
     warning = (
@@ -141,6 +132,30 @@ async def purge_own_messages(
     )
 
 
+async def _raffle_panel_op(
+    cog: "ApprovalCog",
+    interaction: discord.Interaction,
+    guild_id: str,
+    channel_id: Optional[str],
+    op: Callable[[IRaffleAdminBridge, discord.Guild, Optional[discord.abc.Messageable]], Awaitable[tuple[bool, str]]],
+    ok_title: str,
+    ng_title: str,
+) -> None:
+    """抽選パネルの運営操作（host/repost/cancel）の共通手順: サーバーとチャンネルを選び、ブリッジを解決して defer し、結果を返す。"""
+    guild = await pick_guild(cog.bot, interaction, guild_id)
+    if guild is None:
+        return
+    ok, channel = await pick_channel(interaction, guild, channel_id)
+    if not ok:
+        return
+    raffle_bridge = await require_bridge(interaction, cog.bot, IRaffleAdminBridge, "抽選機能", cog._raffle_bridge)
+    if raffle_bridge is None:
+        return
+    await interaction.response.defer(ephemeral=True)
+    ok, text = await op(raffle_bridge, guild, channel)
+    await ui.reply_embed(interaction, ui.ok_embed(ok_title, text) if ok else ui.error_embed(ng_title, text))
+
+
 async def raffle_start(
     cog: "ApprovalCog",
     interaction: discord.Interaction,
@@ -149,53 +164,40 @@ async def raffle_start(
     minutes: int,
     channel_id: Optional[str],
 ) -> None:
-    guild = await pick_guild(cog.bot, interaction, guild_id)
-    if guild is None:
-        return
-    ok, channel = await pick_channel(interaction, guild, channel_id)
-    if not ok:
-        return
-    raffle_bridge = await require_bridge(interaction, cog.bot, IRaffleAdminBridge, "抽選機能", cog._raffle_bridge)
-    if raffle_bridge is None:
-        return
-    await interaction.response.defer(ephemeral=True)
-    ok, text = await raffle_bridge.host(guild, interaction.user.id, fee, minutes, channel)
-    await interaction.followup.send(
-        embed=ui.ok_embed("抽選を始めました", text) if ok else ui.error_embed("始められません", text),
-        ephemeral=True,
+    await _raffle_panel_op(
+        cog,
+        interaction,
+        guild_id,
+        channel_id,
+        lambda bridge, guild, channel: bridge.host(guild, interaction.user.id, fee, minutes, channel),
+        "抽選を始めました",
+        "始められません",
     )
 
 
 async def raffle_repost(
     cog: "ApprovalCog", interaction: discord.Interaction, guild_id: str, channel_id: Optional[str]
 ) -> None:
-    guild = await pick_guild(cog.bot, interaction, guild_id)
-    if guild is None:
-        return
-    ok, channel = await pick_channel(interaction, guild, channel_id)
-    if not ok:
-        return
-    raffle_bridge = await require_bridge(interaction, cog.bot, IRaffleAdminBridge, "抽選機能", cog._raffle_bridge)
-    if raffle_bridge is None:
-        return
-    await interaction.response.defer(ephemeral=True)
-    ok, text = await raffle_bridge.repost(guild, channel)
-    await interaction.followup.send(
-        embed=ui.ok_embed("出し直しました", text) if ok else ui.error_embed("出し直せません", text), ephemeral=True
+    await _raffle_panel_op(
+        cog,
+        interaction,
+        guild_id,
+        channel_id,
+        lambda bridge, guild, channel: bridge.repost(guild, channel),
+        "出し直しました",
+        "出し直せません",
     )
 
 
 async def raffle_cancel(cog: "ApprovalCog", interaction: discord.Interaction, guild_id: str) -> None:
-    guild = await pick_guild(cog.bot, interaction, guild_id)
-    if guild is None:
-        return
-    raffle_bridge = await require_bridge(interaction, cog.bot, IRaffleAdminBridge, "抽選機能", cog._raffle_bridge)
-    if raffle_bridge is None:
-        return
-    await interaction.response.defer(ephemeral=True)
-    ok, text = await raffle_bridge.cancel(guild)
-    await interaction.followup.send(
-        embed=ui.ok_embed("中止しました", text) if ok else ui.error_embed("中止できません", text), ephemeral=True
+    await _raffle_panel_op(
+        cog,
+        interaction,
+        guild_id,
+        None,
+        lambda bridge, guild, _channel: bridge.cancel(guild),
+        "中止しました",
+        "中止できません",
     )
 
 
@@ -235,21 +237,18 @@ async def quiz_bulk(
     if file.size > MAX_IMPORT_BYTES or not (
         file.filename.lower().endswith((".txt", ".md", ".text")) or (file.content_type or "").startswith("text/")
     ):
-        await interaction.response.send_message(
-            embed=ui.error_embed(
-                "ファイルを使えません",
-                f"テキストファイル（.txt、{MAX_IMPORT_BYTES // 1024}KBまで）を添付してください。",
-            ),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction,
+            f"テキストファイル（.txt、{MAX_IMPORT_BYTES // 1024}KBまで）を添付してください。",
+            title="ファイルを使えません",
         )
         return
     await interaction.response.defer(ephemeral=True)
     try:
         text = (await file.read()).decode("utf-8-sig")
     except UnicodeDecodeError:
-        await interaction.followup.send(
-            embed=ui.error_embed("文字コードを読めません", "UTF-8 で保存したテキストファイルを添付してください。"),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction, "UTF-8 で保存したテキストファイルを添付してください。", title="文字コードを読めません"
         )
         return
     quizzes, errors = quizimport.parse_bulk(text)
@@ -262,11 +261,10 @@ async def quiz_bulk(
         ]
     if errors:
         more = f"\n…ほか{len(errors) - 15}件" if len(errors) > 15 else ""
-        await interaction.followup.send(
-            embed=ui.error_embed(
-                f"登録できません（誤り{len(errors)}件・1問も登録していません）", "\n".join(errors[:15]) + more
-            ),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction,
+            "\n".join(errors[:15]) + more,
+            title=f"登録できません（誤り{len(errors)}件・1問も登録していません）",
         )
         return
     view = QuizBulkConfirm(cog, interaction.user.id, quizzes, announce_flag, guild, channel)
@@ -292,6 +290,6 @@ async def quiz_delete(cog: "ApprovalCog", interaction: discord.Interaction, quiz
     if quiz_bridge is None:
         return
     if not quiz_bridge.remove(quiz_id):
-        await interaction.response.send_message(embed=ui.error_embed("その番号の問題はありません"), ephemeral=True)
+        await ui.reply_error(interaction, "", title="その番号の問題はありません")
         return
-    await interaction.response.send_message(embed=ui.ok_embed(f"クイズ #{quiz_id} を削除しました"), ephemeral=True)
+    await ui.reply_ok(interaction, "", title=f"クイズ #{quiz_id} を削除しました")

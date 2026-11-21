@@ -8,6 +8,7 @@ import pytest
 
 from domain import horse as h
 from domain import shop, teiai
+from domain.errors import Failure
 from domain.types import INITIAL_BALANCE
 from infra.db.race import race_slots
 from infra.db.repositories import open_repositories
@@ -44,12 +45,20 @@ def test_stats_total_is_fixed_and_carrot_moves_points_within_limits():
     s = dict(h.DEFAULT_STATS)
     assert h.valid_stats(s) and sum(s.values()) == h.STAT_TOTAL
     ok, new = h.move_points(s, "speed", "guts")
-    assert ok and new["speed"] == 45 and new["guts"] == 55 and sum(new.values()) == h.STAT_TOTAL
+    assert (
+        ok
+        and not isinstance(new, Failure)
+        and new["speed"] == 45
+        and new["guts"] == 55
+        and sum(new.values()) == h.STAT_TOTAL
+    )
     assert not h.move_points(s, "speed", "speed")[0]
     low = {"speed": 20, "stamina": 60, "power": 60, "guts": 60}
-    assert h.move_points(low, "speed", "guts")[1].code == "horse_stat_at_min"
+    res = h.move_points(low, "speed", "guts")
+    assert not res[0] and isinstance(res[1], Failure) and res[1].code == "horse_stat_at_min"
     high = {"speed": 80, "stamina": 40, "power": 40, "guts": 40}
-    assert h.move_points(high, "stamina", "speed")[1].code == "horse_stat_at_max"
+    res = h.move_points(high, "stamina", "speed")
+    assert not res[0] and isinstance(res[1], Failure) and res[1].code == "horse_stat_at_max"
 
 
 def test_random_stats_are_always_valid():
@@ -68,7 +77,11 @@ def test_good_horse_names_are_trimmed():
 
 # ----------------------------- シミュレーションとオッズ ----------------------------- #
 def field(rng, n=8):
-    return [h.Runner(i + 1, f"h{i}", **h.random_stats(rng), form=h.random_form(rng)) for i in range(n)]
+    out = []
+    for i in range(n):
+        s = h.random_stats(rng)
+        out.append(h.Runner(i + 1, f"h{i}", s["speed"], s["stamina"], s["power"], s["guts"], form=h.random_form(rng)))
+    return out
 
 
 def test_race_is_decided_by_the_seed_and_has_a_full_order():
@@ -76,7 +89,7 @@ def test_race_is_decided_by_the_seed_and_has_a_full_order():
     a = h.simulate(runners, h.Track(1800, "良"), random.Random(9), keep_frames=True)
     b = h.simulate(runners, h.Track(1800, "良"), random.Random(9))
     assert a["order"] == b["order"] and sorted(a["order"]) == list(range(8))
-    assert all(x <= y for x, y in zip(a["times"], a["times"][1:]))  # 着順 = ゴールの時刻の順
+    assert all(x <= y for x, y in zip(a["times"], a["times"][1:], strict=False))  # 着順 = ゴールの時刻の順
     first, last = a["frames"][0], a["frames"][-1]
     assert first == [0.0] * 8 and all(p == 1.0 for p in last)
 
@@ -497,7 +510,7 @@ def test_combo_bets_are_settled_by_the_real_finishing_order(eco):
     order_lanes = [result["entries"][i]["lane"] for i in result["order"]]
     by_pick = {(b["kind"], b["picks"]): b for b in result["bets"]}
     assert placed and len(result["bets"]) == len(placed)
-    for kind, lanes, odds in placed:
+    for kind, lanes, _ in placed:
         b = by_pick[(kind, h.combo_key(kind, lanes))]
         expected = int(100 * b["odds"]) if h.combo_hit(kind, lanes, order_lanes) else 0
         assert b["payout"] == expected

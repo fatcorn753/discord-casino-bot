@@ -7,7 +7,8 @@
 """
 
 import unicodedata
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Optional
 
 import discord
 from discord import app_commands
@@ -39,9 +40,7 @@ def optional_amount(raw: str) -> tuple[bool, Optional[int]]:
 
 async def reject_bad_amount(interaction: discord.Interaction) -> None:
     """金額の欄に数字以外が入っていたときの返事（Modal 共通）。"""
-    await interaction.response.send_message(
-        embed=ui.error_embed("金額が正しくありません", "半角の数字で入れてください。"), ephemeral=True
-    )
+    await ui.reply_error(interaction, "半角の数字で入れてください。", title="金額が正しくありません")
 
 
 class AmountModal(discord.ui.Modal):
@@ -58,7 +57,7 @@ class AmountModal(discord.ui.Modal):
     ) -> None:
         super().__init__(title=title)
         self._on_amount = on_amount
-        self.amount: discord.ui.TextInput["AmountModal"] = discord.ui.TextInput(
+        self.amount: discord.ui.TextInput[AmountModal] = discord.ui.TextInput(
             label=label, required=required, max_length=max_length
         )
         self.add_item(self.amount)

@@ -94,17 +94,15 @@ async def play_roulette(
 ) -> None:
     # 賭け方の指定ミスは、賭け金を預かる前に弾く
     if kind == "number" and number is None:
-        await interaction.response.send_message(
-            embed=ui.error_embed(
-                "数字が必要です", "「ストレート（数字）」を選んだときは、0〜36 の数字も指定してください。"
-            ),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction,
+            "「ストレート（数字）」を選んだときは、0〜36 の数字も指定してください。",
+            title="数字が必要です",
         )
         return
     if kind != "number" and number is not None:
-        await interaction.response.send_message(
-            embed=ui.error_embed("数字は不要です", "数字を指定するのは「ストレート（数字）」のときだけです。"),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction, "数字を指定するのは「ストレート（数字）」のときだけです。", title="数字は不要です"
         )
         return
     ctx = await start_game(interaction, deps, bet, "ルーレット")

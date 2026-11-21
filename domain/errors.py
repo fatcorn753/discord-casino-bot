@@ -1,7 +1,7 @@
 """ドメイン・永続化層が返す構造化エラー・通知イベント（プレゼンテーション非依存）。"""
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeAlias, TypeVar
 
 
 @dataclass(frozen=True)
@@ -32,3 +32,9 @@ def fail(code: str, **params: Any) -> Failure:
 
 def notice(code: str, **params: Any) -> Notice:
     return Notice(code, params)
+
+
+T = TypeVar("T")
+
+Outcome: TypeAlias = tuple[bool, Failure | T]
+"""操作の結果 (成功か, 失敗時は Failure・成功時は T)。成功なら (True, 値)、失敗なら (False, Failure)。"""
