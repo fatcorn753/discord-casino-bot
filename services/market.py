@@ -9,7 +9,21 @@ from domain import options as opt
 from domain.errors import Outcome
 from domain.options import name_of
 from domain.ports.clock import IClock
-from domain.ports.contracts import BondQuote, MarginPosition, PricePoint, SpotHolding
+from domain.ports.contracts import (
+    BondQuote,
+    ChartBoardRow,
+    ChartPostRow,
+    EarningsAnnouncement,
+    EarningsAnnounceRow,
+    EarningsRow,
+    MarginPosition,
+    MarketEventRow,
+    OptionBuyResult,
+    OptionRow,
+    OptionWriteResult,
+    PricePoint,
+    SpotHolding,
+)
 from domain.ports.repos import (
     IBondRepo,
     ICryptoRepo,
@@ -66,7 +80,7 @@ class MarketService:
                 out[sym.key] = hist[0][1]
         return out
 
-    def step_prices(self, earnings_results: list[dict[str, Any]], rng: random.Random) -> tuple[dict[str, float], int]:
+    def step_prices(self, earnings_results: list[EarningsRow], rng: random.Random) -> tuple[dict[str, float], int]:
         """全銘柄の価格を1ステップ進め、(新価格辞書, 有事フラグ) を返す。"""
         current = self.latest_prices()
         fair = {k: self._market.market_fair_get(k) or p for k, p in current.items()}
@@ -181,13 +195,13 @@ class MarketService:
     def market_pin(self, symbol: str) -> int:
         return self._market.market_pin(symbol)
 
-    def market_events(self, now: float) -> list[dict[str, Any]]:
+    def market_events(self, now: float) -> list[MarketEventRow]:
         return self._market_events.market_events(now)
 
-    def earnings_upcoming(self, now: float) -> Optional[dict[str, Any]]:
+    def earnings_upcoming(self, now: float) -> Optional[EarningsAnnouncement]:
         return self._earnings.earnings_upcoming(now)
 
-    def earnings_to_announce(self, now: float) -> list[dict[str, Any]]:
+    def earnings_to_announce(self, now: float) -> list[EarningsAnnounceRow]:
         return self._earnings.earnings_to_announce(now)
 
     def crypto_holders(self, guild_id: int, rows: int, symbol: str) -> list[tuple[int, int, int]]:
@@ -199,7 +213,7 @@ class MarketService:
     def margin_cut_map(self, guild_id: int, prices: dict[str, float]) -> list[tuple[str, str, float, int]]:
         return self._margin.for_guild(guild_id).margin_cut_map(prices)
 
-    def live_chart_posts(self) -> list[dict[str, Any]]:
+    def live_chart_posts(self) -> list[ChartPostRow]:
         return self._market.live_chart_posts()
 
     def swap_chart_post(
@@ -216,7 +230,7 @@ class MarketService:
     def delete_guild_chart_posts(self, guild_id: int) -> None:
         self._market.delete_guild_chart_posts(guild_id)
 
-    def list_chart_boards(self) -> list[dict[str, Any]]:
+    def list_chart_boards(self) -> list[ChartBoardRow]:
         return self._market.list_chart_boards()
 
     def delete_chart_board(self, guild_id: int) -> None:
@@ -260,14 +274,14 @@ class MarketService:
         *,
         symbol2: Optional[str] = None,
         strike_pct: Optional[float] = None,
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[OptionBuyResult]:
         return self._options.for_guild(guild_id).option_buy(
             uid, kind, symbol, amount, self.clock.now_ts(), symbol2=symbol2, strike_pct=strike_pct
         )
 
     def option_write(
         self, guild_id: int, uid: int, kind: str, symbol: str, amount: int, *, strike_pct: Optional[float] = None
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[OptionWriteResult]:
         return self._options.for_guild(guild_id).option_write(
             uid, kind, symbol, amount, self.clock.now_ts(), strike_pct=strike_pct
         )
@@ -275,13 +289,13 @@ class MarketService:
     def option_settle(self, guild_id: int, now: float) -> None:
         self._options.for_guild(guild_id).option_settle(now)
 
-    def active_options(self, guild_id: int, uid: int) -> list[Any]:
+    def active_options(self, guild_id: int, uid: int) -> list[OptionRow]:
         return self._options.for_guild(guild_id).option_list(uid)["active"]
 
-    def option_close_cost(self, guild_id: int, row: dict[str, Any], now: float, prices: dict[str, float]) -> int:
+    def option_close_cost(self, guild_id: int, row: OptionRow, now: float, prices: dict[str, float]) -> int:
         return self._options.for_guild(guild_id).option_close_cost(row, now, prices)
 
-    def option_value(self, guild_id: int, row: dict[str, Any], now: float, prices: dict[str, float]) -> int:
+    def option_value(self, guild_id: int, row: OptionRow, now: float, prices: dict[str, float]) -> int:
         return self._options.for_guild(guild_id).option_value(row, now, prices)
 
     def option_sell(self, guild_id: int, uid: int, option_id: int) -> Outcome[int]:
