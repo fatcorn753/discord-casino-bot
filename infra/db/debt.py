@@ -294,10 +294,10 @@ class DebtRepo(ScopedRepo, IDebtRepo):
     def status_for(self, guild_id: int, user_id: int, now: float) -> str:
         """身分。読み取り専用で、口座は作らない。"""
         with self._lock:
-            row = self._conn.execute(
+            row = self._one(
                 "SELECT debt, bankrupt_at, blacklist_until FROM users WHERE guild_id=? AND user_id=?",
                 (guild_id, user_id),
-            ).fetchone()
+            )
             if row is None:
                 return teiai.KATAGI
             if row["bankrupt_at"] is not None and row["debt"] > 0:
@@ -312,10 +312,10 @@ class DebtRepo(ScopedRepo, IDebtRepo):
     def loan_blacklisted_for(self, guild_id: int, user_id: int, now: float) -> bool:
         """破産のブラックリストの間か（貸付を借りられない）。"""
         with self._lock:
-            row = self._conn.execute(
+            row = self._one(
                 "SELECT debt, bankrupt_at, blacklist_until FROM users WHERE guild_id=? AND user_id=?",
                 (guild_id, user_id),
-            ).fetchone()
+            )
         if row is None or row["bankrupt_at"] is None:
             return False
         return row["debt"] > 0 or row["blacklist_until"] is None or now < row["blacklist_until"]
@@ -335,9 +335,7 @@ class DebtRepo(ScopedRepo, IDebtRepo):
     # ------------------------------------------------------------------ #
     def accrue_debt_interest_for(self, guild_id: int, user_id: int, now: float) -> int:
         """帝愛の利息（トイチ）を、借金に加える。加えた額を返す。呼び出し側のトランザクションの中で使う。"""
-        row = self._conn.execute(
-            "SELECT debt, debt_interest_at FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-        ).fetchone()
+        row = self._one("SELECT debt, debt_interest_at FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
         if row is None:
             return 0
         debt, since = row["debt"], row["debt_interest_at"]
@@ -547,10 +545,8 @@ class DebtRepo(ScopedRepo, IDebtRepo):
     def escape_left(self, user_id: int) -> int:
         """海外逃亡を、あと何回試せるか。読み取り専用。"""
         with self._lock:
-            row = self._conn.execute(
-                "SELECT escape_tries FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id)
-            ).fetchone()
-        return max(0, teiai.ESCAPE_MAX_TRIES - (row["escape_tries"] if row else 0))
+            v = self._scalar("SELECT escape_tries FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id))
+        return max(0, teiai.ESCAPE_MAX_TRIES - (v if v is not None else 0))
 
     def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> tuple[Any, ...]:
         """海外逃亡。(成功か, 理由か結果の辞書) を返す。"""
@@ -563,9 +559,8 @@ class DebtRepo(ScopedRepo, IDebtRepo):
             debt = self._account.debt(gid, user_id)
             if debt < teiai.ESCAPE_MIN_DEBT:
                 return False, fail("escape_min_debt", min_debt=teiai.ESCAPE_MIN_DEBT)
-            row = self._conn.execute(
-                "SELECT escape_at, escape_tries FROM users WHERE guild_id=? AND user_id=?", (gid, user_id)
-            ).fetchone()
+            row = self._one("SELECT escape_at, escape_tries FROM users WHERE guild_id=? AND user_id=?", (gid, user_id))
+            assert row is not None  # 直前に ensure 済み
             if row["escape_tries"] >= teiai.ESCAPE_MAX_TRIES:
                 return False, fail("escape_max_tries", max_tries=teiai.ESCAPE_MAX_TRIES)
             ready = (row["escape_at"] or 0) + teiai.ESCAPE_COOLDOWN_HOURS * 3600
