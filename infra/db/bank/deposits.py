@@ -47,9 +47,8 @@ class BankRepo(Base):
             return teiai.TRUST_PREMIUM_PER_DAY
         return row["trust_premium"]
 
-    # ------------------------------------------------------------------ #
     # 預金
-    # ------------------------------------------------------------------ #
+
     def bank_deposit(self, user_id: int, amount: int, now: float) -> Outcome[int]:
         """帝愛に預ける（カタギだけ）。(成功か, 理由か預金残高) を返す。"""
         with self._db.tx():

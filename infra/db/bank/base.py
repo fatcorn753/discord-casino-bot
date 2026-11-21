@@ -47,9 +47,8 @@ class BankRepo(ScopedRepo, IBankRepo):
         self._bankrupt_executor: IBankruptExecutor = bankrupt_executor or NoOpBankruptExecutor()
         self._excess_sink: IExcessLossSink = excess_sink or NoOpExcessLossSink()
 
-    # ------------------------------------------------------------------ #
     # 銀行の手元・預金・課税（IBankCashFlow / IHouseAccount / IGainsTaxCollector / IValuationSource）
-    # ------------------------------------------------------------------ #
+
     def bank_sync_for(self, guild_id: int, now: float) -> dict[str, float]:
         """銀行の手元を取り出す（なければ作る）。地下融資の回収を、いまの時刻まで反映する。"""
         row = self._one("SELECT cash, loaned, ts FROM teiai_bank WHERE guild_id=?", (guild_id,))
