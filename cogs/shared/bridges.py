@@ -288,9 +288,7 @@ async def require_bridge(
     if bridge is None:
         from cogs.shared import ui
 
-        await interaction.response.send_message(
-            embed=ui.error_embed(f"{feature_label}が読み込まれていません"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "", title=f"{feature_label}が読み込まれていません")
     return bridge
 
 
