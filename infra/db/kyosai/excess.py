@@ -1,4 +1,4 @@
-"""超過損失の請求（IExcessLossSink）: 口数に応じた負担を手元と借金で徴収する。"""
+"""超過損失の請求（ExcessLossSink）: 口数に応じた負担を手元と借金で徴収する。"""
 
 from domain import kyosai
 

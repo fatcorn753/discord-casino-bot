@@ -5,7 +5,7 @@ from typing import Optional
 from domain import market as market_mod
 from domain.errors import fail
 from domain.market import DEFAULT
-from domain.ports.bridges import IGainsTaxCollector, IMarginCollateralGuard, NoOpMarginCollateralGuard
+from domain.ports.bridges import GainsTaxCollector, IMarginCollateralGuard, NoOpMarginCollateralGuard
 from domain.ports.contracts import SpotHolding
 from domain.ports.repos import ICryptoRepo
 from domain.types import CryptoResult
@@ -22,7 +22,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
         db: EcoDb,
         account: AccountCore,
         market: MarketDataRepo,
-        tax: IGainsTaxCollector,
+        tax: GainsTaxCollector,
         collateral_guard: Optional[IMarginCollateralGuard] = None,
         guild_id: int = 0,
         strict: bool = False,
@@ -165,7 +165,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
             cost if units == have else round(cost * units / have)
         )  # 端数の按分は四捨五入（切り捨てだと取得額が少しずつ残る）
         self._account.ensure(guild_id, user_id)
-        tax = self._tax.charge_gains_tax_for(guild_id, user_id, proceeds - removed, taxable, f"{name}売却")
+        tax = self._tax(guild_id, user_id, proceeds - removed, taxable, f"{name}売却")
         self._account.apply(
             guild_id, user_id, proceeds - tax, f"{name}売却:{market_mod.lots(units)}@{market_mod.fmt(price)}"
         )

@@ -10,7 +10,7 @@ from .escape import DebtRepo as Base
 
 class DebtRepo(Base):
     def _liquidate_everything_for(self, guild_id: int, user_id: int, now: float) -> int:
-        self._liquidation_step.liquidate(guild_id, user_id, now)
+        self._liquidation_step(guild_id, user_id, now)
         return _take_cash(
             self._account,
             guild_id,
@@ -20,7 +20,7 @@ class DebtRepo(Base):
         )
 
     def _seize_valuables_for(self, guild_id: int, user_id: int, now: float) -> int:
-        return self._seizure_value_step.seize(guild_id, user_id, now)
+        return self._seizure_value_step(guild_id, user_id, now)
 
     def bankrupt_for(
         self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
@@ -35,7 +35,7 @@ class DebtRepo(Base):
                 return False, fail("bankrupt_no_debt")
             debt_before = self._account.debt(guild_id, user_id)
             now = self._now()
-            self._bankrupt_prep_hook.prepare(guild_id, user_id, now)
+            self._bankrupt_prep_hook(guild_id, user_id, now)
             in_grace = self._bank.grace_until_for(guild_id, user_id) is not None
             pool = self._liquidate_everything_for(guild_id, user_id, now)
             shop_value = self._seize_valuables_for(guild_id, user_id, now)

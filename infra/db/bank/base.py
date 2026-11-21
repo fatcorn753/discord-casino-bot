@@ -4,18 +4,18 @@ from typing import Optional
 
 from domain import teiai
 from domain.ports.bridges import (
-    IBankruptExecutor,
-    IExcessLossSink,
-    IGraceEnterHook,
-    IMarginRatioReader,
+    BankruptExecutor,
+    ExcessLossSink,
+    GraceEnterHook,
     INoticeSink,
     IStatusReader,
-    NoOpBankruptExecutor,
-    NoOpExcessLossSink,
-    NoOpGraceEnterHook,
-    NoOpMarginRatioReader,
+    MarginRatioReader,
     NoOpNoticeSink,
     NoOpStatusReader,
+    noop_bankrupt_executor,
+    noop_excess_loss_sink,
+    noop_grace_enter_hook,
+    noop_margin_ratio_reader,
 )
 from domain.ports.repos import IBankRepo
 from infra.db.account import AccountCore
@@ -31,10 +31,10 @@ class BankRepo(ScopedRepo, IBankRepo):
         account: AccountCore,
         notices: Optional[INoticeSink] = None,
         status_reader: Optional[IStatusReader] = None,
-        margin_ratio_reader: Optional[IMarginRatioReader] = None,
-        grace_enter_hook: Optional[IGraceEnterHook] = None,
-        bankrupt_executor: Optional[IBankruptExecutor] = None,
-        excess_sink: Optional[IExcessLossSink] = None,
+        margin_ratio_reader: Optional[MarginRatioReader] = None,
+        grace_enter_hook: Optional[GraceEnterHook] = None,
+        bankrupt_executor: Optional[BankruptExecutor] = None,
+        excess_sink: Optional[ExcessLossSink] = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -42,12 +42,12 @@ class BankRepo(ScopedRepo, IBankRepo):
         self._account = account
         self._notices: INoticeSink = notices or NoOpNoticeSink()
         self._status_reader: IStatusReader = status_reader or NoOpStatusReader()
-        self._margin_ratio_reader: IMarginRatioReader = margin_ratio_reader or NoOpMarginRatioReader()
-        self._grace_enter_hook: IGraceEnterHook = grace_enter_hook or NoOpGraceEnterHook()
-        self._bankrupt_executor: IBankruptExecutor = bankrupt_executor or NoOpBankruptExecutor()
-        self._excess_sink: IExcessLossSink = excess_sink or NoOpExcessLossSink()
+        self._margin_ratio_reader: MarginRatioReader = margin_ratio_reader or noop_margin_ratio_reader
+        self._grace_enter_hook: GraceEnterHook = grace_enter_hook or noop_grace_enter_hook
+        self._bankrupt_executor: BankruptExecutor = bankrupt_executor or noop_bankrupt_executor
+        self._excess_sink: ExcessLossSink = excess_sink or noop_excess_loss_sink
 
-    # 銀行の手元・預金・課税（IBankCashFlow / IHouseAccount / IGainsTaxCollector / IValuationSource）
+    # 銀行の手元・預金・課税（IBankCashFlow / IHouseAccount / GainsTaxCollector / ValuationSource）
 
     def bank_sync_for(self, guild_id: int, now: float) -> dict[str, float]:
         """銀行の手元を取り出す（なければ作る）。地下融資の回収を、いまの時刻まで反映する。"""

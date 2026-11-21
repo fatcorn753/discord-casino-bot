@@ -13,7 +13,7 @@ class BankRepo(Base):
         gid = self._g()
         status = self._status_reader.status_for(gid, target_id, now)
         debt = self._account.debt_readonly(gid, target_id)
-        ratio = self._margin_ratio_reader.margin_ratio_for(gid, target_id)
+        ratio = self._margin_ratio_reader(gid, target_id)
         return {
             "odds": teiai.cds_odds(status, debt, ratio),
             "status": status,

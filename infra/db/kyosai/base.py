@@ -1,7 +1,6 @@
 """帝愛共済リポジトリの基礎部分: コンストラクタと口（持ち口）の管理・回収・引き戻し。"""
 
 from domain import kyosai
-from domain.ports.bridges import IBankruptPrepHook, IExcessLossSink, IGraceEnterHook
 from domain.ports.repos import IKyosaiRepo
 from infra.db.account import AccountCore
 from infra.db.bank import BankRepo
@@ -11,7 +10,7 @@ from infra.db.notices import NoticeRepo
 DAY = 86400
 
 
-class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IGraceEnterHook):
+class KyosaiRepo(ScopedRepo, IKyosaiRepo):
     def __init__(
         self,
         db: EcoDb,

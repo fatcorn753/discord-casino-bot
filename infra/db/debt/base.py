@@ -4,20 +4,20 @@ from typing import Optional
 
 from domain import teiai
 from domain.ports.bridges import (
-    IAssetSeizureStep,
+    AssetSeizureStep,
+    BankruptPrepHook,
     IBankCdsBridge,
-    IBankruptPrepHook,
-    ILiquidationStep,
     INoticeSink,
     IOverdueLoanCollector,
-    ISeizureValueStep,
-    NoOpAssetSeizureStep,
+    LiquidationStep,
     NoOpBankCdsBridge,
-    NoOpBankruptPrepHook,
-    NoOpLiquidationStep,
     NoOpNoticeSink,
     NoOpOverdueLoanCollector,
-    NoOpSeizureValueStep,
+    SeizureValueStep,
+    noop_asset_seizure_step,
+    noop_bankrupt_prep_hook,
+    noop_liquidation_step,
+    noop_seizure_value_step,
 )
 from domain.ports.repos import IDebtRepo
 from infra.db.account import AccountCore
@@ -43,10 +43,10 @@ class DebtRepo(ScopedRepo, IDebtRepo):
         bank: Optional[IBankCdsBridge] = None,
         loans: Optional[IOverdueLoanCollector] = None,
         *,
-        seizure_step: Optional[IAssetSeizureStep] = None,
-        liquidation_step: Optional[ILiquidationStep] = None,
-        seizure_value_step: Optional[ISeizureValueStep] = None,
-        bankrupt_prep_hook: Optional[IBankruptPrepHook] = None,
+        seizure_step: Optional[AssetSeizureStep] = None,
+        liquidation_step: Optional[LiquidationStep] = None,
+        seizure_value_step: Optional[SeizureValueStep] = None,
+        bankrupt_prep_hook: Optional[BankruptPrepHook] = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -55,10 +55,10 @@ class DebtRepo(ScopedRepo, IDebtRepo):
         self._notices: INoticeSink = notices or NoOpNoticeSink()
         self._bank: IBankCdsBridge = bank or NoOpBankCdsBridge()
         self._loans: IOverdueLoanCollector = loans or NoOpOverdueLoanCollector()
-        self._seizure_step: IAssetSeizureStep = seizure_step or NoOpAssetSeizureStep()
-        self._liquidation_step: ILiquidationStep = liquidation_step or NoOpLiquidationStep()
-        self._seizure_value_step: ISeizureValueStep = seizure_value_step or NoOpSeizureValueStep()
-        self._bankrupt_prep_hook: IBankruptPrepHook = bankrupt_prep_hook or NoOpBankruptPrepHook()
+        self._seizure_step: AssetSeizureStep = seizure_step or noop_asset_seizure_step
+        self._liquidation_step: LiquidationStep = liquidation_step or noop_liquidation_step
+        self._seizure_value_step: SeizureValueStep = seizure_value_step or noop_seizure_value_step
+        self._bankrupt_prep_hook: BankruptPrepHook = bankrupt_prep_hook or noop_bankrupt_prep_hook
 
     # 身分・読み取り契約（IStatusReader）
 

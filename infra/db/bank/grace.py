@@ -19,7 +19,7 @@ class BankRepo(Base):
             self._conn.execute(
                 "UPDATE users SET grace_until=? WHERE guild_id=? AND user_id=?", (until, guild_id, user_id)
             )
-            self._grace_enter_hook.on_grace_enter(guild_id, user_id, now)
+            self._grace_enter_hook(guild_id, user_id, now)
             self._notices.note_for(guild_id, user_id, "grace_entered", grace_debt=teiai.GRACE_DEBT, until=until)
         elif row["debt"] < teiai.GRACE_DEBT and row["grace_until"] is not None:
             self._conn.execute("UPDATE users SET grace_until=NULL WHERE guild_id=? AND user_id=?", (guild_id, user_id))
@@ -59,7 +59,7 @@ class BankRepo(Base):
                 if self._account.debt(gid, r["user_id"]) < teiai.GRACE_DEBT:  # 取りこぼしの保険（外し忘れ）
                     self.grace_update_for(gid, r["user_id"], now)
                     continue
-                ok, result = self._bankrupt_executor.bankrupt_for(gid, r["user_id"], forced=True)
+                ok, result = self._bankrupt_executor(gid, r["user_id"], True, False)
                 if ok:
                     done.append((r["user_id"], result))
         return done

@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from domain import loans as loans_mod
 from domain.errors import Failure, Outcome, fail
-from domain.ports.bridges import IGraceReader, IStatusReader, NoOpGraceReader, NoOpStatusReader
+from domain.ports.bridges import GraceReader, IStatusReader, NoOpStatusReader, noop_grace_reader
 from domain.ports.contracts import LoanBook, LoanCollectRow, LoanCredit, LoanRow
 from domain.ports.repos import ILoanRepo
 from infra.db.account import AccountCore
@@ -26,14 +26,14 @@ class LoanRepo(ScopedRepo, ILoanRepo):
         db: EcoDb,
         account: AccountCore,
         status_reader: Optional[IStatusReader] = None,
-        bank: Optional[IGraceReader] = None,
+        bank: Optional[GraceReader] = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
         self._status_reader: IStatusReader = status_reader or NoOpStatusReader()
-        self._bank: IGraceReader = bank or NoOpGraceReader()
+        self._bank: GraceReader = bank or noop_grace_reader
 
     def _loan_owed(self, loan: Mapping[str, Any], now: float) -> int:
         """いまの返済総額（利息つき）。承諾前は 0。"""
@@ -115,7 +115,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
             return {
                 "status": self._status_reader.status_for(gid, user_id, now),
                 "debt": self._account.debt_readonly(gid, user_id),
-                "grace_until": self._bank.grace_until_for(gid, user_id),
+                "grace_until": self._bank(gid, user_id),
                 "repaid": counts.get("repaid", 0),
                 "overdue": counts.get("overdue", 0),
                 "discharged": counts.get("discharged", 0),  # 借り手の破産で、貸した人が回収しきれなかった件数

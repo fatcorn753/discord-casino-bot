@@ -9,9 +9,9 @@ from domain import market as market_mod
 from domain.errors import Failure, fail
 from domain.market import DEFAULT
 from domain.ports.bridges import (
+    GainsTaxCollector,
     IBankCashFlow,
     IDebtOps,
-    IGainsTaxCollector,
     INoticeSink,
     ISpotCollateralReader,
     NoOpDebtOps,
@@ -42,7 +42,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         account: AccountCore,
         market: MarketDataRepo,
         bank: IBankCashFlow,
-        tax: IGainsTaxCollector,
+        tax: GainsTaxCollector,
         notices: Optional[INoticeSink] = None,
         crypto: Optional[ISpotCollateralReader] = None,
         debt: Optional[IDebtOps] = None,
@@ -315,7 +315,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         part_entry = entry_value if whole else entry_value * units / have
         pnl = market_mod.margin_pnl(side, units, part_entry, price)
         payout = max(0, part_margin + pnl)
-        tax = self._tax.charge_gains_tax_for(guild_id, user_id, pnl, taxable, self.SIDE_NAME[side] + "決済")
+        tax = self._tax(guild_id, user_id, pnl, taxable, self.SIDE_NAME[side] + "決済")
         payout -= tax
         table = self._MARGIN_TABLE[side]
         if payout:

@@ -14,12 +14,12 @@ from domain import bonds as bonds_mod
 from domain import rates
 from domain.errors import Outcome, fail
 from domain.ports.bridges import (
+    DebtRepayHook,
     IBankCashFlow,
     IBondHoldings,
-    IDebtRepayHook,
     IMarginCollateralGuard,
-    NoOpDebtRepayHook,
     NoOpMarginCollateralGuard,
+    noop_debt_repay_hook,
 )
 from domain.ports.contracts import ActiveBond, BondQuote, BondRow, HoldingBook
 from domain.ports.repos import IBondRepo
@@ -35,7 +35,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         db: EcoDb,
         account: AccountCore,
         bank: IBankCashFlow,
-        debt_repay: Optional[IDebtRepayHook] = None,
+        debt_repay: Optional[DebtRepayHook] = None,
         collateral_guard: Optional[IMarginCollateralGuard] = None,
         guild_id: int = 0,
         strict: bool = False,
@@ -43,7 +43,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         super().__init__(db, guild_id, strict)
         self._account = account
         self._bank = bank
-        self._debt_repay: IDebtRepayHook = debt_repay or NoOpDebtRepayHook()
+        self._debt_repay: DebtRepayHook = debt_repay or noop_debt_repay_hook
         self._collateral_guard: IMarginCollateralGuard = collateral_guard or NoOpMarginCollateralGuard()
 
     def bond_buy(self, user_id: int, kind_key: str, amount: int, now: float) -> Outcome[str]:
@@ -155,9 +155,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
                 paid = row["principal"] + interest
                 self._account.ensure(gid, row["user_id"])
                 self._account.apply(gid, row["user_id"], paid, f"債券償還:{kind.name}", income=interest)
-                self._debt_repay.repay_all_of_for(
-                    gid, row["user_id"], row["principal"], f"帝愛への返済（債券の元本:{kind.name}）"
-                )
+                self._debt_repay(gid, row["user_id"], row["principal"], f"帝愛への返済（債券の元本:{kind.name}）")
                 self._conn.execute("UPDATE bonds SET status='paid', paid=? WHERE id=?", (paid, row["id"]))
                 out.append({**row, "status": "paid", "paid": paid})
         return sorted(out, key=lambda o: o["id"])
