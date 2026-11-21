@@ -3,6 +3,7 @@
 from typing import Any, Optional
 
 from domain import teiai
+from domain.ports.contracts import BankruptResult
 
 from .house import BankRepo as Base
 
@@ -43,7 +44,7 @@ class BankRepo(Base):
                 )
             ]
 
-    def grace_expire(self, now: float) -> list[Any]:
+    def grace_expire(self, now: float) -> list[tuple[int, BankruptResult]]:
         """猶予の時間切れになった人を、強制破産させる。CDS の失効もここで済ます。[(ユーザーID, 破産の結果)] を返す。"""
         done = []
         with self._db.tx():

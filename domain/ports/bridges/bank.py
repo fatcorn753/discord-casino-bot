@@ -12,6 +12,7 @@ from collections.abc import Callable
 from typing import Any, Optional
 
 from domain.errors import Outcome, fail
+from domain.ports.contracts import BankruptResult
 
 # 単一コールバック契約（Callable 型エイリアス）: 静的型だけで LSP を 100% 保証できる純粋契約
 MarketPriceReader = Callable[[], dict[str, float]]
@@ -19,7 +20,7 @@ GraceReader = Callable[[int, int], Optional[float]]
 GraceEnterHook = Callable[[int, int, float], None]
 ExcessLossSink = Callable[[int, int, float], int]
 # (guild_id, user_id, forced, escape) -> (成功か, 結果 | Failure)
-BankruptExecutor = Callable[[int, int, bool, bool], Outcome[dict[str, Any]]]
+BankruptExecutor = Callable[[int, int, bool, bool], Outcome[BankruptResult]]
 GainsTaxCollector = Callable[[int, int, int, bool, str], int]
 
 
@@ -53,7 +54,7 @@ def noop_excess_loss_sink(guild_id: int, amount: int, now: float) -> int:
     return 0
 
 
-def noop_bankrupt_executor(guild_id: int, user_id: int, forced: bool, escape: bool) -> Outcome[dict[str, Any]]:
+def noop_bankrupt_executor(guild_id: int, user_id: int, forced: bool, escape: bool) -> Outcome[BankruptResult]:
     """破産実行未接続時に失敗を返す LSP 準拠の既定動作。"""
     return False, fail("unavailable")
 

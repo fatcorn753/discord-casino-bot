@@ -13,6 +13,7 @@ from domain import teiai
 from domain import teiai_market as tm
 from domain.errors import fail
 from domain.ports.bridges import IBankCashFlow, IStatusReader
+from domain.ports.contracts import AuctionListing, TeiaiMarketListing
 from domain.ports.repos import IAuctionRepo
 from domain.types import MarketPurchase, PurchaseResult
 from infra.db.account import AccountCore
@@ -66,14 +67,14 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
         """1つあたりの、いまの値段（ペリカ）。"""
         return max(1, round(shop_mod.BY_ID[item_id].price * teiai.auction_rate(listed_at, now)))
 
-    def auction_list(self, now: float) -> list[dict[str, Any]]:
+    def auction_list(self, now: float) -> list[AuctionListing]:
         """競売の棚。品ごとに、残りの数と、いちばん安い（古い）出品の値段。[{item_id, qty, price, rate}]"""
         with self._lock:
             rows = self._all(
                 "SELECT item_id, qty, listed_at FROM seized_items WHERE guild_id=? AND qty>0 ORDER BY listed_at, id",
                 (self._g(),),
             )
-        out: dict[str, dict[str, Any]] = {}
+        out: dict[str, AuctionListing] = {}
         for r in rows:
             if r["item_id"] not in shop_mod.BY_ID:
                 continue
@@ -169,7 +170,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
                 ),
             )
 
-    def _market_row(self, r: Any, now: float) -> dict[str, Any]:
+    def _market_row(self, r: Any, now: float) -> TeiaiMarketListing:
         return {
             "id": r["id"],
             "item_id": r["item_id"],
@@ -182,7 +183,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
             "expires_at": r["expires_at"],
         }
 
-    def market_list(self, now: float, rng: Optional[random.Random] = None) -> list[dict[str, Any]]:
+    def market_list(self, now: float, rng: Optional[random.Random] = None) -> list[TeiaiMarketListing]:
         """いま出ている帝愛の出品（売り切れ・期限切れ・まだ出ていないものは除く）。期限の近い順。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():

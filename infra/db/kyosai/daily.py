@@ -3,13 +3,14 @@
 from typing import Any, Optional
 
 from domain import kyosai
+from domain.ports.contracts import KyosaiDaily
 
 from .base import DAY
 from .excess import KyosaiRepo as Base
 
 
 class KyosaiRepo(Base):
-    def kyosai_daily(self, now: float) -> Optional[dict[str, Any]]:
+    def kyosai_daily(self, now: float) -> Optional[KyosaiDaily]:
         """1日に1回: 休眠の人の口を回収し、余剰から配当を配る。配ったときだけ {pool, paid, recovered} を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -38,7 +39,8 @@ class KyosaiRepo(Base):
                     self._account.apply(gid, user_id, share, "共済:配当", income=share)
                     paid += share
                 self._conn.execute("UPDATE teiai_bank SET kyosai_paid=kyosai_paid+? WHERE guild_id=?", (paid, gid))
-            return {"pool": pool, "paid": paid, "recovered": recovered}
+            result: KyosaiDaily = {"pool": pool, "paid": paid, "recovered": recovered}
+            return result
 
     def _recover_dormant_for(self, guild_id: int, now: float) -> int:
         """DORMANT_DAYS 日、口座が動いていない人の口を回収する。

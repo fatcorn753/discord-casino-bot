@@ -6,7 +6,7 @@
 
 import json
 import random
-from typing import Any, Optional, cast
+from typing import Any, Literal, Optional, cast, overload
 
 from domain import labor as labor_mod
 from domain import relics as relics_mod
@@ -14,7 +14,16 @@ from domain import shop as shop_mod
 from domain import teiai
 from domain.errors import Outcome, fail
 from domain.ports.bridges import IHouseAccount
-from domain.ports.contracts import LaborClickHourRow, LaborFindSummary
+from domain.ports.contracts import (
+    LaborClick,
+    LaborClickFail,
+    LaborClickHourRow,
+    LaborClickOk,
+    LaborCollectDetail,
+    LaborFindSummary,
+    LaborState,
+    LaborTop,
+)
 from domain.ports.repos import ILaborRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -239,7 +248,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         row["donated"] = row.get("donated", 0) + skimmed
         return net
 
-    def labor_state(self, user_id: int, now: float, day: str = "") -> dict[str, Any]:
+    def labor_state(self, user_id: int, now: float, day: str = "") -> LaborState:
         """いまの状態（画面用）。口座や行は、まだ無ければ作らない（読むだけ）。契約の決算は、したことにして見せる（書き込まない）。"""
 
         with self._lock:
@@ -321,9 +330,9 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             row["donated_all"] = self.labor_donated_total()  # このサーバーの全員の寄付の合計
             row["terrain"] = labor_mod.terrain_today(day)  # 今日の地層
             row["crit_chance"] = labor_mod.crit_chance(row["pick"], row["workers"], row["terrain"])
-            return row
+            return cast("LaborState", row)
 
-    def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> dict[str, Any]:
+    def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> LaborTop:
         """採掘ランキング。day を渡すと、その日の稼ぎ。渡さなければ、通算の稼ぎ。{rows, me}。
 
         rows は [(順位, ユーザーID, 稼ぎ, 押した回数)]、me は user_id の (順位, 稼ぎ, 押した回数, 人数)（まだ稼いでいなければ None）。
@@ -344,11 +353,12 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             ((i + 1, r["earned"], r["clicks"], len(ranked)) for i, r in enumerate(ranked) if r["user_id"] == user_id),
             None,
         )
-        return {"rows": rows, "me": me}
+        result: LaborTop = {"rows": rows, "me": me}
+        return result
 
     def labor_click(
         self, user_id: int, now: float, day: str = "", rng: Optional[random.Random] = None
-    ) -> dict[str, Any]:
+    ) -> LaborClick:
         """「働く」を1回押す。{ok, reason, pay, crit（鉱脈ヒットか）, ore（手掘りの鉱石。無ければ None）, combo（コンボ達成か）, terrain（今日の地層）}。"""
         rng = rng or cast("random.Random", random)
         with self._db.tx():
@@ -356,7 +366,8 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             self._account.ensure(gid, user_id)
             row = self._labor_row(gid, user_id, now, day)
             if now - row["last_click"] < labor_mod.CLICK_INTERVAL:
-                return {"ok": False, "reason": "押すのが早すぎます。", "quiet": True}
+                early: LaborClickFail = {"ok": False, "reason": "押すのが早すぎます。", "quiet": True}
+                return early
             terrain = labor_mod.terrain_today(day)
             gain = labor_mod.fatigue_gain(row["glove"])
             if terrain == "fatigue":
@@ -404,7 +415,8 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 row["ores"] = json.dumps(found)
             self._labor_log_click(gid, user_id, now, pay, now - row["last_click_before"])
             self._labor_save(gid, user_id, row)
-            return {"ok": True, "pay": pay, "crit": crit, "ore": ore, "combo": combo, "terrain": terrain}
+            clicked: LaborClickOk = {"ok": True, "pay": pay, "crit": crit, "ore": ore, "combo": combo, "terrain": terrain}
+            return clicked
 
     def _labor_log_click(self, guild_id: int, user_id: int, now: float, pay: int, gap: float) -> None:
         """「働く」の1回を、1時間ごとの記録に足す（押した回数・稼ぎ・間隔の集計）。"""
@@ -439,7 +451,11 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 (self._g(), user_id, int(since // 3600)),
             )
 
-    def labor_collect(self, user_id: int, now: float, day: str = "", detail: bool = False) -> int | dict[str, Any]:
+    @overload
+    def labor_collect(self, user_id: int, now: float, day: str = "", detail: Literal[False] = False) -> int: ...
+    @overload
+    def labor_collect(self, user_id: int, now: float, day: str, detail: Literal[True]) -> LaborCollectDetail: ...
+    def labor_collect(self, user_id: int, now: float, day: str = "", detail: bool = False) -> int | LaborCollectDetail:
         """受け取る前の稼ぎから、帝愛のピンハネを引いて、残高に移す。移した額（借金の天引きの前）を返す。
 
         detail=True なら {amount（移した額）, skimmed（帝愛のピンハネ）, donated（これまでの寄付の合計）, ores（掘った鉱石）, relics（見つけた発掘品）}。
@@ -466,7 +482,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             self._labor_save(gid, user_id, row)
             if not detail:
                 return amount
-            return {
+            detail_result: LaborCollectDetail = {
                 "amount": amount,
                 "skimmed": row["skimmed"],
                 "donated": row["donated"],  # この人のこれまでの寄付の合計
@@ -474,6 +490,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 "ores": ores,
                 "relics": relics,
             }
+            return detail_result
 
     def labor_drink(self, user_id: int, now: float, day: str = "") -> Outcome[str]:
         """栄養ドリンコを1本飲んで、疲労を DRINK_RECOVER 回復する。(ok, 理由) を返す。疲れていなければ、減らさない。"""

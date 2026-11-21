@@ -10,7 +10,7 @@ from typing import Any, Optional, cast
 from domain import quizpay as quizpay_mod
 from domain.errors import Outcome, fail
 from domain.ports.bridges import IDebtOps
-from domain.ports.contracts import QuizAdminView, QuizView
+from domain.ports.contracts import QuizAdminView, QuizAnswerResult, QuizImportItem, QuizSettleRow, QuizView
 from domain.ports.repos import IQuizRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -77,7 +77,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             assert cur.lastrowid is not None
             return cur.lastrowid
 
-    def quiz_add_many(self, items: list[dict[str, Any]], now: float, creator_name: str = "") -> list[int]:
+    def quiz_add_many(self, items: list[QuizImportItem], now: float, creator_name: str = "") -> list[int]:
         """まとめて登録する（全部成功するか、全部なしか）。items は {question, choices, explanation, reward, minutes} の並び（minutes が None なら無期限）。番号のリストを返す。"""
         with self._db.tx():
             return [
@@ -131,7 +131,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             )
         return (_quiz_dict(rows[0]), len(rows)) if rows else (None, 0)
 
-    def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> Outcome[dict[str, Any]]:
+    def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> Outcome[QuizAnswerResult]:
         """答えを記録する。(成功か, 理由か結果) を返す。結果は correct / reward（実際に入った額）/ answer / explanation。
 
         ユーザーの問題の報酬は、出題者の残高から引いて渡す。残高が報酬に足りないときは、足りない分を出題者の借金にして、
@@ -171,7 +171,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
                 paid = self._account.apply(
                     gid, user_id, q["reward"], "クイズ報酬", income=q["reward"]
                 )  # 持ち主の問題の報酬は、システムから出る（増える）。みんなの問題は出題者から
-            result = {
+            result: QuizAnswerResult = {
                 "correct": correct,
                 "reward": paid,
                 "answer": q["choices"][0],
@@ -283,7 +283,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         with self._db.tx():
             self._conn.execute("UPDATE quiz_questions SET message_id=? WHERE id=?", (message_id, quiz_id))
 
-    def quiz_settle(self, now: float) -> list[dict[str, Any]]:
+    def quiz_settle(self, now: float) -> list[QuizSettleRow]:
         """期限を過ぎたユーザーの問題の、出題者への報酬を決着させる（このサーバーの分）。決着した問題を、成績つきで返す。"""
         out = []
         with self._db.tx():
@@ -320,7 +320,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
                 )
         return out
 
-    def quiz_withdraw(self, user_id: int, quiz_id: int, now: float) -> Optional[dict[str, Any]]:
+    def quiz_withdraw(self, user_id: int, quiz_id: int, now: float) -> Optional[QuizSettleRow]:
         """出題者が自分の問題を取り下げる。すぐ終了して、出題者の報酬を決着させる。自分の問題でない・終了済みなら None。"""
         with self._db.tx():
             gid = self._g()

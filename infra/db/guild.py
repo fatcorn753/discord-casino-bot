@@ -3,9 +3,10 @@
 表の定義は infra/db/schema/tables.py にある。
 """
 
-from typing import Any, Iterable, Optional
+from typing import Iterable, Optional
 
 from domain.ports.bridges import WealthyReader, noop_wealthy_reader
+from domain.ports.contracts import GuildStatusRow, LeaderboardRow, ProfileRow
 from domain.ports.repos import IGuildRepo
 from infra.db.base import EcoDb, ScopedRepo
 
@@ -37,11 +38,11 @@ class GuildRepo(ScopedRepo, IGuildRepo):
                 (guild_id, status, name, by, self._now()),
             )
 
-    def get_guild_status(self, guild_id: int) -> Optional[dict[str, Any]]:
+    def get_guild_status(self, guild_id: int) -> Optional[GuildStatusRow]:
         with self._lock:
             return self._one("SELECT * FROM guild_status WHERE guild_id=?", (guild_id,))
 
-    def list_guild_status(self) -> list[dict[str, Any]]:
+    def list_guild_status(self) -> list[GuildStatusRow]:
         with self._lock:
             return self._all("SELECT * FROM guild_status ORDER BY updated_at DESC")
 
@@ -60,11 +61,11 @@ class GuildRepo(ScopedRepo, IGuildRepo):
                 (guild_id, channel_id, message_id),
             )
 
-    def get_leaderboard(self, guild_id: int) -> Optional[dict[str, Any]]:
+    def get_leaderboard(self, guild_id: int) -> Optional[LeaderboardRow]:
         with self._lock:
             return self._one("SELECT * FROM leaderboards WHERE guild_id=?", (guild_id,))
 
-    def list_leaderboards(self) -> list[dict[str, Any]]:
+    def list_leaderboards(self) -> list[LeaderboardRow]:
         with self._lock:
             return self._all("SELECT * FROM leaderboards")
 
@@ -165,7 +166,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
                 is not None
             )
 
-    def profiles_of(self, user_ids: Iterable[int]) -> dict[int, dict[str, Any]]:
+    def profiles_of(self, user_ids: Iterable[int]) -> dict[int, ProfileRow]:
         """{ユーザーID: profile} をまとめて取る（ランキングの称号表示用）。"""
         ids = list(user_ids)
         if not ids:

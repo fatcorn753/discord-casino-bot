@@ -5,9 +5,10 @@
 表の定義は infra/db/schema/tables.py にある。記録は統計のためだけで、ゲームの結果には影響しない。
 """
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain.games.pachinko import SetResult
+from domain.ports.contracts import PachinkoStats
 from domain.ports.repos import IPachinkoRepo
 from infra.db.base import EcoDb, ScopedRepo
 
@@ -45,13 +46,13 @@ class PachinkoRepo(ScopedRepo, IPachinkoRepo):
                 [(gid, user_id, ts, s.omen, s.tier, int(s.hit)) for s in result.spins],
             )
 
-    def pachinko_stats(self, guild_id: Optional[int] = None, since: Optional[float] = None) -> dict[str, Any]:
+    def pachinko_stats(self, guild_id: Optional[int] = None, since: Optional[float] = None) -> PachinkoStats:
         """予告の色・リーチの格ごとの（回転数, 当たり数）と、セット全体の集計。"""
         args = (guild_id, guild_id, since or 0)
         where = "WHERE (? IS NULL OR guild_id=?) AND ts>=?"
         with self._lock:
 
-            def group(col: str) -> dict[Any, tuple[int, int]]:
+            def group(col: str) -> dict[str, tuple[int, int]]:
                 return {
                     r["k"]: (r["n"], r["h"])
                     for r in self._all(

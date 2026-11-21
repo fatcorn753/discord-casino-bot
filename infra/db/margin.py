@@ -2,6 +2,7 @@
 
 import logging
 import math
+from collections.abc import Mapping
 from typing import Any, Optional
 
 from domain import market as market_mod
@@ -133,7 +134,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                     pnl = market_mod.margin_pnl(side, r["units"], r["entry_value"], prices[r["symbol"]])
                     totals[r["user_id"]] = totals.get(r["user_id"], 0) + max(0, r["margin"] + pnl)
 
-    def _collateral_value_for(self, guild_id: int, user_id: int, prices: dict[str, Any]) -> float:
+    def _collateral_value_for(self, guild_id: int, user_id: int, prices: Mapping[str, float]) -> float:
         """代用有価証券の評価（現物は売った手取り×掛目、債券は元本×掛目）。信用取引の担保には数えない。"""
         hair = market_mod.COLLATERAL_HAIRCUT
         total = 0.0
@@ -151,7 +152,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         self,
         guild_id: int,
         user_id: int,
-        prices: dict[str, Any],
+        prices: Mapping[str, float],
         add: Optional[tuple[str, str, float, float]] = None,
         drop_collateral: float = 0.0,
     ) -> MarginStatus:
@@ -178,7 +179,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             "ratio": equity / required if required > 0 else None,
         }
 
-    def margin_status(self, user_id: int, prices: Optional[dict[str, Any]] = None) -> MarginStatus:
+    def margin_status(self, user_id: int, prices: Optional[Mapping[str, float]] = None) -> MarginStatus:
         """口座の維持率 {equity, required, collateral, ratio}。建玉がなければ ratio は None。読み取り専用。"""
         with self._lock:
             return self._margin_status_locked_for(self._g(), user_id, prices or self._market.latest_prices())
@@ -364,7 +365,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
     def long_close(self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT) -> CryptoResult:
         return self.margin_close(user_id, "long", units, price, symbol)
 
-    def _losscut_user_locked_for(self, guild_id: int, user_id: int, prices: dict[str, Any]) -> list[Any]:
+    def _losscut_user_locked_for(self, guild_id: int, user_id: int, prices: Mapping[str, float]) -> list[Any]:
         """維持率が LOSSCUT_RATIO を下回る間、含み損の大きい建玉から順に、全部決済する（連鎖ロスカット）。[(銘柄, 向き, 損失)]。"""
         cut = []
         while True:
@@ -394,7 +395,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             cut.append((symbol, side, -res.profit))
         return cut
 
-    def margin_cut_map(self, prices: Optional[dict[str, Any]] = None) -> list[tuple[str, str, float, int]]:
+    def margin_cut_map(self, prices: Optional[Mapping[str, float]] = None) -> list[tuple[str, str, float, int]]:
         """このサーバーの、信用建玉のロスカット水準の地図 [(銘柄, 向き, ロスカットされる価格, 建玉額), ...]。"""
         out = []
         with self._lock:
@@ -476,7 +477,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                 done.append((gid, r["user_id"], r["symbol"], side, charge))
         return done
 
-    def margin_losscut(self, prices: dict[str, Any]) -> list[tuple[int, int, str, str, int]]:
+    def margin_losscut(self, prices: Mapping[str, float]) -> list[tuple[int, int, str, str, int]]:
         """全サーバーの口座を調べ、維持率が LOSSCUT_RATIO を下回る口座を、連鎖ロスカットする。prices は {銘柄: いまの価格}。[(サーバー, ユーザー, 銘柄, 向き, 損失)]。"""
         done = []
         with self._db.tx():

@@ -4,7 +4,8 @@ import random
 from typing import Any, Optional, cast
 
 from domain import teiai
-from domain.errors import Outcome, fail
+from domain.errors import Failure, Outcome, fail
+from domain.ports.contracts import EscapeResult
 
 from .repay import DebtRepo as Base
 
@@ -16,7 +17,7 @@ class DebtRepo(Base):
             v = self._scalar("SELECT escape_tries FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id))
         return max(0, teiai.ESCAPE_MAX_TRIES - (v if v is not None else 0))
 
-    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Outcome[dict[str, Any]]:
+    def escape_attempt(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Outcome[EscapeResult]:
         """海外逃亡。(成功か, 理由か結果の辞書) を返す。"""
         rng = rng or cast("random.Random", random)
         with self._db.tx():
@@ -41,13 +42,16 @@ class DebtRepo(Base):
             if rng.random() < teiai.ESCAPE_CHANCE:
                 ok, result = self.bankrupt_for(gid, user_id, escape=True)
                 if not ok:
+                    assert isinstance(result, Failure)
                     return False, result
-                return True, {
+                assert not isinstance(result, Failure)
+                escaped: EscapeResult = {
                     "escaped": True,
                     "fine": 0,
                     "debt": self._account.debt(gid, user_id),
                     "bankrupt": result,
                 }
+                return True, escaped
             fine = max(teiai.ESCAPE_FINE_MIN, int(debt * teiai.ESCAPE_FINE_RATE))
             self._conn.execute("UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (fine, gid, user_id))
             self._account.ledger(
@@ -58,4 +62,5 @@ class DebtRepo(Base):
                 f"海外逃亡に失敗（罰金 {fine:,}ペリカが借金に加わる）",
             )
             self.after_debt_change(gid, user_id)
-            return True, {"escaped": False, "fine": fine, "debt": self._account.debt(gid, user_id), "bankrupt": None}
+            failed: EscapeResult = {"escaped": False, "fine": fine, "debt": self._account.debt(gid, user_id), "bankrupt": None}
+            return True, failed

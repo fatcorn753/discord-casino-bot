@@ -7,7 +7,7 @@ from typing import Any, Optional
 
 from domain import poll
 from domain.errors import Outcome, fail
-from domain.ports.contracts import PollRow, PollView
+from domain.ports.contracts import PollRigResult, PollRow, PollView
 from domain.ports.repos import IPollRepo
 from infra.db.account import AccountCore
 from infra.db.bank import BankRepo
@@ -95,7 +95,7 @@ class PollRepo(ScopedRepo, IPollRepo):
             assert view is not None  # 直前に open を確認済み
             return True, view
 
-    def poll_rig(self, user_id: int, poll_id: int, yes: int, no: int, now: float) -> Outcome[dict[str, Any]]:
+    def poll_rig(self, user_id: int, poll_id: int, yes: int, no: int, now: float) -> Outcome[PollRigResult]:
         """作った人だけが、RIG_COST を払って、表示する票数を yes・no に書き換えられる。代金は帝愛銀行の収入。
 
         (成功か, {"poll": 書き換え後, "before": (賛成, 反対)} か Failure)。あとから入る本物の票は、書き換えた数に足される。
@@ -123,7 +123,10 @@ class PollRepo(ScopedRepo, IPollRepo):
                 "UPDATE polls SET adj_yes=?, adj_no=?, rigs=rigs+1 WHERE guild_id=? AND id=?",
                 (yes - real_yes, no - real_no, gid, poll_id),
             )
-            return True, {"poll": self._view_for(gid, poll_id), "before": (before["yes"], before["no"])}
+            after = self._view_for(gid, poll_id)
+            assert after is not None  # 直前まで開いていた投票が、書き換えで閉じることはない
+            result: PollRigResult = {"poll": after, "before": (before["yes"], before["no"])}
+            return True, result
 
     def poll_close_due(self, now: float) -> list[PollView]:
         """締切を過ぎた投票を締めて、締めたものを返す。"""

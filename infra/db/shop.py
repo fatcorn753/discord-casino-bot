@@ -3,13 +3,13 @@
 表の定義は infra/db/schema/tables.py にある。
 """
 
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from domain import shop as shop_mod
 from domain import teiai
 from domain.errors import fail
 from domain.ports.bridges import IStatusReader
-from domain.ports.contracts import SeizedBelongings
+from domain.ports.contracts import ProfileView, SeizedBelongings, ShopStockInfo
 from domain.ports.repos import IShopRepo
 from domain.types import CONSUMABLE_EFFECTS, PurchaseResult
 from infra.db.account import AccountCore
@@ -61,7 +61,7 @@ class ShopRepo(ScopedRepo, IShopRepo):
         )
         return SeizedBelongings(items=tuple(items))
 
-    def shop_stock(self, user_id: int, item_id: str, now: float) -> Optional[dict[str, Any]]:
+    def shop_stock(self, user_id: int, item_id: str, now: float) -> Optional[ShopStockInfo]:
         """在庫のある品の、このプレイヤーの在庫 {stock: 買える数, max, next_at: 次に1つ増える時刻（満タンなら None）}。在庫のない品は None。
 
         読み取りだけ（記録がなければ、満タン）。
@@ -151,7 +151,7 @@ class ShopRepo(ScopedRepo, IShopRepo):
                 )
             }
 
-    def get_profile(self, user_id: int, raw: bool = False) -> dict[str, Any]:
+    def get_profile(self, user_id: int, raw: bool = False) -> ProfileView:
         """装備中の称号・カード・演出、消耗品の効果、身分（status）。読み取り専用（口座は作らない）。
 
         カタギでないとき（借金・延滞・破産者）は、買った称号・カード・演出が「差し押さえ中」なので、装備の欄は None で返り、
@@ -160,13 +160,15 @@ class ShopRepo(ScopedRepo, IShopRepo):
         with self._lock:
             gid = self._g()
             row = self._one("SELECT * FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id))
-            prof = row if row else {"user_id": user_id, **dict.fromkeys(self.SLOTS), "daily_boost": 0, "insurance": 0}
+            prof: dict[str, Any] = (
+                row if row else {"user_id": user_id, **dict.fromkeys(self.SLOTS), "daily_boost": 0, "insurance": 0}
+            )
             prof["status"] = self._status_reader.status_for(gid, user_id, self._now())
         prof["frozen"] = prof["status"] != teiai.KATAGI
         if prof["frozen"] and not raw:
             for slot in self.SLOTS:
                 prof[slot] = None
-        return prof
+        return cast("ProfileView", prof)
 
     def equip(self, user_id: int, slot: str, item_id: Optional[str]) -> bool:
         """称号・カードの色・アイコンを装備（None で外す）。持っていないものは装備できない。"""
