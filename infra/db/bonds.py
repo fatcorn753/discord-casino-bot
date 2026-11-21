@@ -8,7 +8,7 @@
 """
 
 import random
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from domain import bonds as bonds_mod
 from domain import rates
@@ -118,9 +118,9 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         done = [dict(r) for r in reversed(rows) if r["status"] != "active"][:recent]
         return {"active": active, "done": done}
 
-    def bond_settle(self, now: float, rng: Any = None) -> list[Any]:
+    def bond_settle(self, now: float, rng: Optional[random.Random] = None) -> list[dict[str, Any]]:
         """ジャンク債の倒産抽選と、満期を過ぎた債券の決着（このサーバー全員分）。決着した行（status と paid つき）を返す。"""
-        rng = rng or random
+        rng = rng if rng is not None else cast("random.Random", random)
         out = []
         offset = 0  # このバッチの流入（倒産で返さなくてよくなった元本と、満期で返す元本）
         matured = []

@@ -5,7 +5,7 @@
 
 import math
 import random
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from domain import market as market_mod
 from domain import rates, teiai, thermostat
@@ -408,9 +408,9 @@ class BankRepo(ScopedRepo, IBankRepo):
         row = self._conn.execute("SELECT rf FROM teiai_bank WHERE guild_id=?", (guild_id,)).fetchone()
         return row["rf"] if row is not None and row["rf"] > 0 else rates.BASE_RISK_FREE_PER_DAY
 
-    def bank_rf_tick(self, now: float, rng: Any = None) -> float:
+    def bank_rf_tick(self, now: float, rng: Optional[random.Random] = None) -> float:
         """r_f を、いまの準備率 θ の目標へ向けて進める（CIR 風。式は domain/rates.py）。新しい r_f を返す。"""
-        rng = rng or random
+        rng = rng if rng is not None else cast("random.Random", random)
         with self._db.tx():
             gid = self._g()
             state = self.bank_sync_for(gid, now)
