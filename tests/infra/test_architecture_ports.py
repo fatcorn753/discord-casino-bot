@@ -50,41 +50,65 @@ def test_legacy_facade_and_service_locators_are_removed():
         assert not (ROOT / "domain/ports" / removed).exists()
 
 
-def test_ports_and_bridges_use_nominal_base_classes_without_protocol_or_abc():
-    """domain/ports/（catalogs 除く。bridges はパッケージ）は Protocol・abc.ABC を使わない名目的基底クラスである。"""
-    targets = [p for p in _iter_py("domain/ports") if p.name not in ("catalogs.py",) and "catalog_types" not in p.parts]
-    targets.append(ROOT / "cogs/shared/bridges.py")
+# 住み分けポリシー（python-coding-conventions §3.3 / §7.2）:
+# - 名目的契約層（不変条件・状態・実行時 isinstance 契約あり）では Protocol・abc.ABC を禁止する。
+# - 静的型のみで LSP を 100% 保証できる純粋契約層（単一コールバックの bridges・純粋戦略の games）では
+#   Protocol / Callable 型エイリアスを許可する（ただし abc モジュールと ABC 基底は引き続き禁止）。
+NOMINAL_PORT_DIRS = ("domain/ports/repos", "domain/ports/contracts")
+NOMINAL_PORT_FILES = ("domain/ports/catalogs.py", "domain/ports/clock.py", "domain/ports/session.py")
+NOMINAL_EXTRA_FILES = ("cogs/shared/bridges.py",)
+PURE_CONTRACT_DIRS = ("domain/ports/bridges", "domain/games")
+
+
+def _protocol_or_abc_violations(path: Path, *, allow_protocol: bool) -> list[str]:
     violations: list[str] = []
-    for path in targets:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                for base in node.bases:
-                    base_id = base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
-                    if base_id in ("Protocol", "ABC"):
-                        violations.append(
-                            f"{path.relative_to(ROOT)}:{node.lineno} class {node.name} inherits {base_id}"
-                        )
-            elif isinstance(node, ast.ImportFrom) and node.module in ("abc",):
-                violations.append(f"{path.relative_to(ROOT)}:{node.lineno} imports abc")
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            for base in node.bases:
+                base_id = base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
+                if base_id == "ABC" or (base_id == "Protocol" and not allow_protocol):
+                    violations.append(f"{path.relative_to(ROOT)}:{node.lineno} class {node.name} inherits {base_id}")
+        elif isinstance(node, ast.ImportFrom) and node.module in ("abc",):
+            violations.append(f"{path.relative_to(ROOT)}:{node.lineno} imports abc")
+    return violations
+
+
+def _in_dirs(path: Path, dirs: tuple[str, ...]) -> bool:
+    rel = str(path.relative_to(ROOT))
+    return any(rel == d or rel.startswith(d + "/") for d in dirs)
+
+
+def test_nominal_port_layers_forbid_protocol_and_abc():
+    """名目的契約層（domain/ports/repos・contracts・catalogs・clock・session と cogs/shared/bridges.py）は
+    Protocol・abc.ABC を使わない名目的基底クラスのままである（不変条件・実行時契約のため）。"""
+    targets = [
+        p
+        for p in _iter_py("domain/ports")
+        if _in_dirs(p, NOMINAL_PORT_DIRS)
+        or str(p.relative_to(ROOT)) in NOMINAL_PORT_FILES
+        or "catalog_types" in p.parts
+    ]
+    targets += [ROOT / f for f in NOMINAL_EXTRA_FILES]
+    violations = [v for path in targets for v in _protocol_or_abc_violations(path, allow_protocol=False)]
+    assert not violations, "\n".join(violations)
+
+
+def test_pure_contract_layers_may_use_protocol_or_callable_but_never_abc():
+    """純粋契約層（domain/ports/bridges の単一コールバック契約・domain/games の純粋戦略）では
+    Protocol / Callable 型エイリアスを許可するが、abc モジュールと ABC 基底は引き続き禁止する。"""
+    targets = [p for d in PURE_CONTRACT_DIRS for p in _iter_py(d)]
+    violations = [v for path in targets for v in _protocol_or_abc_violations(path, allow_protocol=True)]
     assert not violations, "\n".join(violations)
 
 
 def test_bridges_package_reexports_every_submodule_symbol():
-    """domain/ports/bridges/ の各サブモジュールが定義する公開シンボルは、パッケージから漏れなく再エクスポートされる。"""
+    """domain/ports/bridges/ の各サブモジュールが定義する公開シンボル（クラス・関数・型エイリアス）は、
+    パッケージから漏れなく再エクスポートされる。"""
     import domain.ports.bridges as bridges_pkg
 
     pkg_dir = ROOT / "domain" / "ports" / "bridges"
-    defined: dict[str, str] = {}
-    for path in sorted(pkg_dir.glob("*.py")):
-        if path.name == "__init__.py":
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef):
-                defined[node.name] = path.name
-            elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
-                defined[node.targets[0].id] = path.name
+    defined = _package_defined_symbols(pkg_dir)
     assert defined, "bridges サブモジュールが空です"
     not_exported = [f"{name} ({mod})" for name, mod in defined.items() if not hasattr(bridges_pkg, name)]
     assert not not_exported, "パッケージへの再エクスポート漏れ:\\n" + "\\n".join(not_exported)
@@ -224,7 +248,12 @@ def test_cogs_no_infra_imports_and_no_service_locators():
 
 
 def test_production_follows_python_coding_conventions():
-    """本番コード全体で abc.ABC / @abstractmethod / Protocol / @staticmethod / 不要な @classmethod を禁止する。"""
+    """本番コード全体で abc / abc.ABC / @abstractmethod / @staticmethod / 不要な @classmethod を禁止する。
+
+    Protocol 基底だけは、静的型のみで LSP を 100% 保証できる純粋契約層
+    （domain/ports/bridges/・domain/games/）に限り許可する（住み分けポリシー）。それ以外の
+    名目的契約層（domain/ports/repos/・cogs/shared/bridges.py・infra/db/ など）では禁止のまま。
+    """
     allowed_classmethod_methods = {"from_custom_id"}
     targets = [
         *[p for folder in ("domain", "services", "infra", "cogs") for p in _iter_py(folder)],
@@ -241,9 +270,10 @@ def test_production_follows_python_coding_conventions():
             elif isinstance(node, ast.ImportFrom) and node.module == "abc":
                 violations.append(f"{rel}:{node.lineno} imports from abc")
             elif isinstance(node, ast.ClassDef):
+                protocol_allowed = _in_dirs(path, PURE_CONTRACT_DIRS)
                 for base in node.bases:
                     base_name = base.id if isinstance(base, ast.Name) else getattr(base, "attr", "")
-                    if base_name in ("Protocol", "ABC"):
+                    if base_name == "ABC" or (base_name == "Protocol" and not protocol_allowed):
                         violations.append(f"{rel}:{node.lineno} class {node.name}({base_name})")
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 for dec in node.decorator_list:
