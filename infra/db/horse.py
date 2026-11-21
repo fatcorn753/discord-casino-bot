@@ -1,12 +1,13 @@
 """競走馬・競売。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain import horse as horse_mod
 from domain import shop as shop_mod
 from domain import teiai
 from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import IBankCashFlow, IStatusReader
+from domain.ports.contracts import AuctionHorseRow, HorseRow
 from domain.ports.repos import IHorseRepo
 from domain.shop import CARROT, GOLD_CARROT, HORSE_VOUCHER
 from domain.types import PurchaseResult
@@ -49,7 +50,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
         )
         return owned + listed
 
-    def horse_get_for(self, guild_id: int, horse_id: int) -> Optional[dict[str, Any]]:
+    def horse_get_for(self, guild_id: int, horse_id: int) -> Optional[HorseRow]:
         with self._lock:
             return self._one("SELECT * FROM horses WHERE id=? AND guild_id=?", (horse_id, guild_id))
 
@@ -85,11 +86,11 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             assert lastrowid is not None
             return True, lastrowid
 
-    def horse_list(self, user_id: int) -> list[dict[str, Any]]:
+    def horse_list(self, user_id: int) -> list[HorseRow]:
         with self._lock:
             return self._all("SELECT * FROM horses WHERE guild_id=? AND owner_id=? ORDER BY id", (self._g(), user_id))
 
-    def horse_get(self, horse_id: int) -> Optional[dict[str, Any]]:
+    def horse_get(self, horse_id: int) -> Optional[HorseRow]:
         return self.horse_get_for(self._g(), horse_id)
 
     def horse_carrot(self, user_id: int, horse_id: int, src: str, dst: str) -> Outcome[dict[str, int]]:
@@ -202,17 +203,17 @@ class HorseRepo(ScopedRepo, IHorseRepo):
     def horse_auction_price(self, listed_at: float, now: float) -> int:
         return max(1, round(self.HORSE_PRICE * teiai.auction_rate(listed_at, now)))
 
-    def auction_horses(self, now: float) -> list[dict[str, Any]]:
+    def auction_horses(self, now: float) -> list[AuctionHorseRow]:
         """帝愛の競売に出ている馬。[{馬の行, price, rate}]（出品の早い順）。"""
         with self._lock:
-            rows = self._all(
+            rows: list[HorseRow] = self._all(
                 "SELECT * FROM horses WHERE guild_id=? AND owner_id=-1 ORDER BY listed_at, id", (self._g(),)
             )
         return [
             {
                 **r,
-                "price": self.horse_auction_price(r["listed_at"], now),
-                "rate": teiai.auction_rate(r["listed_at"], now),
+                "price": self.horse_auction_price(r["listed_at"] or 0.0, now),
+                "rate": teiai.auction_rate(r["listed_at"] or 0.0, now),
             }
             for r in rows
         ]

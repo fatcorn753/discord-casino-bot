@@ -11,6 +11,7 @@ from domain import arena as arena_mod
 from domain import teiai
 from domain.errors import Outcome, fail
 from domain.ports.bridges import IBankCashFlow
+from domain.ports.contracts import ArenaBetRow, ArenaFighterRow, ArenaTournamentDetailRow
 from domain.ports.repos import IArenaRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -37,7 +38,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
 
     def arena_tournament_ensure(
         self, fmt: str, now: float, tz_hours: float, rng: Optional[random.Random] = None
-    ) -> dict[str, Any]:
+    ) -> ArenaTournamentDetailRow:
         """今日の、指定した形式の大会を用意する（無ければ作る）。すでにあれば、そのまま返す。"""
         rng = rng or random.SystemRandom()
         day = self.arena_today(now, tz_hours)
@@ -67,11 +68,11 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
 
     def arena_tournaments_ensure_today(
         self, now: float, tz_hours: float, rng: Optional[random.Random] = None
-    ) -> list[dict[str, Any]]:
+    ) -> list[ArenaTournamentDetailRow]:
         """今日の大会を、1on1・バトロワの両方そろえて返す（無ければ作る）。"""
         return [self.arena_tournament_ensure(fmt, now, tz_hours, rng) for fmt in arena_mod.FORMATS]
 
-    def arena_tournament_get_by_day(self, day: str, fmt: str) -> Optional[dict[str, Any]]:
+    def arena_tournament_get_by_day(self, day: str, fmt: str) -> Optional[ArenaTournamentDetailRow]:
         with self._lock:
             t = self._one(
                 "SELECT * FROM arena_tournaments WHERE guild_id=? AND day=? AND format=?", (self._g(), day, fmt)
@@ -81,7 +82,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
             t["fighters"] = self.arena_fighters(t["id"])
             return t
 
-    def arena_fighters(self, tournament_id: int) -> list[dict[str, Any]]:
+    def arena_fighters(self, tournament_id: int) -> list[ArenaFighterRow]:
         with self._lock:
             return self._all("SELECT * FROM arena_fighters WHERE tournament_id=? ORDER BY id", (tournament_id,))
 
@@ -140,8 +141,8 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
         guild_id: int,
         tournament_id: int,
         stage: str,
-        winner: dict[str, Any],
-        losers: list[dict[str, Any]],
+        winner: ArenaFighterRow,
+        losers: list[ArenaFighterRow],
         win_odds: float,
         now: Optional[float] = None,
     ) -> None:
@@ -239,7 +240,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
             self._conn.execute("UPDATE arena_tournaments SET status='done' WHERE id=?", (tournament_id,))
             return {"champion": champion["name"], "runner_up": [f["name"] for f in losers]}
 
-    def arena_my_bets(self, tournament_id: int, user_id: int) -> list[dict[str, Any]]:
+    def arena_my_bets(self, tournament_id: int, user_id: int) -> list[ArenaBetRow]:
         with self._lock:
             return self._all(
                 "SELECT b.*, f.name AS fighter_name FROM arena_bets b JOIN arena_fighters f ON f.id=b.fighter_id "
@@ -247,7 +248,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
                 (tournament_id, user_id),
             )
 
-    def arena_bets_breakdown(self, tournament_id: int) -> dict[int, list[dict[str, Any]]]:
+    def arena_bets_breakdown(self, tournament_id: int) -> dict[int, list[ArenaBetRow]]:
         """戦士ごとの、誰がいくら賭けているか（大会を通じた累積）。{戦士ID: [{user_id, amount}]}（金額の多い順）。"""
         with self._lock:
             rows = self._all(

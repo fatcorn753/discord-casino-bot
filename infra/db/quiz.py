@@ -4,27 +4,29 @@
 """
 
 import json
-from typing import Any, Optional
+from collections.abc import Mapping
+from typing import Any, Optional, cast
 
 from domain import quizpay as quizpay_mod
 from domain.errors import Outcome, fail
 from domain.ports.bridges import IDebtOps
+from domain.ports.contracts import QuizAdminView, QuizView
 from domain.ports.repos import IQuizRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
 from infra.db.schema import new_quiz_order
 
 
-def _quiz_dict(row: Any) -> dict[str, Any]:
+def _quiz_dict(row: Any) -> QuizView:
     d = dict(row)
     d["choices"] = json.loads(d["choices"])
     d["order"] = (
         [d["choices"][i] for i in json.loads(d["shown_order"])] if d.get("shown_order") else d["choices"][:]
     )  # 表示する選択肢の並び
-    return d
+    return cast("QuizView", d)
 
 
-def _quiz_row(row: Any) -> Optional[dict[str, Any]]:
+def _quiz_row(row: Any) -> Optional[QuizView]:
     return None if row is None else _quiz_dict(row)
 
 
@@ -96,25 +98,25 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         with self._lock:
             return {r["question"] for r in self._all("SELECT question FROM quiz_questions")}
 
-    def quiz_get(self, quiz_id: int) -> Optional[dict[str, Any]]:
+    def quiz_get(self, quiz_id: int) -> Optional[QuizView]:
         with self._lock:
             return _quiz_row(self._one("SELECT * FROM quiz_questions WHERE id=?", (quiz_id,)))
 
-    def quiz_list(self) -> list[dict[str, Any]]:
+    def quiz_list(self) -> list[QuizAdminView]:
         """全問題（新しい順）。回答数と正解数つき。"""
         with self._lock:
             rows = self._all(
                 "SELECT q.*, COUNT(a.user_id) AS answered, COALESCE(SUM(a.correct), 0) AS right_count "
                 "FROM quiz_questions q LEFT JOIN quiz_answers a ON a.question_id = q.id GROUP BY q.id ORDER BY q.id DESC"
             )
-        return [_quiz_dict(r) for r in rows]
+        return [cast("QuizAdminView", _quiz_dict(r)) for r in rows]
 
     def quiz_delete(self, quiz_id: int) -> bool:
         with self._db.tx():
             self._conn.execute("DELETE FROM quiz_answers WHERE question_id=?", (quiz_id,))
             return self._conn.execute("DELETE FROM quiz_questions WHERE id=?", (quiz_id,)).rowcount > 0
 
-    def quiz_next(self, user_id: int, now: float) -> tuple[Optional[dict[str, Any]], int]:
+    def quiz_next(self, user_id: int, now: float) -> tuple[Optional[QuizView], int]:
         """まだ答えていない、期限内の一番古い問題と、その残り数（その問題を含む）を返す。無ければ (None, 0)。
 
         ユーザーの問題は、このサーバーのもので、自分の問題ではないものだけ出る（出題者の残高が尽きても、借金で報酬を払うので出続ける）。
@@ -188,7 +190,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         v = self._scalar("SELECT games_played FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
         return v if v is not None else 0
 
-    def _quiz_pay_author(self, guild_id: int, q: dict[str, Any]) -> tuple[int, int]:
+    def _quiz_pay_author(self, guild_id: int, q: Mapping[str, Any]) -> tuple[int, int]:
         """いまの回答状況での出題者の受け取り額（基本+ボーナス+参加報酬）と、すでに払った累計の差を払う（減るときは戻す）。
 
         (動いた額, 累計) を返す。戻すときは、出題者の残高の範囲まで。期限のときの最終合計は、回答のたびに払った累計と同じになる。
@@ -266,7 +268,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             assert lastrowid is not None
             return True, lastrowid
 
-    def quiz_own_open(self, user_id: int, now: float) -> list[dict[str, Any]]:
+    def quiz_own_open(self, user_id: int, now: float) -> list[QuizView]:
         """このサーバーで自分が出した、終了前の問題（古い順）。取り下げの候補に使う。"""
         with self._lock:
             return [

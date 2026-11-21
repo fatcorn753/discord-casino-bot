@@ -4,8 +4,9 @@
 """
 
 import datetime
-from typing import Any, Optional
+from typing import Optional
 
+from domain.ports.contracts import ManualEventRow
 from domain.ports.repos import IEventRepo
 from infra.db.base import EcoDb, ScopedRepo
 
@@ -35,7 +36,7 @@ class EventRepo(ScopedRepo, IEventRepo):
                 (self._g(), game, boost_pct, starts, ends, channel_id),
             )
 
-    def manual_event_get(self, now: float) -> Optional[dict[str, Any]]:
+    def manual_event_get(self, now: float) -> Optional[ManualEventRow]:
         """いま開催中の特別イベント。無ければ None。"""
         with self._lock:
             return self._one(
@@ -43,7 +44,7 @@ class EventRepo(ScopedRepo, IEventRepo):
                 (self._g(), now, now),
             )
 
-    def manual_event_stop(self, now: float) -> Optional[dict[str, Any]]:
+    def manual_event_stop(self, now: float) -> Optional[ManualEventRow]:
         """開催中の特別イベントを、すぐ終わらせる。終わらせたイベントを返す（開催中でなければ None）。"""
         with self._db.tx():
             gid = self._g()
@@ -53,7 +54,7 @@ class EventRepo(ScopedRepo, IEventRepo):
             self._conn.execute("UPDATE manual_event SET ended=1, ends=? WHERE guild_id=?", (now, gid))
             return row
 
-    def manual_event_finish_due(self, now: float) -> Optional[dict[str, Any]]:
+    def manual_event_finish_due(self, now: float) -> Optional[ManualEventRow]:
         """時間が来た特別イベントを終了にして返す（終了の告知を1回だけ出すため）。無ければ None。"""
         with self._db.tx():
             gid = self._g()

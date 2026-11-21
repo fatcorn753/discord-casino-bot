@@ -13,6 +13,7 @@ from domain.ports.bridges import (
     IGraceReader,
     IStatusReader,
 )
+from domain.ports.contracts import ListingRow, P2PMine
 from domain.ports.repos import IP2PRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -194,7 +195,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 (guild_id, user_id, row["ref"], row["qty"]),
             )
 
-    def _p2p_label_for(self, guild_id: int, row: Any) -> str:
+    def _p2p_label_for(self, guild_id: int, row: ListingRow) -> str:
         if row["kind"] == "horse":
             horse = self._horses.horse_get_for(guild_id, int(row["ref"]))
             return f"{horse['silks']} {horse['name']}" if horse else "競走馬"
@@ -202,7 +203,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         name = shop_mod.label(item) if item else row["ref"]
         return name + (f"×{row['qty']}" if row["qty"] > 1 else "")
 
-    def p2p_label(self, row: Any) -> str:
+    def p2p_label(self, row: ListingRow) -> str:
         """出品の名前（品の名前×個数、または馬の名前）。"""
         return self._p2p_label_for(self._g(), row)
 
@@ -225,7 +226,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
             guild_id, row["seller_id"], "p2p_sold", label=label, price=price, fee=fee, net=price - fee
         )
 
-    def p2p_get(self, listing_id: int) -> Any:
+    def p2p_get(self, listing_id: int) -> Optional[ListingRow]:
         with self._lock:
             return self._one("SELECT * FROM market_listings WHERE id=? AND guild_id=?", (listing_id, self._g()))
 
@@ -335,7 +336,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
     def p2p_pull_back(self, user_id: int, now: Optional[float] = None) -> dict[str, int]:
         return self.p2p_pull_back_for(self._g(), user_id, self._now() if now is None else now)
 
-    def p2p_unsynced_posts(self) -> list[Any]:
+    def p2p_unsynced_posts(self) -> list[ListingRow]:
         """終わった（売れた・取り消し・終了）のに、告知の投稿を、まだ書き換えていない出品。"""
         with self._lock:
             return self._all(
@@ -349,12 +350,12 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 "UPDATE market_listings SET post_done=1 WHERE id=? AND guild_id=?", (listing_id, self._g())
             )
 
-    def p2p_settle(self, now: float) -> list[Any]:
+    def p2p_settle(self, now: float) -> list[tuple[ListingRow, str]]:
         """締切・期限を過ぎた出品を精算する。[(出品の行, 結果)]（結果は sold / expired / failed）を返す。"""
-        out = []
+        out: list[tuple[ListingRow, str]] = []
         with self._db.tx():
             gid = self._g()
-            rows = self._all(
+            rows: list[ListingRow] = self._all(
                 "SELECT * FROM market_listings WHERE guild_id=? AND status='active' AND end_at<=? ORDER BY end_at, id",
                 (gid, now),
             )
@@ -393,7 +394,7 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         limit: int = 25,
         mode: Optional[str] = None,
         order: str = "end",
-    ) -> list[Any]:
+    ) -> list[ListingRow]:
         """出ている出品。kind は horse / item、mode は fixed / auction で絞れる。order は P2P_ORDERS のどれか（既定は締切の近い順）。"""
         now = self._now() if now is None else now
         with self._lock:
@@ -416,15 +417,15 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
                 (self._g(), now),
             )
 
-    def p2p_mine(self, user_id: int, now: Optional[float] = None) -> dict[str, Any]:
+    def p2p_mine(self, user_id: int, now: Optional[float] = None) -> P2PMine:
         """自分の出品（出している）と、自分が最高入札者の競り。"""
         with self._lock:
             gid = self._g()
-            selling = self._all(
+            selling: list[ListingRow] = self._all(
                 "SELECT * FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active' ORDER BY end_at",
                 (gid, user_id),
             )
-            bidding = self._all(
+            bidding: list[ListingRow] = self._all(
                 "SELECT * FROM market_listings WHERE guild_id=? AND bidder_id=? AND status='active' ORDER BY end_at",
                 (gid, user_id),
             )
