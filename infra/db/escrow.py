@@ -147,15 +147,15 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
     def jackpot_pool(self) -> int:
         """いまの共有ジャックポットの積み立て。"""
         with self._lock:
-            row = self._conn.execute("SELECT pool FROM jackpot WHERE guild_id=?", (self._g(),)).fetchone()
-            return row["pool"] if row else 0
+            v = self._scalar("SELECT pool FROM jackpot WHERE guild_id=?", (self._g(),))
+            return v if v is not None else 0
 
     def jackpot_claim(self, user_id: int) -> int:
         """積み立てを全額 user_id に払い、0 に戻す。払った額を返す（収入として扱う。借金があれば天引きされる）。"""
         with self._db.tx():
             gid = self._g()
-            row = self._conn.execute("SELECT pool FROM jackpot WHERE guild_id=?", (gid,)).fetchone()
-            pool = row["pool"] if row else 0
+            v = self._scalar("SELECT pool FROM jackpot WHERE guild_id=?", (gid,))
+            pool = v if v is not None else 0
             if pool <= 0:
                 return 0
             self._account.ensure(gid, user_id)
