@@ -277,7 +277,9 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 r = self._one(
                     "SELECT odds_win, odds_place FROM horse_entries WHERE race_id=? AND lane=?", (race_id, lanes[0])
                 )
-                value = r and (r["odds_win"] if kind == "win" else r["odds_place"])
+                if r is None:
+                    return None
+                value = r["odds_win"] if kind == "win" else r["odds_place"]
                 return value if value else None
             v = self._scalar(
                 "SELECT odds FROM horse_odds WHERE race_id=? AND kind=? AND key=?",
