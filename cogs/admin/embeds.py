@@ -22,6 +22,7 @@ from domain import approval
 from domain import labor as lab
 from domain.duration import format_minutes
 from domain.games import pachinko, rtplevel
+from domain.ports.contracts import LaborClickReport, LaborClickReportRow, PachinkoStats
 
 MAX_IMAGE_BYTES = ui.MAX_IMAGE_BYTES
 
@@ -48,14 +49,14 @@ def bulk_preview_lines(quizzes: list) -> str:
 SMALL_SAMPLE = 100  # これより少ない回転数の行には「参考」を付ける（当たり率がまだ安定しないため）
 
 
-def pachinko_stats_embed(data: dict, scope: str) -> discord.Embed:
+def pachinko_stats_embed(data: PachinkoStats, scope: str) -> discord.Embed:
     """設計した数字と、実際の記録を並べる（セット全体と、予告・リーチごとの回転）。"""
     sets, hit_sets, bet, back, balls, starts, chain_max = data["sets"]
     if not sets:
         return ui.embed(f"🎰 パチンコ統計（{scope}）", "まだ記録がありません。", ui.INFO)
     spins, spin_hits = data["spins"]
 
-    def rows(group: dict, names: dict, designed: dict) -> str:
+    def rows(group: dict[str, tuple[int, int]], names: dict, designed: dict) -> str:
         lines = []
         for key, name in names.items():
             n, h = group.get(key, (0, 0))
@@ -111,14 +112,14 @@ def rtp_table_embed(levels: dict, title: str) -> discord.Embed:
     return e
 
 
-def click_history_embed(name: str, report: dict, tz_hours: float, hours: int) -> discord.Embed:
+def click_history_embed(name: str, report: LaborClickReport, tz_hours: float, hours: int) -> discord.Embed:
     """「働く」を押した記録（1時間ごと）。自動操作の疑いを、持ち主が見て判断するための数字。決めつけはしない。"""
     tz = datetime.timezone(datetime.timedelta(hours=tz_hours))
     rows = report["rows"]
     if not rows:
         return ui.embed(f"🕵️ {name} の「働く」の記録", f"過去{hours}時間に、押した記録はありません。", ui.INFO)
 
-    def is_mech(r: dict) -> bool:
+    def is_mech(r: LaborClickReportRow) -> bool:
         return r["clicks"] >= lab.MECH_MIN_CLICKS and r["cv"] is not None and r["cv"] < lab.MECH_CV_MAX
 
     mech = sum(1 for r in rows if is_mech(r))

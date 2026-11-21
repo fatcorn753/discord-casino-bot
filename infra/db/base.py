@@ -69,6 +69,23 @@ def validate_guild_id(guild_id: int) -> int:
     return gid
 
 
+def fetch_one(conn: sqlite3.Connection, sql: str, params: Sequence[Any] = ()) -> Optional[dict[str, Any]]:
+    """1行だけ取得して辞書で返す（無ければ None）。sqlite3.Row は dict に変換する。"""
+    row = conn.execute(sql, params).fetchone()
+    return dict(row) if row else None
+
+
+def fetch_all(conn: sqlite3.Connection, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
+    """全行を辞書のリストで返す。"""
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def fetch_scalar(conn: sqlite3.Connection, sql: str, params: Sequence[Any] = ()) -> Any:
+    """1行1列だけ取得してその値を返す（行が無ければ None）。"""
+    row = conn.execute(sql, params).fetchone()
+    return row[0] if row else None
+
+
 class ScopedRepo:
     """EcoDb とサーバーID（guild_id）に紐づくリポジトリ共通基底（コンポジション用）。"""
 
@@ -92,14 +109,17 @@ class ScopedRepo:
         """注入された IClock の現在時刻（UNIX 秒）。"""
         return self._db.now_ts()
 
-    def _one(self, sql: str, params: Sequence[Any] = ()) -> Optional[dict[str, Any]]:
-        """1行だけ取得して辞書で返す（無ければ None）。sqlite3.Row は dict に変換する。"""
-        row = self._conn.execute(sql, params).fetchone()
-        return dict(row) if row else None
+    def _one(self, sql: str, params: Sequence[Any] = ()) -> Optional[Any]:
+        """1行だけ取得して返す（無ければ None）。SQLite 行をリポジトリ境界の TypedDict 契約へ渡す内部ヘルパのため戻り値は Any とし、契約は呼び出し側の注釈で付く。"""
+        return fetch_one(self._conn, sql, params)
 
-    def _all(self, sql: str, params: Sequence[Any] = ()) -> list[dict[str, Any]]:
-        """全行を辞書のリストで返す。"""
-        return [dict(r) for r in self._conn.execute(sql, params).fetchall()]
+    def _all(self, sql: str, params: Sequence[Any] = ()) -> list[Any]:
+        """全行をリストで返す。SQLite 行をリポジトリ境界の TypedDict 契約へ渡す内部ヘルパのため戻り値は Any とし、契約は呼び出し側の注釈で付く。"""
+        return fetch_all(self._conn, sql, params)
+
+    def _scalar(self, sql: str, params: Sequence[Any] = ()) -> Any:
+        """1行1列だけ取得してその値を返す（行が無ければ None）。"""
+        return fetch_scalar(self._conn, sql, params)
 
     def _g(self) -> int:
         if self._strict and self.guild_id == 0:

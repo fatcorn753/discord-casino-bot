@@ -1,11 +1,11 @@
 """証券の市場価格・ストップ高安・チャート掲示。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain import market as market_mod
 from domain.errors import Failure
 from domain.market import DEFAULT
-from domain.ports.contracts import PricePoint
+from domain.ports.contracts import ChartBoardRow, ChartPostRow, PricePoint
 from domain.ports.repos import IMarketDataRepo
 from infra.db.base import EcoDb, ScopedRepo
 
@@ -19,9 +19,9 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
     def market_latest(self, symbol: str = DEFAULT) -> Optional[PricePoint]:
         """いまの価格 (時刻, 価格, 出来事)。まだ無ければ None。時計が戻っても、最後に記録した行を最新とする。"""
         with self._lock:
-            r = self._conn.execute(
+            r = self._one(
                 "SELECT ts, price, event FROM market_prices WHERE symbol=? ORDER BY rowid DESC LIMIT 1", (symbol,)
-            ).fetchone()
+            )
             return (r["ts"], r["price"], r["event"]) if r else None
 
     def latest_prices(self) -> dict[str, float]:
@@ -39,8 +39,8 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
     def market_fair_get(self, symbol: str) -> Optional[float]:
         """裏の理論価格。まだ無ければ None。"""
         with self._lock:
-            r = self._conn.execute("SELECT fair FROM market_fair WHERE symbol=?", (symbol,)).fetchone()
-            return r["fair"] if r else None
+            v = self._scalar("SELECT fair FROM market_fair WHERE symbol=?", (symbol,))
+            return v if v is not None else None
 
     def market_fair_set(self, symbol: str, fair: float, pin: int, ts: float) -> None:
         with self._db.tx():
@@ -52,8 +52,8 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
     def market_pin(self, symbol: str) -> int:
         """いま張り付いているか（1 ストップ高 / -1 ストップ安 / 0 なし）。"""
         with self._lock:
-            r = self._conn.execute("SELECT pin FROM market_fair WHERE symbol=?", (symbol,)).fetchone()
-            return r["pin"] if r else 0
+            v = self._scalar("SELECT pin FROM market_fair WHERE symbol=?", (symbol,))
+            return v if v is not None else 0
 
     def pin_reason(self, symbol: str, action: str) -> Optional[Failure]:
         """張り付き中で、この売買が約定しないなら Failure を返す。通るなら None。"""
@@ -64,7 +64,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
         with self._lock:
             return [
                 (r["ts"], r["price"], r["event"])
-                for r in self._conn.execute(
+                for r in self._all(
                     "SELECT ts, price, event FROM market_prices WHERE symbol=? AND ts>=? ORDER BY ts", (symbol, since)
                 )
             ]
@@ -78,7 +78,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
     ) -> Optional[int]:
         """そのチャンネルのチャートを新しいものに入れ替え（更新中にする）、前のメッセージID（無ければ None）を返す。"""
         with self._db.tx():
-            prev = self._conn.execute("SELECT message_id FROM chart_posts WHERE channel_id=?", (channel_id,)).fetchone()
+            prev = self._one("SELECT message_id FROM chart_posts WHERE channel_id=?", (channel_id,))
             self._conn.execute(
                 "INSERT INTO chart_posts (channel_id, message_id, guild_id, period, ts, live, symbol) VALUES (?, ?, ?, ?, ?, 1, ?) "
                 "ON CONFLICT(channel_id) DO UPDATE SET message_id=excluded.message_id, guild_id=excluded.guild_id, "
@@ -87,7 +87,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
             )
             return prev["message_id"] if prev else None
 
-    def live_chart_posts(self) -> list[dict[str, Any]]:
+    def live_chart_posts(self) -> list[ChartPostRow]:
         """自動で更新中のチャート。"""
         with self._lock:
             return self._all("SELECT * FROM chart_posts WHERE live=1")
@@ -108,7 +108,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
         with self._db.tx():
             self._conn.execute("DELETE FROM chart_posts WHERE ts<? AND live=0", (before_ts,))
 
-    def list_chart_boards(self) -> list[dict[str, Any]]:
+    def list_chart_boards(self) -> list[ChartBoardRow]:
         with self._lock:
             return self._all("SELECT * FROM chart_boards")
 

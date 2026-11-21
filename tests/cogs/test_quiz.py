@@ -3,6 +3,7 @@
 import asyncio
 import time
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -16,6 +17,8 @@ from cogs.quiz.cog import (
     record_answer,
 )
 from domain import teiai
+from domain.errors import Failure
+from domain.ports.contracts import QuizAnswerResult
 from domain.types import INITIAL_BALANCE
 from infra.db.quiz import QuizRepo
 from infra.db.repositories import open_repositories
@@ -74,9 +77,8 @@ def test_answers_are_per_guild_but_questions_are_shared(tmp_path):
     qid = add(eco)
     g1, g2 = eco.for_guild(10), eco.for_guild(20)
     assert g1.quiz.quiz_answer(1, qid, "東京", NOW)[0]
-    assert (
-        g1.quiz.quiz_next(1, NOW)[0] is None and g2.quiz.quiz_next(1, NOW)[0]["id"] == qid
-    )  # 別サーバーではまた答えられる
+    nxt = g2.quiz.quiz_next(1, NOW)[0]
+    assert g1.quiz.quiz_next(1, NOW)[0] is None and nxt is not None and nxt["id"] == qid  # 別サーバーではまた答えられる
 
 
 @pytest.mark.real_scope
@@ -464,10 +466,13 @@ def test_user_questions_stay_in_their_guild(tmp_path):
     eco = open_repositories(str(tmp_path / "t.db"))
     g1, g2 = eco.for_guild(10), eco.for_guild(20)
     ok, qid = post(g1)
-    assert g2.quiz.quiz_next(1, NOW) == (None, 0) and g1.quiz.quiz_next(1, NOW)[0]["id"] == qid
+    assert not isinstance(qid, Failure)
+    nxt = g1.quiz.quiz_next(1, NOW)[0]
+    assert g2.quiz.quiz_next(1, NOW) == (None, 0) and nxt is not None and nxt["id"] == qid
     assert g2.quiz.quiz_answer(1, qid, "東京", NOW)[0] is False
     eco.quiz.quiz_add("全体", ["a", "b", "c", "d"], "", 50, None, NOW)  # 持ち主の問題は全サーバー
-    assert g2.quiz.quiz_next(1, NOW)[0]["author_id"] == 0
+    last = g2.quiz.quiz_next(1, NOW)[0]
+    assert last is not None and last["author_id"] == 0
 
 
 def test_owner_questions_unchanged_and_not_paid_by_anyone(eco):
@@ -751,12 +756,19 @@ def test_default_wording_is_used_when_the_author_leaves_it_blank(eco):
         (q["msg_right"], q["msg_wrong"]) == ("", "") and verdict(q, True) == "正解！" and verdict(q, False) == "不正解…"
     )
     assert (
-        result_embed({"correct": True, "reward": 100, "reward_blocked": False, "explanation": ""}, 0, q).title
+        result_embed(
+            cast("QuizAnswerResult", {"correct": True, "reward": 100, "reward_blocked": False, "explanation": ""}), 0, q
+        ).title
         == "⭕ 正解！"
     )
-    assert result_embed({"correct": False, "answer": "東京", "explanation": ""}, 0, q).title == "❌ 不正解…"
     assert (
-        result_embed({"correct": True, "reward": 100, "reward_blocked": False, "explanation": ""}, 0).title
+        result_embed(cast("QuizAnswerResult", {"correct": False, "answer": "東京", "explanation": ""}), 0, q).title
+        == "❌ 不正解…"
+    )
+    assert (
+        result_embed(
+            cast("QuizAnswerResult", {"correct": True, "reward": 100, "reward_blocked": False, "explanation": ""}), 0
+        ).title
         == "⭕ 正解！"
     )  # 問題を渡さなくても既定
 
@@ -769,9 +781,11 @@ def test_custom_wording_replaces_only_the_headline_everywhere(eco):
     )
     q = eco.quiz.quiz_get(qid)
     assert verdict(q, True) == "お見事！" and verdict(q, False) == "不正解…"  # 片方だけ決めたら、もう片方は既定
-    e = result_embed({"correct": True, "reward": 100, "reward_blocked": False, "explanation": "解説"}, 0, q)
+    e = result_embed(
+        cast("QuizAnswerResult", {"correct": True, "reward": 100, "reward_blocked": False, "explanation": "解説"}), 0, q
+    )
     assert e.title == "⭕ お見事！" and "+100" in must(e.description)  # 報酬の表示は残る
-    e = result_embed({"correct": False, "answer": "東京", "explanation": "解説"}, 0, q)
+    e = result_embed(cast("QuizAnswerResult", {"correct": False, "answer": "東京", "explanation": "解説"}), 0, q)
     assert e.title == "❌ 不正解…" and "東京" in must(e.description)
 
 
@@ -890,5 +904,7 @@ def test_rewards_have_no_upper_limit(eco):
 def test_messages_tell_the_player_about_the_games_needed(eco):
     from cogs.quiz.cog import result_embed
 
-    e = result_embed({"correct": True, "reward": 0, "reward_blocked": True, "explanation": ""}, 0)
+    e = result_embed(
+        cast("QuizAnswerResult", {"correct": True, "reward": 0, "reward_blocked": True, "explanation": ""}), 0
+    )
     assert "報酬はありません" in must(e.description) and "3回以上" in must(e.description)

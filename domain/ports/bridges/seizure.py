@@ -1,7 +1,8 @@
 """強制執行・自己破産のステップ群のブリッジ契約（名目的基底クラスと NoOp / Composite 実装）。"""
 
-from typing import Any, Optional
+from typing import Optional
 
+from domain.errors import Outcome
 from domain.ports.contracts import ActiveBond, SeizedBelongings
 
 
@@ -11,7 +12,7 @@ class IOptionHoldings:
     def active_option_ids_for(self, guild_id: int, user_id: int) -> list[int]:
         raise NotImplementedError
 
-    def option_close_locked_for(self, guild_id: int, user_id: int, option_id: int, now: float) -> tuple[Any, ...]:
+    def option_close_locked_for(self, guild_id: int, user_id: int, option_id: int, now: float) -> Outcome[int]:
         raise NotImplementedError
 
 
@@ -23,7 +24,7 @@ class IBondHoldings:
 
     def bond_cancel_locked_for(
         self, guild_id: int, user_id: int, bond_id: int, now: Optional[float] = None
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[int]:
         raise NotImplementedError
 
     def bond_write_off_for(self, guild_id: int, user_id: int, bond_id: int, payout: int, now: float) -> None:

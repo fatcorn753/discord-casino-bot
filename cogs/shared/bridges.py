@@ -1,5 +1,6 @@
 """Cog 間・DynamicItem 間の疎結合ブリッジ契約（名目的基底クラス）とオープンレジストリ。"""
 
+import random
 from typing import Any, Optional, TypeVar, cast
 
 import discord
@@ -121,7 +122,7 @@ class NoOpHorseButtonBridge(IHorseButtonBridge):
 
 
 class IRaffleAdminBridge:
-    """運営向け抽選操作（Admin → RaffleCog）のブリッジ契約。"""
+    """運営向け抽選操作（Admin → RaffleCog）のブリッジ契約（host/repost/cancel はすべて (成功か, 説明) を返す）。"""
 
     async def host(
         self,
@@ -130,6 +131,7 @@ class IRaffleAdminBridge:
         fee: Optional[int] = None,
         minutes: int = 60,
         channel: Optional[discord.abc.Messageable] = None,
+        rng: Optional[random.Random] = None,
     ) -> tuple[bool, str]:
         raise NotImplementedError
 
@@ -286,9 +288,7 @@ async def require_bridge(
     if bridge is None:
         from cogs.shared import ui
 
-        await interaction.response.send_message(
-            embed=ui.error_embed(f"{feature_label}が読み込まれていません"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "", title=f"{feature_label}が読み込まれていません")
     return bridge
 
 

@@ -1,9 +1,9 @@
 """Composition Root で循環依存を 1 パスの Constructor DI へ解決するための遅延デリゲート群。"""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, Optional
 
-from domain.errors import Failure
+from domain.errors import Failure, Outcome
 from domain.ports.bridges import (
     IAssetSeizureStep,
     IBankruptExecutor,
@@ -19,6 +19,7 @@ from domain.ports.bridges import (
     IStatusReader,
     IWealthyReader,
 )
+from domain.ports.contracts import BankruptResult, LoanRow
 
 
 class LazyDebtLifecycleHook(IDebtLifecycleHook):
@@ -53,7 +54,9 @@ class LazyBankruptExecutor(IBankruptExecutor):
     def __init__(self, target: Callable[[], IBankruptExecutor]) -> None:
         self._target = target
 
-    def bankrupt_for(self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False) -> tuple[Any, ...]:
+    def bankrupt_for(
+        self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
+    ) -> Outcome[BankruptResult]:
         return self._target().bankrupt_for(guild_id, user_id, forced=forced, escape=escape)
 
 
@@ -93,13 +96,13 @@ class LazyOverdueLoanCollector(IOverdueLoanCollector):
     def collect_overdue_for(self, guild_id: int, user_id: int, budget: int) -> int:
         return self._target().collect_overdue_for(guild_id, user_id, budget)
 
-    def loan_remaining(self, loan: dict[str, Any], now: float) -> int:
+    def loan_remaining(self, loan: Mapping[str, Any], now: float) -> int:
         return self._target().loan_remaining(loan, now)
 
     def has_overdue_for(self, guild_id: int, user_id: int) -> bool:
         return self._target().has_overdue_for(guild_id, user_id)
 
-    def active_loans_for(self, guild_id: int, user_id: int) -> list[dict[str, Any]]:
+    def active_loans_for(self, guild_id: int, user_id: int) -> list[LoanRow]:
         return self._target().active_loans_for(guild_id, user_id)
 
     def record_bankrupt_payment_for(self, loan_id: int, paid: int) -> None:

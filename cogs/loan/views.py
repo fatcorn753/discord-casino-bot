@@ -1,6 +1,7 @@
 """/貸付 のボタン View とボタン押下ハンドラ。"""
 
 import re
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 import discord
@@ -58,7 +59,7 @@ def request_view(loan_id: int) -> discord.ui.View:
     return view
 
 
-def _accepted_embed(loan: dict[str, Any]) -> discord.Embed:
+def _accepted_embed(loan: Mapping[str, Any]) -> discord.Embed:
     return state_embed(
         loan,
         "成立",
@@ -72,14 +73,10 @@ async def handle_lend(loan_svc: LoanService, interaction: discord.Interaction, l
     guild_id = ui.guild_id_of(interaction)
     loan = loan_svc.get(guild_id, loan_id)
     if loan is None or loan["status"] != "request":
-        await interaction.response.send_message(
-            embed=ui.error_embed("できません", "この募集はもう終わっています。"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "この募集はもう終わっています。", title="できません")
         return
     if interaction.user.id == loan["borrower_id"]:
-        await interaction.response.send_message(
-            embed=ui.error_embed("できません", "自分の募集には、貸せません。"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "自分の募集には、貸せません。", title="できません")
         return
     credit = loan_svc.credit(guild_id, loan["borrower_id"])
     ok = await confirm_action(
@@ -93,9 +90,7 @@ async def handle_lend(loan_svc: LoanService, interaction: discord.Interaction, l
         return
     ok, reason = loan_svc.lend(guild_id, loan_id, interaction.user.id)
     if not ok:
-        return await interaction.followup.send(
-            embed=ui.error_embed("貸せませんでした", format_failure(reason)), ephemeral=True
-        )
+        return await ui.reply_error(interaction, format_failure(reason), title="貸せませんでした")
     loan = loan_svc.get(guild_id, loan_id)
     assert loan is not None
     embed = _accepted_embed(loan)
@@ -135,9 +130,7 @@ async def handle_button(
     else:
         ok, reason = loan_svc.cancel(guild_id, loan_id, interaction.user.id)
     if not ok:
-        await interaction.response.send_message(
-            embed=ui.error_embed("できません", format_failure(reason)), ephemeral=True
-        )
+        await ui.reply_error(interaction, format_failure(reason), title="できません")
         return
     loan = loan_svc.get(guild_id, loan_id)
     assert loan is not None

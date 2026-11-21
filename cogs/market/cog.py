@@ -382,17 +382,14 @@ class MarketCog(commands.Cog):
             return await orders.margin_close(self, interaction, kind, target, percent)
         if kind in ("opt", "bond") and target.isdigit():
             if percent is not None and percent < 100:  # 黙って全部を決済しない(#80)
-                await interaction.response.send_message(
-                    embed=ui.error_embed("債券・オプションは全部だけです", "割合を省略するか、100%にしてください。"),
-                    ephemeral=True,
+                await ui.reply_error(
+                    interaction, "割合を省略するか、100%にしてください。", title="債券・オプションは全部だけです"
                 )
                 return
             if kind == "opt":
                 return await orders.option_sell(self, interaction, int(target))
             return await orders.bond_cancel(self, interaction, int(target))
-        await interaction.response.send_message(
-            embed=ui.error_embed("決済できません", "決済する持ち物を、候補から選んでください。"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "決済する持ち物を、候補から選んでください。", title="決済できません")
 
     def holdings_embed(self, uid: int, guild_id: int) -> discord.Embed:
         snap = self._market_svc.holdings_snapshot(guild_id, uid, RNG)

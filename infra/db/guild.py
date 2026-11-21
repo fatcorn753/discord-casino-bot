@@ -3,9 +3,10 @@
 表の定義は infra/db/schema/tables.py にある。
 """
 
-from typing import Any, Iterable, Optional
+from typing import Iterable, Optional
 
 from domain.ports.bridges import IWealthyReader, NoOpWealthyReader
+from domain.ports.contracts import GuildStatusRow, LeaderboardRow, ProfileRow
 from domain.ports.repos import IGuildRepo
 from infra.db.base import EcoDb, ScopedRepo
 
@@ -37,11 +38,11 @@ class GuildRepo(ScopedRepo, IGuildRepo):
                 (guild_id, status, name, by, self._now()),
             )
 
-    def get_guild_status(self, guild_id: int) -> Optional[dict[str, Any]]:
+    def get_guild_status(self, guild_id: int) -> Optional[GuildStatusRow]:
         with self._lock:
             return self._one("SELECT * FROM guild_status WHERE guild_id=?", (guild_id,))
 
-    def list_guild_status(self) -> list[dict[str, Any]]:
+    def list_guild_status(self) -> list[GuildStatusRow]:
         with self._lock:
             return self._all("SELECT * FROM guild_status ORDER BY updated_at DESC")
 
@@ -60,11 +61,11 @@ class GuildRepo(ScopedRepo, IGuildRepo):
                 (guild_id, channel_id, message_id),
             )
 
-    def get_leaderboard(self, guild_id: int) -> Optional[dict[str, Any]]:
+    def get_leaderboard(self, guild_id: int) -> Optional[LeaderboardRow]:
         with self._lock:
             return self._one("SELECT * FROM leaderboards WHERE guild_id=?", (guild_id,))
 
-    def list_leaderboards(self) -> list[dict[str, Any]]:
+    def list_leaderboards(self) -> list[LeaderboardRow]:
         with self._lock:
             return self._all("SELECT * FROM leaderboards")
 
@@ -77,10 +78,7 @@ class GuildRepo(ScopedRepo, IGuildRepo):
     # ------------------------------------------------------------------ #
     def features_off(self, guild_id: int) -> set[str]:
         with self._lock:
-            return {
-                r["feature"]
-                for r in self._conn.execute("SELECT feature FROM features_off WHERE guild_id=?", (guild_id,))
-            }
+            return {r["feature"] for r in self._all("SELECT feature FROM features_off WHERE guild_id=?", (guild_id,))}
 
     def set_feature(self, guild_id: int, feature: str, on: bool) -> None:
         with self._db.tx():
@@ -121,20 +119,15 @@ class GuildRepo(ScopedRepo, IGuildRepo):
 
     def nick_managed(self, guild_id: int, user_id: int) -> bool:
         with self._lock:
-            return (
-                self._conn.execute(
-                    "SELECT 1 FROM nick_prefs WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-                ).fetchone()
-                is not None
-            )
+            return self._one("SELECT 1 FROM nick_prefs WHERE guild_id=? AND user_id=?", (guild_id, user_id)) is not None
 
     def status_nick_targets(self) -> list[int]:
         """身分のニックネームを、付ける・外す必要があるかもしれない人（このサーバー）。"""
         with self._lock:
             gid = self._g()
             rows = [
-                r[0]
-                for r in self._conn.execute(
+                r["user_id"]
+                for r in self._all(
                     "SELECT user_id FROM users WHERE guild_id=? AND (debt > 0 OR EXISTS (SELECT 1 FROM loans l WHERE "
                     "l.guild_id=users.guild_id AND l.borrower_id=users.user_id AND l.status='overdue')) "
                     "UNION SELECT user_id FROM nick_prefs WHERE guild_id=? AND enabled=0",
@@ -145,9 +138,9 @@ class GuildRepo(ScopedRepo, IGuildRepo):
 
     def get_nick_state(self, guild_id: int, user_id: int) -> Optional[tuple[Optional[str], str]]:
         with self._lock:
-            row = self._conn.execute(
+            row = self._one(
                 "SELECT original_nick, applied_nick FROM nick_prefs WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-            ).fetchone()
+            )
         return None if row is None or row["applied_nick"] is None else (row["original_nick"], row["applied_nick"])
 
     def set_nick_state(self, guild_id: int, user_id: int, original: Optional[str], applied: Optional[str]) -> None:
@@ -164,20 +157,16 @@ class GuildRepo(ScopedRepo, IGuildRepo):
 
     def nick_pref_guilds(self, user_id: int) -> list[int]:
         with self._lock:
-            return [
-                r["guild_id"] for r in self._conn.execute("SELECT guild_id FROM nick_prefs WHERE user_id=?", (user_id,))
-            ]
+            return [r["guild_id"] for r in self._all("SELECT guild_id FROM nick_prefs WHERE user_id=?", (user_id,))]
 
     def nick_pref(self, guild_id: int, user_id: int) -> bool:
         with self._lock:
             return (
-                self._conn.execute(
-                    "SELECT 1 FROM nick_prefs WHERE guild_id=? AND user_id=? AND enabled=1", (guild_id, user_id)
-                ).fetchone()
+                self._one("SELECT 1 FROM nick_prefs WHERE guild_id=? AND user_id=? AND enabled=1", (guild_id, user_id))
                 is not None
             )
 
-    def profiles_of(self, user_ids: Iterable[int]) -> dict[int, dict[str, Any]]:
+    def profiles_of(self, user_ids: Iterable[int]) -> dict[int, ProfileRow]:
         """{ユーザーID: profile} をまとめて取る（ランキングの称号表示用）。"""
         ids = list(user_ids)
         if not ids:
@@ -186,8 +175,6 @@ class GuildRepo(ScopedRepo, IGuildRepo):
             gid = self._g()
             marks = ",".join("?" * len(ids))
             return {
-                r["user_id"]: dict(r)
-                for r in self._conn.execute(
-                    f"SELECT * FROM profile WHERE guild_id=? AND user_id IN ({marks})", [gid, *ids]
-                )
+                r["user_id"]: r
+                for r in self._all(f"SELECT * FROM profile WHERE guild_id=? AND user_id IN ({marks})", [gid, *ids])
             }

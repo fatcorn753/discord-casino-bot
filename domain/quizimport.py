@@ -18,10 +18,11 @@
 """
 
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from domain.duration import parse_duration
 from domain.ports import get_catalogs
+from domain.ports.contracts import QuizImportItem
 
 _QUIZ_CFG = get_catalogs().economy().quizpay
 MAX_QUESTIONS = _QUIZ_CFG.max_questions
@@ -53,10 +54,10 @@ def _int(text: str) -> Optional[int]:
         return None
 
 
-def _parse_block(lines: list, number: int, errors: list) -> Optional[dict]:
+def _parse_block(lines: list[tuple[int, str]], number: int, errors: list[str]) -> Optional[QuizImportItem]:
     """1問分。lines は (元ファイルの行番号, 文字列) の並び。誤りは errors に足す。"""
-    fields: dict = {"wrong": []}
-    where: dict = {}
+    fields: dict[str, Any] = {"wrong": []}
+    where: dict[str, int] = {}
     current = None
     problems = []
     for lineno, line in lines:
@@ -137,7 +138,7 @@ def _parse_block(lines: list, number: int, errors: list) -> Optional[dict]:
     return {"question": question, "choices": choices, "explanation": explanation, "reward": reward, "minutes": minutes}
 
 
-def parse_bulk(text: str) -> tuple:
+def parse_bulk(text: str) -> tuple[list[QuizImportItem], list[str]]:
     """(問題のリスト, 誤りのリスト) を返す。誤りが1つでもあれば、呼び出し側は1問も登録しないこと。"""
     blocks, current = [], []
     for lineno, line in enumerate(text.lstrip("﻿").splitlines(), start=1):

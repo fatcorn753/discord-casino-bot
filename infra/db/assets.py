@@ -32,7 +32,7 @@ from domain.types import (
     LIQUID_KEYS as LIQUID_KEYS,
 )
 from domain.types import PART_KEYS
-from infra.db.base import EcoDb, ScopedRepo
+from infra.db.base import EcoDb, ScopedRepo, fetch_all, fetch_one
 
 
 def _item_worth(item_id: str) -> tuple[int, bool]:
@@ -58,7 +58,7 @@ class CashAndDebtCollector(IAssetCollector):
         self._conn = db.conn
 
     def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute("SELECT user_id, balance, debt FROM users WHERE guild_id=?", (guild_id,)):
+        for r in fetch_all(self._conn, "SELECT user_id, balance, debt FROM users WHERE guild_id=?", (guild_id,)):
             add(r["user_id"], "cash", r["balance"])
             add(r["user_id"], "debt", -r["debt"])
 
@@ -82,8 +82,8 @@ class InventoryAssetCollector(IAssetCollector):
         self._conn = db.conn
 
     def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute(
-            "SELECT user_id, item_id, qty FROM inventory WHERE guild_id=? AND qty>0", (guild_id,)
+        for r in fetch_all(
+            self._conn, "SELECT user_id, item_id, qty FROM inventory WHERE guild_id=? AND qty>0", (guild_id,)
         ):
             _add_item_value(add, r["user_id"], r["item_id"], r["qty"])
 
@@ -93,8 +93,8 @@ class LaborAssetCollector(IAssetCollector):
         self._conn = db.conn
 
     def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute(
-            "SELECT user_id, relics, pot, pick, glove, dorm FROM labor WHERE guild_id=?", (guild_id,)
+        for r in fetch_all(
+            self._conn, "SELECT user_id, relics, pot, pick, glove, dorm FROM labor WHERE guild_id=?", (guild_id,)
         ):
             add(r["user_id"], "pot", r["pot"])
             add(
@@ -118,7 +118,8 @@ class HorseAssetCollector(IAssetCollector):
         self._horse_worth = horse_worth_fn
 
     def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute(
+        for r in fetch_all(
+            self._conn,
             "SELECT owner_id, races, wins, places FROM horses WHERE guild_id=? AND owner_id>0",
             (guild_id,),
         ):
@@ -133,11 +134,13 @@ class P2PAssetCollector(IAssetCollector):
         self._horse_worth = horse_worth_fn
 
     def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute("SELECT * FROM market_listings WHERE guild_id=? AND status='active'", (guild_id,)):
+        for r in fetch_all(
+            self._conn, "SELECT * FROM market_listings WHERE guild_id=? AND status='active'", (guild_id,)
+        ):
             if r["kind"] == "item":
                 _add_item_value(add, r["seller_id"], r["ref"], r["qty"])
             else:
-                h = self._conn.execute("SELECT races, wins, places FROM horses WHERE id=?", (int(r["ref"]),)).fetchone()
+                h = fetch_one(self._conn, "SELECT races, wins, places FROM horses WHERE id=?", (int(r["ref"]),))
                 if h:
                     add(r["seller_id"], "horses", self._horse_worth(h["races"], h["wins"], h["places"]))
             if r["bidder_id"]:
@@ -150,8 +153,8 @@ class LoanAssetCollector(IAssetCollector):
         self._loans = loans
 
     def collect(self, guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in self._conn.execute(
-            "SELECT * FROM loans WHERE guild_id=? AND status IN ('active','overdue')", (guild_id,)
+        for r in fetch_all(
+            self._conn, "SELECT * FROM loans WHERE guild_id=? AND status IN ('active','overdue')", (guild_id,)
         ):
             left = self._loans.loan_remaining(dict(r), now)
             add(r["lender_id"], "loans_lent", left)
@@ -183,7 +186,7 @@ class AssetRepo(ScopedRepo, IAssetRepo):
             g = self._g()
             parts: dict[int, dict[str, int]] = {
                 r["user_id"]: dict.fromkeys(PART_KEYS, 0)
-                for r in self._conn.execute("SELECT user_id FROM users WHERE guild_id=?", (g,))
+                for r in self._all("SELECT user_id FROM users WHERE guild_id=?", (g,))
             }
 
             def add(uid: int, key: str, value: int) -> None:

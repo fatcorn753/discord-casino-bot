@@ -2,7 +2,7 @@
 
 import datetime
 import math
-from typing import Any, Optional
+from typing import Optional
 
 from domain import teiai
 from domain.errors import fail
@@ -13,7 +13,7 @@ from domain.ports.bridges import (
     IValuationSource,
     IWealthyReader,
 )
-from domain.ports.contracts import RankEntry
+from domain.ports.contracts import LedgerEntry, RankEntry, UserRow
 from domain.ports.repos import IWalletRepo
 from domain.shop import STREAK_GUARD
 from domain.types import DAILY_BASE, DAILY_STREAK_BONUS, DAILY_STREAK_CAP, DailyResult, TransferResult
@@ -68,7 +68,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
             self._account.apply(gid, user_id, amount, reason)
             return self._account.raw_balance(gid, user_id)
 
-    def set_balance(self, user_id: int, amount: int, reason: str) -> tuple[Any, ...]:
+    def set_balance(self, user_id: int, amount: int, reason: str) -> tuple[int, int, int, int]:
         """残高を amount ちょうどにする（管理者用。差額は台帳に残る）。収入ではないので、天引きしない。
 
         amount が負のときは、手元を 0 にして、帝愛の借金を -amount ちょうどにする（借金状態にする。いまの借金は置き換わる）。
@@ -119,10 +119,11 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, user_id)
-            row = self._conn.execute(
+            row = self._one(
                 "SELECT daily_streak, last_daily, last_slot FROM users WHERE guild_id=? AND user_id=?",
                 (gid, user_id),
-            ).fetchone()
+            )
+            assert row is not None  # 直前に ensure 済み
             last = datetime.date.fromisoformat(row["last_daily"]) if row["last_daily"] else None
             last_slot = row["last_slot"]
             if last_slot is None and last is not None:
@@ -148,9 +149,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
                     if cur.rowcount:
                         streak, guarded = row["daily_streak"] + 1, missed
             amount = self.DAILY_BASE + self.DAILY_STREAK_BONUS * min(streak - 1, self.DAILY_STREAK_CAP)
-            prof = self._conn.execute(
-                "SELECT daily_boost FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id)
-            ).fetchone()
+            prof = self._one("SELECT daily_boost FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id))
             boosted = bool(prof and prof["daily_boost"] > 0)
             if boosted:
                 amount *= 2
@@ -209,10 +208,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
 
     def guild_user_ids(self, guild_id: int) -> set[int]:
         with self._lock:
-            return {
-                r["user_id"]
-                for r in self._conn.execute("SELECT user_id FROM guild_users WHERE guild_id=?", (guild_id,))
-            }
+            return {r["user_id"] for r in self._all("SELECT user_id FROM guild_users WHERE guild_id=?", (guild_id,))}
 
     # ------------------------------------------------------------------ #
     # ランキング・統計・履歴                                              #
@@ -221,19 +217,14 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
         """[(ユーザーID, 純資産)] を多い順に。純資産は、残高から借金を引き、CS・預金・債券・オプションの評価額を足したもの。"""
         with self._db.tx():
             targets = (
-                [
-                    r["user_id"]
-                    for r in self._conn.execute("SELECT user_id FROM users WHERE guild_id=? AND debt>0", (guild_id,))
-                ]
+                [r["user_id"] for r in self._all("SELECT user_id FROM users WHERE guild_id=? AND debt>0", (guild_id,))]
                 if user_ids is None
                 else user_ids
             )
             for uid in targets:
                 # 残高表示と同じく、純資産にも溜まった利息（トイチ）を反映する
                 self._debt.accrue_debt_interest_for(guild_id, uid, self._now())
-            rows = self._conn.execute(
-                "SELECT user_id, balance - debt AS balance FROM users WHERE guild_id=?", (guild_id,)
-            ).fetchall()
+            rows = self._all("SELECT user_id, balance - debt AS balance FROM users WHERE guild_id=?", (guild_id,))
             values: dict[int, int] = {}
             self._valuation_source.collect_values(guild_id, values)
         total = [
@@ -276,23 +267,23 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
                 return i + 1, bal, len(ranked)
         return None
 
-    def peek_stats(self, user_id: int) -> Optional[dict[str, Any]]:
+    def peek_stats(self, user_id: int) -> Optional[UserRow]:
         """読み取り専用。未登録の人を作らずに、成績を返す（未登録なら None）。"""
         with self._lock:
             return self._one("SELECT * FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id))
 
-    def stats(self, user_id: int) -> dict[str, Any]:
+    def stats(self, user_id: int) -> UserRow:
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, user_id)
             self._debt.accrue_debt_interest_for(
                 gid, user_id, self._now()
             )  # 画面に出す借金に、帝愛の利息（トイチ）を含める
-            return dict(
-                self._conn.execute("SELECT * FROM users WHERE guild_id=? AND user_id=?", (gid, user_id)).fetchone()
-            )
+            row = self._one("SELECT * FROM users WHERE guild_id=? AND user_id=?", (gid, user_id))
+            assert row is not None  # 直前に ensure 済み
+            return row
 
-    def history(self, user_id: int, limit: int = 10) -> list[dict[str, Any]]:
+    def history(self, user_id: int, limit: int = 10) -> list[LedgerEntry]:
         with self._lock:
             return self._all(
                 "SELECT delta, balance_after, reason, ts FROM ledger WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT ?",
@@ -325,17 +316,12 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
             self._account.ensure(gid, sender)
             self._account.ensure(gid, receiver)
             sent_today = -(
-                self._conn.execute(
-                    "SELECT COALESCE(SUM(delta), 0) AS s FROM ledger WHERE guild_id=? AND user_id=? AND reason LIKE '送金（送）%' AND ts>=?",
+                self._scalar(
+                    "SELECT COALESCE(SUM(delta), 0) FROM ledger WHERE guild_id=? AND user_id=? AND reason LIKE '送金（送）%' AND ts>=?",
                     (gid, sender, day_start_ts),
-                ).fetchone()["s"]
+                )
             )
-            if (
-                self._conn.execute(
-                    "SELECT games_played FROM users WHERE guild_id=? AND user_id=?", (gid, sender)
-                ).fetchone()["games_played"]
-                < min_games
-            ):
+            if self._scalar("SELECT games_played FROM users WHERE guild_id=? AND user_id=?", (gid, sender)) < min_games:
                 return TransferResult(False, fail("transfer_min_games", min_games=min_games))
             if sent_today + amount > daily_limit:
                 return TransferResult(

@@ -10,9 +10,11 @@ from cogs.shared import ui
 from cogs.shared.amount import reject_bad_amount, typed_amount
 from cogs.shared.messages import format_failure
 from domain import horse as horse_mod
+from domain.errors import Failure
+from domain.ports.contracts import RaceBetResult, RaceRow
 from services.horse import HorseDesk, HorseService
 
-PostBetFn = Callable[[discord.Guild, dict, str], Awaitable[None]]
+PostBetFn = Callable[[discord.Guild, RaceRow, str], Awaitable[None]]
 
 
 class StakeModal(discord.ui.Modal):
@@ -32,22 +34,19 @@ class StakeModal(discord.ui.Modal):
             interaction.user.id, self.panel.race["id"], self.panel.kind, lanes, stake, desk.clock.now_ts()
         )
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(result), title="買えませんでした")
             return
+        assert not isinstance(result, Failure)
         await self.panel.announce_bets(interaction, result)
         lines = [
             f"{r['lane']}枠 {r['name']}　オッズ **{r['odds']:.1f}**（的中すれば {ui.pelica(horse_mod.payout(stake, r['odds']))}）"
             for r in result
         ]
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "馬券を買いました",
-                f"**{horse_mod.BET_KINDS[self.panel.kind]}**　各 {ui.pelica(stake)}（合計 {ui.pelica(stake * len(result))}）\n"
-                + "\n".join(lines),
-            ),
-            ephemeral=True,
+        await ui.reply_ok(
+            interaction,
+            f"**{horse_mod.BET_KINDS[self.panel.kind]}**　各 {ui.pelica(stake)}（合計 {ui.pelica(stake * len(result))}）\n"
+            + "\n".join(lines),
+            title="馬券を買いました",
         )
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -69,24 +68,21 @@ class StakeModal(discord.ui.Modal):
             desk.clock.now_ts(),
         )
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(result), title="買えませんでした")
             return
+        assert not isinstance(result, Failure)
         picks = (
             "→".join(map(str, result["lanes"]))
             if result["kind"] == "exacta"
             else "・".join(map(str, sorted(result["lanes"])))
         )
         await self.panel.announce_bet(interaction, picks, result)
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "馬券を買いました",
-                f"**{horse_mod.BET_KINDS[result['kind']]}**　{picks}枠（{result['name']}）\n"
-                f"賭け金 {ui.pelica(result['stake'])}　オッズ **{result['odds']:.1f}**"
-                f"（的中すれば {ui.pelica(horse_mod.payout(result['stake'], result['odds']))}）",
-            ),
-            ephemeral=True,
+        await ui.reply_ok(
+            interaction,
+            f"**{horse_mod.BET_KINDS[result['kind']]}**　{picks}枠（{result['name']}）\n"
+            f"賭け金 {ui.pelica(result['stake'])}　オッズ **{result['odds']:.1f}**"
+            f"（的中すれば {ui.pelica(horse_mod.payout(result['stake'], result['odds']))}）",
+            title="馬券を買いました",
         )
 
 
@@ -97,7 +93,7 @@ class BetPanel(ui.OwnerView):
         self,
         horse_svc: HorseService,
         user_id: int,
-        race: dict,
+        race: RaceRow,
         post_bet_fn: Optional[PostBetFn] = None,
     ) -> None:
         super().__init__(user_id, timeout=300)
@@ -115,7 +111,7 @@ class BetPanel(ui.OwnerView):
     async def _reject_non_owner(self, interaction: discord.Interaction) -> None:
         await interaction.response.send_message("この画面を使えるのは、開いた本人だけです。", ephemeral=True)
 
-    async def announce_bet(self, interaction: discord.Interaction, picks: str, result: dict) -> None:
+    async def announce_bet(self, interaction: discord.Interaction, picks: str, result: RaceBetResult) -> None:
         """買った馬券を、レースのチャンネルに公開する（誰が何に賭けたか）。投稿できなくても、購入は済んでいる。"""
         if self._post_bet is None or interaction.guild is None:
             return
@@ -128,7 +124,7 @@ class BetPanel(ui.OwnerView):
             ),
         )
 
-    async def announce_bets(self, interaction: discord.Interaction, results: list) -> None:
+    async def announce_bets(self, interaction: discord.Interaction, results: list[RaceBetResult]) -> None:
         """単勝・複勝をまとめて買ったとき、1つの投稿で公開する。"""
         if self._post_bet is None or interaction.guild is None or not results:
             return

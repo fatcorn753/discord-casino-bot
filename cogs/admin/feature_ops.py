@@ -49,4 +49,7 @@ async def feature_list(cog: "ApprovalCog", interaction: discord.Interaction, gui
         return
     targets = [guild] if guild else allowed_guilds(cog.bot, cog._guild_repo, cog._config)
     embeds = [features_embed(g.name, cog._guild_repo.features_off(g.id)) for g in targets[:10]]
-    await interaction.response.send_message(embeds=embeds or [ui.error_embed("対象がありません")], ephemeral=True)
+    if embeds:
+        await interaction.response.send_message(embeds=embeds, ephemeral=True)
+    else:
+        await ui.reply_error(interaction, "対象がありません")

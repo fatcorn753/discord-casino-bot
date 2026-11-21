@@ -62,7 +62,7 @@ async def user_session(
     uid = interaction.user.id
     reason = sessions.try_start(uid)
     if reason:
-        await interaction.response.send_message(embed=ui.error_embed(busy_title, reason), ephemeral=True)
+        await ui.reply_error(interaction, reason, title=busy_title)
         yield False
         return
     try:

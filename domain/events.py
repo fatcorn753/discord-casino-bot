@@ -6,8 +6,9 @@
 
 import datetime
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from domain.ports import get_catalogs
 
@@ -55,7 +56,7 @@ def bonus(bet: int, payout: int, boost: float = BOOST) -> int:
     return min(int((payout - bet) * boost), BONUS_CAP) if payout > bet else 0
 
 
-def best_boost(game: str, scheduled: Optional[Event], manual: Optional[dict]) -> float:
+def best_boost(game: str, scheduled: Optional[Event], manual: Optional[Mapping[str, Any]]) -> float:
     """そのゲームに今かかる上乗せの割合。定例の突発イベントと、持ち主が開いた特別イベントは重ねず、大きいほうだけ使う。"""
     boosts = [0.0]
     if scheduled is not None and scheduled.game == game:

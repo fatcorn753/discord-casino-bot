@@ -1,6 +1,6 @@
 """ゲームの賭け金預かり（escrow）と精算・返金。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain import teiai
 from domain.games import jackpot
@@ -55,9 +55,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
         """
         with self._db.tx():
             gid = self._g()
-            row = self._conn.execute(
-                "SELECT user_id, game FROM escrow WHERE id=? AND guild_id=?", (escrow_id, gid)
-            ).fetchone()
+            row = self._one("SELECT user_id, game FROM escrow WHERE id=? AND guild_id=?", (escrow_id, gid))
             if row is None or extra <= 0:
                 return False
             short = extra - self._account.raw_balance(gid, row["user_id"])
@@ -77,10 +75,8 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
 
     def escrow_amount(self, escrow_id: int) -> int:
         with self._lock:
-            row = self._conn.execute(
-                "SELECT amount FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g())
-            ).fetchone()
-            return row["amount"] if row else 0
+            v = self._scalar("SELECT amount FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g()))
+            return v if v is not None else 0
 
     def settle(self, escrow_id: int, payout: int, game: str) -> Optional[int]:
         """預かり金を精算する。payout は「受け取る総額」（賭け金を含む。負けなら 0）。
@@ -90,7 +86,9 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
         result = self.settle_with_penalty(escrow_id, payout, game, 0)
         return None if result is None else result[0]
 
-    def settle_with_penalty(self, escrow_id: int, payout: int, game: str, penalty: int) -> Optional[tuple[Any, ...]]:
+    def settle_with_penalty(
+        self, escrow_id: int, payout: int, game: str, penalty: int
+    ) -> Optional[tuple[int, int, int]]:
         """精算と、倍払いなどの追加の支払いを、1回のトランザクションで行う。
 
         penalty はまず残高から引き、足りない分は借金にする。負けて払い戻しが 0 のとき、保険券があれば賭け金の半分を返す。
@@ -99,18 +97,14 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
         """
         with self._db.tx():
             gid = self._g()
-            row = self._conn.execute(
-                "SELECT user_id, amount FROM escrow WHERE id=? AND guild_id=?", (escrow_id, gid)
-            ).fetchone()
+            row = self._one("SELECT user_id, amount FROM escrow WHERE id=? AND guild_id=?", (escrow_id, gid))
             if row is None:
                 return None
             user_id, amount = row["user_id"], row["amount"]
             payout = max(0, int(payout))
             insured = 0
             if payout == 0:
-                prof = self._conn.execute(
-                    "SELECT insurance FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id)
-                ).fetchone()
+                prof = self._one("SELECT insurance FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id))
                 if prof and prof["insurance"] > 0:
                     insured = min(amount // 2, INSURANCE_CAP)
                     self._conn.execute(
@@ -153,15 +147,15 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
     def jackpot_pool(self) -> int:
         """いまの共有ジャックポットの積み立て。"""
         with self._lock:
-            row = self._conn.execute("SELECT pool FROM jackpot WHERE guild_id=?", (self._g(),)).fetchone()
-            return row["pool"] if row else 0
+            v = self._scalar("SELECT pool FROM jackpot WHERE guild_id=?", (self._g(),))
+            return v if v is not None else 0
 
     def jackpot_claim(self, user_id: int) -> int:
         """積み立てを全額 user_id に払い、0 に戻す。払った額を返す（収入として扱う。借金があれば天引きされる）。"""
         with self._db.tx():
             gid = self._g()
-            row = self._conn.execute("SELECT pool FROM jackpot WHERE guild_id=?", (gid,)).fetchone()
-            pool = row["pool"] if row else 0
+            v = self._scalar("SELECT pool FROM jackpot WHERE guild_id=?", (gid,))
+            pool = v if v is not None else 0
             if pool <= 0:
                 return 0
             self._account.ensure(gid, user_id)
@@ -176,9 +170,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
         """エラー時の返金。賭け金（追加分を含む）を全額返す。成績（遊んだ回数・勝ち額）には数えない。"""
         with self._db.tx():
             gid = self._g()
-            row = self._conn.execute(
-                "SELECT user_id, amount, game FROM escrow WHERE id=? AND guild_id=?", (escrow_id, gid)
-            ).fetchone()
+            row = self._one("SELECT user_id, amount, game FROM escrow WHERE id=? AND guild_id=?", (escrow_id, gid))
             if row is None:
                 return False
             self._account.apply(gid, row["user_id"], row["amount"], f"返金:{row['game']}")
@@ -188,7 +180,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
     def refund_all_escrows(self) -> int:
         """起動時に呼ぶ。Bot が落ちて残った預かり金を、すべて持ち主に返す。返した件数を返す。"""
         with self._db.tx():
-            rows = self._conn.execute("SELECT id, guild_id, user_id, amount, game FROM escrow").fetchall()
+            rows = self._all("SELECT id, guild_id, user_id, amount, game FROM escrow")
             for r in rows:  # 全サーバー分。それぞれ、預かったサーバーの口座へ返す
                 gid = int(r["guild_id"])
                 if gid < 0 or (

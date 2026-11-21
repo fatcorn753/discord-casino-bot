@@ -3,12 +3,13 @@
 import datetime
 import random
 from collections import Counter
-from typing import Any, Optional
+from typing import Optional
 
 from domain import horse as horse_mod
 from domain import teiai
-from domain.errors import fail
+from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import IBankCashFlow
+from domain.ports.contracts import RaceBetResult, RaceBetRow, RaceCloseResult, RaceEntryRow, RaceRow, RaceRunResult
 from domain.ports.repos import IRaceRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -53,27 +54,22 @@ class RaceRepo(ScopedRepo, IRaceRepo):
     def race_slots(self, now: float, tz_hours: float, days: int = 2) -> list[float]:
         return race_slots(now, tz_hours, days)
 
-    def race_get(self, race_id: int) -> Optional[dict[str, Any]]:
+    def race_get(self, race_id: int) -> Optional[RaceRow]:
         with self._lock:
             return self._one("SELECT * FROM horse_races WHERE id=? AND guild_id=?", (race_id, self._g()))
 
     def race_number(self, race_id: int) -> int:
         """このサーバーでの、第何競走か。"""
         with self._lock:
-            return self._conn.execute(
-                "SELECT COUNT(*) FROM horse_races WHERE guild_id=? AND id<=?", (self._g(), race_id)
-            ).fetchone()[0]
+            return self._scalar("SELECT COUNT(*) FROM horse_races WHERE guild_id=? AND id<=?", (self._g(), race_id))
 
-    def race_open(self) -> list[dict[str, Any]]:
+    def race_open(self) -> list[RaceRow]:
         """まだ終わっていないレース（申し込み中・発売中）。発走の早い順。"""
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM horse_races WHERE guild_id=? AND status IN ('entry','betting') ORDER BY start_at",
-                    (self._g(),),
-                )
-            ]
+            return self._all(
+                "SELECT * FROM horse_races WHERE guild_id=? AND status IN ('entry','betting') ORDER BY start_at",
+                (self._g(),),
+            )
 
     def race_ensure_scheduled(self, now: float, tz_hours: float, channel_id: int = 0) -> Optional[int]:
         """次の定時レースが、申し込みを始める時刻になっていて、まだ無ければ作る（申し込み受付を始める）。作ったレースの番号を返す。"""
@@ -82,9 +78,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             start = race_slots(now, tz_hours)[0]
             if now < start - horse_mod.ENTRY_OPEN_MIN * 60:  # まだ、申し込みを始める時刻ではない
                 return None
-            if self._conn.execute(
-                "SELECT 1 FROM horse_races WHERE guild_id=? AND kind='regular' AND start_at=?", (gid, start)
-            ).fetchone():
+            if self._one("SELECT 1 FROM horse_races WHERE guild_id=? AND kind='regular' AND start_at=?", (gid, start)):
                 return None
             cur = self._conn.execute(
                 "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, channel_id, created) "
@@ -119,19 +113,16 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 "UPDATE horse_races SET channel_id=?, message_id=? WHERE id=?", (channel_id, message_id, race_id)
             )
 
-    def race_entries(self, race_id: int, registered_only: bool = False) -> list[dict[str, Any]]:
+    def race_entries(self, race_id: int, registered_only: bool = False) -> list[RaceEntryRow]:
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM horse_entries WHERE race_id=?"
-                    + (" AND lane<0" if registered_only else "")
-                    + " ORDER BY CASE WHEN lane<0 THEN 99 ELSE lane END, id",
-                    (race_id,),
-                )
-            ]
+            return self._all(
+                "SELECT * FROM horse_entries WHERE race_id=?"
+                + (" AND lane<0" if registered_only else "")
+                + " ORDER BY CASE WHEN lane<0 THEN 99 ELSE lane END, id",
+                (race_id,),
+            )
 
-    def race_register(self, user_id: int, horse_id: int, race_id: int, now: float) -> tuple[Any, ...]:
+    def race_register(self, user_id: int, horse_id: int, race_id: int, now: float) -> Outcome[str]:
         """馬を出走させる（出走料がかかる）。(成功か, 理由)。1人1レースに1頭まで。"""
         with self._db.tx():
             gid = self._g()
@@ -154,11 +145,11 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             busy = (
                 None
                 if race["kind"] == "special"
-                else self._conn.execute(
+                else self._one(
                     "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
                     "WHERE e.horse_id=? AND r.status IN ('entry','betting') AND r.kind='regular'",
                     (horse_id,),
-                ).fetchone()
+                )
             )
             if busy:
                 return False, fail("race_horse_busy")
@@ -175,7 +166,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             )
             return True, ""
 
-    def race_withdraw(self, user_id: int, horse_id: int, race_id: int, now: float) -> tuple[Any, ...]:
+    def race_withdraw(self, user_id: int, horse_id: int, race_id: int, now: float) -> Outcome[str]:
         """締切前なら、申し込みを取り下げて、出走料を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -191,7 +182,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             self._account.apply(gid, user_id, horse_mod.ENTRY_FEE, "競馬:出走料の返金")
             return True, ""
 
-    def race_close_entries(self, race_id: int, rng: Optional[random.Random] = None) -> Optional[dict[str, Any]]:
+    def race_close_entries(self, race_id: int, rng: Optional[random.Random] = None) -> Optional[RaceCloseResult]:
         """申し込みを締め切って、NPC で埋めた出走馬と、コースを決める（発売中にする）。{"runners", "track"} を返す。
 
         オッズは、シミュレーションに時間がかかるので、呼び出し側が計算して、race_set_odds で書く。
@@ -257,7 +248,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             )
             return {"runners": runners, "track": track}
 
-    def race_set_odds(self, race_id: int, odds: dict[str, Any] | list[tuple[float, float]]) -> None:
+    def race_set_odds(self, race_id: int, odds: dict[str, dict[str, float]] | list[tuple[float, float]]) -> None:
         """オッズを書く。odds は、domain/horse.py の make_all_odds の結果（{"win": {枠: オッズ}, "quinella": {キー: オッズ}, …}）。
 
         枠番の順の (単勝, 複勝) の並び（make_odds の結果）でもよい（組み合わせの馬券は、発売されない）。
@@ -284,29 +275,26 @@ class RaceRepo(ScopedRepo, IRaceRepo):
         """その馬券のオッズ（なければ None）。lanes は、選んだ枠の並び（単勝・複勝は1つ）。"""
         with self._lock:
             if kind in ("win", "place"):
-                r = self._conn.execute(
+                r = self._one(
                     "SELECT odds_win, odds_place FROM horse_entries WHERE race_id=? AND lane=?", (race_id, lanes[0])
-                ).fetchone()
-                value = r and (r["odds_win"] if kind == "win" else r["odds_place"])
+                )
+                if r is None:
+                    return None
+                value = r["odds_win"] if kind == "win" else r["odds_place"]
                 return value if value else None
-            r = self._conn.execute(
+            v = self._scalar(
                 "SELECT odds FROM horse_odds WHERE race_id=? AND kind=? AND key=?",
                 (race_id, kind, horse_mod.combo_key(kind, lanes)),
-            ).fetchone()
-            return r["odds"] if r else None
+            )
+            return v if v is not None else None
 
-    def race_bets(self, user_id: int, race_id: int) -> list[dict[str, Any]]:
+    def race_bets(self, user_id: int, race_id: int) -> list[RaceBetRow]:
         with self._lock:
-            return [
-                dict(r)
-                for r in self._conn.execute(
-                    "SELECT * FROM horse_bets WHERE race_id=? AND user_id=? ORDER BY id", (race_id, user_id)
-                )
-            ]
+            return self._all("SELECT * FROM horse_bets WHERE race_id=? AND user_id=? ORDER BY id", (race_id, user_id))
 
     def race_bet(
         self, user_id: int, race_id: int, kind: str, lane: int | list[int], stake: int, now: float
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[RaceBetResult]:
         """馬券を買う。賭けた時点のオッズで確定する。(成功か, 理由か馬券の辞書)。賭け金は、その場で引かれる。
 
         lane は、単勝・複勝なら枠番、組み合わせの馬券（馬連・ワイド・馬単・三連複）なら、選んだ枠番の並び
@@ -329,9 +317,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 return False, fail("race_bet_closed")
             names = []
             for x in lanes:
-                entry = self._conn.execute(
-                    "SELECT * FROM horse_entries WHERE race_id=? AND lane=?", (race_id, x)
-                ).fetchone()
+                entry = self._one("SELECT * FROM horse_entries WHERE race_id=? AND lane=?", (race_id, x))
                 if entry is None:
                     return False, fail("race_lane_not_running")
                 names.append(entry["name"])
@@ -339,9 +325,9 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             if odds is None:
                 return False, fail("race_odds_pending")
             self._account.ensure(gid, user_id)
-            spent = self._conn.execute(
+            spent = self._scalar(
                 "SELECT COALESCE(SUM(stake), 0) FROM horse_bets WHERE race_id=? AND user_id=?", (race_id, user_id)
-            ).fetchone()[0]
+            )
             if spent + stake > horse_mod.MAX_RACE_STAKE:
                 return False, fail("race_max_stake", max_race_stake=horse_mod.MAX_RACE_STAKE)
             bal = self._account.raw_balance(gid, user_id)
@@ -359,7 +345,8 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (gid, race_id, user_id, kind, lanes[0], picks, stake, odds, now),
             )
-            return True, {
+            assert cur.lastrowid is not None
+            result: RaceBetResult = {
                 "id": cur.lastrowid,
                 "kind": kind,
                 "lane": lanes[0],
@@ -368,10 +355,11 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 "odds": odds,
                 "name": label,
             }
+            return True, result
 
     def race_bet_many(
         self, user_id: int, race_id: int, kind: str, lanes: list[int], stake: int, now: float
-    ) -> tuple[Any, ...]:
+    ) -> Outcome[list[RaceBetResult]]:
         """単勝・複勝を、何頭かまとめて買う（1頭ごとに stake ずつ、別々の馬券になる）。(成功か, 理由か馬券の辞書の並び)。
 
         先に、合計の賭け金（レースの上限・残高）を確かめてから買う。それでも途中で買えなくなったら、そこまでの馬券は残る。
@@ -386,9 +374,9 @@ class RaceRepo(ScopedRepo, IRaceRepo):
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, user_id)
-            spent = self._conn.execute(
+            spent = self._scalar(
                 "SELECT COALESCE(SUM(stake), 0) FROM horse_bets WHERE race_id=? AND user_id=?", (race_id, user_id)
-            ).fetchone()[0]
+            )
             total = stake * len(lanes)
             if spent + total > horse_mod.MAX_RACE_STAKE:
                 return False, fail(
@@ -404,11 +392,15 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             for lane in lanes:
                 ok, result = self.race_bet(user_id, race_id, kind, lane, stake, now)
                 if not ok:
-                    return False, fail("race_partial_bought", inner=result, bought=len(bought)) if bought else result
+                    if bought:
+                        return False, fail("race_partial_bought", inner=result, bought=len(bought))
+                    assert isinstance(result, Failure)
+                    return False, result
+                assert not isinstance(result, Failure)
                 bought.append(result)
             return True, bought
 
-    def race_run(self, race_id: int, tz_hours: float, rng: Optional[random.Random] = None) -> Optional[dict[str, Any]]:
+    def race_run(self, race_id: int, tz_hours: float, rng: Optional[random.Random] = None) -> Optional[RaceRunResult]:
         """レースを走らせて、結果を決め、賞金と払い戻しを精算する。すでに終わっていれば None。
 
         結果は、ここで決まる（演出は、返した frames を見せるだけ）。(race, entries, order, frames, bets, prizes) を辞書で返す。
@@ -489,9 +481,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             order_lanes = [entries[i]["lane"] for i in order]
             top_lane, top3 = order_lanes[0], set(order_lanes[:3])
             bets, lost = [], 0
-            for b in self._conn.execute(
-                "SELECT * FROM horse_bets WHERE race_id=? AND settled=0 ORDER BY id", (race_id,)
-            ).fetchall():
+            for b in self._all("SELECT * FROM horse_bets WHERE race_id=? AND settled=0 ORDER BY id", (race_id,)):
                 b = dict(b)
                 if b["kind"] == "win":
                     hit = b["lane"] == top_lane

@@ -1,6 +1,6 @@
 """地下闘技場の賭けパネル（BetPanel）と賭け金モーダル（StakeModal）。賭けが入ると、掲示を自動で書き換える。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 import discord
 
@@ -9,10 +9,11 @@ from cogs.shared import approval_guard, ui
 from cogs.shared.amount import reject_bad_amount, typed_amount
 from cogs.shared.messages import format_failure
 from domain import arena as arena_mod
+from domain.ports.contracts import ArenaFighterRow, ArenaTournamentDetailRow
 from services.arena import ArenaService
 
 
-def bettable_fighters(t: dict[str, Any]) -> list[dict[str, Any]]:
+def bettable_fighters(t: ArenaTournamentDetailRow) -> list[ArenaFighterRow]:
     open_stage = "semi" if t["status"] == "semi_betting" else "final" if t["status"] == "final_betting" else None
     if open_stage is None:
         return []
@@ -20,7 +21,7 @@ def bettable_fighters(t: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 class StakeModal(discord.ui.Modal):
-    def __init__(self, panel: "BetPanel", fighter: dict[str, Any]) -> None:
+    def __init__(self, panel: "BetPanel", fighter: ArenaFighterRow) -> None:
         super().__init__(title=f"{fighter['name']} に賭ける")
         self.panel, self.fighter = panel, fighter
         self.stake: discord.ui.TextInput["StakeModal"] = discord.ui.TextInput(
@@ -39,16 +40,12 @@ class StakeModal(discord.ui.Modal):
             ui.guild_id_of(interaction), interaction.user.id, self.fighter["id"], stake
         )
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("賭けられませんでした", format_failure(reason)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(reason), title="賭けられませんでした")
             return
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "賭けました",
-                f"**{self.fighter['name']}** に {ui.pelica(stake)}（的中すれば、賭け金はそのまま戻り、オッズに応じた利益が上乗せされます）",
-            ),
-            ephemeral=True,
+        await ui.reply_ok(
+            interaction,
+            f"**{self.fighter['name']}** に {ui.pelica(stake)}（的中すれば、賭け金はそのまま戻り、オッズに応じた利益が上乗せされます）",
+            title="賭けました",
         )
         await self.panel.refresh()  # 掲示の賭け総額・内訳を、すぐ書き換える
 
@@ -76,7 +73,7 @@ class FighterSelect(discord.ui.Select["BetPanel"]):
 class BetPanel(discord.ui.View):
     """地下闘技場の掲示（公開。誰でも見られ、賭けるときだけ自分のモーダルが開く）。"""
 
-    def __init__(self, arena_svc: ArenaService, tournament: dict[str, Any]) -> None:
+    def __init__(self, arena_svc: ArenaService, tournament: ArenaTournamentDetailRow) -> None:
         super().__init__(timeout=None)
         self.arena_svc, self.tournament = arena_svc, tournament
         self.message: Optional[discord.Message] = None

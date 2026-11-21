@@ -11,6 +11,17 @@ from typing import Any, Optional, Self, cast
 from domain import shop as shop_mod
 from domain.games.rtplevel import DEFAULT_RTP_POLICY
 from domain.ports.clock import IClock
+from domain.ports.contracts import (
+    ArenaTournamentDetailRow,
+    ManualEventRow,
+    PlayRecord,
+    ProfileView,
+    RaceCloseResult,
+    RaceRow,
+    ShopStockInfo,
+    TeiaiMarketListing,
+    UserRow,
+)
 from domain.ports.repos import (
     IArenaRepo,
     IAuctionRepo,
@@ -88,8 +99,8 @@ class StubWallet(IWalletRepo):
     def balance(self, user_id: int) -> int:
         return self._balances.get(user_id, 0)
 
-    def peek_stats(self, user_id: int) -> Optional[dict[str, Any]]:
-        return {"balance": self._balances.get(user_id, 0)} if user_id in self._balances else None
+    def peek_stats(self, user_id: int) -> Optional[UserRow]:
+        return cast("UserRow", {"balance": self._balances.get(user_id, 0)}) if user_id in self._balances else None
 
     def claim_daily(self, user_id: int, today: datetime.date, slot: Optional[int] = None) -> DailyResult:
         return DailyResult(True, 500, 1, self._balances.get(user_id, 0) + 500)
@@ -141,8 +152,8 @@ class StubShop(IShopRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def get_profile(self, user_id: int, raw: bool = False) -> dict[str, Any]:
-        return {"card_color": None, "card_icon": None, "title": None}
+    def get_profile(self, user_id: int, raw: bool = False) -> ProfileView:
+        return cast("ProfileView", {"card_color": None, "card_icon": None, "title": None})
 
 
 class StubRtp(IRtpRepo):
@@ -157,7 +168,7 @@ class StubEvents(IEventRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def manual_event_get(self, now: float) -> Optional[dict[str, Any]]:
+    def manual_event_get(self, now: float) -> Optional[ManualEventRow]:
         return None
 
 
@@ -173,8 +184,8 @@ class StubRecords(IRecordRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def record_play(self, user_id: int, game: str, bet: int, net: int, day: datetime.date, tags=()) -> dict[str, Any]:
-        return {"streak": 1, "new_best": True, "completed": [], "bonus": 0}
+    def record_play(self, user_id: int, game: str, bet: int, net: int, day: datetime.date, tags=()) -> PlayRecord:
+        return cast("PlayRecord", {"streak": 1, "new_best": True, "completed": [], "bonus": 0})
 
     def backfill_weekly(self, utc_offset_hours: float = 9) -> int:
         return 7
@@ -195,10 +206,10 @@ class StubRaces(IRaceRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def race_close_entries(self, race_id: int, rng=None) -> Optional[dict[str, Any]]:
+    def race_close_entries(self, race_id: int, rng=None) -> Optional[RaceCloseResult]:
         from domain.horse import DISTANCES, GOINGS, Runner, Track
 
-        return {
+        result = {
             "track": Track(DISTANCES[0], GOINGS[0]),
             "runners": [
                 Runner(
@@ -216,12 +227,13 @@ class StubRaces(IRaceRepo):
                 for i in range(6)
             ],
         }
+        return cast("RaceCloseResult", result)
 
     def race_set_odds(self, race_id: int, odds: Any) -> None:
         self.odds_set.append((race_id, odds))
 
-    def race_get(self, race_id: int) -> Optional[dict[str, Any]]:
-        return {"id": race_id, "status": "betting"}
+    def race_get(self, race_id: int) -> Optional[RaceRow]:
+        return cast("RaceRow", {"id": race_id, "status": "betting"})
 
 
 class StubLabor(ILaborRepo):
@@ -293,8 +305,10 @@ class StubArena(IArenaRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def arena_tournament_ensure(self, fmt, now=None, tz_hours=9.0, rng=None) -> dict[str, Any]:
-        return {"id": 1, "day": "2026-11-15", "status": "semi_betting", "fighters": []}
+    def arena_tournament_ensure(self, fmt, now=None, tz_hours=9.0, rng=None) -> ArenaTournamentDetailRow:
+        return cast(
+            "ArenaTournamentDetailRow", {"id": 1, "day": "2026-11-15", "status": "semi_betting", "fighters": []}
+        )
 
     def arena_bet(self, user_id: int, fighter_id: int, amount: int, now=None) -> tuple[Any, ...]:
         return (True, amount)
@@ -345,7 +359,7 @@ class StubAuction(IAuctionRepo):
     def auction_list(self, now=None) -> list[Any]:
         return []
 
-    def market_list(self, now=None, rng=None) -> list[dict[str, Any]]:
+    def market_list(self, now=None, rng=None) -> list[TeiaiMarketListing]:
         return []
 
 
@@ -369,14 +383,14 @@ class StubShopForService(StubShop):
     def inventory(self, user_id: int) -> dict[str, Any]:
         return {"title_rookie": 1}
 
-    def shop_stock(self, user_id: int, item_id: str, now=None) -> Optional[dict[str, Any]]:
+    def shop_stock(self, user_id: int, item_id: str, now=None) -> Optional[ShopStockInfo]:
         return None
 
     def arm(self, user_id: int, item_id: str) -> bool:
         return item_id == shop_mod.INSURANCE
 
-    def get_profile(self, user_id: int, raw: bool = False) -> dict[str, Any]:
-        return {"card_color": None, "card_icon": None, "title": None, "insurance": 2}
+    def get_profile(self, user_id: int, raw: bool = False) -> ProfileView:
+        return cast("ProfileView", {"card_color": None, "card_icon": None, "title": None, "insurance": 2})
 
 
 def test_arena_loan_and_shop_services_work_with_narrow_stubs():

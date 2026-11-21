@@ -1,12 +1,14 @@
 """運営コマンド（`/運営`）で使うサーバー・チャンネル・ユーザーの指定と候補。"""
 
 import re
-from typing import Optional
+from typing import Any, Optional
 
 import discord
 from discord import app_commands
 
 from cogs.shared import ui
+from cogs.shared.tasks import allowed_guilds
+from domain.ports.repos import IGuildRepo
 
 
 def valid_guild_id(text: str) -> bool:
@@ -64,15 +66,21 @@ def user_choices(guild: discord.Guild, current: str) -> list:
     ][:25]
 
 
+def event_targets(bot, guild_repo: IGuildRepo, config: dict[str, Any], guild_id: Optional[str]) -> list:
+    """特別イベントの開始/終了の対象サーバー。guild_id があればそのサーバーだけ、なければ許可されている全サーバー。"""
+    if guild_id:
+        return [bot.get_guild(int(guild_id))]
+    return allowed_guilds(bot, guild_repo, config)
+
+
 async def pick_guild(bot, interaction: discord.Interaction, guild_id: str) -> Optional[discord.Guild]:
     """入力されたサーバーを探す。見つからなければ理由を返して None。"""
     guild = bot.get_guild(int(guild_id)) if valid_guild_id(guild_id) else None
     if guild is None:
-        await interaction.response.send_message(
-            embed=ui.error_embed(
-                "サーバーが見つかりません", "候補から選ぶか、Bot が参加しているサーバーのIDを入れてください。"
-            ),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction,
+            "候補から選ぶか、Bot が参加しているサーバーのIDを入れてください。",
+            title="サーバーが見つかりません",
         )
     return guild
 
@@ -94,7 +102,7 @@ async def pick_channel(
         elif not postable(channel, guild):
             problem = f"#{channel.name} には、Bot が投稿する権限（チャンネルを見る・メッセージを送る・埋め込みリンク）がありません。"
     if problem:
-        await interaction.response.send_message(embed=ui.error_embed("チャンネルを使えません", problem), ephemeral=True)
+        await ui.reply_error(interaction, problem, title="チャンネルを使えません")
         return False, None
     return True, channel
 
@@ -108,25 +116,21 @@ async def pick_member(
         return None
     uid = parse_user_id(user_id)
     if uid is None:
-        await interaction.response.send_message(
-            embed=ui.error_embed("ユーザーを指定してください", "候補から選ぶか、ユーザーID（数字）を入れてください。"),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction, "候補から選ぶか、ユーザーID（数字）を入れてください。", title="ユーザーを指定してください"
         )
         return None
     try:
         member = await guild.fetch_member(uid)
     except discord.NotFound:
-        await interaction.response.send_message(
-            embed=ui.error_embed("そのサーバーにいません", f"`{uid}` は {guild.name} のメンバーではありません。"),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction, f"`{uid}` は {guild.name} のメンバーではありません。", title="そのサーバーにいません"
         )
         return None
     except discord.HTTPException as exc:
-        await interaction.response.send_message(
-            embed=ui.error_embed("確認できません", f"メンバーを確認できませんでした: {exc}"), ephemeral=True
-        )
+        await ui.reply_error(interaction, f"メンバーを確認できませんでした: {exc}", title="確認できません")
         return None
     if member.bot:
-        await interaction.response.send_message(embed=ui.error_embed(f"Bot には{verb}できません"), ephemeral=True)
+        await ui.reply_error(interaction, "", title=f"Bot には{verb}できません")
         return None
     return guild, member

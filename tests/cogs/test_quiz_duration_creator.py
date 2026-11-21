@@ -2,12 +2,14 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from cogs.quiz.cog import AddModal, UserModal, creator_label, public_embed, question_embed
 from domain import quizimport
 from domain.duration import format_minutes, parse_duration
+from domain.errors import Failure
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, call, must
 from tests.support import make_quiz_cog, make_test_bot
@@ -212,7 +214,7 @@ def test_bulk_and_old_schema_keep_the_creator(tmp_path):
     ids = eco.quiz.quiz_add_many(quizzes, NOW, "持ち主さん")
     assert (
         must(eco.quiz.quiz_get(ids[0]))["creator_name"] == "持ち主さん"
-        and abs(must(eco.quiz.quiz_get(ids[0]))["expires"] - NOW - 7200) < 1
+        and abs(cast(float, must(eco.quiz.quiz_get(ids[0]))["expires"]) - NOW - 7200) < 1
     )
     eco.db.conn.commit()
     eco.db.close()
@@ -238,8 +240,11 @@ def test_withdraw_autocomplete_lists_only_my_open_questions_in_this_guild(tmp_pa
     for wallet, user_id in ((g1.wallet, ME), (g1.wallet, OTHER), (g2.wallet, ME)):
         wallet.balance(user_id)  # 口座を作る
     ok, mine1 = g1.quiz.quiz_post(ME, "私の問題その1", ["a", "b", "c", "d"], "", 100, 90, 7, now)
+    assert not isinstance(mine1, Failure)
     ok, mine2 = g1.quiz.quiz_post(ME, "私の問題その2", ["a", "b", "c", "d"], "", 100, 600, 7, now)
+    assert not isinstance(mine2, Failure)
     ok, theirs = g1.quiz.quiz_post(OTHER, "他の人の問題", ["a", "b", "c", "d"], "", 100, 90, 7, now)
+    assert not isinstance(theirs, Failure)
     ok, other_guild = g2.quiz.quiz_post(ME, "別サーバーの問題", ["a", "b", "c", "d"], "", 100, 90, 7, now)
     eco.quiz.quiz_add("持ち主の問題", ["a", "b", "c", "d"], "", 100, None, now)
     cog = make_quiz_cog(make_test_bot(repos=eco))

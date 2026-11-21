@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Optional
 import discord
 
 from cogs.admin.embeds import LEVEL_NAME, click_history_embed, pachinko_stats_embed, rtp_table_embed
-from cogs.admin.targets import pick_channel, pick_guild, pick_member
+from cogs.admin.targets import event_targets, pick_channel, pick_guild, pick_member
 from cogs.shared import ui
 from cogs.shared.bridges import IEventAdminBridge, require_bridge
 from cogs.shared.tasks import allowed_guilds
@@ -22,13 +22,11 @@ async def grant(
         return
     guild, member = picked
     balance = cog._admin.grant(guild.id, member.id, amount, f"付与（管理）{reason}".strip())
-    await interaction.response.send_message(
-        embed=ui.ok_embed(
-            "付与しました",
-            f"{guild.name} の {member.mention}（{member.display_name}）に **{ui.pelica(amount)}** を付与しました（残高 {ui.pelica(balance)}）。"
-            + (f"\n理由: {reason}" if reason else ""),
-        ),
-        ephemeral=True,
+    await ui.reply_ok(
+        interaction,
+        f"{guild.name} の {member.mention}（{member.display_name}）に **{ui.pelica(amount)}** を付与しました（残高 {ui.pelica(balance)}）。"
+        + (f"\n理由: {reason}" if reason else ""),
+        title="付与しました",
     )
 
 
@@ -42,15 +40,13 @@ async def set_balance(
     before, after, debt_before, debt_after = cog._admin.set_balance(
         guild.id, member.id, amount, f"残高の設定（管理）{reason}".strip()
     )
-    await interaction.response.send_message(
-        embed=ui.ok_embed(
-            "残高を設定しました",
-            f"{guild.name} の {member.mention}（{member.display_name}）の残高を "
-            f"**{ui.pelica(before)} → {ui.pelica(after)}** にしました（差額は台帳に残ります）。"
-            + (f"\n帝愛の借金: **{ui.pelica(debt_before)} → {ui.pelica(debt_after)}**" if amount < 0 else "")
-            + (f"\n理由: {reason}" if reason else ""),
-        ),
-        ephemeral=True,
+    await ui.reply_ok(
+        interaction,
+        f"{guild.name} の {member.mention}（{member.display_name}）の残高を "
+        f"**{ui.pelica(before)} → {ui.pelica(after)}** にしました（差額は台帳に残ります）。"
+        + (f"\n帝愛の借金: **{ui.pelica(debt_before)} → {ui.pelica(debt_after)}**" if amount < 0 else "")
+        + (f"\n理由: {reason}" if reason else ""),
+        title="残高を設定しました",
     )
 
 
@@ -69,11 +65,9 @@ async def event_start(
     ok, channel = await pick_channel(interaction, picked, channel_id)
     if not ok:
         return
-    targets = cog._event_targets(guild_id)
+    targets = event_targets(cog.bot, cog._guild_repo, cog._config, guild_id)
     if not targets:
-        await interaction.response.send_message(
-            embed=ui.error_embed("開く先がありません", "許可されているサーバーがありません。"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "許可されているサーバーがありません。", title="開く先がありません")
         return
     event_bridge = await require_bridge(interaction, cog.bot, IEventAdminBridge, "イベント機能", cog._event_bridge)
     if event_bridge is None:
@@ -93,7 +87,9 @@ async def event_stop(cog: "ApprovalCog", interaction: discord.Interaction, guild
     if event_bridge is None:
         return
     await interaction.response.defer(ephemeral=True)
-    lines = [(await event_bridge.stop_manual(g))[1] for g in cog._event_targets(guild_id)]
+    lines = [
+        (await event_bridge.stop_manual(g))[1] for g in event_targets(cog.bot, cog._guild_repo, cog._config, guild_id)
+    ]
     await interaction.followup.send(
         embed=ui.embed("特別イベントを終わらせました", "\n".join(lines)[:3900] or "対象がありません。", ui.INFO),
         ephemeral=True,
@@ -123,7 +119,10 @@ async def rtp_list(cog: "ApprovalCog", interaction: discord.Interaction, guild_i
         return
     targets = [guild] if guild else allowed_guilds(cog.bot, cog._guild_repo, cog._config)
     embeds = [rtp_table_embed(cog._admin.rtp_levels(g.id), f"🎚️ {g.name} の還元率") for g in targets[:10]]
-    await interaction.response.send_message(embeds=embeds or [ui.error_embed("対象がありません")], ephemeral=True)
+    if embeds:
+        await interaction.response.send_message(embeds=embeds, ephemeral=True)
+    else:
+        await ui.reply_error(interaction, "対象がありません")
 
 
 async def pachinko_stats(

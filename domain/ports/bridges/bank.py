@@ -2,6 +2,9 @@
 
 from typing import Any, Optional
 
+from domain.errors import Outcome, fail
+from domain.ports.contracts import BankruptResult
+
 
 class INoticeSink:
     """処理中に発生したユーザー向け一言通知を記録する書き込み契約。"""
@@ -190,12 +193,16 @@ class CompositeGraceEnterHook(IGraceEnterHook):
 class IBankruptExecutor:
     """猶予期限切れなどから強制破産を実行する契約。"""
 
-    def bankrupt_for(self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False) -> tuple[Any, ...]:
+    def bankrupt_for(
+        self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
+    ) -> Outcome[BankruptResult]:
         raise NotImplementedError
 
 
 class NoOpBankruptExecutor(IBankruptExecutor):
     """破産実行未接続時に失敗タプルを返す LSP 準拠 Null 実装。"""
 
-    def bankrupt_for(self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False) -> tuple[Any, ...]:
-        return False, ""
+    def bankrupt_for(
+        self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
+    ) -> Outcome[BankruptResult]:
+        return False, fail("unavailable")
