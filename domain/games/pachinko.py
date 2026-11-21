@@ -148,10 +148,12 @@ def _convolve(a: list[float], b: list[float]) -> list[float]:
     """合計の分布（0〜ANALYSIS_MAX。ANALYSIS_MAX の位置には「それ以上」をまとめる）。"""
     out = [0.0] * (ANALYSIS_MAX + 1)
     for i, pa in enumerate(a):
-        if pa:
-            for j, pb in enumerate(b):
-                if pb:
-                    out[min(i + j, ANALYSIS_MAX)] += pa * pb
+        if not pa:
+            continue
+        for j, pb in enumerate(b):
+            if not pb:
+                continue
+            out[min(i + j, ANALYSIS_MAX)] += pa * pb
     return out
 
 

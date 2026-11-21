@@ -53,6 +53,56 @@ def _int(text: str) -> Optional[int]:
         return None
 
 
+def _apply_key_line(
+    fields: dict[str, Any], where: dict[str, int], problems: list[str], m: re.Match[str], lineno: int
+) -> str:
+    """見出し行（問題: など）を fields へ反映し、続きの見出しキーを返す。"""
+    key = KEYS[m.group(1)]
+    value = m.group(2).strip()
+    where.setdefault(key, lineno)
+    if key == "wrong":
+        fields["wrong"].append(value)
+    elif key in fields:
+        problems.append(f"{lineno}行目: 「{m.group(1)}」が2回あります。")
+    else:
+        fields[key] = value
+    return key
+
+
+def _apply_text_line(
+    fields: dict[str, Any], problems: list[str], current: Optional[str], lineno: int, line: str
+) -> None:
+    """見出しに続く本文行を反映する。問題文と解説だけは次の行に続けられる。"""
+    if current in ("question", "explanation"):
+        fields[current] += "\n" + line.strip()
+    elif current is None:
+        problems.append(f"{lineno}行目: 「問題:」「正解:」などの見出しで始めてください。")
+    else:
+        problems.append(f"{lineno}行目: 「{[k for k, v in KEYS.items() if v == current][0]}」は1行で書いてください。")
+
+
+_DURATION_UNIT = {"duration": "時間", "hours": "時間", "days": "日", "mins": "分"}
+
+
+def _duration_minutes(fields: dict[str, Any], head: str, errors: list[str]) -> Optional[int]:
+    """「期間」「時間」「日数」「分」のどれか1つから分単位の期間を読む。誤りは errors に足す。"""
+    given = [k for k in ("duration", "hours", "days", "mins") if k in fields]
+    if len(given) > 1:
+        errors.append(head + "期間は「期間」「時間」「日数」「分」のどれか1つだけで書いてください。")
+        return None
+    if not given:
+        return None
+    key = given[0]
+    try:
+        minutes = parse_duration(fields[key], _DURATION_UNIT[key])
+        if not 1 <= minutes <= MAX_MINUTES:
+            raise ValueError("期間は 1分〜365日 の範囲で書いてください。")
+    except ValueError as exc:
+        errors.append(head + str(exc) + "（無期限なら行ごと消します）")
+        return None
+    return minutes
+
+
 def _parse_block(lines: list[tuple[int, str]], number: int, errors: list[str]) -> Optional[dict[str, Any]]:
     """1問分。lines は (元ファイルの行番号, 文字列) の並び。誤りは errors に足す。"""
     fields: dict[str, Any] = {"wrong": []}
@@ -64,25 +114,9 @@ def _parse_block(lines: list[tuple[int, str]], number: int, errors: list[str]) -
             continue
         m = KEY_LINE.match(line)
         if m:
-            key = KEYS[m.group(1)]
-            value = m.group(2).strip()
-            current = key
-            where.setdefault(key, lineno)
-            if key == "wrong":
-                fields["wrong"].append(value)
-            elif key in fields:
-                problems.append(f"{lineno}行目: 「{m.group(1)}」が2回あります。")
-            else:
-                fields[key] = value
+            current = _apply_key_line(fields, where, problems, m, lineno)
         elif line.strip():
-            if current in ("question", "explanation"):
-                fields[current] += "\n" + line.strip()  # 問題文と解説は、次の行に続けられる
-            elif current is None:
-                problems.append(f"{lineno}行目: 「問題:」「正解:」などの見出しで始めてください。")
-            else:
-                problems.append(
-                    f"{lineno}行目: 「{[k for k, v in KEYS.items() if v == current][0]}」は1行で書いてください。"
-                )
+            _apply_text_line(fields, problems, current, lineno, line)
     if (
         not fields.get("question")
         and not problems
@@ -119,21 +153,7 @@ def _parse_block(lines: list[tuple[int, str]], number: int, errors: list[str]) -
         if reward is None or reward < 1:
             errors.append(head + "報酬は 1 以上の数字で書いてください。")
             reward = DEFAULT_REWARD
-    minutes = None
-    given = [k for k in ("duration", "hours", "days", "mins") if k in fields]
-    if len(given) > 1:
-        errors.append(head + "期間は「期間」「時間」「日数」「分」のどれか1つだけで書いてください。")
-    elif given:
-        key = given[0]
-        try:
-            minutes = parse_duration(
-                fields[key], {"duration": "時間", "hours": "時間", "days": "日", "mins": "分"}[key]
-            )
-            if not 1 <= minutes <= MAX_MINUTES:
-                raise ValueError("期間は 1分〜365日 の範囲で書いてください。")
-        except ValueError as exc:
-            errors.append(head + str(exc) + "（無期限なら行ごと消します）")
-            minutes = None
+    minutes = _duration_minutes(fields, head, errors)
     return {"question": question, "choices": choices, "explanation": explanation, "reward": reward, "minutes": minutes}
 
 
