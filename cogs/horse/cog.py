@@ -387,15 +387,15 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
             if race_id:
                 await self._announce_entry(guild, desk, race_id)
             for race in desk.race_open():
-                if race["status"] == "entry" and now >= race["entry_close"]:
-                    await self._close_entries(guild, desk, race)
-                elif race["status"] == "betting" and now >= race["start_at"]:
-                    await self._run(guild, desk, race)
-                elif race["status"] == "betting" and now >= race["bet_close"] and race["id"] not in self._bet_closed:
-                    self._bet_closed.add(
-                        race["id"]
-                    )  # 馬券の締切で、投稿を「締め切りました」に書き換える（発走まで、「◯秒前」が増えるのを防ぐ）
-                    await self._retire(guild, desk, race)
+                match race["status"]:
+                    case "entry" if now >= race["entry_close"]:
+                        await self._close_entries(guild, desk, race)
+                    case "betting" if now >= race["start_at"]:
+                        await self._run(guild, desk, race)
+                    case "betting" if now >= race["bet_close"] and race["id"] not in self._bet_closed:
+                        # 馬券の締切で、投稿を「締め切りました」に書き換える（発走まで、「◯秒前」が増えるのを防ぐ）
+                        self._bet_closed.add(race["id"])
+                        await self._retire(guild, desk, race)
 
         await run_for_allowed_guilds(
             self.bot,

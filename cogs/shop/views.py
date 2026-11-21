@@ -80,12 +80,13 @@ class ShopView(ui.OwnerView):
 
     def _build(self) -> None:
         self.clear_items()
-        if self.screen == "inv":
-            self._build_inventory()
-        elif self.screen == "auction":
-            self._build_auction()
-        else:
-            self._build_shop()
+        match self.screen:
+            case "inv":
+                self._build_inventory()
+            case "auction":
+                self._build_auction()
+            case _:
+                self._build_shop()
 
     def _build_shop(self) -> None:
         """上の2段が売り場のボタン（いまの売り場は青）。その下に、買う景品の選択肢（トップでは出ない）。"""
@@ -435,14 +436,15 @@ class ShopView(ui.OwnerView):
                 interaction, "買う景品を選んでから、「🛒 購入」を押してください。", title="景品を選んでください"
             )
         kind, value = self.picked
-        if kind == "horse":
-            await actions.buy_auction_horse(self.cog, interaction, int(value))
-        elif kind == "auction" and value.startswith("tm:"):
-            await actions.buy_teiai_market(self.cog, interaction, int(value[3:]), self.qty)
-        elif kind == "auction":
-            await actions.buy_auction(self.cog, interaction, value, self.qty)
-        else:
-            await actions.buy_item(self.cog, interaction, value, self.qty if self.tab in ("item", "horse") else 1)
+        match kind:
+            case "horse":
+                await actions.buy_auction_horse(self.cog, interaction, int(value))
+            case "auction" if value.startswith("tm:"):
+                await actions.buy_teiai_market(self.cog, interaction, int(value[3:]), self.qty)
+            case "auction":
+                await actions.buy_auction(self.cog, interaction, value, self.qty)
+            case _:
+                await actions.buy_item(self.cog, interaction, value, self.qty if self.tab in ("item", "horse") else 1)
 
     async def _to_auction(self, interaction: discord.Interaction):
         self.screen, self.qty, self.picked, self.auction_tab = "auction", 1, None, None  # タブは、開くたびに決め直す

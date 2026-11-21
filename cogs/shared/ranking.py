@@ -71,10 +71,10 @@ def build_final_embed(
             f"\u3000**{ui.pelica(total)}**"
             for r, (uid, total, _p) in enumerate(ranked[:TOP_N], 1)
         ]
-        if viewer_id:
-            for r, (uid, total, _p) in enumerate(ranked, 1):
-                if uid == viewer_id and r > TOP_N:
-                    lines.append(f"…\n`{r:>2}` <@{viewer_id}>\u3000**{ui.pelica(total)}**")
+        if viewer_id:  # 閲覧者が圏外なら、その順位の行も末尾に足す
+            me = next(((r, total) for r, (uid, total, _p) in enumerate(ranked, 1) if uid == viewer_id), None)
+            if me is not None and me[0] > TOP_N:
+                lines.append(f"…\n`{me[0]:>2}` <@{viewer_id}>\u3000**{ui.pelica(me[1])}**")
         e = ui.embed(title, "\n".join(lines), ui.GOLD)
     if footer:
         e.set_footer(text=footer)

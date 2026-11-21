@@ -1,5 +1,7 @@
 """ショップの Discord ロール・ニックネーム操作。"""
 
+from typing import Optional
+
 import discord
 
 from domain import nick, shop, teiai
@@ -30,8 +32,8 @@ async def set_color_role(guild: discord.Guild, member: discord.Member, item) -> 
             "Bot に「ロールの管理」権限がないため、名前の色を変えられません。サーバーの管理者に、Bot のロールへ権限を足してもらってください。"
         )
     mine = [r for r in member.roles if _is_ours(r)]
-    target = None
-    if item is not None:
+    target: Optional[discord.Role] = None
+    if item is not None:  # 色ロールを取得（なければ作り、位置も Bot のすぐ下に整える）。使えない名前なら ShopError
         name = shop.ROLE_PREFIX + item.name
         same_name = [r for r in guild.roles if r.name == name]
         reusable = [r for r in same_name if _is_ours(r)]

@@ -113,32 +113,34 @@ def catalog_embed(
             inline=False,
         )
         e.add_field(name="🎒 持ち物", value="買った品を身につける・使うのは、こちらです。", inline=False)
+        e.set_footer(text=f"あなたの残高: {ui.pelica(balance)}")
+        return e
+    e = ui.embed(f"{TABS[tab][0]}", TAB_NOTE[tab] + "\n価格はペリカ。✅ は持っている品です。", ui.GOLD)
+    items = tab_items(tab)
+    if tab in ("title", "collection"):  # 値段の段階（TIERS）ごとに、まとめる
+        low = 0
+        for limit, name in TIERS:
+            group = [i for i in items if i.price >= low and (limit is None or i.price < limit)]
+            if group:
+                e.add_field(
+                    name=name,
+                    value="\n".join(item_line(i, inv, stocks.get(i.id)) for i in group)[:1024],
+                    inline=False,
+                )
+            low = limit if limit is not None else low
     else:
-        e = ui.embed(f"{TABS[tab][0]}", TAB_NOTE[tab] + "\n価格はペリカ。✅ は持っている品です。", ui.GOLD)
-        items = tab_items(tab)
-        if tab in ("title", "collection"):  # 値段の段階ごとに、まとめる
-            low = 0
-            for limit, name in TIERS:
-                group = [i for i in items if i.price >= low and (limit is None or i.price < limit)]
-                if group:
-                    e.add_field(
-                        name=name,
-                        value="\n".join(item_line(i, inv, stocks.get(i.id)) for i in group)[:1024],
-                        inline=False,
-                    )
-                low = limit if limit is not None else low
-        else:
-            for kind in TABS[tab][1]:
-                group = [i for i in items if i.kind == kind]
-                if kind == shop.COLOR_ROLE and group:
-                    owned = [i.name for i in group if inv.get(i.id, 0) > 0]
-                    value = f"{'・'.join(i.mark + i.name for i in group)}\n**各 {group[0].price:,}**" + (
-                        f"\n✅ 持っている: {'・'.join(owned)}" if owned else ""
-                    )
-                else:
-                    value = "\n".join(item_line(i, inv, stocks.get(i.id)) for i in group)
-                if group:
-                    e.add_field(name=SECTION_NAME[kind], value=value[:1024], inline=False)
+        for kind in TABS[tab][1]:
+            group = [i for i in items if i.kind == kind]
+            if not group:
+                continue
+            if kind == shop.COLOR_ROLE:  # 色ロールだけ持っている品の注記つき
+                owned = [i.name for i in group if inv.get(i.id, 0) > 0]
+                value = f"{'・'.join(i.mark + i.name for i in group)}\n**各 {group[0].price:,}**" + (
+                    f"\n✅ 持っている: {'・'.join(owned)}" if owned else ""
+                )
+            else:
+                value = "\n".join(item_line(i, inv, stocks.get(i.id)) for i in group)
+            e.add_field(name=SECTION_NAME[kind], value=value[:1024], inline=False)
     e.set_footer(text=f"あなたの残高: {ui.pelica(balance)}")
     return e
 

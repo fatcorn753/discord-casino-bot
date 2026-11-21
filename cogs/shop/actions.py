@@ -143,14 +143,15 @@ async def buy_teiai_market(
             await ui.reply_error(interaction, format_failure(res.reason), title="買えませんでした")
             return
         got = shop.BY_ID[res.got]
-        if res.outcome == "worse":
-            reveal = f"\n😱 鑑定の結果……中身は **{shop.label(got)}** でした。闇市なので、返品はできません。"
-        elif res.outcome == "better":
-            reveal = f"\n✨ 鑑定の結果……中身はなんと **{shop.label(got)}** でした！"
-        elif entry["black"]:
-            reveal = "\n🔍 鑑定の結果、表示どおりの品でした。"
-        else:
-            reveal = ""
+        match res.outcome:
+            case "worse":
+                reveal = f"\n😱 鑑定の結果……中身は **{shop.label(got)}** でした。闇市なので、返品はできません。"
+            case "better":
+                reveal = f"\n✨ 鑑定の結果……中身はなんと **{shop.label(got)}** でした！"
+            case _ if entry["black"]:
+                reveal = "\n🔍 鑑定の結果、表示どおりの品でした。"
+            case _:
+                reveal = ""
         await reply(
             embed=ui.ok_embed(
                 "帝愛の出品を買いました",
@@ -226,24 +227,27 @@ async def buy_item(
             qty = 1
         pre = cog.service.precheck_buy(gid, uid, it, qty)
         if not pre.ok:
-            if pre.status == "owned":
-                await ui.reply_error(
-                    interaction, "すでに持っています。「🎒 持ち物」の画面で身につけられます。", title="買えませんでした"
-                )
-            elif pre.status == "out_of_stock":
-                assert pre.stock is not None
-                await ui.reply_error(
-                    interaction,
-                    f"**{it.name}** の在庫は、いま {pre.stock['stock']}個 です（{stock_text(pre.stock)}）。\n"
-                    "在庫は1人ずつ別々で、時間がたつと補充されます。",
-                    title="在庫が足りません",
-                )
-            else:
-                await ui.reply_error(
-                    interaction,
-                    f"ペリカが足りません（{pre.total:,}ペリカ必要・残高 {pre.balance:,}ペリカ）。\n`/ペリカ デイリー` で6時間ごとにもらえます。",
-                    title="買えませんでした",
-                )
+            match pre.status:  # 失敗理由に応じた文面で返信する
+                case "owned":
+                    await ui.reply_error(
+                        interaction,
+                        "すでに持っています。「🎒 持ち物」の画面で身につけられます。",
+                        title="買えませんでした",
+                    )
+                case "out_of_stock":
+                    assert pre.stock is not None
+                    await ui.reply_error(
+                        interaction,
+                        f"**{it.name}** の在庫は、いま {pre.stock['stock']}個 です（{stock_text(pre.stock)}）。\n"
+                        "在庫は1人ずつ別々で、時間がたつと補充されます。",
+                        title="在庫が足りません",
+                    )
+                case _:
+                    await ui.reply_error(
+                        interaction,
+                        f"ペリカが足りません（{pre.total:,}ペリカ必要・残高 {pre.balance:,}ペリカ）。\n`/ペリカ デイリー` で6時間ごとにもらえます。",
+                        title="買えませんでした",
+                    )
             return
         name_qty = f"**{shop.label(it)}**" + (f" ×{qty}" if qty > 1 else "")
         reply = await confirmed_reply(

@@ -123,12 +123,13 @@ async def handle_button(
     guild_id = ui.guild_id_of(interaction)
     if act == "lend":
         return await handle_lend(loan_svc, interaction, loan_id)
-    if act == "accept":
-        ok, reason = loan_svc.accept(guild_id, loan_id, interaction.user.id)
-    elif act == "decline":
-        ok, reason = loan_svc.decline(guild_id, loan_id, interaction.user.id)
-    else:
-        ok, reason = loan_svc.cancel(guild_id, loan_id, interaction.user.id)
+    match act:
+        case "accept":
+            ok, reason = loan_svc.accept(guild_id, loan_id, interaction.user.id)
+        case "decline":
+            ok, reason = loan_svc.decline(guild_id, loan_id, interaction.user.id)
+        case _:
+            ok, reason = loan_svc.cancel(guild_id, loan_id, interaction.user.id)
     if not ok:
         await ui.reply_error(interaction, format_failure(reason), title="できません")
         return

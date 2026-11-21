@@ -89,13 +89,14 @@ class MessageFormatter(IMessageFormatter):
         entries = summarize_history(rows_newest_first, limit)
         lines: list[str] = []
         for e in entries:
-            if e.kind == "game":
-                text = f"{e.game} 賭{e.bet:,}"
-            elif e.kind == "transfer":
-                arrow = "→" if e.direction == "送" else "←"
-                text = f"送金 {arrow} <@{e.target_user_id}>"
-            else:
-                text = e.reason
+            match e.kind:
+                case "game":
+                    text = f"{e.game} 賭{e.bet:,}"
+                case "transfer":
+                    arrow = "→" if e.direction == "送" else "←"
+                    text = f"送金 {arrow} <@{e.target_user_id}>"
+                case _:
+                    text = e.reason
             lines.append(f"<t:{int(e.ts)}:t> {text}　**{e.delta:+,}**　→ {e.balance_after:,}ペリカ")
         return lines
 

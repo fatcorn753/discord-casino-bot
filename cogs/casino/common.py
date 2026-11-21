@@ -140,27 +140,28 @@ async def start_game(
     res = deps.casino.begin_game(guild_id, uid, bet, game, balance_factor=balance_factor)
 
     if not res.ok:
-        if res.reason_kind == "session":
-            await ui.reply_error(interaction, res.reason, title="まだ始められません")
-        elif res.reason_kind == "min_bet":
-            await ui.reply_error(
-                interaction, f"{ui.pelica(MIN_BET)} 以上で指定してください。", title="賭け金が少なすぎます"
-            )
-        elif res.reason_kind == "balance_factor":
-            msg = (
-                f"{factor_reason}賭け金の **{balance_factor}倍**（{ui.pelica(bet * balance_factor)}）以上の残高が必要です（いまの残高: {ui.pelica(res.balance)}）。\n"
-                f"いまの残高なら、**{ui.pelica(res.balance // balance_factor)}** まで賭けられます。"
-            )
-            await ui.reply_error(interaction, msg, title="ペリカが足りません")
-        elif res.reason_kind == "balance":
-            msg = f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。\n`/ペリカ デイリー` で6時間ごとにもらえます。"
-            await ui.reply_error(interaction, msg, title="ペリカが足りません")
-        else:
-            await ui.reply_error(
-                interaction,
-                f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。",
-                title="ペリカが足りません",
-            )
+        match res.reason_kind:
+            case "session":
+                await ui.reply_error(interaction, res.reason, title="まだ始められません")
+            case "min_bet":
+                await ui.reply_error(
+                    interaction, f"{ui.pelica(MIN_BET)} 以上で指定してください。", title="賭け金が少なすぎます"
+                )
+            case "balance_factor":
+                msg = (
+                    f"{factor_reason}賭け金の **{balance_factor}倍**（{ui.pelica(bet * balance_factor)}）以上の残高が必要です（いまの残高: {ui.pelica(res.balance)}）。\n"
+                    f"いまの残高なら、**{ui.pelica(res.balance // balance_factor)}** まで賭けられます。"
+                )
+                await ui.reply_error(interaction, msg, title="ペリカが足りません")
+            case "balance":
+                msg = f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。\n`/ペリカ デイリー` で6時間ごとにもらえます。"
+                await ui.reply_error(interaction, msg, title="ペリカが足りません")
+            case _:
+                await ui.reply_error(
+                    interaction,
+                    f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。",
+                    title="ペリカが足りません",
+                )
         return None
     ctx = GameContext(
         deps, uid, res.escrow_id, game, bet, guild_id, getattr(interaction.user, "display_name", "") or ""
