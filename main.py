@@ -36,7 +36,7 @@ DB_PATH = str(_DB_PATH)
 def load_config() -> dict:
     if not os.path.exists(CONFIG_PATH):
         raise SystemExit("config.json が見つかりません。config.example.json をコピーしてトークンを設定してください。")
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    with open(CONFIG_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -211,7 +211,7 @@ def acquire_single_instance_lock() -> None:
         raise SystemExit(
             "すでにこの Bot が起動しています。二重に起動すると、コマンドを取り合ってエラーになります。\n"
             "動いているものを止めてから、起動し直してください。"
-        )
+        ) from None
 
 
 def main():
@@ -226,7 +226,7 @@ def main():
     except discord.LoginFailure:
         raise SystemExit(
             "ログインに失敗しました。config.json の token が正しいか、再発行されていないか確認してください。"
-        )
+        ) from None
 
 
 if __name__ == "__main__":
