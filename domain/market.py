@@ -138,25 +138,20 @@ def covariance_matrix() -> list[list[float]]:
     return [[a.sigma * b.sigma * correlation(a.key, b.key) for b in SYMBOLS] for a in SYMBOLS]
 
 
-def _cholesky_cell(matrix: list[list[float]], low: list[list[float]], i: int, j: int) -> None:
-    """コレスキー分解のセル (i, j) を埋める。対角なら正定値性を検査する。"""
-    total = sum(low[i][k] * low[j][k] for k in range(j))
-    if i != j:
-        low[i][j] = (matrix[i][j] - total) / low[j][j]
-        return
-    diag = matrix[i][i] - total
-    if diag <= 0:
-        raise ValueError("相関の数字が正しくありません（行列が正定値ではありません）")
-    low[i][j] = math.sqrt(diag)
-
-
 def cholesky(matrix: list[list[float]]) -> list[list[float]]:
     """コレスキー分解 Σ = L Lᵀ の下三角行列 L。正定値でなければ ValueError。"""
     n = len(matrix)
     low = [[0.0] * n for _ in range(n)]
     for i in range(n):
         for j in range(i + 1):
-            _cholesky_cell(matrix, low, i, j)
+            total = sum(low[i][k] * low[j][k] for k in range(j))
+            if i != j:
+                low[i][j] = (matrix[i][j] - total) / low[j][j]
+                continue
+            diag = matrix[i][i] - total
+            if diag <= 0:
+                raise ValueError("相関の数字が正しくありません（行列が正定値ではありません）")
+            low[i][j] = math.sqrt(diag)
     return low
 
 

@@ -24,23 +24,6 @@ class HistoryEntry:
     reason: str = ""
 
 
-def _collect_game_rows(rows: list[dict[str, Any]], i: int, game: str) -> tuple[int, int, dict[str, Any], int]:
-    """1ゲーム分の台帳行をまとめて (賭け金合計, 損益合計, 最後の行, 次の添字) を返す。"""
-    r = rows[i]
-    bet, net, last, j = -r["delta"], r["delta"], r, i + 1
-    while (
-        j < len(rows)
-        and rows[j]["reason"].endswith(":" + game)
-        and any(rows[j]["reason"].startswith(p) for p in _GAME_ROWS)
-    ):
-        if rows[j]["reason"].startswith("追加の賭け:"):
-            bet += -rows[j]["delta"]
-        net += rows[j]["delta"]
-        last = rows[j]
-        j += 1
-    return bet, net, last, j
-
-
 def _entries_oldest_first(rows: list[dict[str, Any]]) -> list[HistoryEntry]:
     """台帳の行（古い順）を HistoryEntry の並びにする。"""
     out: list[HistoryEntry] = []
@@ -50,7 +33,16 @@ def _entries_oldest_first(rows: list[dict[str, Any]]) -> list[HistoryEntry]:
         reason = r["reason"]
         if reason.startswith("賭け:"):
             game = reason.split(":", 1)[1]
-            bet, net, last, j = _collect_game_rows(rows, i, game)
+            bet, net, last, j = -r["delta"], r["delta"], r, i + 1
+            while (
+                j < len(rows)
+                and rows[j]["reason"].endswith(":" + game)
+                and any(rows[j]["reason"].startswith(p) for p in _GAME_ROWS)
+            ):
+                bet += -rows[j]["delta"] if rows[j]["reason"].startswith("追加の賭け:") else 0
+                net += rows[j]["delta"]
+                last = rows[j]
+                j += 1
             out.append(
                 HistoryEntry(
                     ts=last["ts"],
