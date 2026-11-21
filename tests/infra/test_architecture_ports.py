@@ -342,6 +342,69 @@ def test_debt_repo_does_not_touch_other_domains_tables():
     assert not found, "infra/db/debt/ が他ドメインの表を直接操作している:\n" + "\n".join(found)
 
 
+def _package_defined_symbols(pkg_dir: Path) -> dict[str, str]:
+    """パッケージのサブモジュール（__init__.py 除く）が定義する公開シンボル {名前: ファイル名}。"""
+    defined: dict[str, str] = {}
+    for path in sorted(pkg_dir.glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        for node in ast.parse(path.read_text(encoding="utf-8"), filename=str(path)).body:
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and not node.name.startswith(
+                "_"
+            ):
+                defined[node.name] = path.name
+            elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                name = node.targets[0].id
+                if name.startswith("_") or (
+                    isinstance(node.value, ast.Call) and getattr(node.value.func, "id", "") == "TypeVar"
+                ):
+                    continue
+                defined[name] = path.name
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and not node.target.id.startswith("_")
+            ):
+                defined[node.target.id] = path.name
+    return defined
+
+
+def test_split_packages_reexport_every_submodule_symbol():
+    """分割パッケージ（bank/・debt/・kyosai/・orders/・contracts/）はサブモジュールの公開シンボルを漏れなく再エクスポートする。"""
+    import importlib
+
+    packages = ["infra.db.bank", "infra.db.debt", "infra.db.kyosai", "cogs.market.orders", "domain.ports.contracts"]
+    for dotted in packages:
+        pkg = importlib.import_module(dotted)
+        pkg_dir = ROOT.joinpath(*dotted.split("."))
+        defined = _package_defined_symbols(pkg_dir)
+        assert defined, f"{dotted} のサブモジュールが空です"
+        not_exported = [f"{name} ({mod})" for name, mod in defined.items() if not hasattr(pkg, name)]
+        assert not not_exported, f"{dotted} への再エクスポート漏れ:\n" + "\n".join(not_exported)
+        assert set(pkg.__all__) == set(defined), f"{dotted} の __all__ とサブモジュール定義が一致しません"
+    for flat in ("infra/db/bank.py", "infra/db/debt.py", "infra/db/kyosai.py"):
+        assert not (ROOT / flat).exists(), f"{flat} はパッケージへ分割済みのはず"
+
+
+def test_cogs_do_not_bypass_reply_error_with_raw_send():
+    """cogs/ では生の send/send_message に error_embed を渡さない。エラー応答は ui.reply_error（統一入口）へ。"""
+    violations: list[str] = []
+    for path in _iter_py("cogs"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("send", "send_message")
+            ):
+                continue
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and sub.func.attr == "error_embed":
+                    violations.append(f"{path.relative_to(ROOT)}:{node.lineno} raw send with error_embed")
+                    break
+    assert not violations, "ui.reply_error を迂回する生のエラー送信:\n" + "\n".join(violations)
+
+
 def test_cogs_use_services_instead_of_repositories():
     """Cog は Repository を持たず、状態を変える処理と時刻を伴う処理を services/ に任せる(#65)。
 
