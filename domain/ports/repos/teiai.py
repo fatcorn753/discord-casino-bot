@@ -18,8 +18,8 @@ from domain.ports.bridges import (
     IValuationSource,
 )
 from domain.ports.contracts import (
-    BankStatus,
     BankruptResult,
+    BankStatus,
     CdsHoldings,
     CdsQuote,
     EscapeResult,

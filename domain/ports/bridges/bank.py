@@ -3,6 +3,7 @@
 from typing import Any, Optional
 
 from domain.errors import Outcome, fail
+from domain.ports.contracts import BankruptResult
 
 
 class INoticeSink:

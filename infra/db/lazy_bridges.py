@@ -1,7 +1,7 @@
 """Composition Root で循環依存を 1 パスの Constructor DI へ解決するための遅延デリゲート群。"""
 
 from collections.abc import Callable, Mapping
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Optional
 
 from domain.errors import Failure, Outcome
 from domain.ports.bridges import (

@@ -20,9 +20,9 @@ from cogs.admin.texts import (
 from cogs.shared import ui
 from domain import approval
 from domain import labor as lab
-from domain.ports.contracts import LaborClickReport, LaborClickReportRow, PachinkoStats
 from domain.duration import format_minutes
 from domain.games import pachinko, rtplevel
+from domain.ports.contracts import LaborClickReport, LaborClickReportRow, PachinkoStats
 
 MAX_IMAGE_BYTES = ui.MAX_IMAGE_BYTES
 

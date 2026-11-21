@@ -249,9 +249,7 @@ class ILaborRepo(IGuildScopedRepo):
     def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> LaborTop:
         raise NotImplementedError
 
-    def labor_click(
-        self, user_id: int, now: float, day: str = "", rng: Optional[random.Random] = None
-    ) -> LaborClick:
+    def labor_click(self, user_id: int, now: float, day: str = "", rng: Optional[random.Random] = None) -> LaborClick:
         raise NotImplementedError
 
     def labor_click_hours(self, user_id: int, since: float) -> list[LaborClickHourRow]:

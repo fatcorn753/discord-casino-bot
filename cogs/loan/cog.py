@@ -231,9 +231,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
             accepted_at = loan["accepted_at"] if loan["accepted_at"] is not None else 0.0
             late = loans.late_interest(loan["principal"], loan["rate_tenths"], loan["term_days"], accepted_at, now)
             due = loan["due"] if loan["due"] is not None else 0.0
-            state = (
-                f"⚠️延滞（うち遅延損害金 {late:,}）" if loan["status"] == "overdue" else f"期限 <t:{int(due)}:R>"
-            )
+            state = f"⚠️延滞（うち遅延損害金 {late:,}）" if loan["status"] == "overdue" else f"期限 <t:{int(due)}:R>"
             return f"`#{loan['id']}` {other}　元本{loan['principal']:,}　日利{loans.rate_text(loan['rate_tenths'])}　残り **{left:,}**　{state}"
 
         e = ui.embed(f"🤝 {interaction.user.display_name} の貸し借り", "", ui.INFO)

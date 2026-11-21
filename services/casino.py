@@ -5,7 +5,7 @@ import logging
 import random
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from domain import events as events_mod
 from domain import skins

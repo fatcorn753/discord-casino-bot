@@ -756,12 +756,19 @@ def test_default_wording_is_used_when_the_author_leaves_it_blank(eco):
         (q["msg_right"], q["msg_wrong"]) == ("", "") and verdict(q, True) == "正解！" and verdict(q, False) == "不正解…"
     )
     assert (
-        result_embed(cast("QuizAnswerResult", {"correct": True, "reward": 100, "reward_blocked": False, "explanation": ""}), 0, q).title
+        result_embed(
+            cast("QuizAnswerResult", {"correct": True, "reward": 100, "reward_blocked": False, "explanation": ""}), 0, q
+        ).title
         == "⭕ 正解！"
     )
-    assert result_embed(cast("QuizAnswerResult", {"correct": False, "answer": "東京", "explanation": ""}), 0, q).title == "❌ 不正解…"
     assert (
-        result_embed(cast("QuizAnswerResult", {"correct": True, "reward": 100, "reward_blocked": False, "explanation": ""}), 0).title
+        result_embed(cast("QuizAnswerResult", {"correct": False, "answer": "東京", "explanation": ""}), 0, q).title
+        == "❌ 不正解…"
+    )
+    assert (
+        result_embed(
+            cast("QuizAnswerResult", {"correct": True, "reward": 100, "reward_blocked": False, "explanation": ""}), 0
+        ).title
         == "⭕ 正解！"
     )  # 問題を渡さなくても既定
 
@@ -774,7 +781,9 @@ def test_custom_wording_replaces_only_the_headline_everywhere(eco):
     )
     q = eco.quiz.quiz_get(qid)
     assert verdict(q, True) == "お見事！" and verdict(q, False) == "不正解…"  # 片方だけ決めたら、もう片方は既定
-    e = result_embed(cast("QuizAnswerResult", {"correct": True, "reward": 100, "reward_blocked": False, "explanation": "解説"}), 0, q)
+    e = result_embed(
+        cast("QuizAnswerResult", {"correct": True, "reward": 100, "reward_blocked": False, "explanation": "解説"}), 0, q
+    )
     assert e.title == "⭕ お見事！" and "+100" in must(e.description)  # 報酬の表示は残る
     e = result_embed(cast("QuizAnswerResult", {"correct": False, "answer": "東京", "explanation": "解説"}), 0, q)
     assert e.title == "❌ 不正解…" and "東京" in must(e.description)
@@ -895,5 +904,7 @@ def test_rewards_have_no_upper_limit(eco):
 def test_messages_tell_the_player_about_the_games_needed(eco):
     from cogs.quiz.cog import result_embed
 
-    e = result_embed(cast("QuizAnswerResult", {"correct": True, "reward": 0, "reward_blocked": True, "explanation": ""}), 0)
+    e = result_embed(
+        cast("QuizAnswerResult", {"correct": True, "reward": 0, "reward_blocked": True, "explanation": ""}), 0
+    )
     assert "報酬はありません" in must(e.description) and "3回以上" in must(e.description)

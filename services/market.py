@@ -261,7 +261,9 @@ class MarketService:
         repo = self._margin.for_guild(guild_id)
         return (repo.short_open if side == "short" else repo.long_open)(uid, units, price, leverage, symbol)
 
-    def margin_close(self, guild_id: int, uid: int, side: str, units: Optional[int], price: float, symbol: str) -> CryptoResult:
+    def margin_close(
+        self, guild_id: int, uid: int, side: str, units: Optional[int], price: float, symbol: str
+    ) -> CryptoResult:
         return self._margin.for_guild(guild_id).margin_close(uid, side, units, price, symbol)
 
     def margin_status(self, guild_id: int, uid: int, prices: Mapping[str, float]) -> MarginStatus:

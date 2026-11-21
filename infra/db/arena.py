@@ -13,8 +13,8 @@ from domain.errors import Outcome, fail
 from domain.ports.bridges import IBankCashFlow
 from domain.ports.contracts import (
     ArenaBetRow,
-    ArenaFinalResult,
     ArenaFighterRow,
+    ArenaFinalResult,
     ArenaGroupResult,
     ArenaSemiResult,
     ArenaTournamentDetailRow,
