@@ -459,11 +459,16 @@ def make_admin(tmp_path, guilds=None, extra_cogs=None):
 class Resp2:
     def __init__(self, log):
         self.log = log
+        self.done = False
+
+    def is_done(self):
+        return self.done
 
     async def send_message(self, **kw):
         self.log.append(("send", kw["embed"].title))
 
     async def defer(self, **kw):
+        self.done = True
         self.log.append(("defer",))
 
     async def send_modal(self, modal):
@@ -673,8 +678,14 @@ def run_announce(cog, guilds_arg, heading, body, image, clicks):
             shown.update(kw)
 
     class Resp:
+        def __init__(self):
+            self.done = False
+
+        def is_done(self):
+            return self.done
+
         async def defer(self, **kw):
-            pass
+            self.done = True
 
         async def edit_message(self, **kw):
             assert not ("embed" in kw and "embeds" in kw), (
