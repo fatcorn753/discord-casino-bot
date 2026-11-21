@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from domain import poll
 from domain.errors import Outcome, fail
+from domain.ports.contracts import PollRow, PollView
 from domain.ports.repos import IPollRepo
 from infra.db.account import AccountCore
 from infra.db.bank import BankRepo
@@ -30,7 +31,7 @@ class PollRepo(ScopedRepo, IPollRepo):
         assert row is not None  # 集計なので必ず1行返る
         return row["yes"], row["n"] - row["yes"]
 
-    def _view_for(self, guild_id: int, poll_id: int) -> Optional[dict[str, Any]]:
+    def _view_for(self, guild_id: int, poll_id: int) -> Optional[PollView]:
         d = self._one("SELECT * FROM polls WHERE guild_id=? AND id=?", (guild_id, poll_id))
         if d is None:
             return None
@@ -40,7 +41,7 @@ class PollRepo(ScopedRepo, IPollRepo):
         d["no"] = poll.shown(real_no, d["adj_no"])
         return d
 
-    def _open_for(self, guild_id: int, poll_id: int, now: float) -> Any:
+    def _open_for(self, guild_id: int, poll_id: int, now: float) -> Optional[PollRow]:
         """受付中の投票の行。締切を過ぎていれば（見回りの前でも）None。"""
         return self._one(
             "SELECT * FROM polls WHERE guild_id=? AND id=? AND status='open' AND closes>?", (guild_id, poll_id, now)
@@ -75,11 +76,11 @@ class PollRepo(ScopedRepo, IPollRepo):
                 (channel_id, message_id, self._g(), poll_id),
             )
 
-    def poll_get(self, poll_id: int) -> Optional[dict[str, Any]]:
+    def poll_get(self, poll_id: int) -> Optional[PollView]:
         with self._lock:
             return self._view_for(self._g(), poll_id)
 
-    def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> Outcome[dict[str, Any]]:
+    def poll_vote(self, user_id: int, poll_id: int, yes: bool, now: float) -> Outcome[PollView]:
         """1人1票。あとから変えられる。(成功か, 投票 か Failure)。"""
         with self._db.tx():
             gid = self._g()
@@ -124,7 +125,7 @@ class PollRepo(ScopedRepo, IPollRepo):
             )
             return True, {"poll": self._view_for(gid, poll_id), "before": (before["yes"], before["no"])}
 
-    def poll_close_due(self, now: float) -> list[dict[str, Any]]:
+    def poll_close_due(self, now: float) -> list[PollView]:
         """締切を過ぎた投票を締めて、締めたものを返す。"""
         with self._db.tx():
             gid = self._g()

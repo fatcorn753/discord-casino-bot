@@ -9,6 +9,7 @@ from domain import horse as horse_mod
 from domain import teiai
 from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import IBankCashFlow
+from domain.ports.contracts import RaceBetRow, RaceEntryRow, RaceRow
 from domain.ports.repos import IRaceRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -53,7 +54,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
     def race_slots(self, now: float, tz_hours: float, days: int = 2) -> list[float]:
         return race_slots(now, tz_hours, days)
 
-    def race_get(self, race_id: int) -> Optional[dict[str, Any]]:
+    def race_get(self, race_id: int) -> Optional[RaceRow]:
         with self._lock:
             return self._one("SELECT * FROM horse_races WHERE id=? AND guild_id=?", (race_id, self._g()))
 
@@ -62,7 +63,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
         with self._lock:
             return self._scalar("SELECT COUNT(*) FROM horse_races WHERE guild_id=? AND id<=?", (self._g(), race_id))
 
-    def race_open(self) -> list[dict[str, Any]]:
+    def race_open(self) -> list[RaceRow]:
         """まだ終わっていないレース（申し込み中・発売中）。発走の早い順。"""
         with self._lock:
             return self._all(
@@ -112,7 +113,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 "UPDATE horse_races SET channel_id=?, message_id=? WHERE id=?", (channel_id, message_id, race_id)
             )
 
-    def race_entries(self, race_id: int, registered_only: bool = False) -> list[dict[str, Any]]:
+    def race_entries(self, race_id: int, registered_only: bool = False) -> list[RaceEntryRow]:
         with self._lock:
             return self._all(
                 "SELECT * FROM horse_entries WHERE race_id=?"
@@ -287,7 +288,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             )
             return v if v is not None else None
 
-    def race_bets(self, user_id: int, race_id: int) -> list[dict[str, Any]]:
+    def race_bets(self, user_id: int, race_id: int) -> list[RaceBetRow]:
         with self._lock:
             return self._all("SELECT * FROM horse_bets WHERE race_id=? AND user_id=? ORDER BY id", (race_id, user_id))
 

@@ -14,6 +14,7 @@ from domain import shop as shop_mod
 from domain import teiai
 from domain.errors import Outcome, fail
 from domain.ports.bridges import IHouseAccount
+from domain.ports.contracts import LaborClickHourRow, LaborFindSummary
 from domain.ports.repos import ILaborRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -120,7 +121,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             (guild_id, user_id, guild_id, user_id, self.FINDS_KEEP),
         )
 
-    def labor_finds(self, user_id: int, limit: int = 6) -> list[dict[str, Any]]:
+    def labor_finds(self, user_id: int, limit: int = 6) -> list[LaborFindSummary]:
         """最近の掘り出し（石炭は除く）。すでにペリカ等を受け取り済みのものは出さない。新しい順。[{at, kind, ore}]。"""
         with self._lock:
             return self._all(
@@ -429,7 +430,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         if hour % 24 == 0:  # 古い記録は、1日1回ほど掃除する
             self._conn.execute("DELETE FROM labor_click_hours WHERE hour<?", (hour - self.CLICK_LOG_DAYS * 24,))
 
-    def labor_click_hours(self, user_id: int, since: float) -> list[dict[str, Any]]:
+    def labor_click_hours(self, user_id: int, since: float) -> list[LaborClickHourRow]:
         """since 以降の、1時間ごとの押した記録（古い順）。"""
         with self._lock:
             return self._all(

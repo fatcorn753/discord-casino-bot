@@ -4,9 +4,10 @@
 """
 
 import random
-from typing import Any, Optional, cast
+from typing import Optional, cast
 
 from domain.errors import Outcome, fail
+from domain.ports.contracts import RaffleResult, RaffleRow, RaffleView
 from domain.ports.repos import IRaffleRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -19,15 +20,15 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
         super().__init__(db, guild_id, strict)
         self._account = account
 
-    def _raffle_open_row(self, guild_id: int) -> Optional[dict[str, Any]]:
+    def _raffle_open_row(self, guild_id: int) -> Optional[RaffleRow]:
         return self._one(
             "SELECT * FROM raffle WHERE guild_id=? AND status='open' ORDER BY id DESC LIMIT 1", (guild_id,)
         )
 
-    def _raffle_view(self, row: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    def _raffle_view(self, row: Optional[RaffleRow]) -> Optional[RaffleView]:
         if row is None:
             return None
-        d = row
+        d = cast("RaffleView", dict(row))
         d["entries"] = [
             r["user_id"]
             for r in self._all("SELECT user_id FROM raffle_entries WHERE raffle_id=? ORDER BY rowid", (row["id"],))
@@ -48,7 +49,7 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
             )
             return True, ""
 
-    def raffle_get(self) -> Optional[dict[str, Any]]:
+    def raffle_get(self) -> Optional[RaffleView]:
         """募集中の抽選（参加者つき）。無ければ None。"""
         with self._lock:
             return self._raffle_view(self._raffle_open_row(self._g()))
@@ -80,14 +81,15 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
             self._conn.execute("INSERT INTO raffle_entries (raffle_id, user_id) VALUES (?, ?)", (row["id"], user_id))
             return True, ""
 
-    def raffle_close(self, rng: Optional[random.Random] = None, cancel: bool = False) -> Optional[dict[str, Any]]:
+    def raffle_close(self, rng: Optional[random.Random] = None, cancel: bool = False) -> Optional[RaffleResult]:
         """募集中の抽選を締める。参加者が2人以上なら1人を選んで集めた参加費の全額を渡し、足りない・中止なら全員に返金する。"""
         rng = rng or cast("random.Random", random)
         with self._db.tx():
             gid = self._g()
-            raffle = self._raffle_view(self._raffle_open_row(gid))
-            if raffle is None:
+            view = self._raffle_view(self._raffle_open_row(gid))
+            if view is None:
                 return None
+            raffle = cast("RaffleResult", view)
             entries = raffle["entries"]
             self._conn.execute(
                 "UPDATE raffle SET status=? WHERE id=?", ("cancelled" if cancel else "done", raffle["id"])
