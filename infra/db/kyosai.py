@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from domain import kyosai, p2p
 from domain.errors import fail
-from domain.ports.bridges import IExcessLossSink
+from domain.ports.bridges import IBankruptPrepHook, IExcessLossSink, IGraceEnterHook
 from domain.ports.repos import IKyosaiRepo
 from infra.db.account import AccountCore
 from infra.db.bank import BankRepo
@@ -18,7 +18,7 @@ from infra.db.notices import NoticeRepo
 DAY = 86400
 
 
-class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink):
+class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink, IBankruptPrepHook, IGraceEnterHook):
     def __init__(
         self,
         db: EcoDb,
@@ -69,6 +69,29 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo, IExcessLossSink):
                 (guild_id, user_id),
             )
         return units
+
+    # ------------------------------------------------------------------ #
+    # 取引停止時の引き戻し（破産猶予入り・自己破産。#25 と同型の逃避をふさぐ）
+    # ------------------------------------------------------------------ #
+    def prepare(self, guild_id: int, user_id: int, now: float) -> None:
+        self.kyosai_pull_back_for(guild_id, user_id, now)
+
+    def on_grace_enter(self, guild_id: int, user_id: int, now: float) -> None:
+        self.kyosai_pull_back_for(guild_id, user_id, now)
+
+    def kyosai_pull_back_for(self, guild_id: int, user_id: int, now: float) -> int:
+        """その人が最高入札者になっている進行中の競りをすべて取り消し、預かり金を手元へ戻す。引き戻した件数を返す。"""
+        pulled = 0
+        for row in self._conn.execute(
+            "SELECT id, top_bid FROM kyosai_auctions WHERE guild_id=? AND status='open' AND top_bidder=?",
+            (guild_id, user_id),
+        ).fetchall():
+            if row["top_bid"] > 0:
+                self._account.ensure(guild_id, user_id)
+                self._account.apply(guild_id, user_id, row["top_bid"], "共済:競りの入札の返金（取引停止）")
+            self._conn.execute("UPDATE kyosai_auctions SET top_bid=0, top_bidder=NULL WHERE id=?", (row["id"],))
+            pulled += 1
+        return pulled
 
     def bank_sync(self, guild_id: int, now: float) -> None:
         self._bank.bank_sync_for(guild_id, now)  # 銀行の行を作っておく（kyosai_* の列がそこにある）

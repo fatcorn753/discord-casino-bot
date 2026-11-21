@@ -206,7 +206,7 @@ def open_repositories(
         excess_sink=LazyExcessLossSink(lambda: kyosai),
         status_reader=LazyStatusReader(lambda: debt),
         margin_ratio_reader=LazyMarginRatioReader(lambda: margin),
-        grace_enter_hook=CompositeGraceEnterHook((LazyGraceEnterHook(lambda: p2p),)),
+        grace_enter_hook=CompositeGraceEnterHook((LazyGraceEnterHook(lambda: p2p), LazyGraceEnterHook(lambda: kyosai))),
         bankrupt_executor=LazyBankruptExecutor(lambda: debt),
         strict=strict,
     )
@@ -273,7 +273,7 @@ def open_repositories(
         )
     )
     seizure_value_step = CompositeSeizureValueStep((ShopAndHorseSeizureStep(shop, auction, horses),))
-    bankrupt_prep_hook = CompositeBankruptPrepHook((p2p,))
+    bankrupt_prep_hook = CompositeBankruptPrepHook((p2p, kyosai))
 
     valuation_source = CompositeValuationSource((crypto, margin, bonds, bank, options, company))
     wallet = WalletRepo(db, account, bank, debt, debt, relics, valuation_source, strict=strict)

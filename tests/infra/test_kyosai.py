@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from domain import kyosai, p2p
+from domain import kyosai, p2p, shop, teiai
 from infra.db.repositories import open_repositories
 
 G, A, B, C = 10, 1, 2, 3
@@ -252,6 +252,24 @@ def test_transfers_share_the_p2p_daily_pair_limit(eco):
     assert eco.kyosai.kyosai_accept(B, third, NOW + DAY + 1)[0]  # 24時間たてば、また
 
 
+def test_p2p_pair_limit_also_counts_kyosai_transfers(eco):
+    """共済譲渡で 24時間上限まで取引したあとは、同じ2人の自由市場の購入も拒否される（双方向に合算）。"""
+    give(eco, A, 10)
+    eco.wallet.credit(B, p2p.PAIR_DAILY_LIMIT * 2, "テスト")
+    ok, offer_id = eco.kyosai.kyosai_offer(A, B, 1, p2p.PAIR_DAILY_LIMIT, NOW)
+    assert ok and eco.kyosai.kyosai_accept(B, offer_id, NOW)[0]  # 共済譲渡で 10万
+    with eco.db.tx():
+        eco.db.conn.execute(
+            "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, 1) "
+            "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty=qty+1",
+            (G, A, shop.CARROT),
+        )
+    ok, lid = eco.p2p.p2p_list(A, "item", shop.CARROT, 1, "fixed", 1_000, None, NOW)
+    assert ok
+    ok, why = eco.p2p.p2p_buy(B, lid, NOW)
+    assert not ok and why.code == "p2p_pair_limit" and why.params["used"] == p2p.PAIR_DAILY_LIMIT
+
+
 def test_offer_expires_and_can_be_cancelled(eco):
     give(eco, A, 1)
     eco.wallet.balance(B)
@@ -283,6 +301,50 @@ def test_trading_is_locked_when_the_reserve_is_low(eco):
         eco.bank.bank_pay_for(G, 10_000, NOW)  # 手元が減って θ < 0.20
     ok, why = eco.kyosai.kyosai_offer(A, B, 1, 0, NOW)
     assert not ok and why.code == "kyosai_gate_locked"
+
+
+# ----------------------------- 取引停止時の入札の引き戻し ----------------------------- #
+def _open_auction_row(eco):
+    return eco.db.conn.execute(
+        "SELECT id, top_bid, top_bidder FROM kyosai_auctions WHERE guild_id=? AND status='open'", (G,)
+    ).fetchone()
+
+
+def test_grace_enter_cancels_the_open_auction_bid_and_refunds_the_escrow(eco):
+    """破産猶予に入ったら、進行中の競りの入札が取り消されて預かり金が手元へ戻る（#25 同型の逃避をふさぐ）。"""
+    eco.kyosai.kyosai_auction_tick(NOW)
+    eco.wallet.credit(A, 50_000, "テスト")
+    a0 = eco.wallet.balance(A)
+    ok, _ = eco.kyosai.kyosai_bid(A, 1_000, NOW)
+    assert ok and eco.wallet.balance(A) == a0 - 1_000
+    with eco.db.tx():
+        eco.debt.owe_for(G, A, a0 + 20_000, "テスト")  # 手元を全額差し押さえたうえで借金 → 破産猶予へ
+    assert eco.bank.grace_until(A) is not None
+    row = _open_auction_row(eco)
+    assert row["top_bid"] == 0 and row["top_bidder"] is None
+    assert eco.wallet.balance(A) == teiai.SEED + 1_000  # 種銭 + 入札の返金
+    reasons = [r[0] for r in eco.db.conn.execute("SELECT reason FROM ledger WHERE guild_id=? AND user_id=?", (G, A))]
+    assert "共済:競りの入札の返金（取引停止）" in reasons
+
+
+def test_self_bankruptcy_pulls_the_bid_back_into_the_estate_and_leaves_no_escape(eco):
+    """自己破産でも預かり金が引き戻されて破産財団に組み込まれ、破産後に手元や共済口へ逃がせない。"""
+    eco.kyosai.kyosai_auction_tick(NOW)
+    eco.wallet.credit(A, 50_000, "テスト")
+    a0 = eco.wallet.balance(A)
+    ok, row = eco.kyosai.kyosai_bid(A, 1_000, NOW)
+    assert ok
+    with eco.db.tx():
+        eco.db.conn.execute("UPDATE users SET debt=200_000 WHERE guild_id=? AND user_id=?", (G, A))
+    ok, result = eco.debt.bankrupt(A)
+    assert ok and eco.debt.status(A) == teiai.BANKRUPT and eco.debt.debt(A) > 0
+    auction = _open_auction_row(eco)
+    assert auction["top_bid"] == 0 and auction["top_bidder"] is None
+    assert result["seized"] == a0  # 戻った預かり金も現金ごと破産財団へ
+    assert eco.wallet.balance(A) == teiai.SEED and units(eco, A) == 0
+    events = eco.kyosai.kyosai_auction_tick(row["ends"] + 1)
+    assert [e["event"] for e in events] == ["unsold"]  # 締めても A には口が渡らない（出し直しは告知しない）
+    assert units(eco, A) == 0 and _open_auction_row(eco)["top_bidder"] is None
 
 
 # ----------------------------- 動議（#94） ----------------------------- #
