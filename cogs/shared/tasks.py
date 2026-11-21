@@ -1,7 +1,8 @@
 """承認済みギルドに対する定期バックグラウンド処理の共通ヘルパー。"""
 
 import logging
-from typing import Any, Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any, Optional
 
 import discord
 

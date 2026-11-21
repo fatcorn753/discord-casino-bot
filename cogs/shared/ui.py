@@ -63,7 +63,7 @@ def pelica(amount: int) -> str:
 
 def embed(title: str, description: str = "", color: int = INFO) -> discord.Embed:
     e = discord.Embed(title=title, description=description, color=color)
-    e.timestamp = datetime.datetime.now(datetime.timezone.utc)
+    e.timestamp = datetime.datetime.now(datetime.UTC)
     return e
 
 

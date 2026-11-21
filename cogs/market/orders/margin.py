@@ -1,6 +1,7 @@
 """信用取引（空売り・信用買い）の建てと決済。"""
 
-from typing import TYPE_CHECKING, Callable, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Optional
 
 import discord
 

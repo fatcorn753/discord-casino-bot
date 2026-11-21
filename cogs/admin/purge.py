@@ -5,8 +5,9 @@ Bot は自分の発言を消すのに「メッセージの管理」権限は要�
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional
+from typing import Optional
 
 import discord
 

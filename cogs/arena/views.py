@@ -24,7 +24,7 @@ class StakeModal(discord.ui.Modal):
     def __init__(self, panel: "BetPanel", fighter: ArenaFighterRow) -> None:
         super().__init__(title=f"{fighter['name']} に賭ける")
         self.panel, self.fighter = panel, fighter
-        self.stake: discord.ui.TextInput["StakeModal"] = discord.ui.TextInput(
+        self.stake: discord.ui.TextInput[StakeModal] = discord.ui.TextInput(
             label=f"賭け金（{arena_mod.MIN_STAKE:,}〜{arena_mod.MAX_STAKE:,}ペリカ）", max_length=8
         )
         self.add_item(self.stake)

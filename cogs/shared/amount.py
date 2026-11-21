@@ -7,7 +7,8 @@
 """
 
 import unicodedata
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
+from typing import Optional
 
 import discord
 from discord import app_commands
@@ -56,7 +57,7 @@ class AmountModal(discord.ui.Modal):
     ) -> None:
         super().__init__(title=title)
         self._on_amount = on_amount
-        self.amount: discord.ui.TextInput["AmountModal"] = discord.ui.TextInput(
+        self.amount: discord.ui.TextInput[AmountModal] = discord.ui.TextInput(
             label=label, required=required, max_length=max_length
         )
         self.add_item(self.amount)

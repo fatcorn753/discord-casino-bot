@@ -5,7 +5,8 @@
 
 import collections
 import datetime
-from typing import Iterable, Optional
+from collections.abc import Iterable
+from typing import Optional
 
 from domain import history as history_mod
 from domain import missions as missions_mod

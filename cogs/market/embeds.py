@@ -1,8 +1,8 @@
 """`/証券` の埋め込み・表示文の組み立て。"""
 
 import math
-from collections.abc import Mapping
-from typing import Any, Optional, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any, Optional
 
 import discord
 

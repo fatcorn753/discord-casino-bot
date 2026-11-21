@@ -1,6 +1,7 @@
 """ショップの購入・競売・使用・装備・解除・称号表示切替のアクション群。"""
 
-from typing import TYPE_CHECKING, Any, Callable, Optional, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import discord
 

@@ -1,7 +1,8 @@
 """オプション（コール/プット/ペア）の買い・裸売り・途中決済。"""
 
 import math
-from typing import TYPE_CHECKING, Callable, Optional
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Optional
 
 import discord
 
