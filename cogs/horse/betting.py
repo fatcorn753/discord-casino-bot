@@ -33,9 +33,7 @@ class StakeModal(discord.ui.Modal):
             interaction.user.id, self.panel.race["id"], self.panel.kind, lanes, stake, desk.clock.now_ts()
         )
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(result), title="買えませんでした")
             return
         assert not isinstance(result, Failure)
         await self.panel.announce_bets(interaction, result)
@@ -43,13 +41,11 @@ class StakeModal(discord.ui.Modal):
             f"{r['lane']}枠 {r['name']}　オッズ **{r['odds']:.1f}**（的中すれば {ui.pelica(horse_mod.payout(stake, r['odds']))}）"
             for r in result
         ]
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "馬券を買いました",
-                f"**{horse_mod.BET_KINDS[self.panel.kind]}**　各 {ui.pelica(stake)}（合計 {ui.pelica(stake * len(result))}）\n"
-                + "\n".join(lines),
-            ),
-            ephemeral=True,
+        await ui.reply_ok(
+            interaction,
+            f"**{horse_mod.BET_KINDS[self.panel.kind]}**　各 {ui.pelica(stake)}（合計 {ui.pelica(stake * len(result))}）\n"
+            + "\n".join(lines),
+            title="馬券を買いました",
         )
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -71,9 +67,7 @@ class StakeModal(discord.ui.Modal):
             desk.clock.now_ts(),
         )
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(result), title="買えませんでした")
             return
         assert not isinstance(result, Failure)
         picks = (
@@ -82,14 +76,12 @@ class StakeModal(discord.ui.Modal):
             else "・".join(map(str, sorted(result["lanes"])))
         )
         await self.panel.announce_bet(interaction, picks, result)
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "馬券を買いました",
-                f"**{horse_mod.BET_KINDS[result['kind']]}**　{picks}枠（{result['name']}）\n"
-                f"賭け金 {ui.pelica(result['stake'])}　オッズ **{result['odds']:.1f}**"
-                f"（的中すれば {ui.pelica(horse_mod.payout(result['stake'], result['odds']))}）",
-            ),
-            ephemeral=True,
+        await ui.reply_ok(
+            interaction,
+            f"**{horse_mod.BET_KINDS[result['kind']]}**　{picks}枠（{result['name']}）\n"
+            f"賭け金 {ui.pelica(result['stake'])}　オッズ **{result['odds']:.1f}**"
+            f"（的中すれば {ui.pelica(horse_mod.payout(result['stake'], result['odds']))}）",
+            title="馬券を買いました",
         )
 
 

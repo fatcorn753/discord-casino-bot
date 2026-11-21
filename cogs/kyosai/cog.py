@@ -150,9 +150,7 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
     )
 
     async def _fail(self, interaction: discord.Interaction, reason: Any) -> None:
-        await interaction.response.send_message(
-            embed=ui.error_embed("できません", format_failure(reason)), ephemeral=True
-        )
+        await ui.reply_error(interaction, format_failure(reason), title="できません")
 
     @group.command(name="状況", description="自分の口・配当・帝愛の競り・動議・申し出を見る")
     async def status(self, interaction: discord.Interaction):
@@ -171,13 +169,11 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         if not ok:
             return await self._fail(interaction, result)
         assert not isinstance(result, Failure)
-        await interaction.response.send_message(
-            embed=ui.ok_embed(
-                "🔨 入札しました",
-                f"共済の口 **{result['units']:,}口** に {ui.pelica(amount)} で入札しました（締切 <t:{int(result['ends'])}:R>）。\n"
-                "入札額は預かります。ほかの人に上回られたら、手元に戻ります。",
-            ),
-            ephemeral=True,
+        await ui.reply_ok(
+            interaction,
+            f"共済の口 **{result['units']:,}口** に {ui.pelica(amount)} で入札しました（締切 <t:{int(result['ends'])}:R>）。\n"
+            "入札額は預かります。ほかの人に上回られたら、手元に戻ります。",
+            title="🔨 入札しました",
         )
 
     @group.command(name="譲渡", description="自分の口を、値段をつけて相手へ譲る申し出をする（相手が受けると成立）")
@@ -195,9 +191,7 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         price: app_commands.Range[int, 0, p2p.PAIR_DAILY_LIMIT],
     ):
         if member.bot:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("できません", "Bot には譲れません。"), ephemeral=True
-            )
+            return await ui.reply_error(interaction, "Bot には譲れません。", title="できません")
         ok, result = self._kyosai.offer(ui.guild_id_of(interaction), interaction.user.id, member.id, units, price)
         if not ok:
             return await self._fail(interaction, result)
@@ -233,12 +227,8 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
     @app_commands.describe(offer_id="申し出の番号（`/共済 状況` に出ます）")
     async def cancel(self, interaction: discord.Interaction, offer_id: int):
         if not self._kyosai.cancel(ui.guild_id_of(interaction), interaction.user.id, offer_id):
-            return await interaction.response.send_message(
-                embed=ui.error_embed("できません", "その申し出は見つかりません。"), ephemeral=True
-            )
-        await interaction.response.send_message(
-            embed=ui.ok_embed("取り消しました", f"申し出 #{offer_id}"), ephemeral=True
-        )
+            return await ui.reply_error(interaction, "その申し出は見つかりません。", title="できません")
+        await ui.reply_ok(interaction, f"申し出 #{offer_id}", title="取り消しました")
 
     @group.command(
         name="提案", description="帝愛信託の上乗せ金利を変える動議を出す（告知チャンネルに出て、口数で決まる）"
@@ -261,9 +251,8 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         m = self._kyosai.motion(gid, motion_id) or result
         channel = announce_channel(interaction.guild, self._guild_repo) if interaction.guild else None
         if channel is not None and channel.id != interaction.channel_id:
-            await interaction.response.send_message(
-                embed=ui.ok_embed("🗳️ 動議を出しました", f"動議 #{motion_id} を {channel.mention} に告知しました。"),
-                ephemeral=True,
+            await ui.reply_ok(
+                interaction, f"動議 #{motion_id} を {channel.mention} に告知しました。", title="🗳️ 動議を出しました"
             )
             try:
                 msg = await ui.send_channel(channel, embed=motion_embed(m), view=motion_view(motion_id))
@@ -293,9 +282,8 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         m = self._kyosai.motion(gid, result)
         if m is not None and interaction.guild is not None:
             await _edit_open_post(interaction.guild, m)  # 告知の投稿も最新の票数に書き換える（ボタンは残す）
-        await interaction.response.send_message(
-            embed=ui.ok_embed("投票しました", f"動議 #{result} に **{choice.name}**（締切のときの口数で数えます）"),
-            ephemeral=True,
+        await ui.reply_ok(
+            interaction, f"動議 #{result} に **{choice.name}**（締切のときの口数で数えます）", title="投票しました"
         )
 
     # ------------------------------ ボタン ------------------------------ #
@@ -312,9 +300,7 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
                 await interaction.response.edit_message(embed=motion_embed(closed), view=None)
                 await interaction.followup.send(f"動議 #{motion_id} は締め切られています。", ephemeral=True)
                 return
-            await interaction.response.send_message(
-                embed=ui.error_embed("できません", format_failure(result)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(result), title="できません")
             return
         m = self._kyosai.motion(gid, motion_id)
         if m is not None:
