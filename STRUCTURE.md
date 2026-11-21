@@ -62,7 +62,7 @@
 | `raffle/` | 抽選。参加費を預かり、締切で 1 人に全額を渡す（`cog.py`・`embeds.py`・`views.py`） |
 | `event/` | 突発イベントの告知（`cog.py`・`texts.py`、1 日 1 回、30 分だけ勝ち分が増える） |
 | `weekly/` | 週間ランキングの自動発表（毎週月曜 0 時）と限定称号の付与（`cog.py`・`embeds.py`） |
-| `admin/` | サーバー承認と `/運営` コマンド（`cog.py`・`approval_ops.py`・`economy_ops.py`・`content_ops.py`・`feature_ops.py`・`embeds.py`・`texts.py`・`views.py`・`purge.py`・`targets.py`） |
+| `admin/` | サーバー承認と `/運営` コマンド。`cog.py` はコマンド宣言・ブリッジ提供・リスナの薄い入口で、ビジネスロジックとハンドラ本体は `approval_ops.py`（承認・`owner_only`・パネル操作・`handle_button`）・`economy_ops.py`・`content_ops.py`・`feature_ops.py` へ、対象ギルド解決は `targets.py` へ寄せている（ほかに `embeds.py`・`texts.py`・`views.py`・`purge.py`） |
 | `help/` | `/help`。カテゴリ別の案内（`cog.py`・`texts.py`） |
 
 ## `services/` — アプリケーションサービス
@@ -104,7 +104,7 @@
 | `clock.py` | `IClock`（現在時刻・日付・UTCオフセット・タイムスタンプの抽象契約） |
 | `session.py` | `ISessionGuard`（二重プレイ防止セッション管理の契約） |
 | `repos/` | 領域別 DB リポジトリ用名目的基底クラス群（`base.py`・`economy.py`・`teiai.py`・`market.py`・`social.py`・`games.py`・`bundle.py` / `__init__.py` で `IRepositoryBundle` 等を集約再エクスポート） |
-| `contracts.py` | ポートの戻り値に使う型付きの値型（`ActiveBond`・`SeizedBelongings` 等。catalogs 非依存） |
+| `contracts/` | ポートの戻り値に使う型付きの値型・行モデル（catalogs 非依存）。責務別サブモジュール（`core.py`（値型とジェネリックな `HoldingBook[RowT]`・`LoanBook[RowT]`）・`social.py`（出品/抽選/投票/クイズ/労働等の行）・`games.py`（馬/レース/闘技場の行）・`market.py`（現物/建玉/オプション/債券/決算/市場イベント/チャートの行と派生ペイロード）・`teiai.py`（共済の競り/譲渡/動議・貸付・CDS の行と派生ペイロード））に分割し、`__init__.py` で全シンボルを再エクスポート。`from domain.ports.contracts import X` は従来どおり使える |
 | `bridges/` | リポジトリ・サービス間の循環を防ぐ細粒度ブリッジ契約と Null Object / Composite。責務別サブモジュール（`debt.py`・`bank.py`・`margin.py`・`seizure.py`・`loans.py`）に分割し、`__init__.py` で全シンボル（`NoOp*`・`Composite*`・`IValuationSource`・`IAssetCollector`・`IAssetSeizureStep`・`AddAssetPart` 等）を再エクスポート |
 
 ### `games/` — ゲームのルール（純粋な計算）
@@ -162,14 +162,16 @@
 
 | パス | 内容 |
 |---|---|
-| `base.py` | `EcoDb`（共有 DB 接続・ロック・`tx()`・`close()`）、`ScopedRepo`（ギルドスコープ共通基底。`_one()`/`_all()` は行→辞書の定型取得）、`validate_guild_id()` |
+| `base.py` | `EcoDb`（共有 DB 接続・ロック・`tx()`・`close()`）、`ScopedRepo`（ギルドスコープ共通基底。`_one[RowT]()`/`_all[RowT]()` はジェネリックな行→辞書の定型取得で、`domain/ports/contracts/` の行モデルで型付けされる）、`validate_guild_id()` |
 | `schema/` | DB の表定義（`tables.py`）と旧版からの列追加・データ移行（`migrations.py`） |
 | `repositories.py` | `RepositoryBundle` と `open_repositories()`（全リポジトリの構築・ブリッジ接続・`for_guild(gid)` スコープ切り替え・`db` 管理） |
-| `lazy_bridges.py` | 初期化時の循環参照を解決する遅延解決ブリッジラッパー（`Lazy*`） |
+| `lazy_bridges.py` | 初期化時の循環参照を解決する遅延解決ブリッジラッパー。共通基底 `LazyBridgeBase[T]`（`_resolve()` で実体を解決）を継承し、各 `Lazy*` は名目的継承（`isinstance` 可）と Pyright の完全な型検証を両立するため全メソッドを明示する |
 | `account.py` | `AccountCore`（口座残高・台帳記帳・借金ライフサイクルフックの共有プリミティブ） |
 | `escrow.py` / `wallet.py` | 賭け金預かり・精算（`EscrowRepo`）と残高・デイリー・ランキング・統計・送金（`WalletRepo`） |
-| `assets.py` / `auction.py` / `bonds.py` / `company.py` / `crypto.py` / `debt.py` / `earnings.py` / `events.py` / `guild.py` / `horse.py` / `kyosai.py` / `labor.py` / `loans.py` / `margin.py` / `market.py` / `market_events.py` / `notices.py` / `options.py` / `p2p.py` / `pachinko.py` / `poll.py` / `quiz.py` / `race.py` / `raffle.py` / `records.py` / `relics.py` / `rtp.py` / `shop.py` / `arena.py` | 機能別の独立リポジトリ群と `IAssetCollector` / `IAssetSeizureStep` / `ILiquidationStep` 戦略群（各 `domain/ports/repos/` 契約を継承実装） |
+| `assets.py` / `auction.py` / `bonds.py` / `company.py` / `crypto.py` / `earnings.py` / `events.py` / `guild.py` / `horse.py` / `labor.py` / `loans.py` / `margin.py` / `market.py` / `market_events.py` / `notices.py` / `options.py` / `p2p.py` / `pachinko.py` / `poll.py` / `quiz.py` / `race.py` / `raffle.py` / `records.py` / `relics.py` / `rtp.py` / `shop.py` / `arena.py` | 機能別の独立リポジトリ群と `IAssetCollector` / `IAssetSeizureStep` / `ILiquidationStep` 戦略群（各 `domain/ports/repos/` 契約を継承実装） |
 | `bank/` | `BankRepo`（帝愛銀行・破産猶予・CDS）の責務別パッケージ。逐次継承チェーンで `base.py`（コンストラクタ・手元現金の同期）→ `thermostat.py`（熱浴の内部状態）→ `deposits.py`（信託預金の読取・利率・入出金）→ `reserve.py`（準備率・ロック・`bank_status`）→ `flow.py`（入出金ウォーターフォール）→ `interest.py`（金利遷移・信託利息・利得税）→ `house.py`（胴元口座）→ `grace.py`（破産猶予）→ `cds.py`（CDS）。`__init__.py` が最終クラス `BankRepo` を再エクスポートし、`from infra.db.bank import BankRepo` は従来どおり使える |
+| `debt/` | `DebtRepo`（借金・身分・強制執行・種銭・自己破産・海外逃亡）の責務別パッケージ。逐次継承チェーンで `base.py`（コンストラクタ・身分と借金の読み取り）→ `lifecycle.py`（利息・後始末・天引き）→ `ops.py`（強制執行と借金の発生）→ `repay.py`（返済）→ `escape.py`（海外逃亡）→ `bankrupt.py`（自己破産）。差し押さえ `seizure.py`・換金 `liquidation.py`・競売査定 `seizure_value.py` は独立戦略クラス群。`__init__.py` が最終クラス `DebtRepo` と戦略ステップ群を再エクスポートし、`from infra.db.debt import DebtRepo` は従来どおり使える |
+| `kyosai/` | `KyosaiRepo`（帝愛共済 #34。口・配当・超過損失の請求・回収と帝愛の持ち口の競り・譲渡・動議）の責務別パッケージ。逐次継承チェーンで `base.py`（コンストラクタ・口の管理と引き戻し・`DAY`）→ `excess.py`（超過損失の請求）→ `daily.py`（毎日の配当と休眠回収）→ `auction.py`（競り）→ `offers.py`（譲渡）→ `motions.py`（動議と投票）→ `status.py`（表示用まとめ）。`__init__.py` が最終クラス `KyosaiRepo` と `DAY` を再エクスポートし、`from infra.db.kyosai import KyosaiRepo` は従来どおり使える |
 
 ## `tests/` — 自動テスト
 
