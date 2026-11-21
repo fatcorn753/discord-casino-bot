@@ -492,3 +492,46 @@ def test_cogs_use_services_instead_of_repositories():
             ):
                 violations.append(f"{rel}:{node.lineno} uses *.repos.{node.attr}")
     assert not violations, "\n".join(violations)
+
+
+def _max_if_for_while_depth(node: ast.AST, depth: int = 0) -> int:
+    """関数本体内の if / for / async for / while の最大ネスト深度（elif は同階層、ネストした関数・クラス定義は別カウント）。"""
+    best = depth
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(child, (ast.If, ast.For, ast.AsyncFor, ast.While)):
+            is_elif = (
+                isinstance(node, ast.If)
+                and isinstance(child, ast.If)
+                and len(node.orelse) == 1
+                and child is node.orelse[0]
+            )
+            next_depth = depth if is_elif else depth + 1
+            best = max(best, _max_if_for_while_depth(child, next_depth))
+        else:
+            best = max(best, _max_if_for_while_depth(child, depth))
+    return best
+
+
+def test_production_if_for_while_nesting_at_most_3():
+    """本番コード（domain/・services/・infra/・cogs/・main.py・manage.py）の if/for/while ネストは 3 以内。
+
+    深い分岐が出たときは、単にプライベートヘルパへ逃がすのではなく、条件知識のコンテキスト側からの注入・
+    多態化・事前絞り込み・ガード節・match/case で本質的に平坦化する。
+    """
+    targets = [
+        *[p for folder in ("domain", "services", "infra", "cogs") for p in _iter_py(folder)],
+        ROOT / "main.py",
+        ROOT / "manage.py",
+    ]
+    violations: list[str] = []
+    for path in targets:
+        rel = path.relative_to(ROOT)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                d = _max_if_for_while_depth(node)
+                if d > 3:
+                    violations.append(f"{rel}:{node.lineno} {node.name} (depth={d})")
+    assert not violations, "if/for/while のネストが 4 以上:\n" + "\n".join(violations)
