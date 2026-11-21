@@ -155,13 +155,11 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
         raffle = self._raffle.current(gid)
 
         if raffle is None or interaction.message is None or raffle["message_id"] != interaction.message.id:
-            await interaction.response.send_message(embed=ui.error_embed("募集は終わりました"), ephemeral=True)
+            await ui.reply_error(interaction, "", title="募集は終わりました")
             return
         ok, reason = self._raffle.join(gid, interaction.user.id)
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("参加できません", format_failure(reason)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(reason), title="参加できません")
             return
         raffle = self._raffle.current(gid)
         assert raffle is not None
