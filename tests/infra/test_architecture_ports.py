@@ -51,7 +51,7 @@ def test_legacy_facade_and_service_locators_are_removed():
 
 
 def test_ports_and_bridges_use_nominal_base_classes_without_protocol_or_abc():
-    """domain/ports/（catalogs 除く）と bridges.py は Protocol・abc.ABC を使わない名目的基底クラスである。"""
+    """domain/ports/（catalogs 除く。bridges はパッケージ）は Protocol・abc.ABC を使わない名目的基底クラスである。"""
     targets = [p for p in _iter_py("domain/ports") if p.name not in ("catalogs.py",) and "catalog_types" not in p.parts]
     targets.append(ROOT / "cogs/shared/bridges.py")
     violations: list[str] = []
@@ -68,6 +68,27 @@ def test_ports_and_bridges_use_nominal_base_classes_without_protocol_or_abc():
             elif isinstance(node, ast.ImportFrom) and node.module in ("abc",):
                 violations.append(f"{path.relative_to(ROOT)}:{node.lineno} imports abc")
     assert not violations, "\n".join(violations)
+
+
+def test_bridges_package_reexports_every_submodule_symbol():
+    """domain/ports/bridges/ の各サブモジュールが定義する公開シンボルは、パッケージから漏れなく再エクスポートされる。"""
+    import domain.ports.bridges as bridges_pkg
+
+    pkg_dir = ROOT / "domain" / "ports" / "bridges"
+    defined: dict[str, str] = {}
+    for path in sorted(pkg_dir.glob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                defined[node.name] = path.name
+            elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+                defined[node.targets[0].id] = path.name
+    assert defined, "bridges サブモジュールが空です"
+    not_exported = [f"{name} ({mod})" for name, mod in defined.items() if not hasattr(bridges_pkg, name)]
+    assert not not_exported, "パッケージへの再エクスポート漏れ:\\n" + "\\n".join(not_exported)
+    assert set(bridges_pkg.__all__) == set(defined), "__all__ とサブモジュール定義が一致しません"
 
 
 @pytest.mark.real_scope
