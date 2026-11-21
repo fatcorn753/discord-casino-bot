@@ -196,9 +196,7 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
         desk = self._horse_svc.desk(gid)
         race = desk.race_get(race_id)
         if race is None:
-            await interaction.response.send_message(
-                embed=ui.error_embed("見つかりません", "そのレースは、もうありません。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "そのレースは、もうありません。", title="見つかりません")
             return
         if action == "card":
             await interaction.response.send_message(embed=card_embed(desk, race), ephemeral=True)
@@ -206,9 +204,7 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
         if not await approval_guard.feature_guard(interaction, self._guild_repo, "horse"):
             return
         if race["status"] != "betting" or desk.clock.now_ts() >= race["bet_close"]:
-            await interaction.response.send_message(
-                embed=ui.error_embed("買えません", "このレースの馬券は、まだ（またはもう）買えません。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "このレースの馬券は、まだ（またはもう）買えません。", title="買えません")
             return
         panel = BetPanel(self._horse_svc, interaction.user.id, race, self.post_bet_announcement)
         await interaction.response.send_message(embed=panel.embed(desk), view=panel, ephemeral=True)
