@@ -7,7 +7,7 @@ import pytest
 
 from cogs.kyosai.cog import KyosaiCog, motion_embed
 from infra.db.repositories import open_repositories
-from tests.fakes import as_bot, as_guild, as_interaction, must
+from tests.fakes import as_bot, as_choice, as_guild, as_interaction, invoke, must
 from tests.support import make_test_bot
 
 G, A, B = 10, 1, 2
@@ -139,6 +139,20 @@ def test_button_on_a_closed_motion_shows_the_result_and_removes_the_buttons(tmp_
         it.response.edited[0]["embed"].description
     )
     assert "締め切られています" in it.followup.sent[0][0][0]
+
+
+def test_slash_vote_also_updates_the_announcement_post_and_keeps_the_buttons(tmp_path):
+    """`/共済 投票` で投票したときも、告知の投稿が最新の票数の Embed に書き換わり、ボタン（view）は渡されない。"""
+    cog, ch, guild, bot = setup_cog(tmp_path)
+    give(bot, A, 5000)
+    give(bot, B, 100)
+    mid = propose(cog, ch, guild)
+    it = interaction(B, guild, ch)
+    asyncio.run(invoke(cog.vote, cog, as_interaction(it), as_choice(SimpleNamespace(name="反対", value="no")), mid))
+    assert it.response.sent  # コマンド応答はそのまま
+    edit = ch.msg.edits[-1]
+    assert "view" not in edit  # ボタンは残す
+    assert "反対 **100口**" in must(edit["embed"].description)  # 最新の票数に書き換わる
 
 
 def test_embed_of_an_open_motion_still_shows_the_deadline():

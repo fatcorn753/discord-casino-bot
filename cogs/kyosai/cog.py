@@ -281,11 +281,13 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
     async def vote(
         self, interaction: discord.Interaction, choice: app_commands.Choice[str], motion_id: Optional[int] = None
     ):
-        ok, result = self._kyosai.vote(
-            ui.guild_id_of(interaction), interaction.user.id, choice.value == "yes", motion_id
-        )
+        gid = ui.guild_id_of(interaction)
+        ok, result = self._kyosai.vote(gid, interaction.user.id, choice.value == "yes", motion_id)
         if not ok:
             return await self._fail(interaction, result)
+        m = self._kyosai.motion(gid, result)
+        if m is not None and interaction.guild is not None:
+            await _edit_open_post(interaction.guild, m)  # 告知の投稿も最新の票数に書き換える（ボタンは残す）
         await interaction.response.send_message(
             embed=ui.ok_embed("投票しました", f"動議 #{result} に **{choice.name}**（締切のときの口数で数えます）"),
             ephemeral=True,
@@ -345,10 +347,26 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
                 logthrottle.warn(("kyosai", guild.id), f"共済の告知を投稿できません: guild={guild.id}: {exc!r}")
 
 
+def _motion_post(guild: discord.Guild, m: dict[str, Any]) -> Optional[Any]:
+    """動議の告知の投稿（覚えているときだけ）。"""
+    channel = guild.get_channel(m.get("channel_id") or 0)
+    return ui.partial_message(channel, m["message_id"]) if channel is not None and m.get("message_id") else None
+
+
+async def _edit_open_post(guild: discord.Guild, m: dict[str, Any]) -> None:
+    """投票中の動議の告知の投稿を、最新の票数の Embed だけで書き換える（ボタンは残す。投稿を覚えていないときは何もしない）。"""
+    msg = _motion_post(guild, m)
+    if msg is None:
+        return
+    try:
+        await msg.edit(embed=motion_embed(m))
+    except discord.HTTPException as exc:
+        logthrottle.warn(("kyosai", m["id"]), f"共済の動議の投稿を直せません: motion={m['id']}: {exc!r}")
+
+
 async def _edit_closed_post(guild: discord.Guild, m: dict[str, Any]) -> None:
     """締めた動議の告知の投稿を、結果に書き換えてボタンを外す（投稿を覚えていないときは何もしない）。"""
-    channel = guild.get_channel(m.get("channel_id") or 0)
-    msg = ui.partial_message(channel, m["message_id"]) if channel is not None and m.get("message_id") else None
+    msg = _motion_post(guild, m)
     if msg is None:
         return
     try:
