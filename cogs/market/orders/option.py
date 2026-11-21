@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import discord
 
@@ -27,10 +27,10 @@ async def option_buy(
     kind: str,
     symbol: str,
     amount: int,
-    symbol2: Optional[str] = None,
-    target: Optional[int] = None,
+    symbol2: str | None = None,
+    target: int | None = None,
     *,
-    confirm_fn: Optional[Callable] = None,
+    confirm_fn: Callable | None = None,
 ) -> None:
     """爆騰コール・暴落プット・ペア・ワラントを買う。満期は6時間後。損失は掛け金だけ。"""
     sym, (name, emoji, _hint) = market.BY_KEY[symbol], opt.KINDS[kind]
@@ -108,9 +108,9 @@ async def option_write(
     kind: str,
     symbol: str,
     amount: int,
-    target: Optional[int] = None,
+    target: int | None = None,
     *,
-    confirm_fn: Optional[Callable] = None,
+    confirm_fn: Callable | None = None,
 ) -> None:
     """コール・プットの裸売り。帝愛に売って、プレミアムを先にもらう。証拠金（行使価格の20%）を預け、満期に損失を払う。"""
     sym, label = market.BY_KEY[symbol], opt.SHORT_NAMES[kind]
@@ -175,7 +175,7 @@ async def option_sell(
     interaction: discord.Interaction,
     option_id: int,
     *,
-    confirm_fn: Optional[Callable] = None,
+    confirm_fn: Callable | None = None,
 ) -> None:
     """オプションを、満期の前に手放す。買いはいまの値段（売値）で売り、裸売りは買値で買い戻す。"""
     gid = ui.guild_id_of(interaction)

@@ -4,7 +4,7 @@ Bot が新しいサーバーに追加されると、持ち主（owner_ids）に 
 コマンドの業務ロジックは approval_ops / economy_ops / content_ops へ分離し、ここはコマンド定義と委譲のみを持つ。
 """
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -53,10 +53,10 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         quiz_svc: QuizService,
         labor_svc: LaborService,
         *,
-        event_bridge: Optional[IEventAdminBridge] = None,
-        horse_bridge: Optional[IHorseAdminBridge] = None,
-        raffle_bridge: Optional[IRaffleAdminBridge] = None,
-        quiz_bridge: Optional[IQuizAdminBridge] = None,
+        event_bridge: IEventAdminBridge | None = None,
+        horse_bridge: IHorseAdminBridge | None = None,
+        raffle_bridge: IRaffleAdminBridge | None = None,
+        quiz_bridge: IQuizAdminBridge | None = None,
     ):
         self.bot = bot
         self._config = config
@@ -193,8 +193,8 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         game: app_commands.Choice[str],
         minutes: app_commands.Range[int, 1, 180] = 30,
         boost: app_commands.Range[int, 1, 300] = 50,
-        guild_id: Optional[str] = None,
-        channel_id: Optional[str] = None,
+        guild_id: str | None = None,
+        channel_id: str | None = None,
     ):
         if await approval_ops.owner_only(self, interaction):
             await economy_ops.event_start(self, interaction, game.value, minutes, boost, guild_id, channel_id)
@@ -205,7 +205,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     @event_group.command(name="終了", description="[管理者] 開催中の特別イベントを、すぐ終わらせる")
     @app_commands.rename(guild_id="サーバー")
     @app_commands.describe(guild_id="終わらせるサーバー（候補から選ぶ。空なら全サーバー）")
-    async def event_stop(self, interaction: discord.Interaction, guild_id: Optional[str] = None):
+    async def event_stop(self, interaction: discord.Interaction, guild_id: str | None = None):
         if await approval_ops.owner_only(self, interaction):
             await economy_ops.event_stop(self, interaction, guild_id)
 
@@ -243,7 +243,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     @rtp_group.command(name="一覧", description="[管理者] ゲームごとの還元率レベルと、還元率の目安を見る")
     @app_commands.rename(guild_id="サーバー")
     @app_commands.describe(guild_id="見るサーバー（候補から選ぶ。空なら全サーバー）")
-    async def rtp_list(self, interaction: discord.Interaction, guild_id: Optional[str] = None):
+    async def rtp_list(self, interaction: discord.Interaction, guild_id: str | None = None):
         if await approval_ops.owner_only(self, interaction):
             await economy_ops.rtp_list(self, interaction, guild_id)
 
@@ -278,7 +278,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     @feature_group.command(name="一覧", description="[管理者] 機能ごとの稼働・停止を見る")
     @app_commands.rename(guild_id="サーバー")
     @app_commands.describe(guild_id="見るサーバー（候補から選ぶ。空なら全サーバー）")
-    async def feature_list(self, interaction: discord.Interaction, guild_id: Optional[str] = None):
+    async def feature_list(self, interaction: discord.Interaction, guild_id: str | None = None):
         if await approval_ops.owner_only(self, interaction):
             await feature_ops.feature_list(self, interaction, guild_id)
 
@@ -292,8 +292,8 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     async def pachinko_stats(
         self,
         interaction: discord.Interaction,
-        guild_id: Optional[str] = None,
-        days: Optional[app_commands.Range[int, 1, 365]] = None,
+        guild_id: str | None = None,
+        days: app_commands.Range[int, 1, 365] | None = None,
     ):
         if await approval_ops.owner_only(self, interaction):
             await economy_ops.pachinko_stats(self, interaction, guild_id, days)
@@ -339,7 +339,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         guild_id: str,
         entry_min: app_commands.Range[int, 1, 120] = 5,
         bet_min: app_commands.Range[int, 1, 120] = 5,
-        channel_id: Optional[str] = None,
+        channel_id: str | None = None,
     ):
         if await approval_ops.owner_only(self, interaction):
             await content_ops.special_race(self, interaction, guild_id, entry_min, bet_min, channel_id)
@@ -363,8 +363,8 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         interaction: discord.Interaction,
         guild_id: str,
         advance: bool = False,
-        fmt: Optional[app_commands.Choice[str]] = None,
-        channel_id: Optional[str] = None,
+        fmt: app_commands.Choice[str] | None = None,
+        channel_id: str | None = None,
     ):
         if await approval_ops.owner_only(self, interaction):
             await content_ops.host_arena(self, interaction, guild_id, advance, fmt.value if fmt else None, channel_id)
@@ -383,10 +383,10 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     async def announce(
         self,
         interaction: discord.Interaction,
-        guild_id: Optional[str] = None,
-        image: Optional[discord.Attachment] = None,
-        title: Optional[str] = None,
-        channel_id: Optional[str] = None,
+        guild_id: str | None = None,
+        image: discord.Attachment | None = None,
+        title: str | None = None,
+        channel_id: str | None = None,
     ):
         if await approval_ops.owner_only(self, interaction):
             await content_ops.announce(self, interaction, guild_id, image, title, channel_id)
@@ -422,9 +422,9 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         self,
         interaction: discord.Interaction,
         guild_id: str,
-        fee: Optional[app_commands.Range[int, 500]] = None,
+        fee: app_commands.Range[int, 500] | None = None,
         minutes: app_commands.Range[int, 1, 1440] = 60,
-        channel_id: Optional[str] = None,
+        channel_id: str | None = None,
     ):
         if await approval_ops.owner_only(self, interaction):
             await content_ops.raffle_start(self, interaction, guild_id, fee, minutes, channel_id)
@@ -440,7 +440,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         guild_id="抽選を開いているサーバー（候補から選ぶ）",
         channel_id="出し直すチャンネル（候補から選ぶ。空なら告知チャンネル）",
     )
-    async def raffle_repost(self, interaction: discord.Interaction, guild_id: str, channel_id: Optional[str] = None):
+    async def raffle_repost(self, interaction: discord.Interaction, guild_id: str, channel_id: str | None = None):
         if await approval_ops.owner_only(self, interaction):
             await content_ops.raffle_repost(self, interaction, guild_id, channel_id)
 
@@ -471,9 +471,9 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
     async def quiz_add(
         self,
         interaction: discord.Interaction,
-        announce: Optional[app_commands.Choice[int]] = None,
-        guild_id: Optional[str] = None,
-        channel_id: Optional[str] = None,
+        announce: app_commands.Choice[int] | None = None,
+        guild_id: str | None = None,
+        channel_id: str | None = None,
     ):
         if await approval_ops.owner_only(self, interaction):
             await content_ops.quiz_add(self, interaction, announce is None or announce.value == 1, guild_id, channel_id)
@@ -498,9 +498,9 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
         self,
         interaction: discord.Interaction,
         file: discord.Attachment,
-        announce: Optional[app_commands.Choice[int]] = None,
-        guild_id: Optional[str] = None,
-        channel_id: Optional[str] = None,
+        announce: app_commands.Choice[int] | None = None,
+        guild_id: str | None = None,
+        channel_id: str | None = None,
     ):
         if await approval_ops.owner_only(self, interaction):
             await content_ops.quiz_bulk(

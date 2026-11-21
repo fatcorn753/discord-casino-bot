@@ -2,7 +2,6 @@
 
 import datetime
 import math
-from typing import Optional
 
 from domain import teiai
 from domain.errors import fail
@@ -109,7 +108,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
     # ------------------------------------------------------------------ #
     # デイリー                                                            #
     # ------------------------------------------------------------------ #
-    def claim_daily(self, user_id: int, today: datetime.date, slot: Optional[int] = None) -> DailyResult:
+    def claim_daily(self, user_id: int, today: datetime.date, slot: int | None = None) -> DailyResult:
         """時間帯（slot）ごとに1回のボーナス。slot が前回より進んでいれば受け取れる（省略時は1日1回）。
 
         連続日数は「日」で数える。昨日も受け取っていれば伸び、金額が増える。同じ日に何回受け取っても、連続日数は1日分。
@@ -210,7 +209,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
     # ------------------------------------------------------------------ #
     # ランキング・統計・履歴                                              #
     # ------------------------------------------------------------------ #
-    def _ranked(self, guild_id: int, user_ids: Optional[set[int]]) -> list[tuple[int, int]]:
+    def _ranked(self, guild_id: int, user_ids: set[int] | None) -> list[tuple[int, int]]:
         """[(ユーザーID, 純資産)] を多い順に。純資産は、残高から借金を引き、CS・預金・債券・オプションの評価額を足したもの。"""
         with self._db.tx():
             targets = (
@@ -243,7 +242,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
     def wealthy_ids(self) -> set[int]:
         return self.wealthy_ids_for(self._g())
 
-    def display_status(self, user_id: int, wealthy: Optional[set[int]] = None) -> str:
+    def display_status(self, user_id: int, wealthy: set[int] | None = None) -> str:
         """表示用の身分。status() と同じで、カタギで純資産が WEALTHY_ASSETS 以上なら WEALTHY。wealthy を渡すと再計算しない。"""
         gid = self._g()
         status = self._status_reader.status_for(gid, user_id, self._now())
@@ -252,11 +251,11 @@ class WalletRepo(ScopedRepo, IWalletRepo):
         ids = self.wealthy_ids_for(gid) if wealthy is None else wealthy
         return teiai.WEALTHY if user_id in ids else teiai.KATAGI
 
-    def top(self, limit: int = 10, user_ids: Optional[set[int]] = None) -> list[RankEntry]:
+    def top(self, limit: int = 10, user_ids: set[int] | None = None) -> list[RankEntry]:
         """[(順位, ユーザーID, 純資産), ...]。このサーバーの口座だけで並べる。user_ids を渡すと、さらにその人たちに絞る。"""
         return [(i + 1, uid, bal) for i, (uid, bal) in enumerate(self._ranked(self._g(), user_ids)[:limit])]
 
-    def rank_of(self, user_id: int, user_ids: Optional[set[int]] = None) -> Optional[RankEntry]:
+    def rank_of(self, user_id: int, user_ids: set[int] | None = None) -> RankEntry | None:
         """(順位, 純資産, 対象人数)。登録がなければ None。"""
         ranked = self._ranked(self._g(), user_ids)
         for i, (uid, bal) in enumerate(ranked):
@@ -264,7 +263,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
                 return i + 1, bal, len(ranked)
         return None
 
-    def peek_stats(self, user_id: int) -> Optional[UserRow]:
+    def peek_stats(self, user_id: int) -> UserRow | None:
         """読み取り専用。未登録の人を作らずに、成績を返す（未登録なら None）。"""
         with self._lock:
             return self._one("SELECT * FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id))

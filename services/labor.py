@@ -1,6 +1,5 @@
 """地下作業のアプリケーションサービス（日付キー解決・クリック不正検知レポート）。"""
 
-from typing import Optional
 
 from domain import labor as labor_mod
 from domain.errors import Outcome
@@ -18,7 +17,7 @@ from domain.ports.repos import ILaborRepo, IRelicRepo
 class LaborService:
     """地下作業の日付キー・クリック分析レポート取得を担う。"""
 
-    def __init__(self, labor: ILaborRepo, clock: IClock, relics: Optional[IRelicRepo] = None) -> None:
+    def __init__(self, labor: ILaborRepo, clock: IClock, relics: IRelicRepo | None = None) -> None:
         self._labor = labor
         self.clock = clock
         self._relics = relics

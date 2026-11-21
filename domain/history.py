@@ -5,7 +5,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 _GAME_ROWS = ("追加の賭け:", "払い戻し:", "保険券で半額返金:", "追加の支払い:", "返金:")
 _TRANSFER = re.compile(r"^送金（(送|受)）[→←](\d+)$")
@@ -17,10 +17,10 @@ class HistoryEntry:
     kind: str  # "game" | "transfer" | "other"
     delta: int
     balance_after: int
-    game: Optional[str] = None
+    game: str | None = None
     bet: int = 0
     direction: str = ""  # "送" | "受"
-    target_user_id: Optional[int] = None
+    target_user_id: int | None = None
     reason: str = ""
 
 

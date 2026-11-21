@@ -1,6 +1,5 @@
 """ランキングの表示（`/ペリカ ランキング` と、自動更新のランキング掲示板で共通）。"""
 
-from typing import Optional
 
 import discord
 
@@ -15,11 +14,11 @@ TOP_N = 10
 
 def build_embed(
     repos: RankingService,
-    guild_ids: Optional[set],
+    guild_ids: set | None,
     title: str,
-    viewer_id: Optional[int] = None,
+    viewer_id: int | None = None,
     header: str = "",
-    footer: Optional[str] = None,
+    footer: str | None = None,
 ) -> discord.Embed:
     """上位 TOP_N 人のランキングの埋め込みを作る。guild_ids を渡すと、その人たちの中での順位。
 
@@ -55,10 +54,10 @@ def build_embed(
 
 def build_final_embed(
     repos: RankingService,
-    guild_ids: Optional[set],
+    guild_ids: set | None,
     title: str,
-    viewer_id: Optional[int] = None,
-    footer: Optional[str] = None,
+    viewer_id: int | None = None,
+    footer: str | None = None,
 ) -> discord.Embed:
     """総資産（馬・持ち物・発掘品なども、ペリカに換算しての総額）の上位 TOP_N 人。"""
     ranked = repos.final_assets(guild_ids)

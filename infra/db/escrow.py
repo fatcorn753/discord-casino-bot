@@ -1,6 +1,5 @@
 """ゲームの賭け金預かり（escrow）と精算・返金。"""
 
-from typing import Optional
 
 from domain import teiai
 from domain.games import jackpot
@@ -28,7 +27,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
         self._bank = bank
         self._debt = debt
 
-    def place_bet(self, user_id: int, amount: int, game: str) -> Optional[int]:
+    def place_bet(self, user_id: int, amount: int, game: str) -> int | None:
         """賭け金を残高から預かり、預かり金IDを返す。残高不足なら None。"""
         if amount <= 0:
             return None
@@ -78,7 +77,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
             v = self._scalar("SELECT amount FROM escrow WHERE id=? AND guild_id=?", (escrow_id, self._g()))
             return v if v is not None else 0
 
-    def settle(self, escrow_id: int, payout: int, game: str) -> Optional[int]:
+    def settle(self, escrow_id: int, payout: int, game: str) -> int | None:
         """預かり金を精算する。payout は「受け取る総額」（賭け金を含む。負けなら 0）。
 
         すでに精算済みなら何もせず None（二重払いを防ぐ）。成功時は損益（payout - 賭け金）を返す。
@@ -88,7 +87,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
 
     def settle_with_penalty(
         self, escrow_id: int, payout: int, game: str, penalty: int
-    ) -> Optional[tuple[int, int, int]]:
+    ) -> tuple[int, int, int] | None:
         """精算と、倍払いなどの追加の支払いを、1回のトランザクションで行う。
 
         penalty はまず残高から引き、足りない分は借金にする。負けて払い戻しが 0 のとき、保険券があれば賭け金の半分を返す。

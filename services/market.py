@@ -3,7 +3,6 @@
 import logging
 import random
 from collections.abc import Mapping
-from typing import Optional
 
 from domain import bonds, earnings, market, market_events
 from domain import options as opt
@@ -110,7 +109,7 @@ class MarketService:
             self._market.market_fair_set(key, new_fair[key], pins.get(key, 0), ts)
         return new, event
 
-    def histories(self, minutes: int, now: Optional[float] = None) -> dict[str, list[PricePoint]]:
+    def histories(self, minutes: int, now: float | None = None) -> dict[str, list[PricePoint]]:
         now = self.clock.now_ts() if now is None else now
         since = now - minutes * 60
         return {s.key: self._market.market_history(since, s.key) for s in market.SYMBOLS}
@@ -202,7 +201,7 @@ class MarketService:
     def market_events(self, now: float) -> list[MarketEventRow]:
         return self._market_events.market_events(now)
 
-    def earnings_upcoming(self, now: float) -> Optional[EarningsAnnouncement]:
+    def earnings_upcoming(self, now: float) -> EarningsAnnouncement | None:
         return self._earnings.earnings_upcoming(now)
 
     def earnings_to_announce(self, now: float) -> list[EarningsAnnounceRow]:
@@ -222,7 +221,7 @@ class MarketService:
 
     def swap_chart_post(
         self, channel_id: int, message_id: int, guild_id: int, period: str, now: float, symbol: str
-    ) -> Optional[int]:
+    ) -> int | None:
         return self._market.swap_chart_post(channel_id, message_id, guild_id, period, now, symbol)
 
     def end_chart_post(self, channel_id: int) -> None:
@@ -247,7 +246,7 @@ class MarketService:
     def crypto_buy(self, guild_id: int, uid: int, amount: int, price: float, symbol: str) -> CryptoResult:
         return self._crypto.for_guild(guild_id).crypto_buy(uid, amount, price, symbol)
 
-    def crypto_sell(self, guild_id: int, uid: int, units: Optional[int], price: float, symbol: str) -> CryptoResult:
+    def crypto_sell(self, guild_id: int, uid: int, units: int | None, price: float, symbol: str) -> CryptoResult:
         return self._crypto.for_guild(guild_id).crypto_sell(uid, units, price, symbol)
 
     # ------------------------------ 信用取引 ------------------------------ #
@@ -262,7 +261,7 @@ class MarketService:
         return (repo.short_open if side == "short" else repo.long_open)(uid, units, price, leverage, symbol)
 
     def margin_close(
-        self, guild_id: int, uid: int, side: str, units: Optional[int], price: float, symbol: str
+        self, guild_id: int, uid: int, side: str, units: int | None, price: float, symbol: str
     ) -> CryptoResult:
         return self._margin.for_guild(guild_id).margin_close(uid, side, units, price, symbol)
 
@@ -278,15 +277,15 @@ class MarketService:
         symbol: str,
         amount: int,
         *,
-        symbol2: Optional[str] = None,
-        strike_pct: Optional[float] = None,
+        symbol2: str | None = None,
+        strike_pct: float | None = None,
     ) -> Outcome[OptionBuyResult]:
         return self._options.for_guild(guild_id).option_buy(
             uid, kind, symbol, amount, self.clock.now_ts(), symbol2=symbol2, strike_pct=strike_pct
         )
 
     def option_write(
-        self, guild_id: int, uid: int, kind: str, symbol: str, amount: int, *, strike_pct: Optional[float] = None
+        self, guild_id: int, uid: int, kind: str, symbol: str, amount: int, *, strike_pct: float | None = None
     ) -> Outcome[OptionWriteResult]:
         return self._options.for_guild(guild_id).option_write(
             uid, kind, symbol, amount, self.clock.now_ts(), strike_pct=strike_pct

@@ -1,6 +1,5 @@
 """毎日の配当と休眠口座の回収。"""
 
-from typing import Optional
 
 from domain import kyosai
 from domain.ports.contracts import KyosaiDaily
@@ -10,7 +9,7 @@ from .excess import KyosaiRepo as Base
 
 
 class KyosaiRepo(Base):
-    def kyosai_daily(self, now: float) -> Optional[KyosaiDaily]:
+    def kyosai_daily(self, now: float) -> KyosaiDaily | None:
         """1日に1回: 休眠の人の口を回収し、余剰から配当を配る。配ったときだけ {pool, paid, recovered} を返す。"""
         with self._db.tx():
             gid = self._g()

@@ -9,7 +9,7 @@
 import asyncio
 import datetime
 import logging
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import discord
 from discord import app_commands
@@ -41,7 +41,7 @@ NONE = discord.AllowedMentions.none()
 GAP_ZOOM = 3.0  # 先頭との差を、見やすく広げる倍率（そのままだと、全馬が団子に見える）
 
 
-def display_frames(frames: list, winner: int, finish: Optional[list] = None) -> list:
+def display_frames(frames: list, winner: int, finish: list | None = None) -> list:
     """アニメーション用に、先頭がゴールした瞬間までに切り、先頭との差を GAP_ZOOM 倍に広げる（後ろに下がって見えないようにする）。
 
     最後のコマは、1着の馬がゴールに着いた瞬間。ほかの馬は、ゴールの時刻の差（finish）だけ手前にいる
@@ -79,7 +79,7 @@ def laps_for(distance: int) -> int:
     return max(1, distance // 1000)
 
 
-def lane_text(entries: list, positions: list, laps: int = 1, now: Optional[datetime.datetime] = None) -> str:
+def lane_text(entries: list, positions: list, laps: int = 1, now: datetime.datetime | None = None) -> str:
     """各馬の位置。laps>1 のときは、コースの1周が全体の 1/laps で、何周目かを頭に書く（馬ごとに、いまの周の位置を出す）。
 
     now を渡すと、季節演出の期間中は、帝愛の馬が季節の絵（例: 🦌）で走る。
@@ -99,7 +99,7 @@ def lane_text(entries: list, positions: list, laps: int = 1, now: Optional[datet
     return "```\n" + head + "\n".join(rows) + "\n```"
 
 
-def comment(entries: list, positions: list, previous_leader, final: bool, winner=None, distance: Optional[int] = None):
+def comment(entries: list, positions: list, previous_leader, final: bool, winner=None, distance: int | None = None):
     """実況の一言と、いまの先頭（馬の添字）。final のときは、winner（1着の馬の添字）を名指しする。"""
     leader = max(range(len(positions)), key=lambda i: positions[i])
     top = positions[leader]
@@ -247,7 +247,7 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
 
     # ------------------------------ 開催 ------------------------------ #
     async def start_special(
-        self, guild: discord.Guild, entry_min: int, bet_min: int, channel: Optional[discord.abc.Messageable] = None
+        self, guild: discord.Guild, entry_min: int, bet_min: int, channel: discord.abc.Messageable | None = None
     ) -> int:
         """臨時レースを開催する（管理者用）。channel を指定すれば、掲示・馬券・レースはそこに出す。作ったレースの番号を返す。"""
         desk = self._horse_svc.desk(guild.id)

@@ -1,6 +1,5 @@
 """口の譲渡（プレイヤー間の売買）: 申し出・承諾・取消と、送金抜け道対策の上限。"""
 
-from typing import Optional
 
 from domain import kyosai, p2p
 from domain.errors import Outcome, fail
@@ -67,7 +66,7 @@ class KyosaiRepo(Base):
         with self._db.tx():
             gid = self._g()
             self.bank_sync(gid, now)
-            row: Optional[KyosaiOfferRow] = self._one(
+            row: KyosaiOfferRow | None = self._one(
                 "SELECT * FROM kyosai_offers WHERE id=? AND guild_id=? AND buyer=? AND status='open' AND expires>?",
                 (offer_id, gid, buyer, now),
             )

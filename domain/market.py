@@ -8,7 +8,6 @@ import math
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional
 
 from domain.errors import Failure, fail
 from domain.ports import get_catalogs
@@ -85,7 +84,7 @@ def pin_states(fair: dict[str, float], reference: dict[str, float], limit: float
 PIN_LOCKS = dict(_CFG.pin_locks)
 
 
-def pin_lock_failure(symbol: str, pin: int, action: str) -> Optional[Failure]:
+def pin_lock_failure(symbol: str, pin: int, action: str) -> Failure | None:
     """張り付き中で action が約定しないなら Failure を返す。通るなら None。"""
     if action not in PIN_LOCKS.get(pin, ()):
         return None
@@ -160,7 +159,7 @@ CHOLESKY = cholesky(COVARIANCE)
 
 
 def next_prices(
-    prices: dict[str, float], rng: random.Random, vol: Optional[dict[str, float]] = None
+    prices: dict[str, float], rng: random.Random, vol: dict[str, float] | None = None
 ) -> tuple[dict[str, float], int]:
     """1分後の全銘柄の価格と、有事の出来事（+1 急騰 / -1 急落 / 0 なし）。
 
@@ -269,7 +268,7 @@ def lots(units: int) -> str:
 
 def correlation_from_history(
     hist_a: Sequence[tuple[float, float, int]], hist_b: Sequence[tuple[float, float, int]]
-) -> Optional[float]:
+) -> float | None:
     """2つの銘柄の価格の履歴 [(時刻, 価格, 出来事), ...] から、1分ごとの値動き（対数の変化）の相関を求める。足りなければ None。"""
     a = {t: p for t, p, _ in hist_a}
     pairs = [(a[t], p) for t, p, _ in hist_b if t in a]  # 同じ時刻の価格だけを使う
@@ -284,7 +283,7 @@ def correlation_from_history(
     return sum((x - ma) * (y - mb) for x, y in zip(ra, rb, strict=True)) / math.sqrt(va * vb)
 
 
-def describe_correlation(value: Optional[float]) -> str:
+def describe_correlation(value: float | None) -> str:
     """相関を、ひと目で分かる言葉にする。"""
     if value is None:
         return "—"
@@ -331,7 +330,7 @@ def render_chart(prices: list[float], width: int = 32, height: int = 8) -> str:
     return "\n".join(rows)
 
 
-def summary(prices: list[float]) -> Optional[dict[str, float]]:
+def summary(prices: list[float]) -> dict[str, float] | None:
     if not prices:
         return None
     first, last = prices[0], prices[-1]

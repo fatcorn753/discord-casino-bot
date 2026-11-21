@@ -2,7 +2,6 @@
 
 import math
 import random
-from typing import Optional
 
 import discord
 
@@ -28,14 +27,14 @@ async def default_confirmed_reply(interaction: discord.Interaction, needed: bool
     return await confirmed_reply(interaction, needed, title, text, label, confirm_fn=confirm_action)
 
 
-def units_from(have: int, percent: Optional[int]) -> Optional[int]:
+def units_from(have: int, percent: int | None) -> int | None:
     """売る・買い戻す口数。percent（1〜100）ならその割合（端数でも最低1口）、省略か100以上なら None（全部）。"""
     if percent is not None and 0 < percent < 100:
         return max(1, have * percent // 100)
     return None
 
 
-def worth(have: int, units: Optional[int], price: float) -> float:
+def worth(have: int, units: int | None, price: float) -> float:
     """売買する分（units が None なら全部）の、いまの価格での金額。確認を挟むかの判定に使う。"""
     return (have if units is None else min(units, have)) * price // market.UNIT
 

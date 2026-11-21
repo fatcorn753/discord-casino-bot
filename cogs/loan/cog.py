@@ -9,7 +9,7 @@
 
 import logging
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -172,7 +172,7 @@ class LoanCog(commands.Cog, ILoanButtonBridge):
         self,
         interaction: discord.Interaction,
         loan_id: int,
-        amount: Optional[app_commands.Range[int, 1, 10_000_000]] = None,
+        amount: app_commands.Range[int, 1, 10000000] | None = None,
     ):
         guild_id = ui.guild_id_of(interaction)
         ok, result = self._loans.repay(guild_id, loan_id, interaction.user.id, amount)

@@ -1,7 +1,7 @@
 """ショップの購入・競売・使用・装備・解除・称号表示切替のアクション群。"""
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import discord
 
@@ -32,7 +32,7 @@ def _item_hint(unique: bool) -> str:
 
 
 async def buy_auction_horse(
-    cog: "ShopCog", interaction: discord.Interaction, horse_id: int, *, confirm_fn: Optional[Callable] = None
+    cog: "ShopCog", interaction: discord.Interaction, horse_id: int, *, confirm_fn: Callable | None = None
 ) -> None:
     """競売の馬を買う（買い物の間は「プレイ中」にする）。"""
     fn = confirm_action if confirm_fn is None else confirm_fn
@@ -71,7 +71,7 @@ async def buy_auction(
     item_id: str,
     qty: int = 1,
     *,
-    confirm_fn: Optional[Callable] = None,
+    confirm_fn: Callable | None = None,
 ) -> None:
     """競売で買う。買い物の間は「プレイ中」にする。"""
     fn = confirm_action if confirm_fn is None else confirm_fn
@@ -110,7 +110,7 @@ async def buy_teiai_market(
     listing_id: int,
     qty: int = 1,
     *,
-    confirm_fn: Optional[Callable] = None,
+    confirm_fn: Callable | None = None,
 ) -> None:
     """帝愛の期間限定の出品を買う(#72)。闇市品は、買ったあとに本当の中身を知らせる。"""
     fn = confirm_action if confirm_fn is None else confirm_fn
@@ -163,7 +163,7 @@ async def buy_teiai_market(
 
 
 async def buy_insider_memo(
-    cog: "ShopCog", interaction: discord.Interaction, it, *, confirm_fn: Optional[Callable] = None
+    cog: "ShopCog", interaction: discord.Interaction, it, *, confirm_fn: Callable | None = None
 ) -> None:
     """帝愛市の、裏情報メモ。持ち物には増えず、買うとその場で、本人にだけメモが見える。"""
     fn = confirm_action if confirm_fn is None else confirm_fn
@@ -201,7 +201,7 @@ async def buy_insider_memo(
 
 
 async def buy_item(
-    cog: "ShopCog", interaction: discord.Interaction, item: str, qty: int = 1, *, confirm_fn: Optional[Callable] = None
+    cog: "ShopCog", interaction: discord.Interaction, item: str, qty: int = 1, *, confirm_fn: Callable | None = None
 ) -> None:
     """景品を買う。item は ID か名前。消耗品だけ qty 個（1〜MAX_QTY）まとめて買える。"""
     fn = confirm_action if confirm_fn is None else confirm_fn

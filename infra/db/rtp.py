@@ -3,7 +3,6 @@
 表の定義は infra/db/schema/tables.py にある。レベルの意味と計算は domain/games/rtplevel.py。
 """
 
-from typing import Optional
 
 from domain.games import rtplevel
 from domain.ports.repos import IRtpRepo
@@ -30,7 +29,7 @@ class RtpRepo(ScopedRepo, IRtpRepo):
             }
         return {g: saved.get(g, rtplevel.DEFAULT_LEVEL) for g in rtplevel.GAMES}
 
-    def rtp_level_set(self, game: Optional[str], level: int) -> list[str]:
+    def rtp_level_set(self, game: str | None, level: int) -> list[str]:
         """レベルを決める。game が None なら、すべてのゲーム。変えたゲームの名前を返す。"""
         if level not in rtplevel.LEVELS:
             raise ValueError("レベルは 1〜6 です")

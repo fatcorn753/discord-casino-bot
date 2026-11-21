@@ -1,6 +1,5 @@
 """帝愛銀行リポジトリの基礎部分: コンストラクタと手元現金の同期。"""
 
-from typing import Optional
 
 from domain import teiai
 from domain.ports.bridges import (
@@ -29,12 +28,12 @@ class BankRepo(ScopedRepo, IBankRepo):
         self,
         db: EcoDb,
         account: AccountCore,
-        notices: Optional[INoticeSink] = None,
-        status_reader: Optional[IStatusReader] = None,
-        margin_ratio_reader: Optional[MarginRatioReader] = None,
-        grace_enter_hook: Optional[GraceEnterHook] = None,
-        bankrupt_executor: Optional[BankruptExecutor] = None,
-        excess_sink: Optional[ExcessLossSink] = None,
+        notices: INoticeSink | None = None,
+        status_reader: IStatusReader | None = None,
+        margin_ratio_reader: MarginRatioReader | None = None,
+        grace_enter_hook: GraceEnterHook | None = None,
+        bankrupt_executor: BankruptExecutor | None = None,
+        excess_sink: ExcessLossSink | None = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:

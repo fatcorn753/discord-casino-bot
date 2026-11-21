@@ -1,6 +1,5 @@
 """投票（/投票）のアプリケーションサービス。"""
 
-from typing import Optional
 
 from domain.errors import Outcome
 from domain.ports.clock import IClock
@@ -25,7 +24,7 @@ class PollService:
     def set_message(self, guild_id: int, poll_id: int, channel_id: int, message_id: int) -> None:
         self._polls.for_guild(guild_id).poll_set_message(poll_id, channel_id, message_id)
 
-    def get(self, guild_id: int, poll_id: int) -> Optional[PollView]:
+    def get(self, guild_id: int, poll_id: int) -> PollView | None:
         return self._polls.for_guild(guild_id).poll_get(poll_id)
 
     def vote(self, guild_id: int, user_id: int, poll_id: int, yes: bool) -> Outcome[PollView]:

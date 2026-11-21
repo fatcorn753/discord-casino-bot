@@ -3,7 +3,6 @@
 import datetime
 import random
 from collections import Counter
-from typing import Optional
 
 from domain import horse as horse_mod
 from domain import teiai
@@ -54,7 +53,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
     def race_slots(self, now: float, tz_hours: float, days: int = 2) -> list[float]:
         return race_slots(now, tz_hours, days)
 
-    def race_get(self, race_id: int) -> Optional[RaceRow]:
+    def race_get(self, race_id: int) -> RaceRow | None:
         with self._lock:
             return self._one("SELECT * FROM horse_races WHERE id=? AND guild_id=?", (race_id, self._g()))
 
@@ -71,7 +70,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 (self._g(),),
             )
 
-    def race_ensure_scheduled(self, now: float, tz_hours: float, channel_id: int = 0) -> Optional[int]:
+    def race_ensure_scheduled(self, now: float, tz_hours: float, channel_id: int = 0) -> int | None:
         """次の定時レースが、申し込みを始める時刻になっていて、まだ無ければ作る（申し込み受付を始める）。作ったレースの番号を返す。"""
         with self._db.tx():
             gid = self._g()
@@ -182,7 +181,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             self._account.apply(gid, user_id, horse_mod.ENTRY_FEE, "競馬:出走料の返金")
             return True, ""
 
-    def race_close_entries(self, race_id: int, rng: Optional[random.Random] = None) -> Optional[RaceCloseResult]:
+    def race_close_entries(self, race_id: int, rng: random.Random | None = None) -> RaceCloseResult | None:
         """申し込みを締め切って、NPC で埋めた出走馬と、コースを決める（発売中にする）。{"runners", "track"} を返す。
 
         オッズは、シミュレーションに時間がかかるので、呼び出し側が計算して、race_set_odds で書く。
@@ -271,7 +270,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                     [(race_id, kind, key, o) for key, o in odds.get(kind, {}).items()],
                 )
 
-    def race_odds(self, race_id: int, kind: str, lanes: list[int]) -> Optional[float]:
+    def race_odds(self, race_id: int, kind: str, lanes: list[int]) -> float | None:
         """その馬券のオッズ（なければ None）。lanes は、選んだ枠の並び（単勝・複勝は1つ）。"""
         with self._lock:
             match kind:
@@ -403,7 +402,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 return False, result
             return True, bought
 
-    def race_run(self, race_id: int, tz_hours: float, rng: Optional[random.Random] = None) -> Optional[RaceRunResult]:
+    def race_run(self, race_id: int, tz_hours: float, rng: random.Random | None = None) -> RaceRunResult | None:
         """レースを走らせて、結果を決め、賞金と払い戻しを精算する。すでに終わっていれば None。
 
         結果は、ここで決まる（演出は、返した frames を見せるだけ）。(race, entries, order, frames, bets, prizes) を辞書で返す。

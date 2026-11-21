@@ -4,7 +4,7 @@
 """
 
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any
 
 import discord
 
@@ -211,7 +211,7 @@ class TeiaiPanel(ui.OwnerView):
         teiai_svc: TeiaiService,
         uid: int,
         *,
-        shop_bridge: Optional[IShopTitleBridge] = None,
+        shop_bridge: IShopTitleBridge | None = None,
     ):
         super().__init__(
             uid,
@@ -236,7 +236,7 @@ class TeiaiPanel(ui.OwnerView):
             )
         )
 
-    async def _deposit(self, interaction: discord.Interaction, amount: Optional[int]) -> None:
+    async def _deposit(self, interaction: discord.Interaction, amount: int | None) -> None:
         ok, result = self.teiai.deposit(ui.guild_id_of(interaction), interaction.user.id, amount or 0)
         if ok:
             assert not isinstance(result, Failure)
@@ -245,7 +245,7 @@ class TeiaiPanel(ui.OwnerView):
             text = format_failure(result)
         await self._reply_bank(interaction, ok, text)
 
-    async def _withdraw(self, interaction: discord.Interaction, amount: Optional[int]) -> None:
+    async def _withdraw(self, interaction: discord.Interaction, amount: int | None) -> None:
         ok, result = self.teiai.withdraw(ui.guild_id_of(interaction), interaction.user.id, amount)  # None は全額
         if ok:
             assert not isinstance(result, Failure)

@@ -5,7 +5,7 @@ domain/types.py は catalogs を読むため、ポート（domain/ports）から
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Generic, Optional, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Generic, TypedDict, TypeVar
 
 from .teiai import CdsRow
 
@@ -83,7 +83,7 @@ class BankStatus(TypedDict):
     bonds: int  # 帝愛社債の元本残高（銀行の負債）
     locks: float
     available: float
-    ratio: Optional[float]  # available ÷ (信託総額 + 社債の元本残高)（どちらもなければ None）
+    ratio: float | None  # available ÷ (信託総額 + 社債の元本残高)（どちらもなければ None）
     level: str  # safe / warn / danger / frozen
     thermostat: BankThermostat
     trust_rate: float  # 帝愛信託の利率（1日あたり。r_f + 上乗せ）
@@ -98,13 +98,13 @@ class LoanCredit(TypedDict):
 
     status: str
     debt: int
-    grace_until: Optional[float]
+    grace_until: float | None
     repaid: int
     overdue: int
     discharged: int
     active: int
     owed: int
-    bankrupt_at: Optional[float]
+    bankrupt_at: float | None
 
 
 class LoanBook(TypedDict, Generic[RowT]):
@@ -132,7 +132,7 @@ class MarginStatus(TypedDict):
     equity: float
     required: float
     collateral: float
-    ratio: Optional[float]
+    ratio: float | None
 
 
 class HoldingBook(TypedDict, Generic[RowT]):
@@ -149,16 +149,16 @@ class UserRow(TypedDict):
     user_id: int
     balance: int
     daily_streak: int
-    last_daily: Optional[str]
+    last_daily: str | None
     games_played: int
     total_wagered: int
     total_won: int
     biggest_win: int
     created_at: float
-    last_slot: Optional[int]
+    last_slot: int | None
     debt: int  # 帝愛からの借金（シニア債権）
-    bankrupt_at: Optional[float]
-    blacklist_until: Optional[float]
+    bankrupt_at: float | None
+    blacklist_until: float | None
 
 
 class LedgerEntry(TypedDict):
@@ -191,7 +191,7 @@ class PlayRecord(TypedDict):
 class WeeklyAward(TypedDict):
     """週間ランキングの発表の結果（weekly_award の返り値）。"""
 
-    champion: Optional[tuple[int, int, int]]  # 王者 (ユーザーID, 稼ぎ, ゲーム数)。いなければ None
+    champion: tuple[int, int, int] | None  # 王者 (ユーザーID, 稼ぎ, ゲーム数)。いなければ None
     previous: list[int]  # 称号を外された人のユーザーID
     wins: int  # 王者の通算優勝回数
     standings: list[tuple[int, int, int]]  # (ユーザーID, 稼ぎ, ゲーム数) の並び
@@ -202,10 +202,10 @@ class GuildStatusRow(TypedDict):
 
     guild_id: int
     status: str  # pending / approved / denied
-    name: Optional[str]
-    decided_by: Optional[int]
+    name: str | None
+    decided_by: int | None
     updated_at: float
-    notified_at: Optional[float]
+    notified_at: float | None
 
 
 class LeaderboardRow(TypedDict):

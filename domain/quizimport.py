@@ -18,7 +18,7 @@
 """
 
 import re
-from typing import Any, Optional
+from typing import Any
 
 from domain.duration import parse_duration
 from domain.ports import get_catalogs
@@ -47,7 +47,7 @@ KEY_LINE = re.compile(r"^\s*(問題|正解|不正解|解説|報酬|期間|時間
 SEPARATOR = re.compile(r"^\s*-{3,}\s*$")
 
 
-def _int(text: str) -> Optional[int]:
+def _int(text: str) -> int | None:
     try:
         return int(text.strip().replace(",", ""))
     except ValueError:
@@ -57,7 +57,7 @@ def _int(text: str) -> Optional[int]:
 _DURATION_UNIT = {"duration": "時間", "hours": "時間", "days": "日", "mins": "分"}
 
 
-def _parse_block(lines: list[tuple[int, str]], number: int, errors: list[str]) -> Optional[QuizImportItem]:
+def _parse_block(lines: list[tuple[int, str]], number: int, errors: list[str]) -> QuizImportItem | None:
     """1問分。lines は (元ファイルの行番号, 文字列) の並び。誤りは errors に足す。"""
     fields: dict[str, Any] = {"wrong": []}
     where: dict[str, int] = {}

@@ -1,6 +1,5 @@
 """帝愛信託の預金: 残高の読み取り・利率の決定・入出金と強制差し押さえ。"""
 
-from typing import Optional
 
 from domain import teiai
 from domain.errors import Outcome, fail
@@ -72,7 +71,7 @@ class BankRepo(Base):
             self.bank_set_for(gid, state["cash"] + reserve, state["loaned"] + amount - reserve)
             return True, self.deposit_of_for(gid, user_id)
 
-    def bank_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> Outcome[int]:
+    def bank_withdraw(self, user_id: int, amount: int | None = None, now: float | None = None) -> Outcome[int]:
         """預金を引き出す（amount が None なら全額）。利用可能現金の範囲まで。(成功か, 理由か引き出した額) を返す。"""
         now = self._now() if now is None else now
         with self._db.tx():

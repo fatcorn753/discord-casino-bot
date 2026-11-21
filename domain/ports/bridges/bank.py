@@ -9,14 +9,14 @@
 """
 
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 from domain.errors import Outcome, fail
 from domain.ports.contracts import BankruptResult
 
 # 単一コールバック契約（Callable 型エイリアス）: 静的型だけで LSP を 100% 保証できる純粋契約
 MarketPriceReader = Callable[[], dict[str, float]]
-GraceReader = Callable[[int, int], Optional[float]]
+GraceReader = Callable[[int, int], float | None]
 GraceEnterHook = Callable[[int, int, float], None]
 ExcessLossSink = Callable[[int, int, float], int]
 # (guild_id, user_id, forced, escape) -> (成功か, 結果 | Failure)
@@ -29,7 +29,7 @@ def noop_market_price_reader() -> dict[str, float]:
     return {}
 
 
-def noop_grace_reader(guild_id: int, user_id: int) -> Optional[float]:
+def noop_grace_reader(guild_id: int, user_id: int) -> float | None:
     """猶予読み取り未接続時に None を返す LSP 準拠の既定動作。"""
     return None
 
@@ -136,7 +136,7 @@ class IHouseAccount:
 class IBankCdsBridge:
     """DebtRepo が BankRepo 具体型に依存せず猶予更新と CDS 精算を行う契約。"""
 
-    def grace_until_for(self, guild_id: int, user_id: int) -> Optional[float]:
+    def grace_until_for(self, guild_id: int, user_id: int) -> float | None:
         raise NotImplementedError
 
     def grace_update_for(self, guild_id: int, user_id: int, now: float) -> None:
@@ -155,7 +155,7 @@ class IBankCdsBridge:
 class NoOpBankCdsBridge(IBankCdsBridge):
     """銀行 CDS ブリッジ未接続時の LSP 準拠 Null 実装。"""
 
-    def grace_until_for(self, guild_id: int, user_id: int) -> Optional[float]:
+    def grace_until_for(self, guild_id: int, user_id: int) -> float | None:
         return None
 
     def grace_update_for(self, guild_id: int, user_id: int, now: float) -> None:

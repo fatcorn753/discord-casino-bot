@@ -1,7 +1,7 @@
 """個人間貸付・代用有価証券のブリッジ契約（名目的基底クラスと NoOp 実装）。"""
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from domain.ports.contracts import LoanRow
 
@@ -63,7 +63,7 @@ class ISpotCollateralReader:
         self,
         guild_id: int,
         user_id: int,
-        units: Optional[int],
+        units: int | None,
         price: float,
         symbol: str,
         taxable: bool = False,
@@ -81,7 +81,7 @@ class NoOpSpotCollateralReader(ISpotCollateralReader):
         self,
         guild_id: int,
         user_id: int,
-        units: Optional[int],
+        units: int | None,
         price: float,
         symbol: str,
         taxable: bool = False,

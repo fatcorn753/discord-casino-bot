@@ -7,7 +7,7 @@
 - コマンドはない（競売の画面に一本化した）。このファイルは、画面の部品・買う／入札の処理・締切の精算を持つ。
 """
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord.ext import commands, tasks
@@ -76,11 +76,11 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
             bridges.unregister(IP2PListingBridge, self)
             bridges.unregister(IP2PNavigationBridge, self)
 
-    def _post_args(self, guild_id: int, row: ListingRow) -> tuple[str, Optional[HorseRow]]:
+    def _post_args(self, guild_id: int, row: ListingRow) -> tuple[str, HorseRow | None]:
         return self.p2p.label(guild_id, row), self.p2p.horse_of(guild_id, row)
 
     # ------------------------------ 出品の告知（チャンネルへの投稿） ------------------------------ #
-    async def announce(self, guild: Optional[discord.Guild], listing_id: int) -> bool:
+    async def announce(self, guild: discord.Guild | None, listing_id: int) -> bool:
         """出品を、告知チャンネルに投稿する（投稿を覚えて、入札・売れたときに書き換える）。投稿できたら True。失敗しても、出品には影響しない。"""
         if guild is None:
             return False
@@ -99,7 +99,7 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
         self.p2p.set_post(guild.id, listing_id, channel.id, msg.id)
         return True
 
-    async def refresh_post(self, guild: Optional[discord.Guild], listing_id: int) -> None:
+    async def refresh_post(self, guild: discord.Guild | None, listing_id: int) -> None:
         """告知の投稿を、いまの状態（最高入札・売れた・取り消し・終了）に書き換える。終わったら、ボタンを外す。"""
         if guild is None:
             return

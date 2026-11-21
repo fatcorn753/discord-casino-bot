@@ -1,7 +1,7 @@
 """運営コマンド（`/運営`）の確認ボタンと入力フォーム（お知らせ・クイズの一括登録・発言の削除）。"""
 
 import io
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 
@@ -150,7 +150,7 @@ class AnnounceModal(discord.ui.Modal, title="お知らせの本文"):
     body = discord.ui.TextInput(label="本文（改行できます）", style=discord.TextStyle.paragraph, max_length=2000)
 
     def __init__(
-        self, cog: "ApprovalCog", guilds: list, heading: str, image: Optional[discord.Attachment], channel=None
+        self, cog: "ApprovalCog", guilds: list, heading: str, image: discord.Attachment | None, channel=None
     ):
         super().__init__()
         self.cog, self.guilds, self.heading, self.image, self.channel = cog, guilds, heading, image, channel

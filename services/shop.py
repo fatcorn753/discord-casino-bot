@@ -1,7 +1,6 @@
 """ショップ・帝愛の競売・装備・称号のアプリケーションサービス。"""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from domain import shop, teiai
 from domain.earnings import MemoInfo
@@ -35,7 +34,7 @@ from domain.types import CONSUMABLE_EFFECTS, MarketPurchase, PurchaseResult
 class BuyItemPrecheck:
     ok: bool
     status: str = ""
-    stock: Optional[ShopStockInfo] = None
+    stock: ShopStockInfo | None = None
     balance: int = 0
     total: int = 0
 
@@ -93,7 +92,7 @@ class ShopService:
             return BuyItemPrecheck(ok=False, status="insufficient_balance", balance=balance, total=total)
         return BuyItemPrecheck(ok=True, balance=balance, total=total)
 
-    def arm_consumable(self, guild_id: int, user_id: int, item_id: str) -> Optional[int]:
+    def arm_consumable(self, guild_id: int, user_id: int, item_id: str) -> int | None:
         """消耗品を有効化し、有効になった残り枚数を返す（未所持なら None）。"""
         repo = self._shop.for_guild(guild_id)
         if not repo.arm(user_id, item_id):
@@ -117,10 +116,10 @@ class ShopService:
         self,
         guild_id: int,
         user_id: int,
-        tab: Optional[str],
+        tab: str | None,
         p2p_enabled: bool,
-        kind: Optional[str],
-        mode: Optional[str],
+        kind: str | None,
+        mode: str | None,
         order: str,
         limit: int,
     ) -> AuctionSnapshot:
@@ -148,12 +147,12 @@ class ShopService:
             "p2p_rows": p2p_rows,
         }
 
-    def equipped_title(self, guild_id: int, user_id: int) -> Optional[str]:
+    def equipped_title(self, guild_id: int, user_id: int) -> str | None:
         title = self._shop.for_guild(guild_id).get_profile(user_id)["title"]
         item = shop.BY_ID.get(title) if title is not None else None
         return item.name if item else None
 
-    def nick_tag(self, guild_id: int, user_id: int) -> Optional[str]:
+    def nick_tag(self, guild_id: int, user_id: int) -> str | None:
         status = self._debt.for_guild(guild_id).status(user_id)
         if status != teiai.KATAGI:
             return teiai.STATUS_NAME[status]
@@ -177,7 +176,7 @@ class ShopService:
             user_id, item.id, shop.label(item), item.price, item.unique, qty=qty, now=self._clock.now_ts()
         )
 
-    def equip(self, guild_id: int, user_id: int, slot: str, item_id: Optional[str]) -> bool:
+    def equip(self, guild_id: int, user_id: int, slot: str, item_id: str | None) -> bool:
         """slot に item_id を身につける（None なら外す）。"""
         return self._shop.for_guild(guild_id).equip(user_id, slot, item_id)
 
@@ -200,7 +199,7 @@ class ShopService:
     def auction_buy_horse(self, guild_id: int, user_id: int, horse_id: int) -> PurchaseResult:
         return self._horses.for_guild(guild_id).auction_buy_horse(user_id, horse_id, self._clock.now_ts())
 
-    def insider_stock(self, guild_id: int) -> Optional[InsiderStock]:
+    def insider_stock(self, guild_id: int) -> InsiderStock | None:
         return self._earnings.for_guild(guild_id).insider_stock(self._clock.now_ts())
 
     def insider_buy(self, guild_id: int, user_id: int) -> Outcome[MemoInfo]:

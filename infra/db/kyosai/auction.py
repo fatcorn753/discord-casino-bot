@@ -1,6 +1,5 @@
 """帝愛の持ち口の競り（#93。値段は入札で決まる）。"""
 
-from typing import Optional
 
 from domain import kyosai, p2p
 from domain.errors import Outcome, fail
@@ -10,7 +9,7 @@ from .daily import KyosaiRepo as Base
 
 
 class KyosaiRepo(Base):
-    def _open_auction_for(self, guild_id: int) -> Optional[KyosaiAuctionRow]:
+    def _open_auction_for(self, guild_id: int) -> KyosaiAuctionRow | None:
         return self._one(
             "SELECT * FROM kyosai_auctions WHERE guild_id=? AND status='open' ORDER BY id LIMIT 1", (guild_id,)
         )

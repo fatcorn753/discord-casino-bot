@@ -1,6 +1,6 @@
 """プレイヤー間の取引（定価の市場と競り）。数字と決まりは domain/p2p.py、表は infra/db/schema/tables.py の market_listings。"""
 
-from typing import Any, Optional
+from typing import Any
 
 from domain import horse as horse_mod
 from domain import p2p, teiai
@@ -69,7 +69,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         )
         return market_sum + kyosai_sum
 
-    def _p2p_can_receive(self, guild_id: int, buyer_id: int, row: Any) -> Optional[Failure]:
+    def _p2p_can_receive(self, guild_id: int, buyer_id: int, row: Any) -> Failure | None:
         """買い手が、この出品を受け取れないなら Failure。受け取れるなら None。"""
         if row["kind"] == "horse":
             if self._horses.horse_count_for(guild_id, buyer_id) >= horse_mod.MAX_HORSES:
@@ -83,7 +83,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
             return fail("already_owned")
         return None
 
-    def _p2p_buyer_check(self, guild_id: int, buyer_id: int, row: Any, amount: int, now: float) -> Optional[Failure]:
+    def _p2p_buyer_check(self, guild_id: int, buyer_id: int, row: Any, amount: int, now: float) -> Failure | None:
         """買う・入札するときの、共通の確認。問題があれば Failure。"""
         if buyer_id == row["seller_id"]:
             return fail("p2p_self_buy")
@@ -107,8 +107,8 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         qty: int,
         mode: str,
         price: int,
-        hours: Optional[int] = None,
-        now: Optional[float] = None,
+        hours: int | None = None,
+        now: float | None = None,
     ) -> Outcome[int]:
         """出品する。(成功か, Failure か出品の番号)。品・馬は、出品の間、預かる。"""
         now = self._now() if now is None else now
@@ -224,7 +224,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
             guild_id, row["seller_id"], "p2p_sold", label=label, price=price, fee=fee, net=price - fee
         )
 
-    def p2p_get(self, listing_id: int) -> Optional[ListingRow]:
+    def p2p_get(self, listing_id: int) -> ListingRow | None:
         with self._lock:
             return self._one("SELECT * FROM market_listings WHERE id=? AND guild_id=?", (listing_id, self._g()))
 
@@ -331,7 +331,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
             pulled["bids"] += 1
         return pulled
 
-    def p2p_pull_back(self, user_id: int, now: Optional[float] = None) -> dict[str, int]:
+    def p2p_pull_back(self, user_id: int, now: float | None = None) -> dict[str, int]:
         return self.p2p_pull_back_for(self._g(), user_id, self._now() if now is None else now)
 
     def p2p_unsynced_posts(self) -> list[ListingRow]:
@@ -387,10 +387,10 @@ class P2PRepo(ScopedRepo, IP2PRepo):
 
     def p2p_active(
         self,
-        kind: Optional[str] = None,
-        now: Optional[float] = None,
+        kind: str | None = None,
+        now: float | None = None,
         limit: int = 25,
-        mode: Optional[str] = None,
+        mode: str | None = None,
         order: str = "end",
     ) -> list[ListingRow]:
         """出ている出品。kind は horse / item、mode は fixed / auction で絞れる。order は P2P_ORDERS のどれか（既定は締切の近い順）。"""
@@ -415,7 +415,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
                 (self._g(), now),
             )
 
-    def p2p_mine(self, user_id: int, now: Optional[float] = None) -> P2PMine:
+    def p2p_mine(self, user_id: int, now: float | None = None) -> P2PMine:
         """自分の出品（出している）と、自分が最高入札者の競り。"""
         with self._lock:
             gid = self._g()

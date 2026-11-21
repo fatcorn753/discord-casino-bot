@@ -6,7 +6,7 @@
 
 import json
 import random
-from typing import Any, Literal, Optional, cast, overload
+from typing import Any, Literal, cast, overload
 
 from domain import labor as labor_mod
 from domain import relics as relics_mod
@@ -93,7 +93,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         return bool(cur.rowcount)
 
     def _labor_row(
-        self, guild_id: int, user_id: int, now: float, day: str, rng: Optional[random.Random] = None
+        self, guild_id: int, user_id: int, now: float, day: str, rng: random.Random | None = None
     ) -> dict[str, Any]:
         """行を読む（無ければ作る）。日が変わっていたら、今日の稼ぎを 0 に戻し、疲労は時間で回復させる。呼び出し側のトランザクション内で使う。
 
@@ -152,7 +152,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         row: dict[str, Any],
         now: float,
         buffs: dict[str, float],
-        rng: Optional[random.Random] = None,
+        rng: random.Random | None = None,
     ) -> None:
         """作業員の稼ぎを pot に足し、切れた契約を決算する（更新なら契約料を払い、払えなければ退職）。"""
         workers = self._workers_of(guild_id, user_id)
@@ -318,7 +318,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             row["crit_chance"] = labor_mod.crit_chance(row["pick"], row["workers"], row["terrain"])
             return cast("LaborState", row)
 
-    def labor_top(self, limit: int = 10, day: Optional[str] = None, user_id: Optional[int] = None) -> LaborTop:
+    def labor_top(self, limit: int = 10, day: str | None = None, user_id: int | None = None) -> LaborTop:
         """採掘ランキング。day を渡すと、その日の稼ぎ。渡さなければ、通算の稼ぎ。{rows, me}。
 
         rows は [(順位, ユーザーID, 稼ぎ, 押した回数)]、me は user_id の (順位, 稼ぎ, 押した回数, 人数)（まだ稼いでいなければ None）。
@@ -342,7 +342,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         result: LaborTop = {"rows": rows, "me": me}
         return result
 
-    def labor_click(self, user_id: int, now: float, day: str = "", rng: Optional[random.Random] = None) -> LaborClick:
+    def labor_click(self, user_id: int, now: float, day: str = "", rng: random.Random | None = None) -> LaborClick:
         """「働く」を1回押す。{ok, reason, pay, crit（鉱脈ヒットか）, ore（手掘りの鉱石。無ければ None）, combo（コンボ達成か）, terrain（今日の地層）}。"""
         rng = rng or cast("random.Random", random)
         with self._db.tx():

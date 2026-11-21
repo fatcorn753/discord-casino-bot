@@ -3,7 +3,7 @@
 import asyncio
 import datetime
 from types import SimpleNamespace
-from typing import Optional, cast
+from typing import cast
 
 import discord
 import pytest
@@ -223,10 +223,10 @@ def test_announce_channel_preference_and_permissions():
     guild = SimpleNamespace(id=1, me=object(), system_channel=sys_ch, get_channel=lambda cid: channels.get(cid))
 
     class Boards(ILeaderboardConfigRepo):
-        def __init__(self, channel_id: Optional[int]) -> None:
+        def __init__(self, channel_id: int | None) -> None:
             self._channel_id = channel_id
 
-        def get_leaderboard(self, guild_id: int) -> Optional[LeaderboardRow]:
+        def get_leaderboard(self, guild_id: int) -> LeaderboardRow | None:
             return None if self._channel_id is None else cast("LeaderboardRow", {"channel_id": self._channel_id})
 
     eco_with_board = Boards(100)

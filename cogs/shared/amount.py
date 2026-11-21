@@ -8,7 +8,6 @@
 
 import unicodedata
 from collections.abc import Awaitable, Callable
-from typing import Optional
 
 import discord
 from discord import app_commands
@@ -17,20 +16,20 @@ from cogs.shared import ui
 from services.economy import EconomyService
 
 
-def own_balance(economy: EconomyService, guild_id: Optional[int], user_id: int) -> Optional[int]:
+def own_balance(economy: EconomyService, guild_id: int | None, user_id: int) -> int | None:
     """いまの残高。口座を作らずに読む（初めての人は、最初に遊ぶときに初期支給が入る額を返す）。DM などサーバー外は None。"""
     if guild_id is None:
         return None
     return economy.peek_balance(guild_id, user_id)
 
 
-def typed_amount(current: str) -> Optional[int]:
+def typed_amount(current: str) -> int | None:
     """入力途中の文字列を整数にする（全角・カンマ可）。数字でなければ None。"""
     text = unicodedata.normalize("NFKC", current).replace(",", "").strip()
     return int(text) if text.isascii() and text.isdigit() else None
 
 
-def optional_amount(raw: str) -> tuple[bool, Optional[int]]:
+def optional_amount(raw: str) -> tuple[bool, int | None]:
     """空欄にできる金額の欄を読む。空欄なら (True, None)、数字なら (True, 値)、それ以外は (False, None)。"""
     if not unicodedata.normalize("NFKC", raw).replace(",", "").strip():
         return True, None
@@ -52,7 +51,7 @@ class AmountModal(discord.ui.Modal):
         title: str,
         label: str,
         required: bool,
-        on_amount: Callable[[discord.Interaction, Optional[int]], Awaitable[None]],
+        on_amount: Callable[[discord.Interaction, int | None], Awaitable[None]],
         max_length: int = 12,
     ) -> None:
         super().__init__(title=title)
@@ -75,7 +74,7 @@ def balance_choices(
     interaction: discord.Interaction,
     current: str,
     minimum: int,
-    maximum: Optional[int] = None,
+    maximum: int | None = None,
 ) -> list[app_commands.Choice[int]]:
     """残高を見せる、1行だけの候補。
 

@@ -3,7 +3,7 @@
 対応する表の定義は infra/db/schema/tables.py。キーは `SELECT *` の列と同じ。
 """
 
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 from .core import HoldingBook, MarginPosition, MarginStatus, SpotHolding
 
@@ -47,9 +47,9 @@ class OptionRow(TypedDict):
     ts: float
     status: str  # active / exercised / expired / sold
     paid: int
-    final: Optional[float]
-    symbol2: Optional[str]
-    spot2: Optional[float]
+    final: float | None
+    symbol2: str | None
+    spot2: float | None
     side: str  # long（買い）/ short（裸売り）
     margin: int
 
@@ -66,8 +66,8 @@ class BondRow(TypedDict):
     status: str  # active / paid / defaulted / cancelled
     paid: int
     ts: float
-    checked: Optional[float]
-    rate: Optional[float]
+    checked: float | None
+    rate: float | None
 
 
 class MarketEventPlan(TypedDict):
@@ -153,7 +153,7 @@ class OptionBuyResult(TypedDict):
     strike: float
     expiry: float
     spot: float
-    spot2: Optional[float]
+    spot2: float | None
 
 
 class OptionWriteResult(TypedDict):
@@ -191,4 +191,4 @@ class HoldingsSnapshot(TypedDict):
     bond_data: HoldingBook[BondRow]
     option_quotes: dict[int, int]  # {オプションID: いまの買い戻し費用/売値}
     bond_quotes: dict[int, int]  # {債券ID: いま売ったときの手取り}
-    margin_status: Optional[MarginStatus]  # 建玉がなければ None
+    margin_status: MarginStatus | None  # 建玉がなければ None

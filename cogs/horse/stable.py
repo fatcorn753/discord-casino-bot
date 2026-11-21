@@ -1,6 +1,5 @@
 """競馬の厩舎画面（Stable）と調教・引退 View（GoldCarrotView / RetireView）。"""
 
-from typing import Optional
 
 import discord
 
@@ -250,7 +249,7 @@ class Stable(ui.OwnerView):
         super().__init__(user_id, timeout=600)
         self._svc = horse_svc
         self.user_id, self.guild_id = user_id, guild_id
-        self.horse_id: Optional[int] = None
+        self.horse_id: int | None = None
         self.src, self.dst = "speed", "guts"
         owned = self.desk_here().horse_list(user_id)
         if owned:

@@ -1,7 +1,6 @@
 """競馬の馬券購入パネル（BetPanel）と賭け金モーダル（StakeModal）。"""
 
 from collections.abc import Awaitable, Callable
-from typing import Optional
 
 import discord
 
@@ -94,7 +93,7 @@ class BetPanel(ui.OwnerView):
         horse_svc: HorseService,
         user_id: int,
         race: RaceRow,
-        post_bet_fn: Optional[PostBetFn] = None,
+        post_bet_fn: PostBetFn | None = None,
     ) -> None:
         super().__init__(user_id, timeout=300)
         self._horse_svc = horse_svc

@@ -3,7 +3,7 @@
 import logging
 import math
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any
 
 from domain import market as market_mod
 from domain.errors import Failure, fail
@@ -43,9 +43,9 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         market: MarketDataRepo,
         bank: IBankCashFlow,
         tax: GainsTaxCollector,
-        notices: Optional[INoticeSink] = None,
-        crypto: Optional[ISpotCollateralReader] = None,
-        debt: Optional[IDebtOps] = None,
+        notices: INoticeSink | None = None,
+        crypto: ISpotCollateralReader | None = None,
+        debt: IDebtOps | None = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -153,7 +153,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         guild_id: int,
         user_id: int,
         prices: Mapping[str, float],
-        add: Optional[tuple[str, str, float, float]] = None,
+        add: tuple[str, str, float, float] | None = None,
         drop_collateral: float = 0.0,
     ) -> MarginStatus:
         """口座の維持率。add=(side, 銘柄, 建玉額, 預ける担保) を足した場合、drop_collateral を担保から引いた場合の仮の値も出せる。"""
@@ -179,19 +179,19 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             "ratio": equity / required if required > 0 else None,
         }
 
-    def margin_status(self, user_id: int, prices: Optional[Mapping[str, float]] = None) -> MarginStatus:
+    def margin_status(self, user_id: int, prices: Mapping[str, float] | None = None) -> MarginStatus:
         """口座の維持率 {equity, required, collateral, ratio}。建玉がなければ ratio は None。読み取り専用。"""
         with self._lock:
             return self._margin_status_locked_for(self._g(), user_id, prices or self._market.latest_prices())
 
-    def margin_ratio_for(self, guild_id: int, user_id: int) -> Optional[float]:
+    def margin_ratio_for(self, guild_id: int, user_id: int) -> float | None:
         with self._lock:
             return self._margin_status_locked_for(guild_id, user_id, self._market.latest_prices())["ratio"]
 
     # --- IMarginCollateralGuard --- #
     def check_spot_sell(
-        self, guild_id: int, user_id: int, symbol: str, units: Optional[int], have: int, price: float
-    ) -> Optional[Failure]:
+        self, guild_id: int, user_id: int, symbol: str, units: int | None, have: int, price: float
+    ) -> Failure | None:
         if have <= 0 or not self.margin_positions_for(guild_id, user_id):
             return None
         sold = have if units is None else min(units, have)
@@ -203,7 +203,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             return fail("crypto_collateral_locked", ratio=after["ratio"], open_ratio=market_mod.OPEN_RATIO)
         return None
 
-    def check_bond_cancel(self, guild_id: int, user_id: int, kind: str, principal: int) -> Optional[Failure]:
+    def check_bond_cancel(self, guild_id: int, user_id: int, kind: str, principal: int) -> Failure | None:
         if not self.margin_positions_for(guild_id, user_id):
             return None
         drop = principal * market_mod.COLLATERAL_HAIRCUT.get(kind, 0.0)
@@ -300,7 +300,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         guild_id: int,
         user_id: int,
         side: str,
-        units: Optional[int],
+        units: int | None,
         price: float,
         label: str,
         symbol: str = DEFAULT,
@@ -347,7 +347,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         )
 
     def margin_close(
-        self, user_id: int, side: str, units: Optional[int], price: float, symbol: str = DEFAULT
+        self, user_id: int, side: str, units: int | None, price: float, symbol: str = DEFAULT
     ) -> CryptoResult:
         """units 口を決済する（None なら全部）。担保 + 損益が戻る。担保を超えた損失は、借金になりうる。"""
         with self._db.tx():
@@ -359,10 +359,10 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                 gid, user_id, side, units, price, f"{self.SIDE_NAME[side]}決済", symbol, owe=True, taxable=True
             )
 
-    def short_close(self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT) -> CryptoResult:
+    def short_close(self, user_id: int, units: int | None, price: float, symbol: str = DEFAULT) -> CryptoResult:
         return self.margin_close(user_id, "short", units, price, symbol)
 
-    def long_close(self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT) -> CryptoResult:
+    def long_close(self, user_id: int, units: int | None, price: float, symbol: str = DEFAULT) -> CryptoResult:
         return self.margin_close(user_id, "long", units, price, symbol)
 
     def _losscut_user_locked_for(self, guild_id: int, user_id: int, prices: Mapping[str, float]) -> list[Any]:
@@ -395,7 +395,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             cut.append((symbol, side, -res.profit))
         return cut
 
-    def margin_cut_map(self, prices: Optional[Mapping[str, float]] = None) -> list[tuple[str, str, float, int]]:
+    def margin_cut_map(self, prices: Mapping[str, float] | None = None) -> list[tuple[str, str, float, int]]:
         """このサーバーの、信用建玉のロスカット水準の地図 [(銘柄, 向き, ロスカットされる価格, 建玉額), ...]。"""
         out = []
         with self._lock:

@@ -4,7 +4,7 @@
 """
 
 import random
-from typing import Optional, cast
+from typing import cast
 
 from domain import earnings as ea
 from domain import market as market_mod
@@ -39,8 +39,8 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
         self._bank = bank
 
     def earnings_ensure(
-        self, now: float, tz_hours: float, rng: Optional[random.Random] = None
-    ) -> Optional[EarningsRow]:
+        self, now: float, tz_hours: float, rng: random.Random | None = None
+    ) -> EarningsRow | None:
         """発表前の決算が無ければ、次の決算を決めて登録する。登録したら、その行を返す。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():
@@ -65,7 +65,7 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
                 )
             ]
 
-    def earnings_upcoming(self, now: float) -> Optional[EarningsAnnouncement]:
+    def earnings_upcoming(self, now: float) -> EarningsAnnouncement | None:
         """みんなに告知ずみの、発表前の決算（対象と時刻だけ。方向と大きさは入れない）。月曜 9:00 までは None。"""
         with self._lock:
             return self._one(
@@ -93,7 +93,7 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
                 self._conn.execute("UPDATE earnings SET released=1 WHERE id=?", (r["id"],))
             return rows
 
-    def earnings_memo(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Optional[ea.MemoInfo]:
+    def earnings_memo(self, user_id: int, now: float, rng: random.Random | None = None) -> ea.MemoInfo | None:
         """デイリーのあとに、確率で届く、裏情報メモ。発表前の決算が無い・発表まで MEMO_LEAD_HOURS より先・
         この決算のメモをもう受け取っている・抽選に外れたら None。"""
         rng = rng or random.SystemRandom()
@@ -120,7 +120,7 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
             )
             return ea.build_memo(market_mod.BY_KEY[ev["symbol"]].name, hint, ev["release_at"])
 
-    def insider_stock(self, now: float) -> Optional[InsiderStock]:
+    def insider_stock(self, now: float) -> InsiderStock | None:
         """帝愛市の裏情報メモの在庫。{残り, 全部の数}。発表前の決算が無ければ None（売っていない）。"""
         with self._lock:
             gid = self._g()
@@ -132,7 +132,7 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
             sold = self._scalar("SELECT COUNT(*) FROM earnings_shop WHERE event_id=? AND guild_id=?", (ev["id"], gid))
             return {"left": max(0, ea.SHOP_STOCK - sold), "total": ea.SHOP_STOCK}
 
-    def insider_buy(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Outcome[ea.MemoInfo]:
+    def insider_buy(self, user_id: int, now: float, rng: random.Random | None = None) -> Outcome[ea.MemoInfo]:
         """帝愛市で、裏情報メモを買う。(成功か, 理由かメモの文)。決算ごとに1人1枚、サーバーで SHOP_STOCK 枚まで。"""
         rng = rng or random.SystemRandom()
         price = shop_mod.BY_ID[shop_mod.INSIDER_MEMO].price

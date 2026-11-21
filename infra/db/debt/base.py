@@ -1,6 +1,5 @@
 """帝愛ファイナンスリポジトリの基礎部分: コンストラクタと身分・借金の読み取り。"""
 
-from typing import Optional
 
 from domain import teiai
 from domain.ports.bridges import (
@@ -39,14 +38,14 @@ class DebtRepo(ScopedRepo, IDebtRepo):
         self,
         db: EcoDb,
         account: AccountCore,
-        notices: Optional[INoticeSink] = None,
-        bank: Optional[IBankCdsBridge] = None,
-        loans: Optional[IOverdueLoanCollector] = None,
+        notices: INoticeSink | None = None,
+        bank: IBankCdsBridge | None = None,
+        loans: IOverdueLoanCollector | None = None,
         *,
-        seizure_step: Optional[AssetSeizureStep] = None,
-        liquidation_step: Optional[LiquidationStep] = None,
-        seizure_value_step: Optional[SeizureValueStep] = None,
-        bankrupt_prep_hook: Optional[BankruptPrepHook] = None,
+        seizure_step: AssetSeizureStep | None = None,
+        liquidation_step: LiquidationStep | None = None,
+        seizure_value_step: SeizureValueStep | None = None,
+        bankrupt_prep_hook: BankruptPrepHook | None = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -77,7 +76,7 @@ class DebtRepo(ScopedRepo, IDebtRepo):
                 return teiai.UNDERGROUND
             return teiai.KATAGI
 
-    def status(self, user_id: int, now: Optional[float] = None) -> str:
+    def status(self, user_id: int, now: float | None = None) -> str:
         return self.status_for(self._g(), user_id, self._now() if now is None else now)
 
     def loan_blacklisted_for(self, guild_id: int, user_id: int, now: float) -> bool:
@@ -91,7 +90,7 @@ class DebtRepo(ScopedRepo, IDebtRepo):
             return False
         return row["debt"] > 0 or row["blacklist_until"] is None or now < row["blacklist_until"]
 
-    def loan_blacklisted(self, user_id: int, now: Optional[float] = None) -> bool:
+    def loan_blacklisted(self, user_id: int, now: float | None = None) -> bool:
         return self.loan_blacklisted_for(self._g(), user_id, self._now() if now is None else now)
 
     def debt_for(self, guild_id: int, user_id: int) -> int:

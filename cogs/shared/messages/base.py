@@ -1,7 +1,7 @@
 """ドメイン・永続化層のエラー・通知・表示データを Discord UI 向けに整形する基底契約（Bridge / §8.1）。"""
 
 from collections.abc import Callable, Mapping
-from typing import Any, Optional
+from typing import Any
 
 from domain.earnings import MemoInfo
 from domain.errors import Failure, Notice
@@ -29,7 +29,7 @@ class IMessageFormatter:
         raise NotImplementedError
 
     def format_standings_lines(
-        self, rows: list[Any], medals: dict[int, str], viewer_id: Optional[int] = None
+        self, rows: list[Any], medals: dict[int, str], viewer_id: int | None = None
     ) -> list[str]:
         raise NotImplementedError
 
@@ -43,8 +43,8 @@ class MessageFormatter(IMessageFormatter):
     def __init__(
         self,
         *,
-        extra_failures: Optional[Mapping[str, MessageEntry]] = None,
-        extra_notices: Optional[Mapping[str, MessageEntry]] = None,
+        extra_failures: Mapping[str, MessageEntry] | None = None,
+        extra_notices: Mapping[str, MessageEntry] | None = None,
     ) -> None:
         self.failures = {}
         self.notices = {}
@@ -101,7 +101,7 @@ class MessageFormatter(IMessageFormatter):
         return lines
 
     def format_standings_lines(
-        self, rows: list[Any], medals: dict[int, str], viewer_id: Optional[int] = None
+        self, rows: list[Any], medals: dict[int, str], viewer_id: int | None = None
     ) -> list[str]:
         lines: list[str] = []
         for rank, (uid, net, plays) in enumerate(rows, 1):

@@ -7,7 +7,7 @@
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -64,7 +64,7 @@ class PollCog(commands.Cog, IPollButtonBridge):
         self,
         interaction: discord.Interaction,
         title: app_commands.Range[str, 1, poll.TITLE_MAX],
-        duration: Optional[str] = None,
+        duration: str | None = None,
     ):
         try:
             minutes = parse_duration(duration) if duration else poll.DEFAULT_MINUTES
@@ -129,7 +129,7 @@ class PollCog(commands.Cog, IPollButtonBridge):
         )
         await self._refresh(interaction.guild, p)
 
-    async def _refresh(self, guild: Optional[discord.Guild], p: PollView, *, closed: bool = False) -> None:
+    async def _refresh(self, guild: discord.Guild | None, p: PollView, *, closed: bool = False) -> None:
         """投票の投稿の票数を直す。締め切ったときは、ボタンを外す。"""
         channel = guild.get_channel(p["channel_id"]) if guild else None
         msg = ui.partial_message(channel, p["message_id"]) if channel is not None and p["message_id"] else None

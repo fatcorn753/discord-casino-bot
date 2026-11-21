@@ -1,7 +1,6 @@
 """ショップの商品一覧（カタログ）。景品はすべてゲーム内・サーバー内で完結するもので、現実の価値はない。"""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from domain import labor, relics
 from domain.ports import get_catalogs
@@ -104,7 +103,7 @@ for _i in CATALOG:
     BY_NAME[f"{KIND_LABEL[_i.kind].split(' ', 1)[1]}:{_i.name}"] = _i
 
 
-def find(key: str) -> Optional[Item]:
+def find(key: str) -> Item | None:
     """ID または名前から商品を探す。"""
     key = (key or "").strip()
     return BY_ID.get(key) or BY_NAME.get(key)
@@ -152,7 +151,7 @@ def stock_now(rule: Stock, stock: float, updated: float, now: float) -> float:
     return min(float(rule.max), stock + max(0.0, now - updated) / 3600.0 * rule.per_hour)
 
 
-def next_refill_at(rule: Stock, stock: float, now: float) -> Optional[float]:
+def next_refill_at(rule: Stock, stock: float, now: float) -> float | None:
     """次に1つ増える時刻（在庫が小数のとき、整数に届く時刻）。満タンなら None。"""
     if stock >= rule.max:
         return None

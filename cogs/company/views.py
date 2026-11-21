@@ -1,6 +1,5 @@
 """会社の画面の部品（CompanyPanel と、種類の入力）。"""
 
-from typing import Optional
 
 import discord
 
@@ -117,13 +116,13 @@ class CompanyPanel(ui.OwnerView):
             )
         )
 
-    async def _invest(self, interaction: discord.Interaction, amount: Optional[int]) -> None:
+    async def _invest(self, interaction: discord.Interaction, amount: int | None) -> None:
         ok, result = self.company.invest(ui.guild_id_of(interaction), interaction.user.id, amount or 0)
         if not ok:
             return await self._fail(interaction, result)
         await self.redraw(interaction, "出資しました")
 
-    async def _withdraw(self, interaction: discord.Interaction, amount: Optional[int]) -> None:
+    async def _withdraw(self, interaction: discord.Interaction, amount: int | None) -> None:
         # 空欄・0 は全額
         ok, result = self.company.withdraw(ui.guild_id_of(interaction), interaction.user.id, amount or None)
         if not ok:

@@ -10,7 +10,7 @@ import sqlite3
 import threading
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager, nullcontext
-from typing import TYPE_CHECKING, Any, Optional, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from domain.ports.clock import IClock
 from infra.clock import ConfigClock
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 class EcoDb:
     """1 つの SQLite データベースに対して共有される接続・ロック・再入可能トランザクション・一時通知ストア。"""
 
-    def __init__(self, db_path: str, clock: Optional[IClock] = None) -> None:
+    def __init__(self, db_path: str, clock: IClock | None = None) -> None:
         db_dir = os.path.dirname(db_path)
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
@@ -67,7 +67,7 @@ def validate_guild_id(guild_id: int) -> int:
     return gid
 
 
-def fetch_one(conn: sqlite3.Connection, sql: str, params: Sequence[Any] = ()) -> Optional[dict[str, Any]]:
+def fetch_one(conn: sqlite3.Connection, sql: str, params: Sequence[Any] = ()) -> dict[str, Any] | None:
     """1行だけ取得して辞書で返す（無ければ None）。sqlite3.Row は dict に変換する。"""
     row = conn.execute(sql, params).fetchone()
     return dict(row) if row else None
@@ -107,7 +107,7 @@ class ScopedRepo:
         """注入された IClock の現在時刻（UNIX 秒）。"""
         return self._db.now_ts()
 
-    def _one(self, sql: str, params: Sequence[Any] = ()) -> Optional[Any]:
+    def _one(self, sql: str, params: Sequence[Any] = ()) -> Any | None:
         """1行だけ取得して返す（無ければ None）。SQLite 行をリポジトリ境界の TypedDict 契約へ渡す内部ヘルパのため戻り値は Any とし、契約は呼び出し側の注釈で付く。"""
         return fetch_one(self._conn, sql, params)
 

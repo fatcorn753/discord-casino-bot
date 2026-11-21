@@ -15,7 +15,7 @@ import math
 import random
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from domain.errors import Outcome, fail
 from domain.ports import get_catalogs
@@ -96,7 +96,7 @@ class Runner:
     races: int = 0  # 戦績（オッズに使う。レースの結果には効かない）
     wins: int = 0
     places: int = 0  # 3着以内（1着を含む）
-    style: Optional[str] = None  # 脚質（未指定なら、ステータスから自然に決める。STYLE_NAMES のキー）
+    style: str | None = None  # 脚質（未指定なら、ステータスから自然に決める。STYLE_NAMES のキー）
 
     def stat(self, key: str) -> int:
         return getattr(self, key)
@@ -258,7 +258,7 @@ def simulate(runners: list[Runner], track: Track, rng: random.Random, keep_frame
     """1レース走らせる。{"order": 着順（lane の並び）, "times": 着順ごとのゴール時刻, "frames": ティックごとの進み（keep_frames のとき）}。"""
     n = len(runners)
     pos = [0.0] * n
-    finish: list[Optional[float]] = [None] * n
+    finish: list[float | None] = [None] * n
     luck = [rng.gauss(0, LUCK) for _ in runners]
     spurt = [max(0.0, (r.guts - 20) / 60 * 0.12 * rng.uniform(0.5, 1.5)) for r in runners]  # ラストスパート（根性）
     styles = [r.effective_style for r in runners]
@@ -396,7 +396,7 @@ def _odds(prob: float, takeout: float, cap: float) -> float:
     return max(1.0, min(cap, math.floor((1 - takeout) / prob * 10) / 10))
 
 
-def _blended_probs(runners: list[Runner], track: Optional[Track]) -> tuple[list[float], list[float]]:
+def _blended_probs(runners: list[Runner], track: Track | None) -> tuple[list[float], list[float]]:
     """(勝つ確率の並び, 3着以内率の並び)。戦績の見積もりに、このコースでの試走の結果を ODDS_SIM_WEIGHT だけ混ぜる。
 
     戦績だけだと、距離・馬場・脚質の相性を読める人の期待値が大きくなりすぎる（賭け金の3倍を超える）。
@@ -413,7 +413,7 @@ def _blended_probs(runners: list[Runner], track: Optional[Track]) -> tuple[list[
     )
 
 
-def make_all_odds(runners: list[Runner], track: Optional[Track] = None) -> dict[str, dict[str, float]]:
+def make_all_odds(runners: list[Runner], track: Track | None = None) -> dict[str, dict[str, float]]:
     """全部の馬券のオッズ。{"win": {枠: オッズ}, "place": {枠: オッズ}, "quinella": {キー: オッズ}, …}。
 
     単勝は勝つ確率の見積もり、複勝は3着以内率の見積もり（戦績と、track があればそのコースでの試走を混ぜる）。

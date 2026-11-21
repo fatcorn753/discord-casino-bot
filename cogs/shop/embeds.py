@@ -1,7 +1,6 @@
 """ショップ・競売・持ち物画面のカタログ定数と埋め込み組み立て。"""
 
 from collections.abc import Mapping, Sequence
-from typing import Optional
 
 import discord
 
@@ -67,7 +66,7 @@ def stock_text(stock: ShopStockInfo) -> str:
     return text + (f"（次の補充 <t:{int(stock['next_at'])}:R>）" if stock["next_at"] else "")
 
 
-def item_line(item, inv: dict[str, int], stock: Optional[ShopStockInfo] = None) -> str:
+def item_line(item, inv: dict[str, int], stock: ShopStockInfo | None = None) -> str:
     """売り場の1行: 持っていれば ✅、値段をそろえて、名前。説明があれば、次の行に。在庫のある品は、このプレイヤーの在庫も。"""
     icon = item.value if item.kind in (shop.CARD_ICON, shop.COLLECTION) else item.mark
     mark = "✅" if item.unique and inv.get(item.id, 0) > 0 else "▫️"

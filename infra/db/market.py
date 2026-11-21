@@ -1,6 +1,5 @@
 """証券の市場価格・ストップ高安・チャート掲示。"""
 
-from typing import Optional
 
 from domain import market as market_mod
 from domain.errors import Failure
@@ -16,7 +15,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
     def __init__(self, db: EcoDb, guild_id: int = 0, strict: bool = False) -> None:
         super().__init__(db, guild_id, strict)
 
-    def market_latest(self, symbol: str = DEFAULT) -> Optional[PricePoint]:
+    def market_latest(self, symbol: str = DEFAULT) -> PricePoint | None:
         """いまの価格 (時刻, 価格, 出来事)。まだ無ければ None。時計が戻っても、最後に記録した行を最新とする。"""
         with self._lock:
             r = self._one(
@@ -36,7 +35,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
                 (symbol, ts, price, event),
             )
 
-    def market_fair_get(self, symbol: str) -> Optional[float]:
+    def market_fair_get(self, symbol: str) -> float | None:
         """裏の理論価格。まだ無ければ None。"""
         with self._lock:
             v = self._scalar("SELECT fair FROM market_fair WHERE symbol=?", (symbol,))
@@ -55,7 +54,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
             v = self._scalar("SELECT pin FROM market_fair WHERE symbol=?", (symbol,))
             return v if v is not None else 0
 
-    def pin_reason(self, symbol: str, action: str) -> Optional[Failure]:
+    def pin_reason(self, symbol: str, action: str) -> Failure | None:
         """張り付き中で、この売買が約定しないなら Failure を返す。通るなら None。"""
         return market_mod.pin_lock_failure(symbol, self.market_pin(symbol), action)
 
@@ -75,7 +74,7 @@ class MarketDataRepo(ScopedRepo, IMarketDataRepo):
 
     def swap_chart_post(
         self, channel_id: int, message_id: int, guild_id: int, period: str, ts: float, symbol: str = DEFAULT
-    ) -> Optional[int]:
+    ) -> int | None:
         """そのチャンネルのチャートを新しいものに入れ替え（更新中にする）、前のメッセージID（無ければ None）を返す。"""
         with self._db.tx():
             prev = self._one("SELECT message_id FROM chart_posts WHERE channel_id=?", (channel_id,))

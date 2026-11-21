@@ -10,7 +10,6 @@ W は「賭けた額あたり、勝ち分が平均いくらか」。各ゲーム
 
 import itertools
 from collections.abc import Callable, Mapping
-from typing import Optional
 
 from domain.games import pachinko, roulette, slot
 from domain.ports import get_catalogs
@@ -46,20 +45,20 @@ SLOT_RTP, SLOT_W = _slot_stats()
 
 
 # ゲームごとの基準還元率・平均勝ち分を計算する純粋戦略（静的型だけで LSP が保証できるので Callable エイリアス）
-RtpProfile = Callable[[Optional[str]], tuple[float, float]]
+RtpProfile = Callable[[str | None], tuple[float, float]]
 
 
 def fixed_rtp_profile(rtp: float, win_share: float) -> RtpProfile:
     """事前シミュレーションで求めた固定の (RTP, W) を返すプロファイル。"""
 
-    def stats(kind: Optional[str] = None) -> tuple[float, float]:
+    def stats(kind: str | None = None) -> tuple[float, float]:
         return rtp, win_share
 
     return stats
 
 
 def roulette_rtp_profile(default_kind: str) -> RtpProfile:
-    def stats(kind: Optional[str] = None) -> tuple[float, float]:
+    def stats(kind: str | None = None) -> tuple[float, float]:
         mult = roulette.BETS[kind or default_kind][1]
         p = sum(1 for n in range(37) if roulette.wins(kind or default_kind, n, 17)) / 37
         return p * mult, p * (mult - 1)
@@ -68,7 +67,7 @@ def roulette_rtp_profile(default_kind: str) -> RtpProfile:
 
 
 def pachinko_rtp_profile() -> RtpProfile:
-    def stats(kind: Optional[str] = None) -> tuple[float, float]:
+    def stats(kind: str | None = None) -> tuple[float, float]:
         rtp = pachinko.rtp()
         return rtp, rtp - pachinko.hit_rate()
 
@@ -98,16 +97,16 @@ class IRtpPolicy:
     step: float
     min_bet: int
 
-    def base_stats(self, game: str, kind: Optional[str] = None) -> tuple[float, float]:
+    def base_stats(self, game: str, kind: str | None = None) -> tuple[float, float]:
         raise NotImplementedError
 
-    def factor(self, game: str, level: int, kind: Optional[str] = None) -> float:
+    def factor(self, game: str, level: int, kind: str | None = None) -> float:
         raise NotImplementedError
 
-    def approx_rtp(self, game: str, level: int, kind: Optional[str] = None) -> float:
+    def approx_rtp(self, game: str, level: int, kind: str | None = None) -> float:
         raise NotImplementedError
 
-    def adjust(self, game: str, level: int, bet: int, payout: int, kind: Optional[str] = None) -> int:
+    def adjust(self, game: str, level: int, bet: int, payout: int, kind: str | None = None) -> int:
         raise NotImplementedError
 
 
@@ -133,21 +132,21 @@ class RtpPolicy(IRtpPolicy):
         self.step = step
         self.min_bet = min_bet
 
-    def base_stats(self, game: str, kind: Optional[str] = None) -> tuple[float, float]:
+    def base_stats(self, game: str, kind: str | None = None) -> tuple[float, float]:
         profile = self._profiles.get(game)
         if profile is None:
             raise KeyError(game)
         return profile(kind)
 
-    def factor(self, game: str, level: int, kind: Optional[str] = None) -> float:
+    def factor(self, game: str, level: int, kind: str | None = None) -> float:
         _, w = self.base_stats(game, kind)
         return 1 + (level - self.default_level) * self.step / w
 
-    def approx_rtp(self, game: str, level: int, kind: Optional[str] = None) -> float:
+    def approx_rtp(self, game: str, level: int, kind: str | None = None) -> float:
         rtp, _ = self.base_stats(game, kind)
         return rtp + (level - self.default_level) * self.step
 
-    def adjust(self, game: str, level: int, bet: int, payout: int, kind: Optional[str] = None) -> int:
+    def adjust(self, game: str, level: int, bet: int, payout: int, kind: str | None = None) -> int:
         if level == self.default_level or game not in self.games or payout <= bet:
             return payout
         return bet + max(0, int((payout - bet) * self.factor(game, level, kind)))

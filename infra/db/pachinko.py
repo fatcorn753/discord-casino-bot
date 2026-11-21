@@ -5,7 +5,6 @@
 表の定義は infra/db/schema/tables.py にある。記録は統計のためだけで、ゲームの結果には影響しない。
 """
 
-from typing import Optional
 
 from domain.games.pachinko import SetResult
 from domain.ports.contracts import PachinkoStats
@@ -20,7 +19,7 @@ class PachinkoRepo(ScopedRepo, IPachinkoRepo):
         super().__init__(db, guild_id, strict)
 
     def pachinko_record_set(
-        self, user_id: int, bet: int, balls: int, result: SetResult, now: Optional[float] = None
+        self, user_id: int, bet: int, balls: int, result: SetResult, now: float | None = None
     ) -> None:
         """1セット（SetResult）を記録する。bet はそのセットの賭け金。"""
         ts = now if now is not None else self._now()
@@ -46,7 +45,7 @@ class PachinkoRepo(ScopedRepo, IPachinkoRepo):
                 [(gid, user_id, ts, s.omen, s.tier, int(s.hit)) for s in result.spins],
             )
 
-    def pachinko_stats(self, guild_id: Optional[int] = None, since: Optional[float] = None) -> PachinkoStats:
+    def pachinko_stats(self, guild_id: int | None = None, since: float | None = None) -> PachinkoStats:
         """予告の色・リーチの格ごとの（回転数, 当たり数）と、セット全体の集計。"""
         args = (guild_id, guild_id, since or 0)
         where = "WHERE (? IS NULL OR guild_id=?) AND ts>=?"

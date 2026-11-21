@@ -6,7 +6,7 @@
 
 import datetime
 import random
-from typing import Any, Optional, Self, cast
+from typing import Any, Self, cast
 
 from domain import shop as shop_mod
 from domain.games.rtplevel import DEFAULT_RTP_POLICY
@@ -75,13 +75,13 @@ class FakeSessions(ISessionGuard):
     def __init__(self) -> None:
         self.active: set[int] = set()
 
-    def try_start(self, user_id: int, now: Optional[float] = None) -> Optional[str]:
+    def try_start(self, user_id: int, now: float | None = None) -> str | None:
         if user_id in self.active:
             return "プレイ中"
         self.active.add(user_id)
         return None
 
-    def end(self, user_id: int, now: Optional[float] = None) -> None:
+    def end(self, user_id: int, now: float | None = None) -> None:
         self.active.discard(user_id)
 
     def is_active(self, user_id: int) -> bool:
@@ -99,10 +99,10 @@ class StubWallet(IWalletRepo):
     def balance(self, user_id: int) -> int:
         return self._balances.get(user_id, 0)
 
-    def peek_stats(self, user_id: int) -> Optional[UserRow]:
+    def peek_stats(self, user_id: int) -> UserRow | None:
         return cast("UserRow", {"balance": self._balances.get(user_id, 0)}) if user_id in self._balances else None
 
-    def claim_daily(self, user_id: int, today: datetime.date, slot: Optional[int] = None) -> DailyResult:
+    def claim_daily(self, user_id: int, today: datetime.date, slot: int | None = None) -> DailyResult:
         return DailyResult(True, 500, 1, self._balances.get(user_id, 0) + 500)
 
     def transfer(
@@ -127,7 +127,7 @@ class StubEscrow(IEscrowRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def place_bet(self, user_id: int, amount: int, game: str) -> Optional[int]:
+    def place_bet(self, user_id: int, amount: int, game: str) -> int | None:
         eid = len(self.bets) + 1
         self.bets[eid] = amount
         return eid
@@ -135,7 +135,7 @@ class StubEscrow(IEscrowRepo):
     def escrow_amount(self, escrow_id: int) -> int:
         return self.bets.get(escrow_id, 0)
 
-    def settle_with_penalty(self, escrow_id: int, payout: int, game: str, penalty: int) -> Optional[tuple[Any, ...]]:
+    def settle_with_penalty(self, escrow_id: int, payout: int, game: str, penalty: int) -> tuple[Any, ...] | None:
         bet = self.bets.pop(escrow_id, None)
         if bet is None:
             return None
@@ -168,7 +168,7 @@ class StubEvents(IEventRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def manual_event_get(self, now: float) -> Optional[ManualEventRow]:
+    def manual_event_get(self, now: float) -> ManualEventRow | None:
         return None
 
 
@@ -195,7 +195,7 @@ class StubEarnings(IEarningsRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def earnings_memo(self, user_id: int, now: Optional[float] = None, rng: Optional[random.Random] = None):
+    def earnings_memo(self, user_id: int, now: float | None = None, rng: random.Random | None = None):
         return None
 
 
@@ -206,7 +206,7 @@ class StubRaces(IRaceRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def race_close_entries(self, race_id: int, rng=None) -> Optional[RaceCloseResult]:
+    def race_close_entries(self, race_id: int, rng=None) -> RaceCloseResult | None:
         from domain.horse import DISTANCES, GOINGS, Runner, Track
 
         result = {
@@ -232,7 +232,7 @@ class StubRaces(IRaceRepo):
     def race_set_odds(self, race_id: int, odds: Any) -> None:
         self.odds_set.append((race_id, odds))
 
-    def race_get(self, race_id: int) -> Optional[RaceRow]:
+    def race_get(self, race_id: int) -> RaceRow | None:
         return cast("RaceRow", {"id": race_id, "status": "betting"})
 
 
@@ -383,7 +383,7 @@ class StubShopForService(StubShop):
     def inventory(self, user_id: int) -> dict[str, Any]:
         return {"title_rookie": 1}
 
-    def shop_stock(self, user_id: int, item_id: str, now=None) -> Optional[ShopStockInfo]:
+    def shop_stock(self, user_id: int, item_id: str, now=None) -> ShopStockInfo | None:
         return None
 
     def arm(self, user_id: int, item_id: str) -> bool:

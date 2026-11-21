@@ -1,6 +1,5 @@
 """ランキング（`/ペリカ ランキング`・掲示板・週間発表）の読み取り専用の問い合わせ。"""
 
-from typing import Optional
 
 from domain.ports.contracts import RankEntry
 from domain.ports.repos import IAssetRepo, IBondRepo, ICryptoRepo, IWalletRepo
@@ -23,16 +22,16 @@ class RankingService:
             self._assets.for_guild(guild_id),
         )
 
-    def top(self, limit: int, user_ids: Optional[set[int]] = None) -> list[RankEntry]:
+    def top(self, limit: int, user_ids: set[int] | None = None) -> list[RankEntry]:
         return self._wallet.top(limit, user_ids)
 
-    def rank_of(self, user_id: int, user_ids: Optional[set[int]] = None) -> Optional[RankEntry]:
+    def rank_of(self, user_id: int, user_ids: set[int] | None = None) -> RankEntry | None:
         return self._wallet.rank_of(user_id, user_ids)
 
     def wealthy_ids(self) -> set[int]:
         return self._wallet.wealthy_ids()
 
-    def display_status(self, user_id: int, wealthy: Optional[set[int]] = None) -> str:
+    def display_status(self, user_id: int, wealthy: set[int] | None = None) -> str:
         return self._wallet.display_status(user_id, wealthy)
 
     def crypto_values(self) -> dict[int, int]:
@@ -41,5 +40,5 @@ class RankingService:
     def bond_values(self) -> dict[int, int]:
         return self._bonds.bond_values()
 
-    def final_assets(self, user_ids: Optional[set[int]] = None) -> list[tuple[int, int, dict[str, int]]]:
+    def final_assets(self, user_ids: set[int] | None = None) -> list[tuple[int, int, dict[str, int]]]:
         return self._assets.final_assets(user_ids)

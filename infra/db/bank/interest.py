@@ -1,7 +1,7 @@
 """無リスク金利の遷移・帝愛信託の利息支払い・キャピタルゲイン税の徴収。"""
 
 import random
-from typing import Optional, cast
+from typing import cast
 
 from domain import market as market_mod
 from domain import rates
@@ -17,7 +17,7 @@ class BankRepo(Base):
         v = self._scalar("SELECT rf FROM teiai_bank WHERE guild_id=?", (guild_id,))
         return v if v is not None and v > 0 else rates.BASE_RISK_FREE_PER_DAY
 
-    def bank_rf_tick(self, now: float, rng: Optional[random.Random] = None) -> float:
+    def bank_rf_tick(self, now: float, rng: random.Random | None = None) -> float:
         """r_f を、いまの準備率 θ の目標へ向けて進める（CIR 風。式は domain/rates.py）。新しい r_f を返す。"""
         rng = rng if rng is not None else cast("random.Random", random)
         with self._db.tx():
@@ -32,7 +32,7 @@ class BankRepo(Base):
             self._conn.execute("UPDATE teiai_bank SET rf=?, rf_ts=? WHERE guild_id=?", (r, now, gid))
             return r
 
-    def bank_reserve_for(self, guild_id: int, now: float) -> tuple[float, int, Optional[float]]:
+    def bank_reserve_for(self, guild_id: int, now: float) -> tuple[float, int, float | None]:
         """(利用可能現金, 負債 = 信託 + 社債の元本, 準備率 θ)。呼び出し側のトランザクションの中で使う。"""
         state = self.bank_sync_for(guild_id, now)
         total, bonds, _locks, available, ratio = self._reserve_for(guild_id, state["cash"], now)

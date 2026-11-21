@@ -1,7 +1,6 @@
 """個人間貸付（提案・募集・承諾・返済・期日回収）のアプリケーションサービス。"""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from domain.errors import Outcome
 from domain.ports.clock import IClock
@@ -26,7 +25,7 @@ class LoanService:
     def now_ts(self) -> float:
         return self.clock.now_ts()
 
-    def get(self, guild_id: int, loan_id: int) -> Optional[LoanRow]:
+    def get(self, guild_id: int, loan_id: int) -> LoanRow | None:
         return self._loans.for_guild(guild_id).loan_get(loan_id)
 
     def credit(self, guild_id: int, user_id: int) -> LoanCredit:
@@ -44,7 +43,7 @@ class LoanService:
     def cancel(self, guild_id: int, loan_id: int, user_id: int) -> Outcome[str]:
         return self._loans.for_guild(guild_id).loan_cancel(loan_id, user_id)
 
-    def remaining(self, guild_id: int, loan: LoanRow, now: Optional[float] = None) -> int:
+    def remaining(self, guild_id: int, loan: LoanRow, now: float | None = None) -> int:
         ts = self.clock.now_ts() if now is None else now
         return self._loans.for_guild(guild_id).loan_remaining(loan, ts)
 
@@ -81,10 +80,10 @@ class LoanService:
     def lend(self, guild_id: int, loan_id: int, user_id: int) -> Outcome[str]:
         return self._loans.for_guild(guild_id).loan_lend(loan_id, user_id, self.clock.now_ts())
 
-    def repay(self, guild_id: int, loan_id: int, user_id: int, amount: Optional[int]) -> Outcome[int]:
+    def repay(self, guild_id: int, loan_id: int, user_id: int, amount: int | None) -> Outcome[int]:
         return self._loans.for_guild(guild_id).loan_repay(loan_id, user_id, amount, self.clock.now_ts())
 
-    def process_tick(self, guild_id: int, now: Optional[float] = None) -> LoanTickOutcome:
+    def process_tick(self, guild_id: int, now: float | None = None) -> LoanTickOutcome:
         ts = self.clock.now_ts() if now is None else now
         repo = self._loans.for_guild(guild_id)
         return LoanTickOutcome(

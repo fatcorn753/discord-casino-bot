@@ -2,7 +2,6 @@
 
 import random
 from dataclasses import dataclass
-from typing import Optional
 
 from domain import teiai
 from domain.errors import Outcome
@@ -30,7 +29,7 @@ class TeiaiPanelSnapshot:
     display_status: str
     deposit: int
     debt: int
-    grace_until: Optional[float]
+    grace_until: float | None
     cds: CdsHoldings
     uid: int
 
@@ -64,7 +63,7 @@ class TeiaiService:
     def can_borrow_for_bet(self, guild_id: int, user_id: int, need: int) -> Outcome[str]:
         return self._debt.for_guild(guild_id).can_borrow_for_bet(user_id, need)
 
-    def repay(self, guild_id: int, user_id: int, amount: Optional[int]) -> Outcome[int]:
+    def repay(self, guild_id: int, user_id: int, amount: int | None) -> Outcome[int]:
         """帝愛への返済。amount が None なら返せる限り全額。"""
         return self._debt.for_guild(guild_id).repay_debt(user_id, amount)
 
@@ -74,7 +73,7 @@ class TeiaiService:
         self._notices.for_guild(guild_id).take_notices(user_id)
         return result
 
-    def can_go_bankrupt(self, guild_id: int, user_id: int) -> Optional[str]:
+    def can_go_bankrupt(self, guild_id: int, user_id: int) -> str | None:
         """自己破産できないときの理由（"already" / "nothing"）。できるなら None。"""
         if self._debt.for_guild(guild_id).status(user_id) == teiai.BANKRUPT:
             return "already"
@@ -119,7 +118,7 @@ class TeiaiService:
     def deposit(self, guild_id: int, user_id: int, amount: int) -> Outcome[int]:
         return self._bank.for_guild(guild_id).bank_deposit(user_id, amount, self._clock.now_ts())
 
-    def withdraw(self, guild_id: int, user_id: int, amount: Optional[int]) -> Outcome[int]:
+    def withdraw(self, guild_id: int, user_id: int, amount: int | None) -> Outcome[int]:
         """amount が None なら全額。"""
         return self._bank.for_guild(guild_id).bank_withdraw(user_id, amount, self._clock.now_ts())
 
@@ -133,7 +132,7 @@ class TeiaiService:
         """破産猶予の時間切れ（強制破産と、CDS の配当）。(user_id, 結果) の一覧。"""
         return self._bank.for_guild(guild_id).grace_expire(now)
 
-    def rf_tick(self, guild_id: int, now: float, rng: Optional[random.Random] = None) -> float:
+    def rf_tick(self, guild_id: int, now: float, rng: random.Random | None = None) -> float:
         """無リスク金利を、準備率に応じて進める（毎分。#18）。"""
         return self._bank.for_guild(guild_id).bank_rf_tick(now, rng)
 

@@ -1,6 +1,5 @@
 """台帳・口座残高プリミティブ（全リポジトリがコンポジションで共有する口座台帳）。"""
 
-from typing import Optional
 
 from domain.ports.bridges import IDebtLifecycleHook, NoOpDebtLifecycleHook
 from domain.types import INITIAL_BALANCE
@@ -10,7 +9,7 @@ from infra.db.base import EcoDb, fetch_scalar
 class AccountCore:
     """口座の作成・残高操作・台帳記録を担う共有ストア（Mixin 継承に依存しない）。"""
 
-    def __init__(self, db: EcoDb, debt_hook: Optional[IDebtLifecycleHook] = None) -> None:
+    def __init__(self, db: EcoDb, debt_hook: IDebtLifecycleHook | None = None) -> None:
         self._db = db
         self._conn = db.conn
         self._lock = db.lock

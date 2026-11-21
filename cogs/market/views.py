@@ -1,6 +1,6 @@
 """`/証券` の保有・市況・オプション画面（View / Modal）。"""
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import discord
 
@@ -43,7 +43,7 @@ class HoldingsView(ui.OwnerView):
     """
 
     def __init__(
-        self, cog: "MarketCog", user_id: int, guild_id: int, origin: Optional[discord.Interaction] = None
+        self, cog: "MarketCog", user_id: int, guild_id: int, origin: discord.Interaction | None = None
     ) -> None:
         super().__init__(user_id, timeout=PANEL_TIMEOUT, owner_message="自分の `/証券 保有` で操作してください。")
         self.cog, self.user_id, self.guild_id, self.origin = cog, user_id, guild_id, origin

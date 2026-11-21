@@ -4,7 +4,7 @@
 """
 
 import random
-from typing import Optional, cast
+from typing import cast
 
 from domain.errors import Outcome, fail
 from domain.ports.contracts import RaffleResult, RaffleRow, RaffleView
@@ -20,12 +20,12 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
         super().__init__(db, guild_id, strict)
         self._account = account
 
-    def _raffle_open_row(self, guild_id: int) -> Optional[RaffleRow]:
+    def _raffle_open_row(self, guild_id: int) -> RaffleRow | None:
         return self._one(
             "SELECT * FROM raffle WHERE guild_id=? AND status='open' ORDER BY id DESC LIMIT 1", (guild_id,)
         )
 
-    def _raffle_view(self, row: Optional[RaffleRow]) -> Optional[RaffleView]:
+    def _raffle_view(self, row: RaffleRow | None) -> RaffleView | None:
         if row is None:
             return None
         d = cast("RaffleView", dict(row))
@@ -49,12 +49,12 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
             )
             return True, ""
 
-    def raffle_get(self) -> Optional[RaffleView]:
+    def raffle_get(self) -> RaffleView | None:
         """募集中の抽選（参加者つき）。無ければ None。"""
         with self._lock:
             return self._raffle_view(self._raffle_open_row(self._g()))
 
-    def raffle_set_message(self, raffle_id: int, message_id: int, channel_id: Optional[int] = None) -> None:
+    def raffle_set_message(self, raffle_id: int, message_id: int, channel_id: int | None = None) -> None:
         """募集の投稿を記録する。再掲示で別のチャンネルに移したときは channel_id も渡す。"""
         with self._db.tx():
             self._conn.execute("UPDATE raffle SET message_id=? WHERE id=?", (message_id, raffle_id))
@@ -81,7 +81,7 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
             self._conn.execute("INSERT INTO raffle_entries (raffle_id, user_id) VALUES (?, ?)", (row["id"], user_id))
             return True, ""
 
-    def raffle_close(self, rng: Optional[random.Random] = None, cancel: bool = False) -> Optional[RaffleResult]:
+    def raffle_close(self, rng: random.Random | None = None, cancel: bool = False) -> RaffleResult | None:
         """募集中の抽選を締める。参加者が2人以上なら1人を選んで集めた参加費の全額を渡し、足りない・中止なら全員に返金する。"""
         rng = rng or cast("random.Random", random)
         with self._db.tx():

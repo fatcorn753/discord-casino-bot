@@ -3,7 +3,7 @@
 import datetime
 import logging
 import math
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -96,7 +96,7 @@ class EconomyCog(commands.Cog):
         sessions: ISessionGuard,
         clock: IClock,
         *,
-        shop_bridge: Optional[IShopTitleBridge] = None,
+        shop_bridge: IShopTitleBridge | None = None,
     ):
         self.bot = bot
         self._config = config
@@ -113,7 +113,7 @@ class EconomyCog(commands.Cog):
     @group.command(name="残高", description="ペリカの残高と成績を表示")
     @app_commands.rename(member="対象")
     @app_commands.describe(member="見たい人（省略時: 自分）")
-    async def balance(self, interaction: discord.Interaction, member: Optional[discord.Member] = None):
+    async def balance(self, interaction: discord.Interaction, member: discord.Member | None = None):
         target = member or interaction.user
         card = self._economy_svc.balance_card(ui.guild_id_of(interaction), interaction.user.id, target.id)
         if card is None:
@@ -144,7 +144,7 @@ class EconomyCog(commands.Cog):
     @group.command(name="返済", description="帝愛への借金を、手元のペリカから返す（金額を省くと、返せる限り全額）")
     @app_commands.rename(amount="金額")
     @app_commands.describe(amount="返す額（省略で全額）")
-    async def repay(self, interaction: discord.Interaction, amount: Optional[app_commands.Range[int, 1]] = None):
+    async def repay(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1] | None = None):
         gid, uid = ui.guild_id_of(interaction), interaction.user.id
         ok, result = self._teiai.repay(gid, uid, amount)
         if not ok:
@@ -203,7 +203,7 @@ class EconomyCog(commands.Cog):
     )
     @app_commands.rename(member="内訳")
     @app_commands.describe(member="この人の資産の内訳を見る（省略でランキング）")
-    async def ranking(self, interaction: discord.Interaction, member: Optional[discord.Member] = None):
+    async def ranking(self, interaction: discord.Interaction, member: discord.Member | None = None):
         gid = ui.guild_id_of(interaction)
         if member is not None:
             e = ranking.build_breakdown_embed(self._ranking.for_guild(gid), member.id, member.display_name)
@@ -248,7 +248,7 @@ class EconomyCog(commands.Cog):
     )
     @manage_guild_or_owner()
     async def board_set(
-        self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None, stop: bool = False
+        self, interaction: discord.Interaction, channel: discord.TextChannel | None = None, stop: bool = False
     ):
         await boards.board_set(self._ranking, self._guild_repo, interaction, channel, stop, BOARD_INTERVAL_MINUTES)
 

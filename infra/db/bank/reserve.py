@@ -1,6 +1,5 @@
 """準備率と引当金のロック、銀行の状態（準備率 θ の計算と表示）。"""
 
-from typing import Optional
 
 from domain import rates, teiai, thermostat
 from domain.ports.contracts import BankStatus
@@ -29,7 +28,7 @@ class BankRepo(Base):
                 locks += min(claims, teiai.CDS_PAYOUT_CAP_RATE * r["debt"])
         return locks
 
-    def _reserve_for(self, guild_id: int, cash: float, now: float) -> tuple[int, int, float, float, Optional[float]]:
+    def _reserve_for(self, guild_id: int, cash: float, now: float) -> tuple[int, int, float, float, float | None]:
         """(信託総額, 社債の元本残高, 引当金, 利用可能現金, 準備率 θ)。θ = 利用可能現金 ÷ (信託 + 社債)（どちらもなければ None）。"""
         total = sum(a for _, a in self._deposits_for(guild_id))
         bonds = self._bonds_outstanding_for(guild_id)

@@ -1,6 +1,5 @@
 """抽選の募集・結果・中止の画面。"""
 
-from typing import Optional
 
 import discord
 
@@ -11,7 +10,7 @@ from domain.ports.contracts import RaffleResult, RaffleView
 SHOWN_ENTRANTS = get_catalogs().economy().raffle.shown_entrants  # 掲示に並べる参加者の数（それ以上は人数だけ）
 
 
-def raffle_embed(raffle: RaffleView, now: Optional[float] = None) -> discord.Embed:
+def raffle_embed(raffle: RaffleView, now: float | None = None) -> discord.Embed:
     entries = raffle["entries"]
     prize = raffle["fee"] * len(entries)
     shown = " ".join(f"<@{u}>" for u in entries[:SHOWN_ENTRANTS]) + (

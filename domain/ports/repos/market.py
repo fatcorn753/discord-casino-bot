@@ -42,13 +42,13 @@ class IMarketDataRepo(IGuildScopedRepo):
     def latest_prices(self) -> dict[str, float]:
         raise NotImplementedError
 
-    def market_latest(self, symbol: str = "cs") -> Optional[PricePoint]:
+    def market_latest(self, symbol: str = "cs") -> PricePoint | None:
         raise NotImplementedError
 
     def market_set(self, ts: float, price: float, event: int = 0, symbol: str = "cs") -> None:
         raise NotImplementedError
 
-    def market_fair_get(self, symbol: str) -> Optional[float]:
+    def market_fair_get(self, symbol: str) -> float | None:
         raise NotImplementedError
 
     def market_fair_set(self, symbol: str, fair: float, pin: int, ts: float) -> None:
@@ -65,7 +65,7 @@ class IMarketDataRepo(IGuildScopedRepo):
 
     def swap_chart_post(
         self, channel_id: int, message_id: int, guild_id: int, period: str, ts: float, symbol: str = "cs"
-    ) -> Optional[int]:
+    ) -> int | None:
         raise NotImplementedError
 
     def live_chart_posts(self) -> list[ChartPostRow]:
@@ -98,21 +98,21 @@ class IMarketEventRepo(IGuildScopedRepo):
         raise NotImplementedError
 
     def event_step(
-        self, now: float, rng: Optional[random.Random] = None, force: Optional[MarketEventPlan] = None
-    ) -> Optional[MarketEventRow]:
+        self, now: float, rng: random.Random | None = None, force: MarketEventPlan | None = None
+    ) -> MarketEventRow | None:
         raise NotImplementedError
 
 
 class IEarningsRepo(IGuildScopedRepo):
     def earnings_ensure(
-        self, now: float, tz_hours: float, rng: Optional[random.Random] = None
-    ) -> Optional[EarningsRow]:
+        self, now: float, tz_hours: float, rng: random.Random | None = None
+    ) -> EarningsRow | None:
         raise NotImplementedError
 
     def earnings_jumps(self, now: float, seconds: float) -> list[EarningsJump]:
         raise NotImplementedError
 
-    def earnings_upcoming(self, now: float) -> Optional[EarningsAnnouncement]:
+    def earnings_upcoming(self, now: float) -> EarningsAnnouncement | None:
         raise NotImplementedError
 
     def earnings_to_announce(self, now: float) -> list[EarningsAnnounceRow]:
@@ -121,13 +121,13 @@ class IEarningsRepo(IGuildScopedRepo):
     def earnings_release_due(self, now: float) -> list[EarningsRow]:
         raise NotImplementedError
 
-    def earnings_memo(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> Optional["MemoInfo"]:
+    def earnings_memo(self, user_id: int, now: float, rng: random.Random | None = None) -> Optional["MemoInfo"]:
         raise NotImplementedError
 
-    def insider_stock(self, now: float) -> Optional[InsiderStock]:
+    def insider_stock(self, now: float) -> InsiderStock | None:
         raise NotImplementedError
 
-    def insider_buy(self, user_id: int, now: float, rng: Optional[random.Random] = None) -> "Outcome[MemoInfo]":
+    def insider_buy(self, user_id: int, now: float, rng: random.Random | None = None) -> "Outcome[MemoInfo]":
         raise NotImplementedError
 
 
@@ -150,12 +150,12 @@ class ICryptoRepo(IGuildScopedRepo, ISpotCollateralReader):
     def crypto_buy(self, user_id: int, amount: int, price: float, symbol: str = "cs") -> "CryptoResult":
         raise NotImplementedError
 
-    def crypto_sell(self, user_id: int, units: Optional[int], price: float, symbol: str = "cs") -> "CryptoResult":
+    def crypto_sell(self, user_id: int, units: int | None, price: float, symbol: str = "cs") -> "CryptoResult":
         raise NotImplementedError
 
 
 class IMarginRepo(IGuildScopedRepo, IMarginCollateralGuard):
-    def margin_ratio_for(self, guild_id: int, user_id: int) -> Optional[float]:
+    def margin_ratio_for(self, guild_id: int, user_id: int) -> float | None:
         raise NotImplementedError
 
     def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
@@ -185,7 +185,7 @@ class IMarginRepo(IGuildScopedRepo, IMarginCollateralGuard):
     def margin_equity(self) -> dict[int, int]:
         raise NotImplementedError
 
-    def margin_status(self, user_id: int, prices: Optional[Mapping[str, float]] = None) -> MarginStatus:
+    def margin_status(self, user_id: int, prices: Mapping[str, float] | None = None) -> MarginStatus:
         raise NotImplementedError
 
     def short_open(self, user_id: int, units: int, price: float, leverage: int, symbol: str = "cs") -> "CryptoResult":
@@ -195,17 +195,17 @@ class IMarginRepo(IGuildScopedRepo, IMarginCollateralGuard):
         raise NotImplementedError
 
     def margin_close(
-        self, user_id: int, side: str, units: Optional[int], price: float, symbol: str = "cs"
+        self, user_id: int, side: str, units: int | None, price: float, symbol: str = "cs"
     ) -> "CryptoResult":
         raise NotImplementedError
 
-    def short_close(self, user_id: int, units: Optional[int], price: float, symbol: str = "cs") -> "CryptoResult":
+    def short_close(self, user_id: int, units: int | None, price: float, symbol: str = "cs") -> "CryptoResult":
         raise NotImplementedError
 
-    def long_close(self, user_id: int, units: Optional[int], price: float, symbol: str = "cs") -> "CryptoResult":
+    def long_close(self, user_id: int, units: int | None, price: float, symbol: str = "cs") -> "CryptoResult":
         raise NotImplementedError
 
-    def margin_cut_map(self, prices: Optional[Mapping[str, float]] = None) -> list[tuple[str, str, float, int]]:
+    def margin_cut_map(self, prices: Mapping[str, float] | None = None) -> list[tuple[str, str, float, int]]:
         raise NotImplementedError
 
     def margin_interest(self, now: float) -> list[tuple[int, int, str, str, int]]:
@@ -228,7 +228,7 @@ class IBondRepo(IGuildScopedRepo):
     def bond_list(self, user_id: int, recent: int = 5) -> HoldingBook[BondRow]:
         raise NotImplementedError
 
-    def bond_settle(self, now: float, rng: Optional[random.Random] = None) -> list[BondRow]:
+    def bond_settle(self, now: float, rng: random.Random | None = None) -> list[BondRow]:
         raise NotImplementedError
 
     def bond_price(self, row: BondRow, now: float) -> int:
@@ -237,7 +237,7 @@ class IBondRepo(IGuildScopedRepo):
     def bond_quote(self, kind_key: str, amount: int, now: float) -> BondQuote:
         raise NotImplementedError
 
-    def bond_cancel(self, user_id: int, bond_id: int, now: Optional[float] = None) -> Outcome[int]:
+    def bond_cancel(self, user_id: int, bond_id: int, now: float | None = None) -> Outcome[int]:
         raise NotImplementedError
 
 
@@ -252,8 +252,8 @@ class IOptionRepo(IGuildScopedRepo):
         symbol: str,
         amount: int,
         now: float,
-        symbol2: Optional[str] = None,
-        strike_pct: Optional[float] = None,
+        symbol2: str | None = None,
+        strike_pct: float | None = None,
     ) -> Outcome[OptionBuyResult]:
         raise NotImplementedError
 
@@ -264,7 +264,7 @@ class IOptionRepo(IGuildScopedRepo):
         symbol: str,
         amount: int,
         now: float,
-        strike_pct: Optional[float] = None,
+        strike_pct: float | None = None,
     ) -> Outcome[OptionWriteResult]:
         raise NotImplementedError
 

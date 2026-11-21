@@ -1,6 +1,6 @@
 """破産猶予（借金が一定額を超えた人の猶予期間の管理と時間切れの強制破産）。"""
 
-from typing import Any, Optional
+from typing import Any
 
 from domain import teiai
 from domain.ports.contracts import BankruptResult
@@ -25,11 +25,11 @@ class BankRepo(Base):
             self._conn.execute("UPDATE users SET grace_until=NULL WHERE guild_id=? AND user_id=?", (guild_id, user_id))
             self._notices.note_for(guild_id, user_id, "grace_exited")
 
-    def grace_until_for(self, guild_id: int, user_id: int) -> Optional[float]:
+    def grace_until_for(self, guild_id: int, user_id: int) -> float | None:
         with self._lock:
             return self._scalar("SELECT grace_until FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
 
-    def grace_until(self, user_id: int) -> Optional[float]:
+    def grace_until(self, user_id: int) -> float | None:
         return self.grace_until_for(self._g(), user_id)
 
     def grace_list(self) -> list[Any]:

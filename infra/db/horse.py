@@ -1,6 +1,5 @@
 """競走馬・競売。"""
 
-from typing import Optional
 
 from domain import horse as horse_mod
 from domain import shop as shop_mod
@@ -50,7 +49,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
         )
         return owned + listed
 
-    def horse_get_for(self, guild_id: int, horse_id: int) -> Optional[HorseRow]:
+    def horse_get_for(self, guild_id: int, horse_id: int) -> HorseRow | None:
         with self._lock:
             return self._one("SELECT * FROM horses WHERE id=? AND guild_id=?", (horse_id, guild_id))
 
@@ -90,7 +89,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
         with self._lock:
             return self._all("SELECT * FROM horses WHERE guild_id=? AND owner_id=? ORDER BY id", (self._g(), user_id))
 
-    def horse_get(self, horse_id: int) -> Optional[HorseRow]:
+    def horse_get(self, horse_id: int) -> HorseRow | None:
         return self.horse_get_for(self._g(), horse_id)
 
     def horse_carrot(self, user_id: int, horse_id: int, src: str, dst: str) -> Outcome[dict[str, int]]:
@@ -145,7 +144,7 @@ class HorseRepo(ScopedRepo, IHorseRepo):
             self._conn.execute("UPDATE horses SET owner_id=-2 WHERE id=?", (horse_id,))
             return True, value
 
-    def horse_set_style(self, user_id: int, horse_id: int, style: Optional[str]) -> Outcome[str]:
+    def horse_set_style(self, user_id: int, horse_id: int, style: str | None) -> Outcome[str]:
         """脚質を選ぶ（style=None で、ステータスからの自動判定に戻す）。(成功か, Failure | "")。"""
         if style is not None and style not in horse_mod.STYLE_NAMES:
             return False, fail("horse_select_style")

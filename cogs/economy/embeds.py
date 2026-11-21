@@ -1,6 +1,6 @@
 """`/ペリカ` の画面の組み立て（残高カード・デイリー・返済・自己破産・ミッション・履歴）。値は services/ から受け取る。"""
 
-from typing import Any, Optional
+from typing import Any
 
 import discord
 
@@ -90,7 +90,7 @@ def daily_wait_embed(streak: int, next_label: str, next_ts: int) -> discord.Embe
 
 
 def daily_embed(
-    result: DailyResult, next_label: str, next_ts: int, season: Optional[skins.Season] = None
+    result: DailyResult, next_label: str, next_ts: int, season: skins.Season | None = None
 ) -> discord.Embed:
     """デイリーボーナスの結果。季節演出の期間中は、見出しと一言がその季節のものになる（額は変わらない）。"""
     next_bonus = DAILY_BASE + DAILY_STREAK_BONUS * min(result.streak, DAILY_STREAK_CAP)

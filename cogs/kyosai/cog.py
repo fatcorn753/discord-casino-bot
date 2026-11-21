@@ -13,7 +13,7 @@ import logging
 import math
 import re
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import discord
 from discord import app_commands
@@ -274,7 +274,7 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         choice=[app_commands.Choice(name="賛成", value="yes"), app_commands.Choice(name="反対", value="no")]
     )
     async def vote(
-        self, interaction: discord.Interaction, choice: app_commands.Choice[str], motion_id: Optional[int] = None
+        self, interaction: discord.Interaction, choice: app_commands.Choice[str], motion_id: int | None = None
     ):
         gid = ui.guild_id_of(interaction)
         ok, result = self._kyosai.vote(gid, interaction.user.id, choice.value == "yes", motion_id)
@@ -343,7 +343,7 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
                 logthrottle.warn(("kyosai", guild.id), f"共済の告知を投稿できません: guild={guild.id}: {exc!r}")
 
 
-def _motion_post(guild: discord.Guild, m: Mapping[str, Any]) -> Optional[Any]:
+def _motion_post(guild: discord.Guild, m: Mapping[str, Any]) -> Any | None:
     """動議の告知の投稿（覚えているときだけ）。"""
     channel = guild.get_channel(m.get("channel_id") or 0)
     return ui.partial_message(channel, m["message_id"]) if channel is not None and m.get("message_id") else None
@@ -381,7 +381,7 @@ def _motion_result(motion: Mapping[str, Any]) -> tuple[str, str]:
     return "🗳️ 帝愛共済の動議の結果", text
 
 
-def _auction_post(event: Mapping[str, Any]) -> Optional[tuple[str, str]]:
+def _auction_post(event: Mapping[str, Any]) -> tuple[str, str] | None:
     if event["event"] == "sold":
         return (
             "🔨 帝愛共済の競りの結果",

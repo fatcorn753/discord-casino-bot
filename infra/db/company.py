@@ -4,7 +4,7 @@
 設立費は帝愛銀行へ、建設費・維持費は帝愛の胴元の口座へ入る。出荷の代金は、まず胴元の口座から出て、足りない分は1日の買取枠（DAILY_GRANT）まで帝愛が新しく出す。
 """
 
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from domain import company as company_mod
 from domain import teiai
@@ -57,7 +57,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo):
     # ------------------------------------------------------------------ #
     # 読み書きの土台
     # ------------------------------------------------------------------ #
-    def _load(self, guild_id: int, user_id: int) -> Optional[dict[str, Any]]:
+    def _load(self, guild_id: int, user_id: int) -> dict[str, Any] | None:
         return self._one("SELECT * FROM companies WHERE guild_id=? AND user_id=?", (guild_id, user_id))
 
     def _save(self, c: dict[str, Any]) -> None:
@@ -102,7 +102,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo):
         self._save(c)
         return True
 
-    def _current(self, guild_id: int, user_id: int, now: float) -> Optional[dict[str, Any]]:
+    def _current(self, guild_id: int, user_id: int, now: float) -> dict[str, Any] | None:
         """精算済みの会社（無い・倒産したなら None）。トランザクションの中で呼ぶ。"""
         c = self._load(guild_id, user_id)
         if c is None or not self._settle(c, now):
@@ -155,7 +155,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo):
     # ------------------------------------------------------------------ #
     # 会社の操作
     # ------------------------------------------------------------------ #
-    def company_get(self, user_id: int, now: float) -> Optional[CompanyView]:
+    def company_get(self, user_id: int, now: float) -> CompanyView | None:
         """自分の会社（いまの時刻まで精算したもの）。無ければ None。"""
         with self._db.tx():
             c = self._current(self._g(), user_id, now)
@@ -213,7 +213,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo):
             self._save(c)
             return True, c["funds"]
 
-    def company_withdraw(self, user_id: int, amount: Optional[int] = None, now: Optional[float] = None) -> Outcome[int]:
+    def company_withdraw(self, user_id: int, amount: int | None = None, now: float | None = None) -> Outcome[int]:
         """会社資金を、個人の残高へ引き出す（amount が None なら全額）。(成功か, Failure か引き出した額)。"""
         now = self._now() if now is None else now
         if amount is not None and amount <= 0:

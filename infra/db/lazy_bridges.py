@@ -10,7 +10,7 @@
 """
 
 from collections.abc import Callable, Mapping
-from typing import Any, Generic, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 
 from domain.errors import Failure
 from domain.ports.bridges import (
@@ -49,7 +49,7 @@ class LazyBridgeBase(Generic[T]):
 
 
 class LazyDebtLifecycleHook(LazyBridgeBase[IDebtLifecycleHook], IDebtLifecycleHook):
-    def accrue_interest(self, guild_id: int, user_id: int, now: Optional[float] = None) -> int:
+    def accrue_interest(self, guild_id: int, user_id: int, now: float | None = None) -> int:
         return self._resolve().accrue_interest(guild_id, user_id, now)
 
     def after_debt_change(self, guild_id: int, user_id: int) -> None:
@@ -72,11 +72,11 @@ class LazyStatusReader(LazyBridgeBase[IStatusReader], IStatusReader):
 
 class LazyMarginCollateralGuard(LazyBridgeBase[IMarginCollateralGuard], IMarginCollateralGuard):
     def check_spot_sell(
-        self, guild_id: int, user_id: int, symbol: str, units: Optional[int], have: int, price: float
-    ) -> Optional[Failure]:
+        self, guild_id: int, user_id: int, symbol: str, units: int | None, have: int, price: float
+    ) -> Failure | None:
         return self._resolve().check_spot_sell(guild_id, user_id, symbol, units, have, price)
 
-    def check_bond_cancel(self, guild_id: int, user_id: int, kind: str, principal: int) -> Optional[Failure]:
+    def check_bond_cancel(self, guild_id: int, user_id: int, kind: str, principal: int) -> Failure | None:
         return self._resolve().check_bond_cancel(guild_id, user_id, kind, principal)
 
 

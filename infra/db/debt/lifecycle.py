@@ -1,6 +1,5 @@
 """借金のライフサイクル: 利息・後始末・収入からの天引き・非収入の全額充当。"""
 
-from typing import Optional
 
 from domain import teiai
 
@@ -49,7 +48,7 @@ class DebtRepo(Base):
             self._notices.note_for(guild_id, user_id, "debt_interest", add=add, rate=teiai.DEBT_RATE_PER_DAY)
         return add
 
-    def accrue_interest(self, guild_id: int, user_id: int, now: Optional[float] = None) -> int:
+    def accrue_interest(self, guild_id: int, user_id: int, now: float | None = None) -> int:
         return self.accrue_debt_interest_for(guild_id, user_id, self._now() if now is None else now)
 
     def after_debt_change(self, guild_id: int, user_id: int) -> None:
