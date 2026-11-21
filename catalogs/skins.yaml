@@ -76,6 +76,7 @@ seasons:
     end: "2026-12-26T00:00:00+09:00"
     daily_title: "🎁 サンタからのプレゼント"
     daily_line: "🎅 枕元に、サンタからプレゼントが届いたみたいだ…！"
+    house_horse_icon: "🦌"  # 競馬: 帝愛の馬が、トナカイの見た目で走る
     skins:
       - item_id: season_xmas_dice
         games: ["チンチロ"]

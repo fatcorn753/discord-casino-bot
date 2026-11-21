@@ -40,6 +40,7 @@ class Season:
     skins: tuple[Skin, ...]
     daily_title: str = ""  # デイリーボーナスの見出し
     daily_line: str = ""  # デイリーボーナスの一言
+    house_horse_icon: str = ""  # 競馬: 帝愛の馬（NPC）の絵
 
     def active(self, now: datetime.datetime) -> bool:
         return self.start <= now < self.end
@@ -74,6 +75,7 @@ SEASONS = tuple(
         tuple(_skin(s) for s in c.skins),
         c.daily_title,
         c.daily_line,
+        c.house_horse_icon,
     )
     for c in _CFG.seasons
 )
@@ -96,6 +98,12 @@ def season_skin(game: str, now: datetime.datetime) -> Optional[Skin]:
 def active_season(now: datetime.datetime) -> Optional[Season]:
     """いま期間中の季節演出（なければ None。期間が重なれば、先に書いたほう）。"""
     return next((s for s in SEASONS if s.active(now)), None)
+
+
+def house_horse_icon(now: datetime.datetime) -> str:
+    """競馬の帝愛の馬（NPC）の、いまの絵（季節演出の期間中は、その季節の絵。見た目だけで、強さは変わらない）。"""
+    season = active_season(now)
+    return season.house_horse_icon if season and season.house_horse_icon else ""
 
 
 def skin_for(profile: dict, game: str, now: datetime.datetime) -> Optional[Skin]:

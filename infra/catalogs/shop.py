@@ -107,6 +107,7 @@ class SeasonConfig(SeasonContract):
     skins: tuple[SkinConfig, ...] = Field(min_length=1)
     daily_title: str = ""
     daily_line: str = ""
+    house_horse_icon: str = ""
 
     @model_validator(mode="after")
     def _check(self) -> Self:

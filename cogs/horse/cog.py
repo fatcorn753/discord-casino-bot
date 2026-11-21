@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import datetime
 import logging
 from typing import TYPE_CHECKING, Any, Optional, cast
 
@@ -15,7 +16,7 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from cogs.horse.betting import BetPanel
-from cogs.horse.cards import RaceButton, card_embed, card_view, race_title
+from cogs.horse.cards import RaceButton, card_embed, card_view, race_title, runner_icon
 from cogs.horse.stable import Stable
 from cogs.shared import approval_guard, logthrottle, ui
 from cogs.shared.announce import announce_channel
@@ -77,15 +78,19 @@ def laps_for(distance: int) -> int:
     return max(1, distance // 1000)
 
 
-def lane_text(entries: list, positions: list, laps: int = 1) -> str:
-    """各馬の位置。laps>1 のときは、コースの1周が全体の 1/laps で、何周目かを頭に書く（馬ごとに、いまの周の位置を出す）。"""
+def lane_text(entries: list, positions: list, laps: int = 1, now: Optional[datetime.datetime] = None) -> str:
+    """各馬の位置。laps>1 のときは、コースの1周が全体の 1/laps で、何周目かを頭に書く（馬ごとに、いまの周の位置を出す）。
+
+    now を渡すと、季節演出の期間中は、帝愛の馬が季節の絵（例: 🦌）で走る。
+    """
     rows = []
     for e, p in zip(entries, positions):
         lap = min(laps - 1, int(p * laps))
         frac = 1.0 if p >= 1.0 else p * laps - lap
         k = min(TRACK_W, int(frac * TRACK_W))
         mark = f" {lap + 1}周目" if laps > 1 and p < 1.0 else ""
-        rows.append(f"{e['lane']} {e['silks']}{'─' * k}🐎{'·' * (TRACK_W - k)}🏁 {e['name'][:5]}{mark}")
+        icon = runner_icon(e, now) if now is not None else "🐎"
+        rows.append(f"{e['lane']} {e['silks']}{'─' * k}{icon}{'·' * (TRACK_W - k)}🏁 {e['name'][:5]}{mark}")
     head = ""
     if laps > 1:
         lead = min(laps, int(max(positions) * laps) + 1) if max(positions) < 1.0 else laps
@@ -337,13 +342,14 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
         title = f"{race_title(desk, race)}　発走！　{result['track'].label}"
 
         laps = laps_for(result["track"].distance)
+        today = desk.clock.now()
 
         def frame_embed(i: int, leader):
             positions = frames[i]
             final = i == len(frames) - 1
             text, new_leader = comment(entries, positions, leader, final, winner, result["track"].distance)
             return ui.embed(
-                title, f"{text}\n{lane_text(entries, positions, laps)}", ui.GOLD if final else ui.INFO
+                title, f"{text}\n{lane_text(entries, positions, laps, today)}", ui.GOLD if final else ui.INFO
             ), new_leader
 
         embed, leader = frame_embed(0, None)

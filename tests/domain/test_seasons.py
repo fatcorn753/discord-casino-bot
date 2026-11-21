@@ -59,3 +59,19 @@ def test_a_season_must_end_after_it_starts_and_have_a_timezone():
         )
     with pytest.raises(ValueError):
         SeasonConfig(id="s", name="s", start="2026-12-01T00:00:00", end="2026-12-26T00:00:00", skins=(skin,))
+
+
+def test_house_horses_run_as_reindeer_only_during_the_season():
+    from cogs.horse.cards import house_mark, runner_icon
+    from cogs.horse.cog import lane_text
+
+    house, owned = {"owner_id": 0}, {"owner_id": 42}
+    assert runner_icon(house, XMAS_EVE) == "🦌" and house_mark(house, XMAS_EVE) == "🦌 "
+    assert runner_icon(owned, XMAS_EVE) == "🐎" and house_mark(owned, XMAS_EVE) == ""  # 馬主のいる馬は、そのまま
+    assert runner_icon(house, at(2027, 1, 1)) == "🐎" and house_mark(house, at(2027, 1, 1)) == ""
+    entries = [
+        {**house, "lane": 1, "silks": "🔴", "name": "ハヤテ"},
+        {**owned, "lane": 2, "silks": "🔵", "name": "タロウ"},
+    ]
+    text = lane_text(entries, [0.5, 0.5], 1, XMAS_EVE)
+    assert text.count("🦌") == 1 and text.count("🐎") == 1

@@ -60,6 +60,7 @@ class SeasonContract:
     skins: tuple[SkinContract, ...]
     daily_title: str  # デイリーボーナスの見出し（空なら、いつもの見出し）
     daily_line: str  # デイリーボーナスの先頭に添える一言（空なら、なし）
+    house_horse_icon: str  # 競馬: 帝愛の馬（NPC）の絵（空なら、いつもの 🐎）
 
 
 @dataclass(frozen=True)

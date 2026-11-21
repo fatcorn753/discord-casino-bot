@@ -1,5 +1,6 @@
 """競馬のレースカード・出馬表 Embed・公開ボタン（再起動耐性 DynamicItem）。"""
 
+import datetime
 import re
 from typing import TYPE_CHECKING, Any, cast
 
@@ -8,6 +9,7 @@ import discord
 from cogs.shared import ui
 from cogs.shared.bridges import IHorseButtonBridge, NoOpHorseButtonBridge
 from domain import horse as horse_mod
+from domain import skins
 from services.horse import HorseDesk
 
 if TYPE_CHECKING:
@@ -54,6 +56,17 @@ async def refresh_entry_card(
         pass
 
 
+def house_mark(e: dict, now: datetime.datetime) -> str:
+    """名前の前の印。季節演出の期間中は、帝愛の馬（馬主なし）だけに季節の絵を付ける（見た目だけ）。"""
+    icon = "" if e["owner_id"] else skins.house_horse_icon(now)
+    return f"{icon} " if icon else ""
+
+
+def runner_icon(e: dict, now: datetime.datetime) -> str:
+    """走路を走る絵。帝愛の馬は、季節演出の期間中は季節の絵（例: 🦌）になる。"""
+    return ("" if e["owner_id"] else skins.house_horse_icon(now)) or "🐎"
+
+
 def when(ts: float, now: float) -> str:
     """時刻と「◯分後」。過ぎた時刻は、「◯秒前」が増え続けて紛らわしいので、時刻だけにする。"""
     if now >= ts:
@@ -65,6 +78,7 @@ def card_embed(desk: HorseDesk, race: dict, closed: bool = False) -> discord.Emb
     """出馬表。申し込み中は申し込みの馬、発売中は枠・オッズ・調子、終わったら着順。"""
     title = race_title(desk, race)
     now = desk.clock.now_ts()
+    today = desk.clock.now()
     entries = desk.race_entries(race["id"])
     if race["status"] == "entry":
         reg = [e for e in entries if e["lane"] < 0]
@@ -97,7 +111,7 @@ def card_embed(desk: HorseDesk, race: dict, closed: bool = False) -> discord.Emb
             return e["style"] or horse_mod.style_of({k: e[k] for k in horse_mod.STAT_KEYS})
 
         rows = [
-            f"`{e['lane']}` {e['silks']} **{e['name']}** {horse_mod.FORM_MARK[e['form']]} "
+            f"`{e['lane']}` {e['silks']} {house_mark(e, today)}**{e['name']}** {horse_mod.FORM_MARK[e['form']]} "
             f"{horse_mod.STYLE_MARK[entry_style(e)]}　"
             f"単勝 **{e['odds_win']:.1f}** 複勝 **{e['odds_place']:.1f}**\n　└ {record_text(e)}　{stat_short(e)}"
             + (f"　馬主 <@{e['owner_id']}>" if e["owner_id"] else "")
@@ -114,7 +128,7 @@ def card_embed(desk: HorseDesk, race: dict, closed: bool = False) -> discord.Emb
         return MEDAL.get(x["finish"], str(x["finish"]) + "着")
 
     rows = [
-        f"{place(x)} {x['silks']} {x['name']}　単勝 {x['odds_win']:.1f}"
+        f"{place(x)} {x['silks']} {house_mark(x, today)}{x['name']}　単勝 {x['odds_win']:.1f}"
         + (f"（<@{x['owner_id']}>）" if x["owner_id"] else "")
         for x in order
     ]
