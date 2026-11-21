@@ -11,6 +11,7 @@ from typing import Any, Optional, Self, cast
 from domain import shop as shop_mod
 from domain.games.rtplevel import DEFAULT_RTP_POLICY
 from domain.ports.clock import IClock
+from domain.ports.contracts import ArenaTournamentDetailRow, ManualEventRow, RaceRow
 from domain.ports.repos import (
     IArenaRepo,
     IAuctionRepo,
@@ -157,7 +158,7 @@ class StubEvents(IEventRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def manual_event_get(self, now: float) -> Optional[dict[str, Any]]:
+    def manual_event_get(self, now: float) -> Optional[ManualEventRow]:
         return None
 
 
@@ -220,8 +221,8 @@ class StubRaces(IRaceRepo):
     def race_set_odds(self, race_id: int, odds: Any) -> None:
         self.odds_set.append((race_id, odds))
 
-    def race_get(self, race_id: int) -> Optional[dict[str, Any]]:
-        return {"id": race_id, "status": "betting"}
+    def race_get(self, race_id: int) -> Optional[RaceRow]:
+        return cast("RaceRow", {"id": race_id, "status": "betting"})
 
 
 class StubLabor(ILaborRepo):
@@ -293,8 +294,10 @@ class StubArena(IArenaRepo):
     def for_guild(self, guild_id: int) -> Self:
         return self
 
-    def arena_tournament_ensure(self, fmt, now=None, tz_hours=9.0, rng=None) -> dict[str, Any]:
-        return {"id": 1, "day": "2026-11-15", "status": "semi_betting", "fighters": []}
+    def arena_tournament_ensure(self, fmt, now=None, tz_hours=9.0, rng=None) -> ArenaTournamentDetailRow:
+        return cast(
+            "ArenaTournamentDetailRow", {"id": 1, "day": "2026-11-15", "status": "semi_betting", "fighters": []}
+        )
 
     def arena_bet(self, user_id: int, fighter_id: int, amount: int, now=None) -> tuple[Any, ...]:
         return (True, amount)

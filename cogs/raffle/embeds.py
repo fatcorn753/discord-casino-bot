@@ -6,11 +6,12 @@ import discord
 
 from cogs.shared import ui
 from domain.ports import get_catalogs
+from domain.ports.contracts import RaffleResult, RaffleView
 
 SHOWN_ENTRANTS = get_catalogs().economy().raffle.shown_entrants  # 掲示に並べる参加者の数（それ以上は人数だけ）
 
 
-def raffle_embed(raffle: dict, now: Optional[float] = None) -> discord.Embed:
+def raffle_embed(raffle: RaffleView, now: Optional[float] = None) -> discord.Embed:
     entries = raffle["entries"]
     prize = raffle["fee"] * len(entries)
     shown = " ".join(f"<@{u}>" for u in entries[:SHOWN_ENTRANTS]) + (
@@ -27,7 +28,7 @@ def raffle_embed(raffle: dict, now: Optional[float] = None) -> discord.Embed:
     return ui.embed("🎟️ 抽選 参加者募集中！", "\n".join(lines), ui.GOLD)
 
 
-def result_embed(raffle: dict) -> discord.Embed:
+def result_embed(raffle: RaffleResult) -> discord.Embed:
     n = len(raffle["entries"])
     if raffle["winner"] is not None:
         lines = [
@@ -42,7 +43,7 @@ def result_embed(raffle: dict) -> discord.Embed:
     )
 
 
-def cancelled_embed(raffle: dict) -> discord.Embed:
+def cancelled_embed(raffle: RaffleResult) -> discord.Embed:
     return ui.embed(
         "🎟️ 抽選 中止",
         f"抽選は中止されました。参加した{len(raffle['entries'])}人に参加費を返しました。",

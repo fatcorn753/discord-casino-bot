@@ -3,6 +3,7 @@
 import asyncio
 import random
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -11,6 +12,7 @@ from cogs.horse import views as views
 from cogs.horse.cog import HorseCog, anim_frames, comment, lane_text, laps_for, pick_frames
 from domain import horse as h
 from domain import shop
+from domain.ports.contracts import RaceRow
 from tests.fakes import as_interaction, freeze_time, invoke, must
 from tests.support import make_horse_cog, make_shop_cog, make_test_bot
 
@@ -152,10 +154,10 @@ def test_card_embed_for_each_stage_and_bet_panel(setup):
     assert "出走受付中" in must(views.card_embed(desk(eco), race).title)
     field = eco.races.race_close_entries(rid, random.Random(1))
     eco.races.race_set_odds(rid, h.make_odds(field["runners"]))
-    race = eco.races.race_get(rid)
+    race = must(eco.races.race_get(rid))
     card = views.card_embed(desk(eco), race)
     assert "発売中" in must(card.title) and must(card.description).count("単勝") >= h.FIELD_SIZE
-    panel = views.BetPanel(make_test_bot(repos=eco).services.horse, V, {**race, "guild_id": 0})
+    panel = views.BetPanel(make_test_bot(repos=eco).services.horse, V, cast("RaceRow", {**race, "guild_id": 0}))
     assert len(panel.children) == 3 and "馬券を買う" in must(panel.embed(desk(eco)).title)
     eco.races.race_run(rid, 9.0, random.Random(2))
     assert "結果" in must(views.card_embed(desk(eco), eco.races.race_get(rid)).title)
@@ -200,7 +202,7 @@ def test_bet_panel_builds_for_every_kind_and_shows_the_odds(setup):
     rid = eco.races.race_create_special(1_700_000_000.0, 1, 1)
     field = eco.races.race_close_entries(rid, random.Random(1))
     eco.races.race_set_odds(rid, h.make_all_odds(field["runners"]))
-    race = {**eco.races.race_get(rid), "guild_id": 0}
+    race = cast("RaceRow", {**must(eco.races.race_get(rid)), "guild_id": 0})
     panel = views.BetPanel(make_test_bot(repos=eco).services.horse, V, race)
     selects = {}
     for kind in h.BET_KINDS:
@@ -240,9 +242,9 @@ def test_auction_screen_lists_seized_horses_with_a_horse_select(setup):
 def test_bet_is_announced_publicly_in_the_race_channel(setup):
     eco, chan, guild, bot, cog = setup
     rid = eco.races.race_create_special(1_700_000_000.0, 1, 1)
-    race = eco.races.race_get(rid)
+    race = must(eco.races.race_get(rid))
     panel = views.BetPanel(
-        make_test_bot(repos=eco).services.horse, V, {**race, "guild_id": 0}, cog.post_bet_announcement
+        make_test_bot(repos=eco).services.horse, V, cast("RaceRow", {**race, "guild_id": 0}), cog.post_bet_announcement
     )
     interaction = SimpleNamespace(guild=guild, guild_id=0, user=SimpleNamespace(id=V))
     result = {"kind": "win", "lanes": [3], "name": "アルファ", "stake": 500, "odds": 4.2}
@@ -255,14 +257,14 @@ def _open_race(eco):
     rid = eco.races.race_create_special(1_700_000_000.0, 1, 1)
     field = eco.races.race_close_entries(rid, random.Random(1))
     eco.races.race_set_odds(rid, h.make_all_odds(field["runners"]))
-    race = eco.races.race_get(rid)
+    race = must(eco.races.race_get(rid))
     return rid, race, race["bet_close"] - 10
 
 
 def test_win_and_place_select_several_horses_at_once(setup):
     eco, chan, guild, bot, cog = setup
     rid, race, now = _open_race(eco)
-    panel = views.BetPanel(make_test_bot(repos=eco).services.horse, V, {**race, "guild_id": 0})
+    panel = views.BetPanel(make_test_bot(repos=eco).services.horse, V, cast("RaceRow", {**race, "guild_id": 0}))
     for kind in h.MULTI_KINDS:
         panel.kind = kind
         panel._build(eco.races)
@@ -312,7 +314,7 @@ def test_stake_modal_buys_every_selected_horse_and_announces_once(setup, monkeyp
     before = eco.wallet.balance(V)
     rid, race, now = _open_race(eco)
     panel = views.BetPanel(
-        make_test_bot(repos=eco).services.horse, V, {**race, "guild_id": 0}, cog.post_bet_announcement
+        make_test_bot(repos=eco).services.horse, V, cast("RaceRow", {**race, "guild_id": 0}), cog.post_bet_announcement
     )
     panel.kind, panel.multi = "place", [3, 6]
     modal = views.StakeModal(panel)

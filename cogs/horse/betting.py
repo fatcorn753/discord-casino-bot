@@ -11,9 +11,10 @@ from cogs.shared.amount import reject_bad_amount, typed_amount
 from cogs.shared.messages import format_failure
 from domain import horse as horse_mod
 from domain.errors import Failure
+from domain.ports.contracts import RaceRow
 from services.horse import HorseDesk, HorseService
 
-PostBetFn = Callable[[discord.Guild, dict, str], Awaitable[None]]
+PostBetFn = Callable[[discord.Guild, RaceRow, str], Awaitable[None]]
 
 
 class StakeModal(discord.ui.Modal):
@@ -92,7 +93,7 @@ class BetPanel(ui.OwnerView):
         self,
         horse_svc: HorseService,
         user_id: int,
-        race: dict,
+        race: RaceRow,
         post_bet_fn: Optional[PostBetFn] = None,
     ) -> None:
         super().__init__(user_id, timeout=300)

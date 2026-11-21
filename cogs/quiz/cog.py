@@ -1,7 +1,8 @@
 """/クイズ — 持ち主・プレイヤーが出題する 4 択クイズの Cog と定期精算タスク。"""
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import discord
 from discord import app_commands
@@ -140,7 +141,7 @@ class QuizCog(commands.Cog, IQuizAdminBridge, IQuizButtonBridge):
             error_label="クイズを精算できません",
         )
 
-    async def announce_settle(self, guild: discord.Guild, q: dict) -> None:
+    async def announce_settle(self, guild: discord.Guild, q: Mapping[str, Any]) -> None:
         """出題の投稿からボタンを外し、結果と出題報酬を同じチャンネルに出す（出題者にはメンションする）。"""
         channel = guild.get_channel(q["channel_id"]) if q["channel_id"] else None
         if channel is None:
@@ -237,7 +238,9 @@ class QuizCog(commands.Cog, IQuizAdminBridge, IQuizButtonBridge):
         out = []
         for q in self._quiz.own_open(interaction.guild_id, interaction.user.id):
             text = q["question"].replace("\n", " ")
-            label = f"#{q['id']} {text[:50]}（あと{format_minutes(max(1, int((q['expires'] - now) // 60)))}）"
+            label = (
+                f"#{q['id']} {text[:50]}（あと{format_minutes(max(1, int((cast(float, q['expires']) - now) // 60)))}）"
+            )
             if not cur or cur in label.lower():
                 out.append(app_commands.Choice(name=label[:100], value=q["id"]))
         return out[:25]
