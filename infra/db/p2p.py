@@ -57,12 +57,18 @@ class P2PRepo(ScopedRepo, IP2PRepo, IBankruptPrepHook, IGraceEnterHook):
         self.p2p_pull_back_for(guild_id, user_id, now)
 
     def _p2p_pair_total(self, guild_id: int, a: int, b: int, now: float) -> int:
-        """この2人（どちらが売り手でも）の、24時間の取引額の合計。"""
-        return self._conn.execute(
+        """この2人（どちらが売り手でも）の、24時間の取引額の合計。共済の口の譲渡（kyosai_offers）と合わせて数える。"""
+        market_sum = self._conn.execute(
             "SELECT COALESCE(SUM(sold_price), 0) FROM market_listings WHERE guild_id=? AND status='sold' AND closed_at>? "
             "AND ((seller_id=? AND buyer_id=?) OR (seller_id=? AND buyer_id=?))",
             (guild_id, now - 86400, a, b, b, a),
         ).fetchone()[0]
+        kyosai_sum = self._conn.execute(
+            "SELECT COALESCE(SUM(price), 0) FROM kyosai_offers WHERE guild_id=? AND status='done' AND done_at>? "
+            "AND ((seller=? AND buyer=?) OR (seller=? AND buyer=?))",
+            (guild_id, now - 86400, a, b, b, a),
+        ).fetchone()[0]
+        return market_sum + kyosai_sum
 
     def _p2p_can_receive(self, guild_id: int, buyer_id: int, row: Any) -> Optional[Failure]:
         """買い手が、この出品を受け取れないなら Failure。受け取れるなら None。"""
