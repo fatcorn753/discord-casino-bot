@@ -158,9 +158,7 @@ class StakeModal(discord.ui.Modal):
         uid = interaction.user.id
         ok, result = self.panel.teiai.cds_buy(ui.guild_id_of(interaction), uid, self.target_id, stake)
         if not ok:
-            await interaction.response.send_message(
-                embed=ui.error_embed("買えませんでした", format_failure(result)), ephemeral=True
-            )
+            await ui.reply_error(interaction, format_failure(result), title="買えませんでした")
             return
         assert not isinstance(result, Failure)
         mine = self.target_id == uid
@@ -173,7 +171,7 @@ class StakeModal(discord.ui.Modal):
             )
         )
         if mine:  # 自分への保険は、戦略が見えるので、本人だけ
-            await interaction.response.send_message(embed=ui.ok_embed("CDS を買いました", text), ephemeral=True)
+            await ui.reply_ok(interaction, text, title="CDS を買いました")
             return
         await interaction.response.send_message(  # 他人への CDS は公開（「あいつの破産に賭けた」）
             embed=ui.embed(
@@ -193,9 +191,7 @@ class TargetSelect(discord.ui.UserSelect):
     async def callback(self, interaction: discord.Interaction):
         target = self.values[0]
         if target.bot:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("選べません", "Bot は選べません。"), ephemeral=True
-            )
+            return await ui.reply_error(interaction, "Bot は選べません。", title="選べません")
         quote = self.panel.teiai.cds_quote(ui.guild_id_of(interaction), target.id)
         await interaction.response.send_modal(StakeModal(self.panel, target.id, quote["odds"]))
 
@@ -258,8 +254,10 @@ class TeiaiPanel(ui.OwnerView):
         await self._reply_bank(interaction, ok, text)
 
     async def _reply_bank(self, interaction: discord.Interaction, ok: bool, text: str) -> None:
-        embed = ui.ok_embed("完了", text) if ok else ui.error_embed("できませんでした", text)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        if ok:
+            await ui.reply_ok(interaction, text, title="完了")
+        else:
+            await ui.reply_error(interaction, text, title="できませんでした")
 
     @discord.ui.button(label="CDS を掛ける", style=discord.ButtonStyle.danger)
     async def cds(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -286,17 +284,15 @@ class TeiaiPanel(ui.OwnerView):
                     ui.GOLD,
                 )
             )
-        embed = ui.error_embed("借りられません", format_failure(result))
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await ui.reply_error(interaction, format_failure(result), title="借りられません")
 
     @discord.ui.button(label="🚢 海外逃亡チャンス！！", style=discord.ButtonStyle.danger, row=1)
     async def escape(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.teiai.debt_of(ui.guild_id_of(interaction), interaction.user.id) < teiai.ESCAPE_MIN_DEBT:
-            return await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "逃亡できません", f"試せるのは、帝愛の借金が {teiai.ESCAPE_MIN_DEBT:,}ペリカ 以上のときだけです。"
-                ),
-                ephemeral=True,
+            return await ui.reply_error(
+                interaction,
+                f"試せるのは、帝愛の借金が {teiai.ESCAPE_MIN_DEBT:,}ペリカ 以上のときだけです。",
+                title="逃亡できません",
             )
 
         async def after_success(inter: discord.Interaction):

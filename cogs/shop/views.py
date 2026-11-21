@@ -404,10 +404,7 @@ class ShopView(ui.OwnerView):
 
     # ---- 操作 ---- #
     async def _reject_non_owner(self, interaction: discord.Interaction) -> None:
-        await interaction.response.send_message(
-            embed=ui.error_embed("これは他の人のパネルです", "`/ショップ` で自分のパネルを開けます。"),
-            ephemeral=True,
-        )
+        await ui.reply_error(interaction, "`/ショップ` で自分のパネルを開けます。", title="これは他の人のパネルです")
 
     async def _redraw(self, interaction: discord.Interaction) -> None:
         self._build()
@@ -432,9 +429,8 @@ class ShopView(ui.OwnerView):
 
     async def _on_purchase(self, interaction: discord.Interaction):
         if self.picked is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("景品を選んでください", "買う景品を選んでから、「🛒 購入」を押してください。"),
-                ephemeral=True,
+            return await ui.reply_error(
+                interaction, "買う景品を選んでから、「🛒 購入」を押してください。", title="景品を選んでください"
             )
         kind, value = self.picked
         if kind == "horse":
