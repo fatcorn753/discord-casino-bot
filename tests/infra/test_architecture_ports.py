@@ -397,10 +397,10 @@ def _package_defined_symbols(pkg_dir: Path) -> dict[str, str]:
 
 
 def test_split_packages_reexport_every_submodule_symbol():
-    """分割パッケージ（bank/・debt/・kyosai/・orders/）はサブモジュールの公開シンボルを漏れなく再エクスポートする。"""
+    """分割パッケージ（bank/・debt/・kyosai/・orders/・contracts/）はサブモジュールの公開シンボルを漏れなく再エクスポートする。"""
     import importlib
 
-    packages = ["infra.db.bank", "infra.db.debt", "infra.db.kyosai", "cogs.market.orders"]
+    packages = ["infra.db.bank", "infra.db.debt", "infra.db.kyosai", "cogs.market.orders", "domain.ports.contracts"]
     for dotted in packages:
         pkg = importlib.import_module(dotted)
         pkg_dir = ROOT.joinpath(*dotted.split("."))
