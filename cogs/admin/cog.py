@@ -137,9 +137,7 @@ class ApprovalCog(commands.Cog, IApprovalBridge):
 
     async def _owner_only(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id not in approval.owner_ids(self._config):
-            await interaction.response.send_message(
-                embed=ui.error_embed("権限がありません", "このコマンドは Bot の持ち主だけが使えます。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "このコマンドは Bot の持ち主だけが使えます。", title="権限がありません")
             return False
         return True
 

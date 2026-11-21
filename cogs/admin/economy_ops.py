@@ -22,13 +22,11 @@ async def grant(
         return
     guild, member = picked
     balance = cog._admin.grant(guild.id, member.id, amount, f"付与（管理）{reason}".strip())
-    await interaction.response.send_message(
-        embed=ui.ok_embed(
-            "付与しました",
-            f"{guild.name} の {member.mention}（{member.display_name}）に **{ui.pelica(amount)}** を付与しました（残高 {ui.pelica(balance)}）。"
-            + (f"\n理由: {reason}" if reason else ""),
-        ),
-        ephemeral=True,
+    await ui.reply_ok(
+        interaction,
+        f"{guild.name} の {member.mention}（{member.display_name}）に **{ui.pelica(amount)}** を付与しました（残高 {ui.pelica(balance)}）。"
+        + (f"\n理由: {reason}" if reason else ""),
+        title="付与しました",
     )
 
 
@@ -42,15 +40,13 @@ async def set_balance(
     before, after, debt_before, debt_after = cog._admin.set_balance(
         guild.id, member.id, amount, f"残高の設定（管理）{reason}".strip()
     )
-    await interaction.response.send_message(
-        embed=ui.ok_embed(
-            "残高を設定しました",
-            f"{guild.name} の {member.mention}（{member.display_name}）の残高を "
-            f"**{ui.pelica(before)} → {ui.pelica(after)}** にしました（差額は台帳に残ります）。"
-            + (f"\n帝愛の借金: **{ui.pelica(debt_before)} → {ui.pelica(debt_after)}**" if amount < 0 else "")
-            + (f"\n理由: {reason}" if reason else ""),
-        ),
-        ephemeral=True,
+    await ui.reply_ok(
+        interaction,
+        f"{guild.name} の {member.mention}（{member.display_name}）の残高を "
+        f"**{ui.pelica(before)} → {ui.pelica(after)}** にしました（差額は台帳に残ります）。"
+        + (f"\n帝愛の借金: **{ui.pelica(debt_before)} → {ui.pelica(debt_after)}**" if amount < 0 else "")
+        + (f"\n理由: {reason}" if reason else ""),
+        title="残高を設定しました",
     )
 
 
@@ -71,9 +67,7 @@ async def event_start(
         return
     targets = cog._event_targets(guild_id)
     if not targets:
-        await interaction.response.send_message(
-            embed=ui.error_embed("開く先がありません", "許可されているサーバーがありません。"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "許可されているサーバーがありません。", title="開く先がありません")
         return
     event_bridge = await require_bridge(interaction, cog.bot, IEventAdminBridge, "イベント機能", cog._event_bridge)
     if event_bridge is None:
