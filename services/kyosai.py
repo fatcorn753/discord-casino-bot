@@ -1,10 +1,12 @@
 """帝愛共済（#34）のアプリケーションサービス。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import (
+    KyosaiDaily,
+    KyosaiStatus,
     KyosaiAuctionEventRow,
     KyosaiAuctionRow,
     KyosaiMotionProposeRow,
@@ -25,7 +27,7 @@ class KyosaiService:
     def _now(self) -> float:
         return self._clock.now_ts()
 
-    def status(self, guild_id: int, user_id: int) -> dict[str, Any]:
+    def status(self, guild_id: int, user_id: int) -> KyosaiStatus:
         return self._kyosai.for_guild(guild_id).kyosai_status(user_id, self._now())
 
     def offers(self, guild_id: int, user_id: int) -> list[KyosaiOfferRow]:
@@ -58,7 +60,7 @@ class KyosaiService:
 
     def tick(
         self, guild_id: int
-    ) -> tuple[Optional[dict[str, Any]], list[KyosaiMotionViewRow], list[KyosaiAuctionEventRow]]:
+    ) -> tuple[Optional[KyosaiDaily], list[KyosaiMotionViewRow], list[KyosaiAuctionEventRow]]:
         """毎分: 1日ごとの配当（と休眠の回収）、締切を過ぎた動議の締め、帝愛の持ち口の競り。
 
         (配当の結果, 締めた動議の結果, 競りで起きたこと)。

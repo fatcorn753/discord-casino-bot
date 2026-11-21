@@ -5,6 +5,7 @@
 """
 
 import datetime
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -81,7 +82,7 @@ SEASONS = tuple(
 )
 
 
-def active_skin(profile: dict[str, Any], game: str) -> Optional[Skin]:
+def active_skin(profile: Mapping[str, Any], game: str) -> Optional[Skin]:
     """そのゲームで、いま装備している変更品（なければ None）。別のゲーム用のものを装備していても、効かない。"""
     slot = SLOT_OF_GAME.get(game)
     skin_id = profile.get(slot) if slot else None
@@ -106,7 +107,7 @@ def house_horse_icon(now: datetime.datetime) -> str:
     return season.house_horse_icon if season and season.house_horse_icon else ""
 
 
-def skin_for(profile: dict[str, Any], game: str, now: datetime.datetime) -> Optional[Skin]:
+def skin_for(profile: Mapping[str, Any], game: str, now: datetime.datetime) -> Optional[Skin]:
     """そのゲームで使う見た目。装備している変更品が優先で、なければ期間中の季節演出。"""
     return active_skin(profile, game) or season_skin(game, now)
 

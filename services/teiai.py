@@ -2,12 +2,19 @@
 
 import random
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Optional
 
 from domain import teiai
 from domain.errors import Outcome
 from domain.ports.clock import IClock
-from domain.ports.contracts import BankStatus, CdsHoldings, CdsQuote, HouseAccount
+from domain.ports.contracts import (
+    BankruptResult,
+    BankStatus,
+    CdsHoldings,
+    CdsQuote,
+    EscapeResult,
+    HouseAccount,
+)
 from domain.ports.repos import IBankRepo, IDebtRepo, ILoanRepo, INoticeRepo, IWalletRepo
 
 
@@ -75,7 +82,7 @@ class TeiaiService:
             return "nothing"
         return None
 
-    def bankrupt(self, guild_id: int, user_id: int) -> Outcome[dict[str, Any]]:
+    def bankrupt(self, guild_id: int, user_id: int) -> Outcome[BankruptResult]:
         return self._debt.for_guild(guild_id).bankrupt(user_id)
 
     def take_notices(self, guild_id: int, user_id: int) -> None:
@@ -85,7 +92,7 @@ class TeiaiService:
     def escape_left(self, guild_id: int, user_id: int) -> int:
         return self._debt.for_guild(guild_id).escape_left(user_id)
 
-    def escape_attempt(self, guild_id: int, user_id: int) -> Outcome[dict[str, Any]]:
+    def escape_attempt(self, guild_id: int, user_id: int) -> Outcome[EscapeResult]:
         return self._debt.for_guild(guild_id).escape_attempt(user_id, self._clock.now_ts())
 
     # ------------------------------ 帝愛銀行・CDS ------------------------------ #
@@ -122,7 +129,7 @@ class TeiaiService:
     def cds_buy(self, guild_id: int, user_id: int, target_id: int, stake: int) -> Outcome[float]:
         return self._bank.for_guild(guild_id).cds_buy(user_id, target_id, stake, self._clock.now_ts())
 
-    def grace_expire(self, guild_id: int, now: float) -> list[tuple[int, Any]]:
+    def grace_expire(self, guild_id: int, now: float) -> list[tuple[int, BankruptResult]]:
         """破産猶予の時間切れ（強制破産と、CDS の配当）。(user_id, 結果) の一覧。"""
         return self._bank.for_guild(guild_id).grace_expire(now)
 

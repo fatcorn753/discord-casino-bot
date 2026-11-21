@@ -2,11 +2,11 @@
 
 import datetime
 import random
-from typing import Any, Optional
+from typing import Optional
 
 from domain.errors import Outcome
 from domain.ports.clock import IClock
-from domain.ports.contracts import ArenaBetRow, ArenaTournamentDetailRow
+from domain.ports.contracts import ArenaBetRow, ArenaFinalResult, ArenaSemiResult, ArenaTournamentDetailRow
 from domain.ports.repos import IArenaRepo
 
 
@@ -43,12 +43,12 @@ class ArenaService:
 
     def run_semis(
         self, guild_id: int, tournament_id: int, rng: Optional[random.Random] = None
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[ArenaSemiResult]:
         return self._arena.for_guild(guild_id).arena_run_semis(tournament_id, rng, self.clock.now_ts())
 
     def run_final(
         self, guild_id: int, tournament_id: int, rng: Optional[random.Random] = None
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[ArenaFinalResult]:
         return self._arena.for_guild(guild_id).arena_run_final(tournament_id, rng, self.clock.now_ts())
 
     def tournament_by_day(self, guild_id: int, day: str, fmt: str) -> Optional[ArenaTournamentDetailRow]:

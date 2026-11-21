@@ -45,7 +45,7 @@ class LoanService:
     def cancel(self, guild_id: int, loan_id: int, user_id: int) -> Outcome[str]:
         return self._loans.for_guild(guild_id).loan_cancel(loan_id, user_id)
 
-    def remaining(self, guild_id: int, loan: Mapping[str, Any], now: Optional[float] = None) -> int:
+    def remaining(self, guild_id: int, loan: LoanRow, now: Optional[float] = None) -> int:
         ts = self.clock.now_ts() if now is None else now
         return self._loans.for_guild(guild_id).loan_remaining(loan, ts)
 

@@ -1,6 +1,6 @@
 """プレイヤー間の市場と競り（出品・購入・入札・取り消し・締切の精算）のアプリケーションサービス。"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from domain.errors import Outcome
 from domain.ports.clock import IClock
@@ -35,7 +35,7 @@ class P2PService:
     def mine(self, guild_id: int, user_id: int) -> P2PMine:
         return self._repo(guild_id).p2p_mine(user_id)
 
-    def sellable_items(self, guild_id: int, user_id: int) -> dict[str, Any]:
+    def sellable_items(self, guild_id: int, user_id: int) -> dict[str, int]:
         return self._shop.for_guild(guild_id).inventory(user_id)
 
     def sellable_horses(self, guild_id: int, user_id: int) -> list[HorseRow]:
