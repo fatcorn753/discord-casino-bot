@@ -190,6 +190,16 @@ def test_host_random_fee_is_in_range_and_needs_a_channel(eco, monkeypatch):
     assert not ok and "チャンネル" in text and eco2.raffle.raffle_get() is None
 
 
+def test_host_random_fee_is_deterministic_with_injected_rng(eco, monkeypatch):
+    cog, guild, sent, _ = make_host_cog(eco, monkeypatch)
+    asyncio.run(cog.host(as_guild(guild), 99, rng=random.Random(42)))
+    first = eco.raffle.raffle_get()["fee"]
+    eco.raffle.raffle_close(cancel=True)
+    asyncio.run(cog.host(as_guild(guild), 99, rng=random.Random(42)))
+    second = eco.raffle.raffle_get()["fee"]
+    assert first == second and 500 <= first <= 3000 and first % 100 == 0
+
+
 def test_cancel_refunds_and_reports(eco, monkeypatch):
     cog, guild, sent, ch = make_host_cog(eco, monkeypatch)
     asyncio.run(cog.host(as_guild(guild), 99, 1000, 30))
