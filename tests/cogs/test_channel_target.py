@@ -100,8 +100,7 @@ def test_channel_autocomplete_lists_only_postable_channels_of_the_chosen_guild_f
     assert names("クイズ") == ["#クイズ部屋"] and names("zzz") == []
     assert [c.value for c in asyncio.run(cog.channel_autocomplete(as_interaction(inter), "クイズ"))] == ["11"]
     assert (
-        asyncio.run(cog.channel_autocomplete(as_interaction(dm(FRIEND, [], SimpleNamespace(サーバー="5"))), ""))
-        == []
+        asyncio.run(cog.channel_autocomplete(as_interaction(dm(FRIEND, [], SimpleNamespace(サーバー="5"))), "")) == []
     )  # 持ち主以外には出さない
     assert asyncio.run(cog.channel_autocomplete(as_interaction(dm(OWNER, [])), "")) == []  # サーバー未選択
     assert (

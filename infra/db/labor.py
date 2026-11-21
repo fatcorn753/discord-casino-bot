@@ -257,7 +257,21 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             row: dict[str, Any] = (
                 r
                 if r
-                else dict.fromkeys(("pick", "glove", "pot", "pot_workers", "day_earned", "day_click", "clicks", "earned_total", "dorm", "idle_at"), 0)
+                else dict.fromkeys(
+                    (
+                        "pick",
+                        "glove",
+                        "pot",
+                        "pot_workers",
+                        "day_earned",
+                        "day_click",
+                        "clicks",
+                        "earned_total",
+                        "dorm",
+                        "idle_at",
+                    ),
+                    0,
+                )
                 | {
                     "fatigue": 0.0,
                     "fatigue_at": now,

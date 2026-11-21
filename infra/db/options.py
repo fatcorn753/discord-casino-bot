@@ -332,8 +332,11 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                 (option_id, gid, user_id),
             )
             # 持っているコールは、ストップ安では売れない
-            if held and held["side"] != "short" and held["kind"] == "call" and (
-                reason := self._market.pin_reason(held["symbol"], "sell_call")
+            if (
+                held
+                and held["side"] != "short"
+                and held["kind"] == "call"
+                and (reason := self._market.pin_reason(held["symbol"], "sell_call"))
             ):
                 return False, reason
             return self.option_close_locked_for(gid, user_id, option_id, now)

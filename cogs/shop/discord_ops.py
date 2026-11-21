@@ -74,7 +74,9 @@ async def set_color_role(guild: discord.Guild, member: discord.Member, item) -> 
         if target is not None and target not in member.roles:
             await member.add_roles(target, reason="ペリカショップ: 名前の色")
     except discord.Forbidden:
-        raise ShopError("ロールを付け替えられませんでした。Bot の権限と、Bot のロールの位置を確認してください。") from None
+        raise ShopError(
+            "ロールを付け替えられませんでした。Bot の権限と、Bot のロールの位置を確認してください。"
+        ) from None
 
 
 def nick_blocker(guild: discord.Guild, member: discord.Member) -> str:
@@ -102,7 +104,9 @@ async def apply_title_nick(guild: discord.Guild, member: discord.Member, title: 
         try:
             await member.edit(nick=new, reason="ペリカショップ: 称号の表示")
         except discord.Forbidden:
-            raise ShopError("ニックネームを変えられませんでした。Bot の権限と、Bot のロールの位置を確認してください。") from None
+            raise ShopError(
+                "ニックネームを変えられませんでした。Bot の権限と、Bot のロールの位置を確認してください。"
+            ) from None
         except discord.HTTPException:
             raise ShopError(
                 "Discord 側のエラーで、ニックネームを変えられませんでした。時間をおいて、もう一度お試しください。"

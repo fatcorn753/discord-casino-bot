@@ -580,9 +580,7 @@ def test_short_counts_in_ranking_and_payout_repays_debt(eco):
     a = eco.for_guild(G)
     set_price(eco, 100.0)
     a.margin.short_open(U, 10_000, 100.0, 2)
-    assert (
-        {u: v for _, u, v in a.wallet.top(5)}[U] == INITIAL_BALANCE
-    )  # 担保 + 含み損益（0）で、総資産は変わらない
+    assert {u: v for _, u, v in a.wallet.top(5)}[U] == INITIAL_BALANCE  # 担保 + 含み損益（0）で、総資産は変わらない
     set_price(eco, 90.0)
     assert {u: v for _, u, v in a.wallet.top(5)}[U] == INITIAL_BALANCE + 100
     with a.db.tx():
