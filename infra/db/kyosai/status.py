@@ -3,13 +3,14 @@
 from typing import Any
 
 from domain import kyosai
+from domain.ports.contracts import KyosaiStatus
 
 from .base import DAY
 from .motions import KyosaiRepo as Base
 
 
 class KyosaiRepo(Base):
-    def kyosai_status(self, user_id: int, now: float) -> dict[str, Any]:
+    def kyosai_status(self, user_id: int, now: float) -> KyosaiStatus:
         with self._db.tx():
             gid = self._g()
             self.bank_sync(gid, now)

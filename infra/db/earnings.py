@@ -4,14 +4,20 @@
 """
 
 import random
-from typing import Any, Optional, cast
+from typing import Optional, cast
 
 from domain import earnings as ea
 from domain import market as market_mod
 from domain import shop as shop_mod
 from domain.errors import Outcome, fail
 from domain.ports.bridges import IBankCashFlow
-from domain.ports.contracts import EarningsAnnouncement, EarningsAnnounceRow, EarningsJump, EarningsRow
+from domain.ports.contracts import (
+    EarningsAnnouncement,
+    EarningsAnnounceRow,
+    EarningsJump,
+    EarningsRow,
+    InsiderStock,
+)
 from domain.ports.repos import IEarningsRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -114,7 +120,7 @@ class EarningsRepo(ScopedRepo, IEarningsRepo):
             )
             return ea.build_memo(market_mod.BY_KEY[ev["symbol"]].name, hint, ev["release_at"])
 
-    def insider_stock(self, now: float) -> Optional[dict[str, Any]]:
+    def insider_stock(self, now: float) -> Optional[InsiderStock]:
         """帝愛市の裏情報メモの在庫。{残り, 全部の数}。発表前の決算が無ければ None（売っていない）。"""
         with self._lock:
             gid = self._g()

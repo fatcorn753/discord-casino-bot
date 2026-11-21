@@ -19,7 +19,7 @@ from domain.ports.bridges import (
     IStatusReader,
     IWealthyReader,
 )
-from domain.ports.contracts import LoanRow
+from domain.ports.contracts import BankruptResult, LoanRow
 
 
 class LazyDebtLifecycleHook(IDebtLifecycleHook):
@@ -56,7 +56,7 @@ class LazyBankruptExecutor(IBankruptExecutor):
 
     def bankrupt_for(
         self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[BankruptResult]:
         return self._target().bankrupt_for(guild_id, user_id, forced=forced, escape=escape)
 
 

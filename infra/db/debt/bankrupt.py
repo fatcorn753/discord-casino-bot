@@ -4,6 +4,7 @@ from typing import Any
 
 from domain import teiai
 from domain.errors import Outcome, fail
+from domain.ports.contracts import BankruptResult
 
 from .base import _take_cash
 from .escape import DebtRepo as Base
@@ -25,7 +26,7 @@ class DebtRepo(Base):
 
     def bankrupt_for(
         self, guild_id: int, user_id: int, forced: bool = False, escape: bool = False
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[BankruptResult]:
         """自己破産。全財産とショップの全品を差し押さえて換金し、帝愛 → 貸付の順に配当する。"""
         with self._db.tx():
             self._account.ensure(guild_id, user_id)
@@ -79,7 +80,7 @@ class DebtRepo(Base):
             cds_paid = self._bank.cds_settle_default_for(guild_id, user_id, debt_before, now) if payable else 0
             if not payable:
                 self._bank.cds_void_for(guild_id, user_id)
-            return True, {
+            result: BankruptResult = {
                 "forced": forced,
                 "cds_paid": cds_paid,
                 "seized": total_pool,
@@ -91,6 +92,7 @@ class DebtRepo(Base):
                 "debt": self._account.debt(guild_id, user_id),
                 "seed": seed,
             }
+            return True, result
 
-    def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> Outcome[dict[str, Any]]:
+    def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> Outcome[BankruptResult]:
         return self.bankrupt_for(self._g(), user_id, forced=forced, escape=escape)

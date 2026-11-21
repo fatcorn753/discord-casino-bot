@@ -11,7 +11,14 @@ from domain import arena as arena_mod
 from domain import teiai
 from domain.errors import Outcome, fail
 from domain.ports.bridges import IBankCashFlow
-from domain.ports.contracts import ArenaBetRow, ArenaFighterRow, ArenaTournamentDetailRow
+from domain.ports.contracts import (
+    ArenaBetRow,
+    ArenaFinalResult,
+    ArenaFighterRow,
+    ArenaGroupResult,
+    ArenaSemiResult,
+    ArenaTournamentDetailRow,
+)
 from domain.ports.repos import IArenaRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -193,7 +200,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
 
     def arena_run_semis(
         self, tournament_id: int, rng: Optional[random.Random] = None, now: Optional[float] = None
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[ArenaSemiResult]:
         """準決勝の全組を同時に決着させ、決勝へ進む人（組の数ぶん）を決める。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():
@@ -203,7 +210,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
                 return None
             fighters = self.arena_fighters(tournament_id)
             finalists = []
-            groups: dict[int, dict[str, Any]] = {}
+            groups: dict[int, ArenaGroupResult] = {}
             for group_no in range(1, arena_mod.semi_groups(t["format"]) + 1):
                 group = [f for f in fighters if f["group_no"] == group_no]
                 bet_totals = {f["name"]: f["bet_total"] for f in group}
@@ -220,7 +227,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
 
     def arena_run_final(
         self, tournament_id: int, rng: Optional[random.Random] = None, now: Optional[float] = None
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[ArenaFinalResult]:
         """決勝を決着させ、優勝者を決める（準決勝の勝者全員で、同時に戦う）。"""
         rng = rng or random.SystemRandom()
         with self._db.tx():

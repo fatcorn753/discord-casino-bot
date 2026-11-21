@@ -3,13 +3,13 @@
 import datetime
 import random
 from collections import Counter
-from typing import Any, Optional
+from typing import Optional
 
 from domain import horse as horse_mod
 from domain import teiai
 from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import IBankCashFlow
-from domain.ports.contracts import RaceBetRow, RaceEntryRow, RaceRow
+from domain.ports.contracts import RaceBetResult, RaceBetRow, RaceCloseResult, RaceEntryRow, RaceRow, RaceRunResult
 from domain.ports.repos import IRaceRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -182,7 +182,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             self._account.apply(gid, user_id, horse_mod.ENTRY_FEE, "競馬:出走料の返金")
             return True, ""
 
-    def race_close_entries(self, race_id: int, rng: Optional[random.Random] = None) -> Optional[dict[str, Any]]:
+    def race_close_entries(self, race_id: int, rng: Optional[random.Random] = None) -> Optional[RaceCloseResult]:
         """申し込みを締め切って、NPC で埋めた出走馬と、コースを決める（発売中にする）。{"runners", "track"} を返す。
 
         オッズは、シミュレーションに時間がかかるので、呼び出し側が計算して、race_set_odds で書く。
@@ -248,7 +248,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             )
             return {"runners": runners, "track": track}
 
-    def race_set_odds(self, race_id: int, odds: dict[str, Any] | list[tuple[float, float]]) -> None:
+    def race_set_odds(self, race_id: int, odds: dict[str, dict[str, float]] | list[tuple[float, float]]) -> None:
         """オッズを書く。odds は、domain/horse.py の make_all_odds の結果（{"win": {枠: オッズ}, "quinella": {キー: オッズ}, …}）。
 
         枠番の順の (単勝, 複勝) の並び（make_odds の結果）でもよい（組み合わせの馬券は、発売されない）。
@@ -294,7 +294,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
 
     def race_bet(
         self, user_id: int, race_id: int, kind: str, lane: int | list[int], stake: int, now: float
-    ) -> Outcome[dict[str, Any]]:
+    ) -> Outcome[RaceBetResult]:
         """馬券を買う。賭けた時点のオッズで確定する。(成功か, 理由か馬券の辞書)。賭け金は、その場で引かれる。
 
         lane は、単勝・複勝なら枠番、組み合わせの馬券（馬連・ワイド・馬単・三連複）なら、選んだ枠番の並び
@@ -345,7 +345,8 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (gid, race_id, user_id, kind, lanes[0], picks, stake, odds, now),
             )
-            return True, {
+            assert cur.lastrowid is not None
+            result: RaceBetResult = {
                 "id": cur.lastrowid,
                 "kind": kind,
                 "lane": lanes[0],
@@ -354,10 +355,11 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 "odds": odds,
                 "name": label,
             }
+            return True, result
 
     def race_bet_many(
         self, user_id: int, race_id: int, kind: str, lanes: list[int], stake: int, now: float
-    ) -> Outcome[list[dict[str, Any]]]:
+    ) -> Outcome[list[RaceBetResult]]:
         """単勝・複勝を、何頭かまとめて買う（1頭ごとに stake ずつ、別々の馬券になる）。(成功か, 理由か馬券の辞書の並び)。
 
         先に、合計の賭け金（レースの上限・残高）を確かめてから買う。それでも途中で買えなくなったら、そこまでの馬券は残る。
@@ -398,7 +400,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 bought.append(result)
             return True, bought
 
-    def race_run(self, race_id: int, tz_hours: float, rng: Optional[random.Random] = None) -> Optional[dict[str, Any]]:
+    def race_run(self, race_id: int, tz_hours: float, rng: Optional[random.Random] = None) -> Optional[RaceRunResult]:
         """レースを走らせて、結果を決め、賞金と払い戻しを精算する。すでに終わっていれば None。
 
         結果は、ここで決まる（演出は、返した frames を見せるだけ）。(race, entries, order, frames, bets, prizes) を辞書で返す。

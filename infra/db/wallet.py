@@ -2,7 +2,7 @@
 
 import datetime
 import math
-from typing import Any, Optional
+from typing import Optional
 
 from domain import teiai
 from domain.errors import fail
@@ -13,7 +13,7 @@ from domain.ports.bridges import (
     IValuationSource,
     IWealthyReader,
 )
-from domain.ports.contracts import RankEntry
+from domain.ports.contracts import LedgerEntry, RankEntry, UserRow
 from domain.ports.repos import IWalletRepo
 from domain.shop import STREAK_GUARD
 from domain.types import DAILY_BASE, DAILY_STREAK_BONUS, DAILY_STREAK_CAP, DailyResult, TransferResult
@@ -267,12 +267,12 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
                 return i + 1, bal, len(ranked)
         return None
 
-    def peek_stats(self, user_id: int) -> Optional[dict[str, Any]]:
+    def peek_stats(self, user_id: int) -> Optional[UserRow]:
         """読み取り専用。未登録の人を作らずに、成績を返す（未登録なら None）。"""
         with self._lock:
             return self._one("SELECT * FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id))
 
-    def stats(self, user_id: int) -> dict[str, Any]:
+    def stats(self, user_id: int) -> UserRow:
         with self._db.tx():
             gid = self._g()
             self._account.ensure(gid, user_id)
@@ -283,7 +283,7 @@ class WalletRepo(ScopedRepo, IWalletRepo, IWealthyReader):
             assert row is not None  # 直前に ensure 済み
             return row
 
-    def history(self, user_id: int, limit: int = 10) -> list[dict[str, Any]]:
+    def history(self, user_id: int, limit: int = 10) -> list[LedgerEntry]:
         with self._lock:
             return self._all(
                 "SELECT delta, balance_after, reason, ts FROM ledger WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT ?",

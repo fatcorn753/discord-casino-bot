@@ -4,10 +4,10 @@
 """
 
 import random
-from typing import Any, Optional, cast
+from typing import Optional, cast
 
 from domain import market_events as ev_mod
-from domain.ports.contracts import MarketEventRow
+from domain.ports.contracts import MarketEventPlan, MarketEventRow
 from domain.ports.repos import IMarketEventRepo
 from infra.db.base import EcoDb, ScopedRepo
 
@@ -25,7 +25,7 @@ class MarketEventRepo(ScopedRepo, IMarketEventRepo):
                 "SELECT * FROM market_events WHERE end_ts>=? ORDER BY start_ts", (now - ev_mod.COOLDOWN_MIN * 60,)
             )
 
-    def vol_multipliers(self, now: float) -> dict[str, Any]:
+    def vol_multipliers(self, now: float) -> dict[str, float]:
         """いま発生中のイベントによる、銘柄ごとの値動きの倍率 {銘柄: 倍率}（なければ空）。"""
         events = self.market_events(now)
         out = {}
@@ -36,7 +36,7 @@ class MarketEventRepo(ScopedRepo, IMarketEventRepo):
         return out
 
     def event_step(
-        self, now: float, rng: Optional[random.Random] = None, force: Optional[dict[str, Any]] = None
+        self, now: float, rng: Optional[random.Random] = None, force: Optional[MarketEventPlan] = None
     ) -> Optional[MarketEventRow]:
         """1分ごとに呼ぶ。終わっていないイベントも、終わって COOLDOWN_MIN 分以内のものもなければ、確率で新しい予告を出す。出したらその行を返す。"""
         rng = rng or random.SystemRandom()

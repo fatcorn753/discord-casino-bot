@@ -5,13 +5,13 @@
 
 import collections
 import datetime
-from typing import Any, Iterable, Optional
+from typing import Iterable, Optional
 
 from domain import history as history_mod
 from domain import missions as missions_mod
 from domain import shop as shop_mod
 from domain import weekly as weekly_mod
-from domain.ports.contracts import WeeklyRankEntry
+from domain.ports.contracts import PlayRecord, PlaySummary, WeeklyAward, WeeklyRankEntry
 from domain.ports.repos import IRecordRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
@@ -26,7 +26,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
 
     def record_play(
         self, user_id: int, game: str, bet: int, net: int, day: datetime.date, tags: Iterable[str] = ()
-    ) -> dict[str, Any]:
+    ) -> PlayRecord:
         """1回遊んだ結果を記録する。連勝を更新し、デイリーミッションを進めて、達成した分の報酬を渡す。"""
         with self._db.tx():
             g, d = self._g(), day.isoformat()
@@ -101,7 +101,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
                     self._account.apply(g, user_id, bonus, "ミッション全達成ボーナス", income=bonus)
             return {"streak": streak, "new_best": new_best, "completed": completed, "bonus": bonus}
 
-    def mission_status(self, user_id: int, day: datetime.date) -> list[Any]:
+    def mission_status(self, user_id: int, day: datetime.date) -> list[tuple[missions_mod.Mission, int, bool]]:
         """今日のミッションごとの (ミッション, 進み具合, 達成済みか)。口座は作らない。"""
         with self._lock:
             g = self._g()
@@ -151,7 +151,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
                 "SELECT COUNT(*) FROM weekly_champions WHERE guild_id=? AND user_id=?", (self._g(), user_id)
             )
 
-    def weekly_award(self, week: str) -> Optional[dict[str, Any]]:
+    def weekly_award(self, week: str) -> Optional[WeeklyAward]:
         """その週の発表。王者（稼ぎがプラスで、ゲーム数が規定以上の1位）に限定称号を贈り、前の週の保持者からは外す。"""
         with self._db.tx():
             g, king = self._g(), shop_mod.WEEKLY_KING
@@ -214,7 +214,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
             self._conn.execute("INSERT INTO weekly_state (guild_id, last_week) VALUES (0, 'backfilled')")
             return count
 
-    def play_summary(self, user_id: int) -> dict[str, Any]:
+    def play_summary(self, user_id: int) -> PlaySummary:
         """ゲームの成績（遊んだ回数・勝った回数・損益・最大連勝）。読み取り専用で、口座は作らない。"""
         with self._lock:
             r = self._one(
