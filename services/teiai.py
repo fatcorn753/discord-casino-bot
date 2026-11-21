@@ -16,7 +16,7 @@ class TeiaiPanelSnapshot:
 
     bank: BankStatus
     house: HouseAccount
-    graced: list[Any]
+    graced: list[tuple[int, int, float]]
     claims: int
     status: str
     display_status: str
@@ -121,7 +121,7 @@ class TeiaiService:
     def cds_buy(self, guild_id: int, user_id: int, target_id: int, stake: int) -> tuple[Any, ...]:
         return self._bank.for_guild(guild_id).cds_buy(user_id, target_id, stake, self._clock.now_ts())
 
-    def grace_expire(self, guild_id: int, now: float) -> list[Any]:
+    def grace_expire(self, guild_id: int, now: float) -> list[tuple[int, Any]]:
         """破産猶予の時間切れ（強制破産と、CDS の配当）。(user_id, 結果) の一覧。"""
         return self._bank.for_guild(guild_id).grace_expire(now)
 

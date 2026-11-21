@@ -97,10 +97,10 @@ class IBankRepo(IGuildScopedRepo, IBankCashFlow, IHouseAccount, IGainsTaxCollect
     def grace_until(self, user_id: int) -> Optional[float]:
         raise NotImplementedError
 
-    def grace_list(self) -> list[Any]:
+    def grace_list(self) -> list[tuple[int, int, float]]:
         raise NotImplementedError
 
-    def grace_expire(self, now: float) -> list[Any]:
+    def grace_expire(self, now: float) -> list[tuple[int, Any]]:
         raise NotImplementedError
 
     def bank_trust_accrue(self, now: float) -> int:

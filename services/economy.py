@@ -4,6 +4,7 @@ import datetime
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from domain import missions as missions_mod
 from domain.earnings import MemoInfo
 from domain.ports.clock import IClock
 from domain.ports.repos import (
@@ -37,7 +38,7 @@ class BalanceCard:
 class MissionBoard:
     """`/ペリカ ミッション` に出す値。"""
 
-    status: list[Any]
+    status: list[tuple[missions_mod.Mission, int, bool]]
     win_streak: int
     best_streak: int
     next_reset: datetime.datetime
