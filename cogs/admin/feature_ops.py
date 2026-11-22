@@ -1,6 +1,6 @@
 """`/運営 機能`: サーバーごとに、賭け事や仕組みを止める・再開する・一覧する。"""
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import discord
 
@@ -43,10 +43,13 @@ async def feature_set(
     )
 
 
-async def feature_list(cog: "ApprovalCog", interaction: discord.Interaction, guild_id: Optional[str]) -> None:
+async def feature_list(cog: "ApprovalCog", interaction: discord.Interaction, guild_id: str | None) -> None:
     guild = await pick_guild(cog.bot, interaction, guild_id) if guild_id else None
     if guild_id and guild is None:
         return
     targets = [guild] if guild else allowed_guilds(cog.bot, cog._guild_repo, cog._config)
     embeds = [features_embed(g.name, cog._guild_repo.features_off(g.id)) for g in targets[:10]]
-    await interaction.response.send_message(embeds=embeds or [ui.error_embed("対象がありません")], ephemeral=True)
+    if embeds:
+        await interaction.response.send_message(embeds=embeds, ephemeral=True)
+    else:
+        await ui.reply_error(interaction, "対象がありません")

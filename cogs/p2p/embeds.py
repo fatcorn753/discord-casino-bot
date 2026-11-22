@@ -6,6 +6,7 @@ from cogs.shared import ui
 from cogs.shared.horse_display import stat_lines
 from domain import p2p
 from domain import shop as shop_mod
+from domain.ports.contracts import HorseRow, ListingRow
 
 ENDED_TEXT = {
     "sold": ("✅ 売れました", "{label} は、<@{buyer}> が **{price}** で買いました。"),
@@ -18,18 +19,18 @@ def when(ts: float) -> str:
     return f"<t:{int(ts)}:R>（<t:{int(ts)}:t>）"
 
 
-def price_text(r: dict) -> str:
+def price_text(r: ListingRow) -> str:
     if r["mode"] == "fixed":
         return f"定価 **{ui.pelica(r['price'])}**"
     now = f"現在 **{ui.pelica(r['bid'])}**" if r["bid"] else f"開始 **{ui.pelica(r['price'])}**"
     return f"競り {now}"
 
 
-def line_of(r: dict, label: str) -> str:
+def line_of(r: ListingRow, label: str) -> str:
     return f"`#{r['id']}` {label}　{price_text(r)}　{'締切' if r['mode'] == 'auction' else '期限'} {when(r['end_at'])}"
 
 
-def entry_text(r: dict, label: str) -> str:
+def entry_text(r: ListingRow, label: str) -> str:
     """一覧の1件（2行）。何を・いくらで・どの方式で・誰が・いつまでか。競りは、入札の有無も。"""
     if r["mode"] == "fixed":
         how = f"💵 定価 **{ui.pelica(r['price'])}**"
@@ -41,7 +42,7 @@ def entry_text(r: dict, label: str) -> str:
     return f"`#{r['id']}` **{label}**　{how}\n　└ 出品 <@{r['seller_id']}>　{left} {when(r['end_at'])}"
 
 
-def detail_embed(r: dict, label: str, horse: dict | None = None) -> discord.Embed:
+def detail_embed(r: ListingRow, label: str, horse: HorseRow | None = None) -> discord.Embed:
     lines = [
         f"出品者: <@{r['seller_id']}>",
         price_text(r),
@@ -77,7 +78,7 @@ ENDED_TEXT = {
 }
 
 
-def post_embed(r: dict, label: str, horse: dict | None = None) -> discord.Embed:
+def post_embed(r: ListingRow, label: str, horse: HorseRow | None = None) -> discord.Embed:
     """告知の投稿。出ている間は、値段・締切・最高入札。終わったら、結果（売れた値段など）に書き換わる。"""
     if r["status"] != "active":
         title, text = ENDED_TEXT.get(r["status"], ENDED_TEXT["expired"])

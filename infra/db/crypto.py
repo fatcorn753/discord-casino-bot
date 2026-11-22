@@ -1,11 +1,9 @@
 """証券の現物保有・売買。"""
 
-from typing import Any, Optional
-
 from domain import market as market_mod
 from domain.errors import fail
 from domain.market import DEFAULT
-from domain.ports.bridges import IGainsTaxCollector, IMarginCollateralGuard, NoOpMarginCollateralGuard
+from domain.ports.bridges import GainsTaxCollector, IMarginCollateralGuard, NoOpMarginCollateralGuard
 from domain.ports.contracts import SpotHolding
 from domain.ports.repos import ICryptoRepo
 from domain.types import CryptoResult
@@ -22,8 +20,8 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
         db: EcoDb,
         account: AccountCore,
         market: MarketDataRepo,
-        tax: IGainsTaxCollector,
-        collateral_guard: Optional[IMarginCollateralGuard] = None,
+        tax: GainsTaxCollector,
+        collateral_guard: IMarginCollateralGuard | None = None,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
@@ -34,10 +32,10 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
         self._collateral_guard: IMarginCollateralGuard = collateral_guard or NoOpMarginCollateralGuard()
 
     def _crypto_holding_for(self, guild_id: int, user_id: int, symbol: str = DEFAULT) -> SpotHolding:
-        r = self._conn.execute(
+        r = self._one(
             "SELECT units, cost FROM crypto WHERE guild_id=? AND user_id=? AND symbol=?",
             (guild_id, user_id, symbol),
-        ).fetchone()
+        )
         return (r["units"], r["cost"]) if r else (0, 0)
 
     def crypto_holding(self, user_id: int, symbol: str = DEFAULT) -> SpotHolding:
@@ -50,13 +48,13 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
         with self._lock:
             return [
                 (r["symbol"], r["units"], r["cost"])
-                for r in self._conn.execute(
+                for r in self._all(
                     "SELECT symbol, units, cost FROM crypto WHERE guild_id=? AND user_id=? AND units>0 ORDER BY symbol",
                     (guild_id, user_id),
                 )
             ]
 
-    def holdings(self, user_id: int) -> list[Any]:
+    def holdings(self, user_id: int) -> list[tuple[str, int, int]]:
         return self.holdings_for(self._g(), user_id)
 
     def crypto_holders(self, limit: int = 10, symbol: str = DEFAULT) -> list[tuple[int, int, int]]:
@@ -64,7 +62,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
         with self._lock:
             return [
                 (r["user_id"], r["units"], r["cost"])
-                for r in self._conn.execute(
+                for r in self._all(
                     "SELECT user_id, units, cost FROM crypto WHERE guild_id=? AND symbol=? AND units>0 "
                     "ORDER BY cost DESC, user_id LIMIT ?",
                     (self._g(), symbol, limit),
@@ -81,9 +79,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
     def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
         with self._lock:
             prices = self._market.latest_prices()
-            for r in self._conn.execute(
-                "SELECT user_id, symbol, units FROM crypto WHERE guild_id=? AND units>0", (guild_id,)
-            ):
+            for r in self._all("SELECT user_id, symbol, units FROM crypto WHERE guild_id=? AND units>0", (guild_id,)):
                 if r["symbol"] in prices:
                     totals[r["user_id"]] = (
                         totals.get(r["user_id"], 0) + market_mod.sell_quote(r["units"], prices[r["symbol"]])[0]
@@ -130,7 +126,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
                 True, units=units, money=total, fee=fee, balance=self._account.raw_balance(gid, user_id)
             )
 
-    def crypto_sell(self, user_id: int, units: Optional[int], price: float, symbol: str = DEFAULT) -> CryptoResult:
+    def crypto_sell(self, user_id: int, units: int | None, price: float, symbol: str = DEFAULT) -> CryptoResult:
         """units 口を売る（None なら全部）。受け取る額は手数料を引いたもの。"""
         with self._db.tx():
             gid = self._g()
@@ -147,7 +143,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
         self,
         guild_id: int,
         user_id: int,
-        units: Optional[int],
+        units: int | None,
         price: float,
         symbol: str = DEFAULT,
         taxable: bool = False,
@@ -167,7 +163,7 @@ class CryptoRepo(ScopedRepo, ICryptoRepo):
             cost if units == have else round(cost * units / have)
         )  # 端数の按分は四捨五入（切り捨てだと取得額が少しずつ残る）
         self._account.ensure(guild_id, user_id)
-        tax = self._tax.charge_gains_tax_for(guild_id, user_id, proceeds - removed, taxable, f"{name}売却")
+        tax = self._tax(guild_id, user_id, proceeds - removed, taxable, f"{name}売却")
         self._account.apply(
             guild_id, user_id, proceeds - tax, f"{name}売却:{market_mod.lots(units)}@{market_mod.fmt(price)}"
         )

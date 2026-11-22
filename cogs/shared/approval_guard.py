@@ -1,6 +1,6 @@
 """サーバー承認・持ち主 DM コマンド・機能のオン・オフの Discord 入口ガード（cogs 共通基盤）。"""
 
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import discord
 
@@ -36,9 +36,8 @@ async def guard(interaction: discord.Interaction) -> bool:
     if is_allowed(guild_repo, bot.config, guild_id, interaction.user.id):
         return True
     if not requires_approval(bot.config):
-        await interaction.response.send_message(
-            embed=ui.error_embed("このサーバーでは使えません", "この Bot は、許可されたサーバーだけで遊べます。"),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction, "この Bot は、許可されたサーバーだけで遊べます。", title="このサーバーでは使えません"
         )
         return False
     row = guild_repo.get_guild_status(guild_id)
@@ -49,7 +48,7 @@ async def guard(interaction: discord.Interaction) -> bool:
         msg = "このサーバーでの利用は、Bot の持ち主に許可されていません。"
     else:
         msg = "このサーバーは、まだ Bot の持ち主に承認されていません。承認を依頼しました。承認されるまで、少しお待ちください。"
-    await interaction.response.send_message(embed=ui.warn_embed("承認待ちです", msg), ephemeral=True)
+    await ui.reply_warn(interaction, msg, title="承認待ちです")
     return False
 
 
@@ -59,8 +58,8 @@ async def allow_component(
     config: dict[str, Any],
     *,
     title: str = "利用できません",
-    text: Optional[str] = None,
-    feature: Optional[str] = None,
+    text: str | None = None,
+    feature: str | None = None,
 ) -> bool:
     """ボタン・Select の操作の入口の検査（スラッシュコマンドの guard とは別に、押された時点の許可を見る）。
 
@@ -70,12 +69,11 @@ async def allow_component(
     guild_id = interaction.guild_id
     if guild_id is not None and approval.is_allowed(guild_repo, config, guild_id, interaction.user.id):
         return feature is None or await feature_guard(interaction, guild_repo, feature)
-    embed = ui.error_embed(title, text) if text is not None else ui.error_embed(title)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await ui.reply_error(interaction, text if text is not None else "", title=title)
     return False
 
 
-def feature_off(guild_repo: IGuildRepo, guild_id: Optional[int], feature: str) -> bool:
+def feature_off(guild_repo: IGuildRepo, guild_id: int | None, feature: str) -> bool:
     """その機能が、このサーバーで止められているか。"""
     return guild_id is not None and feature in guild_repo.features_off(guild_id)
 
@@ -84,15 +82,12 @@ async def feature_guard(interaction: discord.Interaction, guild_repo: IGuildRepo
     """機能が止められていれば、本人だけに断りを返して False を返す（止まっていなければ True）。"""
     if not feature_off(guild_repo, interaction.guild_id, feature):
         return True
-    embed = ui.error_embed(
-        "⏸️ 停止中",
+    await ui.reply_error(
+        interaction,
         f"**{features.label(feature)}** は、いま管理者が止めています。再開まで、お待ちください。\n"
         "（止める前に始めたものは、いつもどおり精算されます）",
+        title="⏸️ 停止中",
     )
-    if interaction.response.is_done():
-        await interaction.followup.send(embed=embed, ephemeral=True)
-    else:
-        await interaction.response.send_message(embed=embed, ephemeral=True)
     return False
 
 

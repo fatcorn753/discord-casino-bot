@@ -4,7 +4,6 @@ import json
 import os
 import sqlite3
 import time
-from typing import Optional
 
 from domain import kyosai, labor
 from domain.types import INITIAL_BALANCE
@@ -233,7 +232,7 @@ _SYMBOL_TABLES = {
 }
 
 
-def _migrate_labor_counts(conn: sqlite3.Connection, now: Optional[float] = None) -> None:
+def _migrate_labor_counts(conn: sqlite3.Connection, now: float | None = None) -> None:
     """作業員を「人数の列」で持っていた版から、契約つきの1人1行の表（labor_workers）へ移す。いまの人は、今から7日の契約にする（何度動かしても安全）。"""
     now = time.time() if now is None else now
     for r in conn.execute(
@@ -255,7 +254,7 @@ def _migrate_labor_counts(conn: sqlite3.Connection, now: Optional[float] = None)
 ARCHAEOLOGIST_FEE = 2_400  # なくなった「発掘員」の、契約料（返金の額）
 
 
-def _refund_archaeologists(conn: sqlite3.Connection, now: Optional[float] = None) -> None:
+def _refund_archaeologists(conn: sqlite3.Connection, now: float | None = None) -> None:
     """専用の「発掘員」を雇っていた人の契約料を返して、契約を解約する（何度動かしても安全。いなければ何もしない）。"""
     now = time.time() if now is None else now
     refunds: dict = {}
@@ -274,7 +273,7 @@ def _refund_archaeologists(conn: sqlite3.Connection, now: Optional[float] = None
     conn.execute("DELETE FROM labor_workers WHERE kind='archaeologist'")
 
 
-def _refund_legacy_contracts(conn: sqlite3.Connection, now: Optional[float] = None) -> None:
+def _refund_legacy_contracts(conn: sqlite3.Connection, now: float | None = None) -> None:
     """鉱石版より前に雇った作業員の契約料を、いまの値段で返して、契約を解約する（ルール変更の補償）。列を足したときに、1回だけ動く。"""
     now = time.time() if now is None else now
     refunds: dict = {}
@@ -306,7 +305,7 @@ def _add_symbol_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE chart_posts ADD COLUMN symbol TEXT NOT NULL DEFAULT 'cs'")
 
 
-def migrate_to_guild_scope(conn: sqlite3.Connection, db_path: str, legacy_guild_id: Optional[int]) -> None:
+def migrate_to_guild_scope(conn: sqlite3.Connection, db_path: str, legacy_guild_id: int | None) -> None:
     """サーバー別になる前の記録（users に guild_id が無い）を、指定したサーバーのものとして引き継ぐ。"""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
     if not cols or "guild_id" in cols:
@@ -365,7 +364,7 @@ def migrate_to_guild_scope(conn: sqlite3.Connection, db_path: str, legacy_guild_
         raise
 
 
-def retire_autoplay(conn: sqlite3.Connection, now: Optional[float] = None) -> None:
+def retire_autoplay(conn: sqlite3.Connection, now: float | None = None) -> None:
     """廃止した自動プレイの表が残っていたら、預け中の分を残高に戻してから表を消す（預けた額を失わせない）。"""
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='autoplay'").fetchone():
         return

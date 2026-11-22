@@ -3,7 +3,7 @@
 import asyncio
 import datetime
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import cast
 
 import discord
 import pytest
@@ -11,6 +11,7 @@ import pytest
 from cogs.shared import ui
 from cogs.shared.announce import announce_channel
 from cogs.shared.confirm import confirmed_reply, user_session
+from domain.ports.contracts import LeaderboardRow
 from domain.ports.repos import ILeaderboardConfigRepo
 from infra.clock import ConfigClock
 from services.session import Sessions
@@ -75,6 +76,62 @@ def test_owner_view_silent_and_custom_rejection():
         it2, sent2, _ = make_interaction(99)
         assert await custom.interaction_check(as_interaction(it2)) is False
         assert len(sent2) == 1 and "権限なし" in sent2[0]["embed"].title
+
+    asyncio.run(run())
+
+
+# ---- cogs.shared.ui の応答ヘルパ（reply_embed / reply_error / reply_warn / reply_ok） ----
+def test_reply_helpers_send_via_response_when_not_done():
+    async def run():
+        it, sent, followed = make_interaction(1)  # この Resp は is_done を持たない（未応答として扱う）
+        await ui.reply_error(as_interaction(it), "本文です", title="失敗")
+        await ui.reply_warn(as_interaction(it), "注意です")
+        await ui.reply_ok(as_interaction(it), "できました")
+        await ui.reply_embed(as_interaction(it), ui.embed("そのまま", "渡すだけ"), ephemeral=False)
+        assert followed == []
+        assert [s["embed"].title for s in sent] == ["❌ 失敗", "⚠️ 確認", "✅ 完了", "そのまま"]
+        assert sent[0]["embed"].description == "本文です" and sent[0]["ephemeral"] is True
+        assert sent[1]["embed"].description == "注意です" and sent[1]["ephemeral"] is True
+        assert sent[2]["embed"].description == "できました" and sent[2]["ephemeral"] is True
+        assert sent[3]["ephemeral"] is False
+
+    asyncio.run(run())
+
+
+def test_reply_error_uses_default_title():
+    async def run():
+        it, sent, _ = make_interaction(1)
+        await ui.reply_error(as_interaction(it), "本文")
+        assert sent[0]["embed"].title == "❌ できません" and sent[0]["embed"].description == "本文"
+
+    asyncio.run(run())
+
+
+def test_reply_helpers_followup_when_response_already_done():
+    sent_via_response = []
+
+    class Resp:
+        def is_done(self):
+            return True
+
+        async def send_message(self, *args, **kw):
+            sent_via_response.append(kw)
+
+    class Follow:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, *args, **kw):
+            self.sent.append(kw)
+
+    async def run():
+        it = SimpleNamespace(user=SimpleNamespace(id=1), response=Resp(), followup=Follow())
+        await ui.reply_error(as_interaction(it), "本文", title="失敗", ephemeral=False)
+        assert sent_via_response == []
+        assert len(it.followup.sent) == 1
+        assert "❌ 失敗" in it.followup.sent[0]["embed"].title
+        assert it.followup.sent[0]["embed"].description == "本文"
+        assert it.followup.sent[0]["ephemeral"] is False
 
     asyncio.run(run())
 
@@ -166,11 +223,11 @@ def test_announce_channel_preference_and_permissions():
     guild = SimpleNamespace(id=1, me=object(), system_channel=sys_ch, get_channel=lambda cid: channels.get(cid))
 
     class Boards(ILeaderboardConfigRepo):
-        def __init__(self, channel_id: Optional[int]) -> None:
+        def __init__(self, channel_id: int | None) -> None:
             self._channel_id = channel_id
 
-        def get_leaderboard(self, guild_id: int) -> Optional[dict[str, Any]]:
-            return None if self._channel_id is None else {"channel_id": self._channel_id}
+        def get_leaderboard(self, guild_id: int) -> LeaderboardRow | None:
+            return None if self._channel_id is None else cast("LeaderboardRow", {"channel_id": self._channel_id})
 
     eco_with_board = Boards(100)
     assert announce_channel(as_guild(guild), eco_with_board) is board_ch

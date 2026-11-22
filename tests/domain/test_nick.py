@@ -44,9 +44,11 @@ def test_plan_adds_and_replaces_titles():
     new, st = plan(None, None, "常連")
     assert new == "tatu【常連】" and st == nick.NickState(None, "tatu【常連】")  # ニックネームなし → 表示名の後ろ
     new, st = plan("あだ名", None, "常連")
-    assert new == "あだ名【常連】" and st.original == "あだ名"
+    assert new == "あだ名【常連】" and st is not None and st.original == "あだ名"
     new, st = plan("あだ名【常連】", st, "地下の帝王")
-    assert new == "あだ名【地下の帝王】" and st.original == "あだ名"  # 付け替えても元の名前は変わらない
+    assert (
+        new == "あだ名【地下の帝王】" and st is not None and st.original == "あだ名"
+    )  # 付け替えても元の名前は変わらない
 
 
 def test_plan_restores_exactly_what_was_there_before():
@@ -60,18 +62,18 @@ def test_long_nickname_is_restored_in_full_after_truncation():
     """長い名前は称号のために切り詰めるが、記録があるので外せば完全に元へ戻る（切り詰めた名前は残らない）。"""
     long_nick = "あ" * 30
     new, st = plan(long_nick, None, "常連")
-    assert nick.ulen(new) <= nick.NICK_LIMIT and new != long_nick + "【常連】"
+    assert new is not None and nick.ulen(new) <= nick.NICK_LIMIT and new != long_nick + "【常連】"
     assert plan(new, st, None) == (long_nick, None)
     # 称号を付け替えても、元の長い名前から作り直す（「…」が積み重ならない）
     new2, st2 = plan(new, st, "地下の帝王")
-    assert st2.original == long_nick and new2.count("…") <= 1
+    assert st2 is not None and new2 is not None and st2.original == long_nick and new2.count("…") <= 1
     assert plan(new2, st2, None) == (long_nick, None)
 
 
 def test_plan_respects_a_nickname_the_user_changed_afterwards():
     _, st = plan("あだ名", None, "常連")
     new, st2 = plan("新しい名前", st, "常連")  # 途中で自分で変えた
-    assert new == "新しい名前【常連】" and st2.original == "新しい名前"
+    assert new == "新しい名前【常連】" and st2 is not None and st2.original == "新しい名前"
     target, _ = plan("新しい名前【常連】", st2, None)
     assert target == "新しい名前"
     target, _ = plan("別の名前【常連】", st2, None)  # 外す前にまた変えられていた
@@ -88,7 +90,7 @@ def test_plan_with_only_a_title_as_nickname_never_returns_empty_string():
     target, _ = plan("【常連】", None, None)
     assert target is None  # 空文字を edit に渡さない
     new, st = plan("【常連】", None, "常連")
-    assert new == "tatu【常連】" and st.original is None
+    assert new == "tatu【常連】" and st is not None and st.original is None
 
 
 # ------------------------------ Discord 側 ------------------------------ #

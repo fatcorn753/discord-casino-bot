@@ -5,14 +5,15 @@ import logging
 import random
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Optional
 
 from domain import events as events_mod
 from domain import skins
+from domain.errors import Notice
 from domain.games import jackpot
 from domain.games.pachinko import SetResult
 from domain.games.rtplevel import DEFAULT_RTP_POLICY, IRtpPolicy
 from domain.ports.clock import IClock
+from domain.ports.contracts import PlayRecord
 from domain.ports.repos import (
     IEscrowRepo,
     IEventRepo,
@@ -35,7 +36,7 @@ class BeginGameResult:
     reason: str = ""
     balance: int = 0
     escrow_id: int = 0
-    skin: Optional[skins.Skin] = None
+    skin: skins.Skin | None = None
 
 
 @dataclass(frozen=True)
@@ -46,8 +47,8 @@ class SettleGameResult:
     insured_refund: int = 0
     event_bonus: int = 0
     rtp_shift: int = 0
-    notices: tuple[Any, ...] = ()
-    events: dict[str, Any] | None = None
+    notices: tuple[Notice, ...] = ()
+    events: PlayRecord | None = None
     jackpot_won: int = 0  # 共有ジャックポットを当てた額（当たらなければ 0）
     jackpot_pool: int = 0  # 精算のあとの、ジャックポットの積み立て
 
@@ -67,8 +68,8 @@ class CasinoService:
         sessions: ISessionGuard,
         clock: IClock,
         rtp_policy: IRtpPolicy = DEFAULT_RTP_POLICY,
-        pachinko: Optional[IPachinkoRepo] = None,
-        rng: Optional[random.Random] = None,
+        pachinko: IPachinkoRepo | None = None,
+        rng: random.Random | None = None,
     ) -> None:
         self._wallet = wallet
         self._escrow = escrow
@@ -98,7 +99,7 @@ class CasinoService:
         reason = self.sessions.try_start(user_id)
         if reason:
             return BeginGameResult(False, reason_kind="session", reason=reason)
-        escrow_id: Optional[int] = None
+        escrow_id: int | None = None
         try:
             if bet < self._rtp_policy.min_bet:
                 return BeginGameResult(False, reason_kind="min_bet")
@@ -127,9 +128,9 @@ class CasinoService:
         penalty: int = 0,
         keep_session: bool = False,
         tags: Iterable[str] = (),
-        rtp_kind: Optional[str] = None,
+        rtp_kind: str | None = None,
         rtp_done: bool = False,
-        now: Optional[datetime.datetime] = None,
+        now: datetime.datetime | None = None,
     ) -> SettleGameResult:
         """RTP・突発イベント補正を適用して預かり金を精算し、通知とミッション/連勝記録を更新する。"""
         rtp_repo = self._rtp.for_guild(guild_id)
@@ -162,7 +163,7 @@ class CasinoService:
             return SettleGameResult(duplicate=True, event_bonus=event_bonus, rtp_shift=rtp_shift)
         net, penalty_taken, insured_refund = result
         notices = tuple(notice_repo.take_notices(user_id))
-        ev_result: dict[str, Any] = {}
+        ev_result: PlayRecord | None = None
         try:
             ev_result = record_repo.record_play(user_id, game, bet, net, current_now.date(), tags)
         except Exception:
@@ -181,7 +182,7 @@ class CasinoService:
             jackpot_pool=pool,
         )
 
-    def _draw_jackpot(self, escrow_repo: Any, user_id: int, bet: int) -> tuple[int, int]:
+    def _draw_jackpot(self, escrow_repo: IEscrowRepo, user_id: int, bet: int) -> tuple[int, int]:
         """共有ジャックポットの抽選。(当てた額, 抽選のあとの積み立て)。失敗しても、精算そのものは済んでいる。"""
         try:
             pool = escrow_repo.jackpot_pool()

@@ -226,7 +226,7 @@ def test_write_can_be_bought_back_at_the_ask(eco):
 def test_write_counts_margin_minus_liability_in_the_ranking_and_is_seized(eco):
     fund_bank(eco)
     ok, res = eco.options.option_write(U, opt.CALL, "cs", 2_000, time.time())
-    total = dict((u, v) for _, u, v in eco.wallet.top(5))[U]
+    total = {u: v for _, u, v in eco.wallet.top(5)}[U]
     assert INITIAL_BALANCE - 600 < total < INITIAL_BALANCE + 600  # 証拠金は資産、買い戻しの費用は負債
     eco.wallet.debit_up_to(U, eco.wallet.balance(U), "テスト")
     with eco.db.tx():

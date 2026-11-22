@@ -4,8 +4,8 @@
 """
 
 import datetime
-from typing import Any, Optional
 
+from domain.ports.contracts import ManualEventRow
 from domain.ports.repos import IEventRepo
 from infra.db.base import EcoDb, ScopedRepo
 
@@ -18,10 +18,8 @@ class EventRepo(ScopedRepo, IEventRepo):
 
     def event_phase(self, day: datetime.date) -> int:
         with self._lock:
-            row = self._conn.execute(
-                "SELECT phase FROM event_state WHERE guild_id=? AND day=?", (self._g(), day.isoformat())
-            ).fetchone()
-            return row["phase"] if row else 0
+            v = self._scalar("SELECT phase FROM event_state WHERE guild_id=? AND day=?", (self._g(), day.isoformat()))
+            return v if v is not None else 0
 
     def set_event_phase(self, day: datetime.date, phase: int) -> None:
         with self._db.tx():
@@ -37,7 +35,7 @@ class EventRepo(ScopedRepo, IEventRepo):
                 (self._g(), game, boost_pct, starts, ends, channel_id),
             )
 
-    def manual_event_get(self, now: float) -> Optional[dict[str, Any]]:
+    def manual_event_get(self, now: float) -> ManualEventRow | None:
         """いま開催中の特別イベント。無ければ None。"""
         with self._lock:
             return self._one(
@@ -45,26 +43,22 @@ class EventRepo(ScopedRepo, IEventRepo):
                 (self._g(), now, now),
             )
 
-    def manual_event_stop(self, now: float) -> Optional[dict[str, Any]]:
+    def manual_event_stop(self, now: float) -> ManualEventRow | None:
         """開催中の特別イベントを、すぐ終わらせる。終わらせたイベントを返す（開催中でなければ None）。"""
         with self._db.tx():
             gid = self._g()
-            row = self._conn.execute(
-                "SELECT * FROM manual_event WHERE guild_id=? AND ended=0 AND ends>?", (gid, now)
-            ).fetchone()
+            row = self._one("SELECT * FROM manual_event WHERE guild_id=? AND ended=0 AND ends>?", (gid, now))
             if row is None:
                 return None
             self._conn.execute("UPDATE manual_event SET ended=1, ends=? WHERE guild_id=?", (now, gid))
-            return dict(row)
+            return row
 
-    def manual_event_finish_due(self, now: float) -> Optional[dict[str, Any]]:
+    def manual_event_finish_due(self, now: float) -> ManualEventRow | None:
         """時間が来た特別イベントを終了にして返す（終了の告知を1回だけ出すため）。無ければ None。"""
         with self._db.tx():
             gid = self._g()
-            row = self._conn.execute(
-                "SELECT * FROM manual_event WHERE guild_id=? AND ended=0 AND ends<=?", (gid, now)
-            ).fetchone()
+            row = self._one("SELECT * FROM manual_event WHERE guild_id=? AND ended=0 AND ends<=?", (gid, now))
             if row is None:
                 return None
             self._conn.execute("UPDATE manual_event SET ended=1 WHERE guild_id=?", (gid,))
-            return dict(row)
+            return row

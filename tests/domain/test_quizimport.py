@@ -139,11 +139,17 @@ def run_cmd(cog, uid, file, announce=None):
     log = {"sent": [], "follow": [], "edits": []}
 
     class Resp:
+        def __init__(self):
+            self.done = False
+
+        def is_done(self):
+            return self.done
+
         async def send_message(self, **kw):
             log["sent"].append(kw["embed"].title)
 
         async def defer(self, **kw):
-            pass
+            self.done = True
 
         async def edit_message(self, **kw):
             log["edits"].append(kw["embeds"][0].title)

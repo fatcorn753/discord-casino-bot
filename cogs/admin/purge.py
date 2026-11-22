@@ -5,8 +5,8 @@ Bot は自分の発言を消すのに「メッセージの管理」権限は要�
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable, Optional
 
 import discord
 
@@ -29,7 +29,7 @@ def can_read_history(channel, guild: discord.Guild) -> bool:
 
 
 async def delete_own_messages(
-    channel, bot_user_id: int, on_progress: Optional[Callable[[PurgeResult], Awaitable[None]]] = None
+    channel, bot_user_id: int, on_progress: Callable[[PurgeResult], Awaitable[None]] | None = None
 ) -> PurgeResult:
     """channel の履歴を新しい順にたどり、Bot 自身の発言だけを消す。履歴を読めないとき（discord.Forbidden）は、そのまま例外にする。"""
     result = PurgeResult()

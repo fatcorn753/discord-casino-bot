@@ -193,7 +193,7 @@ def test_post_announces_and_reports_results_to_each_allowed_guild(eco, monkeypat
 
     guild = SimpleNamespace(id=7)
     cog = make_cog(eco)
-    setattr(cog.bot, "guilds", [guild])
+    monkeypatch.setattr(cog.bot, "guilds", [guild])
     monkeypatch.setattr("domain.approval.is_allowed", lambda *a: True)
     monkeypatch.setattr(market_cog, "announce_channel", lambda g, e: Chan())
     now = time.time()

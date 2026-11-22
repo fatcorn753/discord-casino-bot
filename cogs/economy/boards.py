@@ -2,11 +2,11 @@
 
 import datetime
 import logging
-from typing import Optional
 
 import discord
 
 from cogs.shared import logthrottle, ranking, ui
+from domain.ports.contracts import LeaderboardRow
 from domain.ports.repos import IGuildRepo
 from services.ranking import RankingService
 
@@ -79,7 +79,7 @@ async def refresh_board(
     bot: discord.Client,
     ranking_repos: RankingService,
     guild_repo: IGuildRepo,
-    board: dict,
+    board: LeaderboardRow,
     interval_minutes: int,
 ) -> None:
     """掲示板のメッセージを最新の順位に書き換える。消されていたら投稿し直す。"""
@@ -106,7 +106,7 @@ async def refresh_board(
         logthrottle.warn(("board", guild.id), f"ランキング掲示板を更新できません: guild={guild.id}: {exc!r}")
 
 
-async def delete_board_message(guild: discord.Guild, board: Optional[dict]) -> None:
+async def delete_board_message(guild: discord.Guild, board: LeaderboardRow | None) -> None:
     if not board:
         return
     channel = guild.get_channel(board["channel_id"])
@@ -121,7 +121,7 @@ async def board_set(
     ranking_repos: RankingService,
     guild_repo: IGuildRepo,
     interaction: discord.Interaction,
-    channel: Optional[discord.TextChannel],
+    channel: discord.TextChannel | None,
     stop: bool,
     interval_minutes: int,
 ) -> None:
@@ -129,12 +129,10 @@ async def board_set(
         await board_unset(guild_repo, interaction)
         return
     if channel is None:
-        await interaction.response.send_message(
-            embed=ui.error_embed(
-                "チャンネルを指定してください",
-                "掲示するチャンネルを指定します。止めるときは「止める」を True にしてください。",
-            ),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction,
+            "掲示するチャンネルを指定します。止めるときは「止める」を True にしてください。",
+            title="チャンネルを指定してください",
         )
         return
     guild = interaction.guild
@@ -142,12 +140,10 @@ async def board_set(
         return
     perms = channel.permissions_for(guild.me)
     if not (perms.view_channel and perms.send_messages and perms.embed_links):
-        await interaction.response.send_message(
-            embed=ui.error_embed(
-                "掲示できません",
-                f"Bot が {channel.mention} に埋め込みを投稿できません。チャンネルの権限を確認してください。",
-            ),
-            ephemeral=True,
+        await ui.reply_error(
+            interaction,
+            f"Bot が {channel.mention} に埋め込みを投稿できません。チャンネルの権限を確認してください。",
+            title="掲示できません",
         )
         return
     await interaction.response.defer(ephemeral=True)
@@ -173,10 +169,7 @@ async def board_unset(guild_repo: IGuildRepo, interaction: discord.Interaction) 
         return
     board = guild_repo.get_leaderboard(guild.id)
     if board is None:
-        await interaction.response.send_message(
-            embed=ui.warn_embed("掲示していません", "このサーバーには、ランキングの掲示がありません。"),
-            ephemeral=True,
-        )
+        await ui.reply_warn(interaction, "このサーバーには、ランキングの掲示がありません。", title="掲示していません")
         return
     await interaction.response.defer(ephemeral=True)
     await delete_board_message(guild, board)

@@ -169,7 +169,7 @@ def test_refund_is_not_taken_for_debt_and_ranking_subtracts_debt(eco):
     eco.db.conn.execute("UPDATE users SET debt=500 WHERE user_id=1")
     eco.escrow.refund(eid)
     assert eco.wallet.balance(1) == INITIAL_BALANCE and eco.debt.debt(1) == 500  # 返金は徴収しない
-    assert dict((u, a) for _, u, a in eco.wallet.top(5)) == {1: INITIAL_BALANCE - 500, 2: INITIAL_BALANCE}
+    assert {u: a for _, u, a in eco.wallet.top(5)} == {1: INITIAL_BALANCE - 500, 2: INITIAL_BALANCE}
 
 
 def test_transfer_daily_limit_counts_only_the_amount_not_the_fee(eco):

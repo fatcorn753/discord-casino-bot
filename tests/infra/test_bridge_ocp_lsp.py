@@ -26,23 +26,23 @@ from cogs.shared.bridges import (
 )
 from domain import teiai
 from domain.ports.bridges import (
-    CompositeAssetCollector,
-    CompositeAssetSeizureStep,
-    CompositeBankruptPrepHook,
-    CompositeGraceEnterHook,
-    CompositeLiquidationStep,
-    CompositeSeizureValueStep,
-    CompositeValuationSource,
-    IAssetSeizureStep,
-    IBankruptPrepHook,
-    IGraceEnterHook,
-    ILiquidationStep,
-    ISeizureValueStep,
-    IValuationSource,
+    AssetSeizureStep,
+    compose_asset_collectors,
+    compose_asset_seizure_steps,
+    compose_bankrupt_prep_hooks,
+    compose_grace_enter_hooks,
+    compose_liquidation_steps,
+    compose_seizure_value_steps,
+    compose_valuation_sources,
+    noop_asset_seizure_step,
+    noop_bankrupt_prep_hook,
+    noop_grace_enter_hook,
+    noop_liquidation_step,
+    noop_seizure_value_step,
 )
 from infra.db import schema
 from infra.db.account import AccountCore
-from infra.db.assets import ValuationSourceCollector
+from infra.db.assets import valuation_source_collector
 from infra.db.bank import BankRepo
 from infra.db.base import EcoDb
 from infra.db.bonds import BondRepo
@@ -50,7 +50,7 @@ from infra.db.crypto import CryptoRepo
 from infra.db.debt import DebtRepo
 from infra.db.earnings import EarningsRepo
 from infra.db.guild import GuildRepo
-from infra.db.lazy_bridges import LazyAssetSeizureStep, LazyStatusReader
+from infra.db.lazy_bridges import LazyStatusReader, lazy_asset_seizure_step
 from infra.db.loans import LoanRepo
 from infra.db.margin import MarginRepo
 from infra.db.market import MarketDataRepo
@@ -93,8 +93,8 @@ def test_standalone_repos_run_with_default_noop_bridges_satisfying_lsp():
         debt = DebtRepo(db, account).for_guild(G)
         loans = LoanRepo(db, account).for_guild(G)
         bonds = BondRepo(db, account, raw_bank).for_guild(G)
-        crypto = CryptoRepo(db, account, market, raw_bank).for_guild(G)
-        margin = MarginRepo(db, account, market, raw_bank, raw_bank).for_guild(G)
+        crypto = CryptoRepo(db, account, market, raw_bank.charge_gains_tax_for).for_guild(G)
+        margin = MarginRepo(db, account, market, raw_bank, raw_bank.charge_gains_tax_for).for_guild(G)
         options = OptionRepo(db, account, market, market_events, earnings, raw_bank).for_guild(G)
         guild_repo = GuildRepo(db).for_guild(G)
 
@@ -125,15 +125,14 @@ def test_standalone_repos_run_with_default_noop_bridges_satisfying_lsp():
 
 
 def test_persistence_composites_and_valuation_collector_support_open_extension():
-    """Composite* と ValuationSourceCollector は既存実装を変更せず新種ステップ・評価源を拡張できる（OCP）。"""
+    """compose_* と valuation_source_collector は既存実装を変更せず新種ステップ・評価源を拡張できる（OCP）。"""
 
-    class CustomSource(IValuationSource):
-        def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
-            totals[U] = totals.get(U, 0) + 777
+    def custom_source(guild_id: int, totals: dict[int, int]) -> None:
+        totals[U] = totals.get(U, 0) + 777
 
-    composed_source = CompositeValuationSource((CustomSource(),))
+    composed_source = compose_valuation_sources((custom_source,))
     totals: dict[int, int] = {}
-    composed_source.collect_values(G, totals)
+    composed_source(G, totals)
     assert totals == {U: 777}
 
     parts: dict[tuple[int, str], int] = {}
@@ -141,50 +140,57 @@ def test_persistence_composites_and_valuation_collector_support_open_extension()
     def add_part(uid: int, key: str, value: int) -> None:
         parts[(uid, key)] = parts.get((uid, key), 0) + value
 
-    collector = CompositeAssetCollector((ValuationSourceCollector("custom_token", composed_source),))
-    collector.collect(G, add_part, 0.0)
+    collector = compose_asset_collectors((valuation_source_collector("custom_token", composed_source),))
+    collector(G, add_part, 0.0)
     assert parts == {(U, "custom_token"): 777}
 
     calls: list[str] = []
 
-    class HookA(IGraceEnterHook):
-        def on_grace_enter(self, guild_id: int, user_id: int, now: float) -> None:
-            calls.append(f"hook:{guild_id}:{user_id}")
+    def hook_a(guild_id: int, user_id: int, now: float) -> None:
+        calls.append(f"hook:{guild_id}:{user_id}")
 
-    class PrepA(IBankruptPrepHook):
-        def prepare(self, guild_id: int, user_id: int, now: float) -> None:
-            calls.append(f"prep:{guild_id}:{user_id}")
+    def prep_a(guild_id: int, user_id: int, now: float) -> None:
+        calls.append(f"prep:{guild_id}:{user_id}")
 
-    class SeizeA(IAssetSeizureStep):
+    def seize_a(guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
+        return min(need, 120)
+
+    def seize_b(guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
+        return min(need, 80)
+
+    def liq_a(guild_id: int, user_id: int, now: float) -> None:
+        calls.append(f"liq:{guild_id}:{user_id}")
+
+    def val_a(guild_id: int, user_id: int, now: float) -> int:
+        return 10
+
+    def val_b(guild_id: int, user_id: int, now: float) -> int:
+        return 20
+
+    compose_grace_enter_hooks((hook_a,))(G, U, 123.0)
+    compose_bankrupt_prep_hooks((prep_a,))(G, U, 123.0)
+    compose_liquidation_steps((liq_a,))(G, U, 123.0)
+    assert calls == [f"hook:{G}:{U}", f"prep:{G}:{U}", f"liq:{G}:{U}"]
+    assert compose_asset_seizure_steps((seize_a, seize_b))(G, U, 500, "test", 0.0) == 200
+    assert compose_seizure_value_steps((val_a, val_b))(G, U, 0.0) == 30
+
+    # 束縛メソッドもそのままステップとして渡せる（OCP）。遅延解決は lazy_* ファクトリで包む
+    class CustomSeize:
         def seize(self, guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
             return min(need, 120)
 
-    class SeizeB(IAssetSeizureStep):
-        def seize(self, guild_id: int, user_id: int, need: int, reason: str, now: float) -> int:
-            return min(need, 80)
+    resolved_seize = CustomSeize()
+    lazy_seize: AssetSeizureStep = lazy_asset_seizure_step(lambda: resolved_seize.seize)
+    assert lazy_seize(G, U, 500, "test", 0.0) == 120
 
-    class LiqA(ILiquidationStep):
-        def liquidate(self, guild_id: int, user_id: int, now: float) -> None:
-            calls.append(f"liq:{guild_id}:{user_id}")
-
-    class ValA(ISeizureValueStep):
-        def seize(self, guild_id: int, user_id: int, now: float) -> int:
-            return 10
-
-    class ValB(ISeizureValueStep):
-        def seize(self, guild_id: int, user_id: int, now: float) -> int:
-            return 20
-
-    CompositeGraceEnterHook((HookA(),)).on_grace_enter(G, U, 123.0)
-    CompositeBankruptPrepHook((PrepA(),)).prepare(G, U, 123.0)
-    CompositeLiquidationStep((LiqA(),)).liquidate(G, U, 123.0)
-    assert calls == [f"hook:{G}:{U}", f"prep:{G}:{U}", f"liq:{G}:{U}"]
-    assert CompositeAssetSeizureStep((SeizeA(), SeizeB())).seize(G, U, 500, "test", 0.0) == 200
-    assert CompositeSeizureValueStep((ValA(), ValB())).seize(G, U, 0.0) == 30
-
-    resolved_seize = SeizeA()
-    lazy_seize = LazyAssetSeizureStep(lambda: resolved_seize)
-    assert lazy_seize.seize(G, U, 500, "test", 0.0) == 120
+    # 既定の noop_* は例外を出さず安全に動く（LSP）
+    assert noop_asset_seizure_step(G, U, 500, "test", 0.0) == 0
+    assert noop_seizure_value_step(G, U, 0.0) == 0
+    noop_grace_enter_hook(G, U, 0.0)
+    noop_bankrupt_prep_hook(G, U, 0.0)
+    noop_liquidation_step(G, U, 0.0)
+    assert compose_grace_enter_hooks((noop_grace_enter_hook, hook_a))(G, U, 1.0) is None
+    assert calls[-1] == f"hook:{G}:{U}"
 
     lazy_db = _make_standalone_db()
     try:

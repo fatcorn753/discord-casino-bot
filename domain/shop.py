@@ -1,7 +1,6 @@
 """ショップの商品一覧（カタログ）。景品はすべてゲーム内・サーバー内で完結するもので、現実の価値はない。"""
 
 from dataclasses import dataclass
-from typing import Optional
 
 from domain import labor, relics
 from domain.ports import get_catalogs
@@ -104,13 +103,13 @@ for _i in CATALOG:
     BY_NAME[f"{KIND_LABEL[_i.kind].split(' ', 1)[1]}:{_i.name}"] = _i
 
 
-def find(key: str) -> Optional[Item]:
+def find(key: str) -> Item | None:
     """ID または名前から商品を探す。"""
     key = (key or "").strip()
     return BY_ID.get(key) or BY_NAME.get(key)
 
 
-def find_all(key: str) -> list:
+def find_all(key: str) -> list[Item]:
     """ID・名前・「種類:名前」・表示名のどれかに合う商品をすべて返す（「赤」のように同名が複数ある場合のため）。"""
     key = (key or "").strip()
     return [i for i in CATALOG if key in (i.id, i.name, label(i), f"{KIND_LABEL[i.kind].split(' ', 1)[1]}:{i.name}")]
@@ -122,12 +121,12 @@ def label(item: Item) -> str:
     return f"{KIND_LABEL[item.kind].split(' ', 1)[1]}：{icon}{item.name}"
 
 
-def of_kind(kind: str, include_limited: bool = False) -> list:
+def of_kind(kind: str, include_limited: bool = False) -> list[Item]:
     """その種類の商品。限定品は、販売の一覧には出さない（持ち物や称号の判定では include_limited=True）。"""
     return [i for i in CATALOG if i.kind == kind and (include_limited or not i.limited)]
 
 
-def collection_value(inventory: dict) -> tuple:
+def collection_value(inventory: dict[str, int]) -> tuple[list[Item], int]:
     """持っているコレクションの (商品の並び, 資産価値)。資産価値は、買った値段の合計。"""
     owned = [i for i in of_kind(COLLECTION) if inventory.get(i.id, 0) > 0]
     return owned, sum(i.price for i in owned)
@@ -152,7 +151,7 @@ def stock_now(rule: Stock, stock: float, updated: float, now: float) -> float:
     return min(float(rule.max), stock + max(0.0, now - updated) / 3600.0 * rule.per_hour)
 
 
-def next_refill_at(rule: Stock, stock: float, now: float) -> Optional[float]:
+def next_refill_at(rule: Stock, stock: float, now: float) -> float | None:
     """次に1つ増える時刻（在庫が小数のとき、整数に届く時刻）。満タンなら None。"""
     if stock >= rule.max:
         return None
