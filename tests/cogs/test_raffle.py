@@ -104,11 +104,20 @@ def test_embeds_show_entrants_and_prize(eco):
 
 
 class Msg:
-    def __init__(self):
+    def __init__(self, mid=4242):
+        self.id = mid
         self.edits = []
+        self.pins = 0
+        self.unpins = 0
 
     async def edit(self, **kw):
         self.edits.append(kw)
+
+    async def pin(self):
+        self.pins += 1
+
+    async def unpin(self):
+        self.unpins += 1
 
 
 class Channel:
@@ -144,7 +153,7 @@ def test_run_once_closes_only_overdue_raffles_and_announces(eco, monkeypatch):
     asyncio.run(cog.run_once())
     assert eco.raffle.raffle_get() is None
     assert ch.sent[0][1] == "🎟️ 抽選 結果発表！" and ch.sent[0][0].startswith("🎉 <@")
-    assert ch.msg.edits and ch.msg.edits[0]["view"] is None  # ボタンを外す
+    assert ch.msg.edits and ch.msg.edits[0]["view"] is None and ch.msg.unpins == 1  # ボタンとピン留めを外す
 
 
 def make_host_cog(eco, monkeypatch, channel=True):
@@ -156,8 +165,9 @@ def make_host_cog(eco, monkeypatch, channel=True):
         mention = "#告知"
 
         async def send(self, **kw):
-            sent.append((kw["embed"].title, len(kw["view"].children)))
-            return SimpleNamespace(id=7777)
+            m = Msg(7777)
+            sent.append((kw["embed"].title, len(kw["view"].children), m))
+            return m
 
     chan = Chan() if channel else None
     monkeypatch.setattr("cogs.raffle.cog.announce_channel", lambda guild, e: chan)
@@ -172,7 +182,8 @@ def test_host_posts_in_the_announce_channel_and_saves_the_message(eco, monkeypat
     assert (
         ok
         and (r["fee"], r["message_id"], r["channel_id"]) == (1500, 7777, 888)
-        and sent == [("🎟️ 抽選 参加者募集中！", 1)]
+        and [(t, n) for t, n, _ in sent] == [("🎟️ 抽選 参加者募集中！", 1)]
+        and sent[0][2].pins == 1
     )
     assert abs(r["closes"] - time.time() - 30 * 60) < 5
     ok, text = asyncio.run(cog.host(as_guild(guild), 99, 1500, 30))  # 募集中は1つだけ
@@ -206,7 +217,13 @@ def test_cancel_refunds_and_reports(eco, monkeypatch):
     eco.raffle.raffle_join(1, time.time())
     eco.raffle.raffle_join(2, time.time())
     ok, text = asyncio.run(cog.cancel(as_guild(guild)))
-    assert ok and "2人に返金" in text and eco.raffle.raffle_get() is None and eco.wallet.balance(1) == INITIAL_BALANCE
+    assert (
+        ok
+        and "2人に返金" in text
+        and eco.raffle.raffle_get() is None
+        and eco.wallet.balance(1) == INITIAL_BALANCE
+        and ch.msg.unpins == 1
+    )
     assert not asyncio.run(cog.cancel(as_guild(guild)))[0]
 
 
@@ -267,6 +284,6 @@ def test_repost_moves_the_post_and_deletes_the_old_one(eco, monkeypatch):
     ok, text = asyncio.run(cog.repost(as_guild(guild)))
     r = eco.raffle.raffle_get()
     assert ok and (r["message_id"], r["channel_id"], r["entries"]) == (7777, 888, [1]) and deleted == [True]
-    assert sent == [("🎟️ 抽選 参加者募集中！", 1)]
+    assert [(t, n) for t, n, _ in sent] == [("🎟️ 抽選 参加者募集中！", 1)] and sent[0][2].pins == 1
     eco.raffle.raffle_close(cancel=True)
     assert not asyncio.run(cog.repost(as_guild(guild)))[0]  # 募集中がなければ出し直せない

@@ -2,7 +2,9 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any, cast
 
+import discord
 import pytest
 
 from cogs.kyosai.cog import KyosaiCog, motion_embed
@@ -37,10 +39,16 @@ class Followup:
 
 class Msg:
     def __init__(self):
-        self.id, self.channel, self.edits = MSG, SimpleNamespace(id=CH), []
+        self.id, self.channel, self.edits, self.pins, self.unpins = MSG, SimpleNamespace(id=CH), [], 0, 0
 
     async def edit(self, **kw):
         self.edits.append(kw)
+
+    async def pin(self):
+        self.pins += 1
+
+    async def unpin(self):
+        self.unpins += 1
 
 
 class Channel:
@@ -71,6 +79,7 @@ def interaction(uid, guild, ch):
         guild_id=G,
         guild=guild,
         channel_id=CH,
+        message=ch.msg,
         user=SimpleNamespace(id=uid, mention=f"<@{uid}>"),
         response=Response(),
         followup=Followup(),
@@ -104,15 +113,15 @@ def propose(cog, ch, guild, uid=A):
     return cog._kyosai.status(G, uid)["motions"][-1]["id"]
 
 
-def test_propose_remembers_the_post(tmp_path):
+def test_propose_remembers_the_post_and_pins_it(tmp_path):
     cog, ch, guild, bot = setup_cog(tmp_path)
     give(bot, A, 5000)
     mid = propose(cog, ch, guild)
     m = must(cog._kyosai.motion(G, mid))
-    assert (m["channel_id"], m["message_id"]) == (CH, MSG)
+    assert (m["channel_id"], m["message_id"]) == (CH, MSG) and ch.msg.pins == 1
 
 
-def test_tick_rewrites_the_post_with_the_result_and_removes_the_buttons(tmp_path, monkeypatch):
+def test_tick_rewrites_the_post_with_the_result_removes_buttons_and_unpins(tmp_path, monkeypatch):
     monkeypatch.setattr("domain.approval.is_allowed", lambda *a: True)
     cog, ch, guild, bot = setup_cog(tmp_path)
     give(bot, A, 5000)
@@ -120,7 +129,23 @@ def test_tick_rewrites_the_post_with_the_result_and_removes_the_buttons(tmp_path
     close_now(bot, mid)
     asyncio.run(cog._tick_guild(as_guild(guild)))
     edit = ch.msg.edits[-1]
-    assert edit["view"] is None and "可決" in must(edit["embed"].description)
+    assert edit["view"] is None and "可決" in must(edit["embed"].description) and ch.msg.unpins == 1
+
+
+def test_pin_failure_does_not_break_propose_or_tick(tmp_path, monkeypatch):
+    monkeypatch.setattr("domain.approval.is_allowed", lambda *a: True)
+    cog, ch, guild, bot = setup_cog(tmp_path)
+    give(bot, A, 5000)
+
+    async def fail_pin():
+        raise discord.HTTPException(cast(Any, SimpleNamespace(status=403, reason="Forbidden")), "Missing Permissions")
+
+    ch.msg.pin = fail_pin
+    ch.msg.unpin = fail_pin
+    mid = propose(cog, ch, guild)
+    close_now(bot, mid)
+    asyncio.run(cog._tick_guild(as_guild(guild)))
+    assert ch.msg.edits[-1]["view"] is None
 
 
 def test_button_on_a_closed_motion_shows_the_result_and_removes_the_buttons(tmp_path):
@@ -138,7 +163,7 @@ def test_button_on_a_closed_motion_shows_the_result_and_removes_the_buttons(tmp_
     assert it.response.edited[0]["view"] is None and "締め切りました" in must(
         it.response.edited[0]["embed"].description
     )
-    assert "締め切られています" in it.followup.sent[0][0][0]
+    assert ch.msg.unpins == 1 and "締め切られています" in it.followup.sent[0][0][0]
 
 
 def test_slash_vote_also_updates_the_announcement_post_and_keeps_the_buttons(tmp_path):

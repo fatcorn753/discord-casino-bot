@@ -2,7 +2,9 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any, cast
 
+import discord
 import pytest
 
 from cogs.poll.cog import PollCog
@@ -144,10 +146,19 @@ class Followup:
 
 class Msg:
     def __init__(self):
+        self.id = 4242
         self.edits = []
+        self.pins = 0
+        self.unpins = 0
 
     async def edit(self, **kw):
         self.edits.append(kw)
+
+    async def pin(self):
+        self.pins += 1
+
+    async def unpin(self):
+        self.unpins += 1
 
 
 class Channel:
@@ -170,13 +181,19 @@ def setup_cog(eco):
     return cog, ch, guild, bot
 
 
-def interaction(uid, guild):
+def interaction(uid, guild, ch=None):
+    async def original_response():
+        assert ch is not None
+        return ch.msg
+
     return SimpleNamespace(
         guild_id=G,
         guild=guild,
+        channel_id=555,
         user=SimpleNamespace(id=uid, mention=f"<@{uid}>"),
         response=Response(),
         followup=Followup(),
+        original_response=original_response,
     )
 
 
@@ -209,17 +226,30 @@ def test_rig_is_announced_to_everyone_and_the_post_is_updated(eco):
     assert "賛成 **99票**" in ch.msg.edits[-1]["embed"].description
 
 
-def test_tick_closes_due_polls_removes_buttons_and_posts_the_result(eco, monkeypatch):
+def test_tick_closes_due_polls_removes_buttons_unpins_and_posts_the_result(eco, monkeypatch):
     monkeypatch.setattr("domain.approval.is_allowed", lambda *a: True)
     cog, ch, guild, bot = setup_cog(eco)
-    ok, pid = cog._poll.create(G, OWNER, "議題", 1, 555)
-    assert not isinstance(pid, Failure)
-    cog._poll.set_message(G, pid, 555, 4242)
+    it = interaction(OWNER, guild, ch)
+    asyncio.run(cast(Any, cog.create.callback)(cog, as_interaction(it), "議題", "1分"))
+    pid = bot.repos.db.conn.execute("SELECT id FROM polls ORDER BY id DESC LIMIT 1").fetchone()[0]
+    assert ch.msg.pins == 1
     asyncio.run(cog._tick_guild(as_guild(guild)))
-    assert not ch.sent
+    assert not ch.sent and ch.msg.unpins == 0
     with bot.repos.db.tx():
         bot.repos.db.conn.execute("UPDATE polls SET closes=0 WHERE id=?", (pid,))
     asyncio.run(cog._tick_guild(as_guild(guild)))
-    assert ch.msg.edits[-1]["view"] is None and "結果" in ch.sent[0].title
+    assert ch.msg.edits[-1]["view"] is None and ch.msg.unpins == 1 and "結果" in ch.sent[0].title
     asyncio.run(cog._tick_guild(as_guild(guild)))
     assert len(ch.sent) == 1  # 二重には締めない
+
+
+def test_poll_pin_error_does_not_fail_create(eco):
+    cog, ch, guild, _ = setup_cog(eco)
+
+    async def fail_pin():
+        raise discord.HTTPException(cast(Any, SimpleNamespace(status=403, reason="Forbidden")), "Missing Permissions")
+
+    ch.msg.pin = fail_pin
+    it = interaction(OWNER, guild, ch)
+    asyncio.run(cast(Any, cog.create.callback)(cog, as_interaction(it), "議題", "1時間"))
+    assert it.response.sent and "view" in it.response.sent[0]
