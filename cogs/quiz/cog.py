@@ -1,7 +1,8 @@
 """/クイズ — 持ち主・プレイヤーが出題する 4 択クイズの Cog と定期精算タスク。"""
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, cast
 
 import discord
 from discord import app_commands
@@ -140,7 +141,7 @@ class QuizCog(commands.Cog, IQuizAdminBridge, IQuizButtonBridge):
             error_label="クイズを精算できません",
         )
 
-    async def announce_settle(self, guild: discord.Guild, q: dict) -> None:
+    async def announce_settle(self, guild: discord.Guild, q: Mapping[str, Any]) -> None:
         """出題の投稿からボタンを外し、結果と出題報酬を同じチャンネルに出す（出題者にはメンションする）。"""
         channel = guild.get_channel(q["channel_id"]) if q["channel_id"] else None
         if channel is None:
@@ -167,8 +168,8 @@ class QuizCog(commands.Cog, IQuizAdminBridge, IQuizButtonBridge):
     async def broadcast(
         self,
         quiz_id: int,
-        guild: Optional[discord.Guild] = None,
-        channel: Optional[discord.abc.Messageable] = None,
+        guild: discord.Guild | None = None,
+        channel: discord.abc.Messageable | None = None,
     ) -> int:
         """問題を、許可されている全サーバーの告知チャンネルに出す。出せた投稿の数を返す。"""
         quiz = self._quiz.get(quiz_id)
@@ -218,15 +219,12 @@ class QuizCog(commands.Cog, IQuizAdminBridge, IQuizButtonBridge):
     async def withdraw(self, interaction: discord.Interaction, quiz_id: int):
         done = self._quiz.withdraw(ui.guild_id_of(interaction), interaction.user.id, quiz_id)
         if done is None:
-            return await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "取り下げられません", "あなたがこのサーバーで出した、終了前の問題の番号を指定してください。"
-                ),
-                ephemeral=True,
+            return await ui.reply_error(
+                interaction,
+                "あなたがこのサーバーで出した、終了前の問題の番号を指定してください。",
+                title="取り下げられません",
             )
-        await interaction.response.send_message(
-            embed=ui.ok_embed(f"クイズ #{quiz_id} を取り下げました", settle_text(done)), ephemeral=True
-        )
+        await ui.reply_ok(interaction, settle_text(done), title=f"クイズ #{quiz_id} を取り下げました")
         if interaction.guild is not None:
             await self.announce_settle(interaction.guild, done)
 
@@ -240,7 +238,9 @@ class QuizCog(commands.Cog, IQuizAdminBridge, IQuizButtonBridge):
         out = []
         for q in self._quiz.own_open(interaction.guild_id, interaction.user.id):
             text = q["question"].replace("\n", " ")
-            label = f"#{q['id']} {text[:50]}（あと{format_minutes(max(1, int((q['expires'] - now) // 60)))}）"
+            label = (
+                f"#{q['id']} {text[:50]}（あと{format_minutes(max(1, int((cast(float, q['expires']) - now) // 60)))}）"
+            )
             if not cur or cur in label.lower():
                 out.append(app_commands.Choice(name=label[:100], value=q["id"]))
         return out[:25]
@@ -249,8 +249,8 @@ class QuizCog(commands.Cog, IQuizAdminBridge, IQuizButtonBridge):
     def add_modal(
         self,
         announce: bool = True,
-        guild: Optional[discord.Guild] = None,
-        channel: Optional[discord.abc.Messageable] = None,
+        guild: discord.Guild | None = None,
+        channel: discord.abc.Messageable | None = None,
     ) -> AddModal:
         return AddModal(self._quiz, self, announce, guild, channel)
 

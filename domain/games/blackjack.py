@@ -10,7 +10,7 @@ SUITS = list(_CFG.suits)
 RANKS = list(_CFG.ranks)
 
 
-def new_deck(rng: random.Random) -> list:
+def new_deck(rng: random.Random) -> list[tuple[str, str]]:
     deck = [(r, s) for s in SUITS for r in RANKS]
     rng.shuffle(deck)
     return deck
@@ -28,13 +28,14 @@ def value(cards) -> int:
     """手札の合計。Aは1か11のうち、バーストしない最大の方。"""
     total, aces = 0, 0
     for rank, _ in cards:
-        if rank == "A":
-            aces += 1
-            total += 11
-        elif rank in ("J", "Q", "K"):
-            total += 10
-        else:
-            total += int(rank)
+        match rank:
+            case "A":
+                aces += 1
+                total += 11
+            case "J" | "Q" | "K":
+                total += 10
+            case _:
+                total += int(rank)
     while total > 21 and aces:
         total -= 10
         aces -= 1
@@ -48,9 +49,9 @@ def is_blackjack(cards) -> bool:
 @dataclass
 class Game:
     rng: random.Random
-    deck: list = field(default_factory=list)
-    player: list = field(default_factory=list)
-    dealer: list = field(default_factory=list)
+    deck: list[tuple[str, str]] = field(default_factory=list)
+    player: list[tuple[str, str]] = field(default_factory=list)
+    dealer: list[tuple[str, str]] = field(default_factory=list)
     doubled: bool = False
     finished: bool = False
 

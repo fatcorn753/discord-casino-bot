@@ -10,6 +10,7 @@ import pytest
 from cogs.poll.cog import PollCog
 from cogs.poll.views import RigModal, parse_count, poll_embed, verdict
 from domain import poll
+from domain.errors import Failure
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_bot, as_guild, as_interaction, must
@@ -26,7 +27,7 @@ def eco(tmp_path):
 
 def create(eco, minutes=60, creator=OWNER, title="カレーは飲み物"):
     ok, poll_id = eco.polls.poll_create(creator, title, NOW + minutes * 60, 555, NOW)
-    assert ok
+    assert not isinstance(poll_id, Failure)
     return poll_id
 
 
@@ -102,7 +103,8 @@ def test_polls_are_separate_per_server(tmp_path):
     repos = open_repositories(str(tmp_path / "t.db"))
     pid = create(repos.for_guild(1))
     assert repos.for_guild(2).polls.poll_get(pid) is None
-    assert repos.for_guild(2).polls.poll_vote(A, pid, True, NOW)[1].code == "poll_closed"
+    res = repos.for_guild(2).polls.poll_vote(A, pid, True, NOW)
+    assert not res[0] and isinstance(res[1], Failure) and res[1].code == "poll_closed"
 
 
 # ----------------------------- 画面 ----------------------------- #
@@ -198,6 +200,7 @@ def interaction(uid, guild, ch=None):
 def test_buttons_vote_and_only_the_creator_gets_the_rig_form(eco):
     cog, ch, guild, bot = setup_cog(eco)
     ok, pid = cog._poll.create(G, OWNER, "議題", 60, 555)
+    assert not isinstance(pid, Failure)
     cog._poll.set_message(G, pid, 555, 4242)
     it = interaction(A, guild)
     asyncio.run(cog.handle_button(as_interaction(it), "yes", pid))
@@ -213,6 +216,7 @@ def test_buttons_vote_and_only_the_creator_gets_the_rig_form(eco):
 def test_rig_is_announced_to_everyone_and_the_post_is_updated(eco):
     cog, ch, guild, bot = setup_cog(eco)
     ok, pid = cog._poll.create(G, OWNER, "議題", 60, 555)
+    assert not isinstance(pid, Failure)
     cog._poll.set_message(G, pid, 555, 4242)
     it = interaction(OWNER, guild)
     asyncio.run(cog.rig(as_interaction(it), pid, 99, 1))

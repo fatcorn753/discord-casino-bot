@@ -41,7 +41,7 @@ def split(amount: int, holdings: list[tuple[int, int]]) -> dict[int, int]:
     exact = [(uid, amount * u / total) for uid, u in holdings if u > 0]
     out = {uid: int(x) for uid, x in exact}
     left = amount - sum(out.values())
-    for uid, x in sorted(exact, key=lambda p: (-(p[1] - int(p[1])), p[0]))[:left]:
+    for uid, _ in sorted(exact, key=lambda p: (-(p[1] - int(p[1])), p[0]))[:left]:
         out[uid] += 1
     return out
 

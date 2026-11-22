@@ -1,6 +1,6 @@
 """`/証券` の保有・市況・オプション画面（View / Modal）。"""
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import discord
 
@@ -30,9 +30,7 @@ class PercentModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction) -> None:
         pct = typed_amount(self.percent.value)
         if pct is None or not 1 <= pct <= 100:
-            await interaction.response.send_message(
-                embed=ui.error_embed("割合が正しくありません", "1〜100の数字で入れてください。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "1〜100の数字で入れてください。", title="割合が正しくありません")
             return
         await self.panel.settle(interaction, self.code, pct)
 
@@ -45,7 +43,7 @@ class HoldingsView(ui.OwnerView):
     """
 
     def __init__(
-        self, cog: "MarketCog", user_id: int, guild_id: int, origin: Optional[discord.Interaction] = None
+        self, cog: "MarketCog", user_id: int, guild_id: int, origin: discord.Interaction | None = None
     ) -> None:
         super().__init__(user_id, timeout=PANEL_TIMEOUT, owner_message="自分の `/証券 保有` で操作してください。")
         self.cog, self.user_id, self.guild_id, self.origin = cog, user_id, guild_id, origin
@@ -169,11 +167,8 @@ class OptionAmountModal(discord.ui.Modal):
             return
         premium = typed_amount(self.amount.value)
         if premium is None or premium < opt.MIN_PREMIUM:
-            await interaction.response.send_message(
-                embed=ui.error_embed(
-                    "掛け金が正しくありません", f"{opt.MIN_PREMIUM:,}ペリカ以上の数字で入れてください。"
-                ),
-                ephemeral=True,
+            await ui.reply_error(
+                interaction, f"{opt.MIN_PREMIUM:,}ペリカ以上の数字で入れてください。", title="掛け金が正しくありません"
             )
             return
         await orders.option_buy(self.cog, interaction, self.kind, self.symbol, premium)

@@ -1,6 +1,9 @@
 """個人間貸付・代用有価証券のブリッジ契約（名目的基底クラスと NoOp 実装）。"""
 
-from typing import TYPE_CHECKING, Any, Optional
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
+
+from domain.ports.contracts import LoanRow
 
 if TYPE_CHECKING:
     from domain.types import CryptoResult
@@ -12,13 +15,13 @@ class IOverdueLoanCollector:
     def collect_overdue_for(self, guild_id: int, user_id: int, budget: int) -> int:
         raise NotImplementedError
 
-    def loan_remaining(self, loan: dict[str, Any], now: float) -> int:
+    def loan_remaining(self, loan: Mapping[str, Any], now: float) -> int:
         raise NotImplementedError
 
     def has_overdue_for(self, guild_id: int, user_id: int) -> bool:
         raise NotImplementedError
 
-    def active_loans_for(self, guild_id: int, user_id: int) -> list[dict[str, Any]]:
+    def active_loans_for(self, guild_id: int, user_id: int) -> list[LoanRow]:
         raise NotImplementedError
 
     def record_bankrupt_payment_for(self, loan_id: int, paid: int) -> None:
@@ -34,13 +37,13 @@ class NoOpOverdueLoanCollector(IOverdueLoanCollector):
     def collect_overdue_for(self, guild_id: int, user_id: int, budget: int) -> int:
         return 0
 
-    def loan_remaining(self, loan: dict[str, Any], now: float) -> int:
+    def loan_remaining(self, loan: Mapping[str, Any], now: float) -> int:
         return 0
 
     def has_overdue_for(self, guild_id: int, user_id: int) -> bool:
         return False
 
-    def active_loans_for(self, guild_id: int, user_id: int) -> list[dict[str, Any]]:
+    def active_loans_for(self, guild_id: int, user_id: int) -> list[LoanRow]:
         return []
 
     def record_bankrupt_payment_for(self, loan_id: int, paid: int) -> None:
@@ -60,7 +63,7 @@ class ISpotCollateralReader:
         self,
         guild_id: int,
         user_id: int,
-        units: Optional[int],
+        units: int | None,
         price: float,
         symbol: str,
         taxable: bool = False,
@@ -78,7 +81,7 @@ class NoOpSpotCollateralReader(ISpotCollateralReader):
         self,
         guild_id: int,
         user_id: int,
-        units: Optional[int],
+        units: int | None,
         price: float,
         symbol: str,
         taxable: bool = False,

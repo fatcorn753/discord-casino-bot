@@ -158,7 +158,7 @@ def test_game_losses_feed_the_bank(eco):
 def test_deposit_counts_in_ranking(eco):
     eco.wallet.credit(A, 20_000, "テスト")
     eco.bank.bank_deposit(A, 10_000, NOW)
-    assert dict((u, v) for _, u, v in eco.wallet.top(5))[A] == INITIAL_BALANCE + 20_000
+    assert {u: v for _, u, v in eco.wallet.top(5)}[A] == INITIAL_BALANCE + 20_000
 
 
 # ----------------------------- 破産猶予 ----------------------------- #

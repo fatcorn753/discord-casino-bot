@@ -10,6 +10,7 @@ import pytest
 from cogs.admin.cog import RENOTIFY_AFTER, ApprovalButton, ApprovalCog
 from cogs.shared import approval_guard
 from domain import approval
+from domain.ports.contracts import PachinkoStats
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_guild, as_interaction, as_item, fake_response, invoke, must
@@ -459,11 +460,16 @@ def make_admin(tmp_path, guilds=None, extra_cogs=None):
 class Resp2:
     def __init__(self, log):
         self.log = log
+        self.done = False
+
+    def is_done(self):
+        return self.done
 
     async def send_message(self, **kw):
         self.log.append(("send", kw["embed"].title))
 
     async def defer(self, **kw):
+        self.done = True
         self.log.append(("defer",))
 
     async def send_modal(self, modal):
@@ -536,7 +542,7 @@ def test_parse_user_id_and_autocomplete(tmp_path):
     assert (
         asyncio.run(cog.guild_autocomplete(as_interaction(dm(FRIEND, [])), "友達")) == []
     )  # 持ち主以外には候補も出さない
-    inter.namespace = SimpleNamespace(**{"サーバー": "5"})
+    inter.namespace = SimpleNamespace(サーバー="5")
     assert [c.value for c in asyncio.run(cog.user_autocomplete(as_interaction(inter), "ありす"))] == [
         "1"
     ]  # Bot は出ない
@@ -554,7 +560,7 @@ def test_raffle_and_quiz_admin_commands_delegate_and_are_owner_only(tmp_path):
     calls = []
 
     class FakeRaffle(IRaffleAdminBridge):
-        async def host(self, guild, host_id, fee=None, minutes=60, channel=None):
+        async def host(self, guild, host_id, fee=None, minutes=60, channel=None, rng=None):
             calls.append(("host", guild.id, fee, minutes))
             return True, "投稿した"
 
@@ -673,8 +679,14 @@ def run_announce(cog, guilds_arg, heading, body, image, clicks):
             shown.update(kw)
 
     class Resp:
+        def __init__(self):
+            self.done = False
+
+        def is_done(self):
+            return self.done
+
         async def defer(self, **kw):
-            pass
+            self.done = True
 
         async def edit_message(self, **kw):
             assert not ("embed" in kw and "embeds" in kw), (
@@ -820,7 +832,7 @@ def test_pachinko_stats_embed_compares_actual_to_design():
 
     empty = pachinko_stats_embed({"omen": {}, "tier": {}, "spins": (0, 0), "sets": (0, 0, 0, 0, 0, 0, 0)}, "全サーバー")
     assert "まだ記録がありません" in must(empty.description)
-    data = {
+    data: PachinkoStats = {
         "omen": {"gold": (200, 110), "": (50, 5)},
         "tier": {"super": (100, 45)},
         "spins": (250, 115),

@@ -3,20 +3,20 @@
 表の定義は infra/db/schema/tables.py にある。
 """
 
-from typing import Any, Optional
+from typing import Any, cast
 
 from domain import shop as shop_mod
 from domain import teiai
 from domain.errors import fail
-from domain.ports.bridges import IShopBelongings, IStatusReader
-from domain.ports.contracts import SeizedBelongings
+from domain.ports.bridges import IStatusReader
+from domain.ports.contracts import ProfileView, SeizedBelongings, ShopStockInfo
 from domain.ports.repos import IShopRepo
 from domain.types import CONSUMABLE_EFFECTS, PurchaseResult
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
 
 
-class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
+class ShopRepo(ScopedRepo, IShopRepo):
     """ショップの持ち物・装備・消耗品。"""
 
     SLOTS = ("title", "card_color", "card_icon", "skin_dice", "skin_table")
@@ -43,13 +43,13 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
         """
         items = [
             (r["item_id"], r["qty"])
-            for r in self._conn.execute(
+            for r in self._all(
                 "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0", (guild_id, user_id)
-            ).fetchall()
+            )
         ]
-        prof = self._conn.execute(
+        prof = self._one(
             "SELECT daily_boost, insurance FROM profile WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-        ).fetchone()
+        )
         if prof:
             items.append((shop_mod.DAILY_DOUBLE, prof["daily_boost"]))
             items.append((shop_mod.INSURANCE, prof["insurance"]))
@@ -61,7 +61,7 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
         )
         return SeizedBelongings(items=tuple(items))
 
-    def shop_stock(self, user_id: int, item_id: str, now: float) -> Optional[dict[str, Any]]:
+    def shop_stock(self, user_id: int, item_id: str, now: float) -> ShopStockInfo | None:
         """在庫のある品の、このプレイヤーの在庫 {stock: 買える数, max, next_at: 次に1つ増える時刻（満タンなら None）}。在庫のない品は None。
 
         読み取りだけ（記録がなければ、満タン）。
@@ -70,10 +70,10 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
         if rule is None:
             return None
         with self._lock:
-            row = self._conn.execute(
+            row = self._one(
                 "SELECT stock, updated FROM shop_stock WHERE guild_id=? AND user_id=? AND item_id=?",
                 (self._g(), user_id, item_id),
-            ).fetchone()
+            )
         exact = shop_mod.stock_now(rule, row["stock"], row["updated"], now) if row else float(rule.max)
         return {
             "stock": int(exact + 1e-9),
@@ -90,7 +90,7 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
         price: int,
         unique: bool,
         qty: int = 1,
-        now: Optional[float] = None,
+        now: float | None = None,
     ) -> PurchaseResult:
         """購入。支払い・持ち物の追加を1回の処理で行う。持っているもの（消耗品以外）は買えない。在庫のある品は、在庫の数まで。"""
         if qty < 1 or price <= 0:
@@ -107,10 +107,10 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
                     fail("shop_out_of_stock", stock=stock["stock"], next_at=stock["next_at"]),
                     self._account.raw_balance(gid, user_id),
                 )
-            have = self._conn.execute(
+            have = self._one(
                 "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=?",
                 (gid, user_id, item_id),
-            ).fetchone()
+            )
             if unique and have:
                 return PurchaseResult(False, fail("already_owned"), self._account.raw_balance(gid, user_id))
             debt = self._account.debt(gid, user_id)
@@ -145,13 +145,13 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
         with self._lock:
             return {
                 r["item_id"]: r["qty"]
-                for r in self._conn.execute(
+                for r in self._all(
                     "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0",
                     (self._g(), user_id),
                 )
             }
 
-    def get_profile(self, user_id: int, raw: bool = False) -> dict[str, Any]:
+    def get_profile(self, user_id: int, raw: bool = False) -> ProfileView:
         """装備中の称号・カード・演出、消耗品の効果、身分（status）。読み取り専用（口座は作らない）。
 
         カタギでないとき（借金・延滞・破産者）は、買った称号・カード・演出が「差し押さえ中」なので、装備の欄は None で返り、
@@ -159,31 +159,26 @@ class ShopRepo(ScopedRepo, IShopRepo, IShopBelongings):
         """
         with self._lock:
             gid = self._g()
-            row = self._conn.execute("SELECT * FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id)).fetchone()
-            prof = (
-                dict(row)
-                if row
-                else {"user_id": user_id, **dict.fromkeys(self.SLOTS), "daily_boost": 0, "insurance": 0}
+            row = self._one("SELECT * FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id))
+            prof: dict[str, Any] = (
+                row if row else {"user_id": user_id, **dict.fromkeys(self.SLOTS), "daily_boost": 0, "insurance": 0}
             )
             prof["status"] = self._status_reader.status_for(gid, user_id, self._now())
         prof["frozen"] = prof["status"] != teiai.KATAGI
         if prof["frozen"] and not raw:
             for slot in self.SLOTS:
                 prof[slot] = None
-        return prof
+        return cast("ProfileView", prof)
 
-    def equip(self, user_id: int, slot: str, item_id: Optional[str]) -> bool:
+    def equip(self, user_id: int, slot: str, item_id: str | None) -> bool:
         """称号・カードの色・アイコンを装備（None で外す）。持っていないものは装備できない。"""
         if slot not in self.SLOTS:
             raise ValueError(slot)
         with self._db.tx():
             gid = self._g()
-            if (
-                item_id is not None
-                and not self._conn.execute(
-                    "SELECT 1 FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
-                    (gid, user_id, item_id),
-                ).fetchone()
+            if item_id is not None and not self._one(
+                "SELECT 1 FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
+                (gid, user_id, item_id),
             ):
                 return False
             self._ensure_profile(gid, user_id)

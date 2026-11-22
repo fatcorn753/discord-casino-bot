@@ -1,6 +1,7 @@
 """Cog 間・DynamicItem 間の疎結合ブリッジ契約（名目的基底クラス）とオープンレジストリ。"""
 
-from typing import Any, Optional, TypeVar, cast
+import random
+from typing import Any, TypeVar, cast
 
 import discord
 
@@ -39,8 +40,8 @@ class IShopTitleBridge:
     async def sync_title_nick(
         self,
         user_id: int,
-        here: Optional[discord.Guild] = None,
-        member: Optional[discord.Member] = None,
+        here: discord.Guild | None = None,
+        member: discord.Member | None = None,
     ) -> tuple[str, int]:
         raise NotImplementedError
 
@@ -54,8 +55,8 @@ class NoOpShopTitleBridge(IShopTitleBridge):
     async def sync_title_nick(
         self,
         user_id: int,
-        here: Optional[discord.Guild] = None,
-        member: Optional[discord.Member] = None,
+        here: discord.Guild | None = None,
+        member: discord.Member | None = None,
     ) -> tuple[str, int]:
         return ("", 0)
 
@@ -72,7 +73,7 @@ class IEventAdminBridge:
         game: str,
         boost_pct: int,
         minutes: int,
-        channel: Optional[discord.abc.Messageable] = None,
+        channel: discord.abc.Messageable | None = None,
     ) -> tuple[bool, str]:
         raise NotImplementedError
 
@@ -88,7 +89,7 @@ class IHorseAdminBridge:
         guild: discord.Guild,
         entry_min: int,
         bet_min: int,
-        channel: Optional[discord.abc.Messageable] = None,
+        channel: discord.abc.Messageable | None = None,
     ) -> int:
         raise NotImplementedError
 
@@ -99,9 +100,9 @@ class IArenaAdminBridge:
     async def host_now(
         self,
         guild: discord.Guild,
-        channel: Optional[discord.abc.Messageable],
+        channel: discord.abc.Messageable | None,
         advance: bool,
-        fmt: Optional[str] = None,
+        fmt: str | None = None,
     ) -> str:
         raise NotImplementedError
 
@@ -121,19 +122,20 @@ class NoOpHorseButtonBridge(IHorseButtonBridge):
 
 
 class IRaffleAdminBridge:
-    """運営向け抽選操作（Admin → RaffleCog）のブリッジ契約。"""
+    """運営向け抽選操作（Admin → RaffleCog）のブリッジ契約（host/repost/cancel はすべて (成功か, 説明) を返す）。"""
 
     async def host(
         self,
         guild: discord.Guild,
         host_id: int,
-        fee: Optional[int] = None,
+        fee: int | None = None,
         minutes: int = 60,
-        channel: Optional[discord.abc.Messageable] = None,
+        channel: discord.abc.Messageable | None = None,
+        rng: random.Random | None = None,
     ) -> tuple[bool, str]:
         raise NotImplementedError
 
-    async def repost(self, guild: discord.Guild, channel: Optional[discord.abc.Messageable] = None) -> tuple[bool, str]:
+    async def repost(self, guild: discord.Guild, channel: discord.abc.Messageable | None = None) -> tuple[bool, str]:
         raise NotImplementedError
 
     async def cancel(self, guild: discord.Guild) -> tuple[bool, str]:
@@ -146,16 +148,16 @@ class IQuizAdminBridge:
     def add_modal(
         self,
         announce: bool,
-        guild: Optional[discord.Guild],
-        channel: Optional[discord.abc.Messageable],
+        guild: discord.Guild | None,
+        channel: discord.abc.Messageable | None,
     ) -> discord.ui.Modal:
         raise NotImplementedError
 
     async def broadcast(
         self,
         quiz_id: int,
-        guild: Optional[discord.Guild] = None,
-        channel: Optional[discord.abc.Messageable] = None,
+        guild: discord.Guild | None = None,
+        channel: discord.abc.Messageable | None = None,
     ) -> int:
         raise NotImplementedError
 
@@ -258,15 +260,15 @@ class BotBridges:
     def has(self, contract: type[Any]) -> bool:
         return contract in self._entries
 
-    def resolve(self, contract: type[T]) -> Optional[T]:
-        return cast(Optional[T], self._entries.get(contract))
+    def resolve(self, contract: type[T]) -> T | None:
+        return cast(T | None, self._entries.get(contract))
 
     def resolve_or(self, contract: type[T], fallback: T) -> T:
         impl = self._entries.get(contract)
         return fallback if impl is None else cast(T, impl)
 
 
-def resolve_bridge(bot: Any, contract: type[T], override: Optional[T] = None) -> Optional[T]:
+def resolve_bridge(bot: Any, contract: type[T], override: T | None = None) -> T | None:
     """明示注入されたブリッジ、または BotBridges レジストリから指定契約を解決する。"""
     if override is not None:
         return override
@@ -279,23 +281,21 @@ async def require_bridge(
     bot: Any,
     contract: type[T],
     feature_label: str,
-    override: Optional[T] = None,
-) -> Optional[T]:
+    override: T | None = None,
+) -> T | None:
     """指定契約のブリッジを解決し、未ロードならエラーを返信して None を返す。"""
     bridge = resolve_bridge(bot, contract, override)
     if bridge is None:
         from cogs.shared import ui
 
-        await interaction.response.send_message(
-            embed=ui.error_embed(f"{feature_label}が読み込まれていません"), ephemeral=True
-        )
+        await ui.reply_error(interaction, "", title=f"{feature_label}が読み込まれていません")
     return bridge
 
 
 class DeferredShopTitleBridge(IShopTitleBridge):
     """呼び出し時に BotBridges から最新の IShopTitleBridge を解決する遅延プロキシ（ロード順非依存）。"""
 
-    def __init__(self, bot: Any, fallback: Optional[IShopTitleBridge] = None) -> None:
+    def __init__(self, bot: Any, fallback: IShopTitleBridge | None = None) -> None:
         self._bot = bot
         self._fallback: IShopTitleBridge = fallback if fallback is not None else NoOpShopTitleBridge()
 
@@ -308,8 +308,8 @@ class DeferredShopTitleBridge(IShopTitleBridge):
     async def sync_title_nick(
         self,
         user_id: int,
-        here: Optional[discord.Guild] = None,
-        member: Optional[discord.Member] = None,
+        here: discord.Guild | None = None,
+        member: discord.Member | None = None,
     ) -> tuple[str, int]:
         return await self._current().sync_title_nick(user_id, here=here, member=member)
 

@@ -55,7 +55,9 @@ class Casino(commands.Cog):
     async def chinchiro(self, interaction: discord.Interaction, bet: app_commands.Range[int, MIN_BET]):
         await play_chinchiro(interaction, self._deps, bet)
 
-    @casino.command(name="チンチロ卓", description="🎲 チンチロの卓を立てる。みんなで同じ親と勝負（60秒で締切）")
+    @casino.command(
+        name="チンチロ卓", description="🎲 チンチロの卓を立てる。みんなで振って、いちばん強い役が総取り（60秒で締切）"
+    )
     @app_commands.rename(bet="賭け金")
     @app_commands.describe(bet="1人あたりの賭け金（座る人は全員この額）")
     @app_commands.autocomplete(bet=_bet_autocomplete)

@@ -638,13 +638,13 @@ def test_selling_through_the_modal_posts_the_announcement(cog, eco, monkeypatch)
     modal.price._value = "1500"
     must(modal.qty)._value = "1"
     done = It(S)
-    setattr(done, "guild", _guild(chan))
+    monkeypatch.setattr(done, "guild", _guild(chan), raising=False)
     asyncio.run(modal.on_submit(as_interaction(done)))
     assert chan.sent and "告知チャンネルに" in done.sent[-1]["embed"].description
     assert eco.p2p.p2p_active(None)[0]["message_id"] == 501
 
 
-def test_the_announce_button_opens_the_detail_for_anyone(cog, eco):
+def test_the_announce_button_opens_the_detail_for_anyone(cog, eco, monkeypatch):
     from cogs.shared.bridges import BotBridges, IP2PListingBridge
 
     give(eco, S, CARROT)
@@ -653,11 +653,11 @@ def test_the_announce_button_opens_the_detail_for_anyone(cog, eco):
     bridges = BotBridges()
     bridges.register(IP2PListingBridge, cog)
     it = It(B)
-    setattr(it, "client", SimpleNamespace(bridges=bridges))
+    monkeypatch.setattr(it, "client", SimpleNamespace(bridges=bridges), raising=False)
     asyncio.run(invoke(button, it))
     assert "にんじん" in it.sent[-1]["embed"].title and it.sent[-1]["view"].children
     gone = It(B)
-    setattr(gone, "client", SimpleNamespace(bridges=BotBridges()))
+    monkeypatch.setattr(gone, "client", SimpleNamespace(bridges=BotBridges()), raising=False)
     asyncio.run(invoke(button, gone))
     assert "いまは使えません" in gone.sent[-1]["embed"].title
 

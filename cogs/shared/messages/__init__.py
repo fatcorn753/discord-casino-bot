@@ -1,6 +1,6 @@
 """ドメイン・永続化層が返す構造化エラー・通知イベント・表示データの Discord 向け整形。"""
 
-from typing import Any, Optional
+from typing import Any
 
 from cogs.shared.messages.base import IMessageFormatter, MessageEntry
 from cogs.shared.messages.notices import MessageFormatter
@@ -33,7 +33,7 @@ def format_history(rows_newest_first: list[Any], limit: int = 12) -> list[str]:
     return DEFAULT_MESSAGES.format_history(rows_newest_first, limit)
 
 
-def format_standings_lines(rows: list[Any], medals: dict[int, str], viewer_id: Optional[int] = None) -> list[str]:
+def format_standings_lines(rows: list[Any], medals: dict[int, str], viewer_id: int | None = None) -> list[str]:
     return DEFAULT_MESSAGES.format_standings_lines(rows, medals, viewer_id)
 
 

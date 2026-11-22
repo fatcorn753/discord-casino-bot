@@ -71,7 +71,7 @@ def prices_keys():
 
 def _corr(x, y):
     mx, my = sum(x) / len(x), sum(y) / len(y)
-    sxy = sum((p - mx) * (q - my) for p, q in zip(x, y))
+    sxy = sum((p - mx) * (q - my) for p, q in zip(x, y, strict=True))
     return sxy / math.sqrt(sum((p - mx) ** 2 for p in x) * sum((q - my) ** 2 for q in y))
 
 

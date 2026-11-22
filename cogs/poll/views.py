@@ -8,12 +8,13 @@ import discord
 from cogs.shared import ui
 from cogs.shared.bridges import IPollButtonBridge, NoOpPollButtonBridge
 from domain import poll
+from domain.ports.contracts import PollView
 
 if TYPE_CHECKING:
     from cogs.shared.bot import CasinoBot
 
 
-def verdict(p: dict[str, Any]) -> str:
+def verdict(p: PollView) -> str:
     if p["yes"] > p["no"]:
         return "✅ 賛成多数"
     if p["no"] > p["yes"]:
@@ -21,7 +22,7 @@ def verdict(p: dict[str, Any]) -> str:
     return "⚖️ 同数"
 
 
-def poll_embed(p: dict[str, Any]) -> discord.Embed:
+def poll_embed(p: PollView) -> discord.Embed:
     """投票の投稿。受付中は締切までの時間、締切後は結果を出す。"""
     closed = p["status"] != "open"
     lines = [
@@ -99,6 +100,6 @@ class RigModal(discord.ui.Modal, title="票数を書き換える"):
         try:
             yes, no = parse_count(self.yes.value), parse_count(self.no.value)
         except ValueError as exc:
-            await interaction.response.send_message(embed=ui.error_embed("できません", str(exc)), ephemeral=True)
+            await ui.reply_error(interaction, str(exc), title="できません")
             return
         await self._cog.rig(interaction, self.poll_id, yes, no)

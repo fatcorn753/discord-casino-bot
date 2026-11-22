@@ -13,10 +13,11 @@ import datetime
 import itertools
 import math
 import random
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
-from domain.errors import fail
+from domain.errors import Outcome, fail
 from domain.ports import get_catalogs
 
 _CFG = get_catalogs().horse()
@@ -60,7 +61,7 @@ MAJOR_PRIZES = _CFG.major_prizes
 MAJOR_HOUSE_TOPUP = _CFG.major_house_topup
 
 
-def is_major_race(race: dict, tz_hours: float) -> bool:
+def is_major_race(race: Mapping[str, Any], tz_hours: float) -> bool:
     """定時レースで、発走が MAJOR_HOUR（21時）なら重賞。"""
     tz = datetime.timezone(datetime.timedelta(hours=tz_hours))
     return race["kind"] == "regular" and datetime.datetime.fromtimestamp(race["start_at"], tz).hour == MAJOR_HOUR
@@ -95,7 +96,7 @@ class Runner:
     races: int = 0  # 戦績（オッズに使う。レースの結果には効かない）
     wins: int = 0
     places: int = 0  # 3着以内（1着を含む）
-    style: Optional[str] = None  # 脚質（未指定なら、ステータスから自然に決める。STYLE_NAMES のキー）
+    style: str | None = None  # 脚質（未指定なら、ステータスから自然に決める。STYLE_NAMES のキー）
 
     def stat(self, key: str) -> int:
         return getattr(self, key)
@@ -121,13 +122,13 @@ STYLE_MARK = {s.key: s.mark for s in _CFG.styles}
 STYLE_BY_STAT = {s.key: s.style for s in _CFG.stats}
 
 
-def style_of(stats: dict) -> str:
+def style_of(stats: dict[str, int]) -> str:
     """ステータスの配分から、自然な脚質を決める（いちばん高いステータスで決まる。並んだら speed→power→stamina→guts の順を優先）。"""
     best = max(STAT_KEYS, key=lambda k: (stats[k], -STAT_KEYS.index(k)))
     return STYLE_BY_STAT[best]
 
 
-def valid_stats(stats: dict) -> bool:
+def valid_stats(stats: dict[str, int]) -> bool:
     """合計が STAT_TOTAL ちょうどで、すべてが範囲内か。"""
     return (
         set(stats) == set(STAT_KEYS)
@@ -149,7 +150,7 @@ def retire_value(races: int, wins: int, places: int) -> int:
     return max(-RETIRE_FEE_MAX, min(RETIRE_MAX, value))
 
 
-def add_points(stats: dict, first: str, second: str) -> tuple:
+def add_points(stats: dict[str, int], first: str, second: str) -> Outcome[dict[str, int]]:
     """金にんじん1本ぶん、first と second に GOLD_CARROT_POINTS 点ずつ足す（同じステータスでもよい）。(成功か, Failure か新しいステータス)。"""
     if first not in STAT_KEYS or second not in STAT_KEYS:
         return False, fail("horse_select_stat_to_add")
@@ -162,7 +163,7 @@ def add_points(stats: dict, first: str, second: str) -> tuple:
     return True, new
 
 
-def move_points(stats: dict, src: str, dst: str, carrots: int = 1) -> tuple:
+def move_points(stats: dict[str, int], src: str, dst: str, carrots: int = 1) -> Outcome[dict[str, int]]:
     """にんじん carrots 本ぶん、src から dst へポイントを動かす。(成功か, Failure か新しいステータス)。"""
     if src == dst or src not in STAT_KEYS or dst not in STAT_KEYS:
         return False, fail("horse_select_distinct_stats")
@@ -177,7 +178,7 @@ def move_points(stats: dict, src: str, dst: str, carrots: int = 1) -> tuple:
     return True, new
 
 
-def random_stats(rng: random.Random, total: int = STAT_TOTAL) -> dict:
+def random_stats(rng: random.Random, total: int = STAT_TOTAL) -> dict[str, int]:
     """範囲内で、合計が total になる、ランダムな配分（NPC馬用。にんじんと同じ CARROT_POINTS 刻みにそろえる）。"""
     unit = CARROT_POINTS
     while True:
@@ -185,7 +186,7 @@ def random_stats(rng: random.Random, total: int = STAT_TOTAL) -> dict:
         scale = (total - STAT_MIN * len(STAT_KEYS)) / sum(raw)
         vals = [STAT_MIN + unit * round(r * scale / unit) for r in raw]
         vals[0] += total - sum(vals)  # 端数は先頭に寄せる（total・unit とも5の倍数なので、刻みは保たれる）
-        stats = dict(zip(STAT_KEYS, vals))
+        stats = dict(zip(STAT_KEYS, vals, strict=True))
         if (
             set(stats) == set(STAT_KEYS)
             and sum(stats.values()) == total
@@ -257,7 +258,7 @@ def simulate(runners: list[Runner], track: Track, rng: random.Random, keep_frame
     """1レース走らせる。{"order": 着順（lane の並び）, "times": 着順ごとのゴール時刻, "frames": ティックごとの進み（keep_frames のとき）}。"""
     n = len(runners)
     pos = [0.0] * n
-    finish: list[Optional[float]] = [None] * n
+    finish: list[float | None] = [None] * n
     luck = [rng.gauss(0, LUCK) for _ in runners]
     spurt = [max(0.0, (r.guts - 20) / 60 * 0.12 * rng.uniform(0.5, 1.5)) for r in runners]  # ラストスパート（根性）
     styles = [r.effective_style for r in runners]
@@ -286,7 +287,9 @@ def simulate(runners: list[Runner], track: Track, rng: random.Random, keep_frame
     return out
 
 
-def estimate(runners: list, track: Track, sims: int = ODDS_SIMS, seed: int = 0) -> tuple:
+def estimate(
+    runners: list[Runner], track: Track, sims: int = ODDS_SIMS, seed: int = 0
+) -> tuple[list[float], list[float]]:
     """(勝率の並び, 3着以内率の並び)。同じ出走馬を sims 回走らせて数える。"""
     rng = random.Random(seed)
     n = len(runners)
@@ -299,7 +302,9 @@ def estimate(runners: list, track: Track, sims: int = ODDS_SIMS, seed: int = 0) 
     return [w / sims for w in win], [p / sims for p in place]
 
 
-def estimate_all(runners: list, track: Track, sims: int = ODDS_SIMS, seed: int = 0) -> dict:
+def estimate_all(
+    runners: list[Runner], track: Track, sims: int = ODDS_SIMS, seed: int = 0
+) -> dict[str, dict[str, float]]:
     """単勝・複勝と、組み合わせの馬券の確率を、1回のシミュレーションの繰り返しでまとめて数える。
 
     {"win": {枠: 確率}, "place": {枠: 確率}, "quinella": {キー: 確率}, "wide": …, "exacta": …, "trio": …}（キーは combo_key）。
@@ -342,14 +347,14 @@ ABILITY_PRIOR_WEIGHT = (
 )  # オッズの事前値（戦績が浅い馬の基準）に、ステータス合計の傾向をどれだけ緩やかに混ぜるか
 
 
-def _ability_share(runners: list) -> list:
+def _ability_share(runners: list[Runner]) -> list[float]:
     """ステータス合計の比率（合計1）。コース適性・脚質・展開の相性は、引き続きオッズに入れない。"""
     totals = [sum(r.stat(k) for k in STAT_KEYS) for r in runners]
     s = sum(totals) or 1
     return [t / s for t in totals]
 
 
-def _win_weights(runners: list) -> list:
+def _win_weights(runners: list[Runner]) -> list[float]:
     """勝つ確率の見積もり（合計 1）。戦績の勝率を平均に寄せ、初出走は下げ、調子で補正する。
 
     平均（事前値）は、出走馬のステータス合計の傾向を緩やかに混ぜる（戦績が浅い馬ほど効く）。
@@ -359,7 +364,7 @@ def _win_weights(runners: list) -> list:
     share = _ability_share(runners)
     prior = [ABILITY_PRIOR_WEIGHT * sh + (1 - ABILITY_PRIOR_WEIGHT) * flat for sh in share]
     raw = []
-    for r, pr in zip(runners, prior):
+    for r, pr in zip(runners, prior, strict=True):
         p = (r.wins + RECORD_PRIOR_RUNS * pr) / (r.races + RECORD_PRIOR_RUNS)
         if r.races == 0:
             p *= FIRST_RUN_FACTOR
@@ -368,14 +373,14 @@ def _win_weights(runners: list) -> list:
     return [x / total for x in raw]
 
 
-def _place_probs(runners: list) -> list:
+def _place_probs(runners: list[Runner]) -> list[float]:
     """3着以内に入る確率の見積もり（合計はほぼ 3）。事前値の扱いは _win_weights と同じ。"""
     n = len(runners)
     flat = min(3, n) / n
     share = _ability_share(runners)
     prior = [ABILITY_PRIOR_WEIGHT * (sh * min(3, n)) + (1 - ABILITY_PRIOR_WEIGHT) * flat for sh in share]
     raw = []
-    for r, pr in zip(runners, prior):
+    for r, pr in zip(runners, prior, strict=True):
         p = (r.places + RECORD_PRIOR_RUNS * pr) / (r.races + RECORD_PRIOR_RUNS)
         if r.races == 0:
             p *= FIRST_RUN_FACTOR
@@ -391,7 +396,7 @@ def _odds(prob: float, takeout: float, cap: float) -> float:
     return max(1.0, min(cap, math.floor((1 - takeout) / prob * 10) / 10))
 
 
-def _blended_probs(runners: list, track: Optional[Track]) -> tuple:
+def _blended_probs(runners: list[Runner], track: Track | None) -> tuple[list[float], list[float]]:
     """(勝つ確率の並び, 3着以内率の並び)。戦績の見積もりに、このコースでの試走の結果を ODDS_SIM_WEIGHT だけ混ぜる。
 
     戦績だけだと、距離・馬場・脚質の相性を読める人の期待値が大きくなりすぎる（賭け金の3倍を超える）。
@@ -403,12 +408,12 @@ def _blended_probs(runners: list, track: Optional[Track]) -> tuple:
     sim_win, sim_place = estimate(runners, track, ODDS_SIMS)
     w = ODDS_SIM_WEIGHT
     return (
-        [w * s + (1 - w) * r for s, r in zip(sim_win, win)],
-        [min(PLACE_CAP, w * s + (1 - w) * r) for s, r in zip(sim_place, place)],
+        [w * s + (1 - w) * r for s, r in zip(sim_win, win, strict=True)],
+        [min(PLACE_CAP, w * s + (1 - w) * r) for s, r in zip(sim_place, place, strict=True)],
     )
 
 
-def make_all_odds(runners: list[Runner], track: Optional[Track] = None) -> dict[str, dict[str, float]]:
+def make_all_odds(runners: list[Runner], track: Track | None = None) -> dict[str, dict[str, float]]:
     """全部の馬券のオッズ。{"win": {枠: オッズ}, "place": {枠: オッズ}, "quinella": {キー: オッズ}, …}。
 
     単勝は勝つ確率の見積もり、複勝は3着以内率の見積もり（戦績と、track があればそのコースでの試走を混ぜる）。
@@ -416,8 +421,8 @@ def make_all_odds(runners: list[Runner], track: Optional[Track] = None) -> dict[
     """
     lanes = [r.lane for r in runners]
     win_probs, place_probs = _blended_probs(runners, track)
-    win = dict(zip(lanes, win_probs))
-    place = dict(zip(lanes, place_probs))
+    win = dict(zip(lanes, win_probs, strict=True))
+    place = dict(zip(lanes, place_probs, strict=True))
 
     def first_two(a: int, b: int) -> float:  # a が1着・b が2着
         return win[a] * win[b] / (1 - win[a])
@@ -470,7 +475,7 @@ WEEKDAY_HOURS = _CFG.weekday_hours
 WEEKEND_HOURS = _CFG.weekend_hours
 
 
-def schedule_for(d: datetime.date) -> tuple:
+def schedule_for(d: datetime.date) -> tuple[tuple[int, int], ...]:
     """その日の、定時レースの発走時刻（現地時間の時・分）。0〜9時は開催しない。"""
     hours = WEEKEND_HOURS if d.weekday() >= 5 else WEEKDAY_HOURS
     return tuple((h, 0) for h in hours)
@@ -486,31 +491,33 @@ COMBO_TAKEOUT = _CFG.combo_takeout
 MAX_COMBO_ODDS = _CFG.max_combo_odds
 
 
-def combo_key(kind: str, lanes) -> str:
+def combo_key(kind: str, lanes: Iterable[int]) -> str:
     """組み合わせの馬券の、オッズ表のキー。順不同のものは小さい順にそろえ、馬単だけ順番を残す（例: "2-5"・"5>2"）。"""
     lanes = list(lanes)
     return ">".join(map(str, lanes)) if kind == "exacta" else "-".join(map(str, sorted(lanes)))
 
 
-def combo_hit(kind: str, lanes, order_lanes: list) -> bool:
+def combo_hit(kind: str, lanes: Iterable[int], order_lanes: list[int]) -> bool:
     """着順（枠番の並び）で、その組み合わせが当たりか。"""
     lanes = list(lanes)
-    if kind == "quinella":
-        return set(lanes) == set(order_lanes[:2])
-    if kind == "exacta":
-        return lanes == order_lanes[:2]
-    if kind == "wide":
-        return set(lanes) <= set(order_lanes[:3])
-    if kind == "trio":
-        return set(lanes) == set(order_lanes[:3])
-    return False
+    match kind:
+        case "quinella":
+            return set(lanes) == set(order_lanes[:2])
+        case "exacta":
+            return lanes == order_lanes[:2]
+        case "wide":
+            return set(lanes) <= set(order_lanes[:3])
+        case "trio":
+            return set(lanes) == set(order_lanes[:3])
+        case _:
+            return False
 
 
 NPC_NAMES = list(_CFG.npc_names)
 BANNED_NAME_CHARS = set(_CFG.banned_name_chars)  # メンション・リンク・装飾を防ぐ
 
 
-def check_name(name: str) -> tuple:
+def check_name(name: str) -> Outcome[str]:
     """馬の名前が使えるか。(使えるか, 整えた名前か Failure)。メンション・リンク・装飾に使う文字は禁止。"""
     name = name.strip()
     if not name:

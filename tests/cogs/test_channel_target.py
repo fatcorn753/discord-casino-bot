@@ -94,14 +94,13 @@ def test_postable_needs_view_send_and_embed_permissions():
 def test_channel_autocomplete_lists_only_postable_channels_of_the_chosen_guild_for_the_owner(tmp_path):
     guild, chans = make_guild()
     cog, eco, bot = make_admin(tmp_path, [guild])
-    inter = dm(OWNER, [], SimpleNamespace(**{"サーバー": "5"}))
+    inter = dm(OWNER, [], SimpleNamespace(サーバー="5"))
     names = lambda current: [c.name for c in asyncio.run(cog.channel_autocomplete(as_interaction(inter), current))]  # noqa: E731
     assert names("") == ["#general", "#クイズ部屋"]  # 投稿できないチャンネルは出ない
     assert names("クイズ") == ["#クイズ部屋"] and names("zzz") == []
     assert [c.value for c in asyncio.run(cog.channel_autocomplete(as_interaction(inter), "クイズ"))] == ["11"]
     assert (
-        asyncio.run(cog.channel_autocomplete(as_interaction(dm(FRIEND, [], SimpleNamespace(**{"サーバー": "5"}))), ""))
-        == []
+        asyncio.run(cog.channel_autocomplete(as_interaction(dm(FRIEND, [], SimpleNamespace(サーバー="5"))), "")) == []
     )  # 持ち主以外には出さない
     assert asyncio.run(cog.channel_autocomplete(as_interaction(dm(OWNER, [])), "")) == []  # サーバー未選択
     assert (

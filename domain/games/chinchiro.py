@@ -35,17 +35,19 @@ class Hand:
     @property
     def strength(self) -> int:
         """大きいほど強い。同じ値なら引き分け。"""
-        if self.kind == HIFUMI:
-            return 0
-        if self.kind == MENASHI:
-            return 1
-        if self.kind == ME:
-            return 10 + self.value
-        if self.kind == SHIGORO:
-            return 30
-        if self.kind == ARASHI:
-            return 40 + self.value
-        return 100
+        match self.kind:
+            case "hifumi":  # HIFUMI
+                return 0
+            case "menashi":  # MENASHI
+                return 1
+            case "me":  # ME
+                return 10 + self.value
+            case "shigoro":  # SHIGORO
+                return 30
+            case "arashi":  # ARASHI
+                return 40 + self.value
+            case _:  # PINZORO（デフォルト）
+                return 100
 
     @property
     def name(self) -> str:
@@ -72,11 +74,11 @@ def classify(dice) -> Hand:
     return Hand(MENASHI)
 
 
-def roll_dice(rng: random.Random) -> tuple:
+def roll_dice(rng: random.Random) -> tuple[int, ...]:
     return tuple(rng.randint(1, 6) for _ in range(3))
 
 
-def play_hand(rng: random.Random) -> list:
+def play_hand(rng: random.Random) -> list[tuple[tuple[int, ...], Hand]]:
     """目が出る（またはヒフミ・3回）まで振る。[(出目, 役), ...] を返す。最後の要素が確定した役。"""
     rolls = []
     for _ in range(MAX_ROLLS):
@@ -112,7 +114,7 @@ def compare(player: Hand, dealer: Hand) -> Outcome:
     return Outcome("lose", mult)
 
 
-def payout(bet: int, outcome: Outcome) -> tuple:
+def payout(bet: int, outcome: Outcome) -> tuple[int, int]:
     """(預かり金から払い戻す総額, 預かり金以外から追加で引く額) を返す。
 
     - 勝ち: 賭け金 + 賭け金×倍率 を受け取る
@@ -136,3 +138,21 @@ def expected_value(trials: int = 200_000, seed: int = 1) -> float:
         out = compare(player, dealer)
         total += {"win": out.multiplier, "lose": -out.multiplier, "draw": 0}[out.result]
     return total / trials
+
+
+# ----------------------------- 卓（総取り） ----------------------------- #
+TABLE_RAKE = 0.10  # 卓の場代。負けた人の賭け金のうち、帝愛が取る割合（勝った人には残りが渡る）
+
+
+def pot_payouts(hands: dict[int, Hand], bet: int, rake: float = TABLE_RAKE) -> dict[int, int]:
+    """卓の総取り。いちばん強い役の人が、負けた人の賭け金（場代を引いた分）を分け合う。
+
+    返すのは、席ごとの「預かり金から払い戻す総額」（自分の賭け金を含む。負けは 0）。
+    同じ強さの人が並べば山分け（割り切れない端数は場代に回る）。全員が同じ強さなら、全員に賭け金を返す。
+    ヒフミも倍払いはなく、いちばん弱い役として扱う。
+    """
+    best = max(h.strength for h in hands.values())
+    winners = [uid for uid, h in hands.items() if h.strength == best]
+    losers = len(hands) - len(winners)
+    share = int(bet * losers * (1 - rake)) // len(winners)
+    return {uid: (bet + share if uid in winners else 0) for uid in hands}

@@ -1,7 +1,6 @@
 """同じ人が同時に複数のゲームを始めないようにする（連打・二重プレイ対策）。"""
 
 import time
-from typing import Optional
 
 from domain.ports import ISessionGuard
 
@@ -12,7 +11,7 @@ class Sessions(ISessionGuard):
         self._last_end = {}
         self.cooldown = cooldown
 
-    def try_start(self, user_id: int, now: Optional[float] = None) -> Optional[str]:
+    def try_start(self, user_id: int, now: float | None = None) -> str | None:
         """開始できれば None を返して「プレイ中」にする。できなければ理由を返す。"""
         now = time.monotonic() if now is None else now
         if user_id in self._active:
@@ -23,7 +22,7 @@ class Sessions(ISessionGuard):
         self._active.add(user_id)
         return None
 
-    def end(self, user_id: int, now: Optional[float] = None) -> None:
+    def end(self, user_id: int, now: float | None = None) -> None:
         now = time.monotonic() if now is None else now
         self._active.discard(user_id)
         self._last_end[user_id] = now

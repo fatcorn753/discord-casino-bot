@@ -2,7 +2,7 @@
 
 import datetime
 from collections.abc import Hashable
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import discord
 
@@ -59,7 +59,7 @@ def partial_message(channel: object, message_id: int) -> Any:
     return getter(message_id) if callable(getter) else None
 
 
-async def _toggle_pin(message: object, method: str, *, log_key: Optional[Hashable], label: str) -> bool:
+async def _toggle_pin(message: object, method: str, *, log_key: Hashable | None, label: str) -> bool:
     fn = getattr(message, method, None)
     if not callable(fn):
         return False
@@ -77,12 +77,12 @@ async def _toggle_pin(message: object, method: str, *, log_key: Optional[Hashabl
         return False
 
 
-async def pin_message(message: object, *, log_key: Optional[Hashable] = None, label: str = "投稿") -> bool:
+async def pin_message(message: object, *, log_key: Hashable | None = None, label: str = "投稿") -> bool:
     """メッセージをピン留めする（権限不足や上限などの失敗では落とさず False を返す）。"""
     return await _toggle_pin(message, "pin", log_key=log_key, label=label)
 
 
-async def unpin_message(message: object, *, log_key: Optional[Hashable] = None, label: str = "投稿") -> bool:
+async def unpin_message(message: object, *, log_key: Hashable | None = None, label: str = "投稿") -> bool:
     """メッセージのピン留めを外す（権限不足や削除済みなどの失敗では落とさず False を返す）。"""
     return await _toggle_pin(message, "unpin", log_key=log_key, label=label)
 
@@ -94,7 +94,7 @@ def pelica(amount: int) -> str:
 
 def embed(title: str, description: str = "", color: int = INFO) -> discord.Embed:
     e = discord.Embed(title=title, description=description, color=color)
-    e.timestamp = datetime.datetime.now(datetime.timezone.utc)
+    e.timestamp = datetime.datetime.now(datetime.UTC)
     return e
 
 
@@ -108,6 +108,38 @@ def error_embed(title: str, description: str = "") -> discord.Embed:
 
 def warn_embed(title: str, description: str = "") -> discord.Embed:
     return embed(f"⚠️ {title}", description, WARN)
+
+
+async def reply_embed(interaction: discord.Interaction, embed: discord.Embed, *, ephemeral: bool = True) -> None:
+    """interaction への応答。未応答なら response.send_message、応答済みなら followup.send へ送る。
+
+    テストの偽 interaction など is_done を持たない response では、未応答として扱う。
+    """
+    response = getattr(interaction, "response", None)
+    is_done = getattr(response, "is_done", None) if response is not None else None
+    if response is not None and not (callable(is_done) and is_done()):
+        await response.send_message(embed=embed, ephemeral=ephemeral)
+    else:
+        await interaction.followup.send(embed=embed, ephemeral=ephemeral)
+
+
+async def reply_error(
+    interaction: discord.Interaction, text: str, *, title: str = "できません", ephemeral: bool = True
+) -> None:
+    """エラーの返信（見た目は error_embed と同じ。❌ タイトル・ephemeral 既定）という統一入口。"""
+    await reply_embed(interaction, error_embed(title, text), ephemeral=ephemeral)
+
+
+async def reply_warn(
+    interaction: discord.Interaction, text: str, *, title: str = "確認", ephemeral: bool = True
+) -> None:
+    """注意の返信（見た目は warn_embed と同じ）。"""
+    await reply_embed(interaction, warn_embed(title, text), ephemeral=ephemeral)
+
+
+async def reply_ok(interaction: discord.Interaction, text: str, *, title: str = "完了", ephemeral: bool = True) -> None:
+    """成功の返信（見た目は ok_embed と同じ）。"""
+    await reply_embed(interaction, ok_embed(title, text), ephemeral=ephemeral)
 
 
 class OwnerView(discord.ui.View):

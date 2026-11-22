@@ -10,7 +10,8 @@
 
 import math
 import random
-from typing import Optional
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from domain import market
 from domain.ports import get_catalogs
@@ -30,7 +31,7 @@ Z_ALERT = _CFG.z_alert
 MIN_ABS_CORR = _CFG.min_abs_corr  # 警報の対象にする、連動の強さ（相関の絶対値）
 
 
-def plan_event(now: float, rng: random.Random) -> dict:
+def plan_event(now: float, rng: random.Random) -> dict[str, Any]:
     """新しいボラティリティ予告（銘柄はランダム）。"""
     symbol = rng.choice([s.key for s in market.SYMBOLS])
     start = now + LEAD_MIN * 60
@@ -43,14 +44,14 @@ def plan_event(now: float, rng: random.Random) -> dict:
     }
 
 
-def phase(ev: dict, now: float) -> str:
+def phase(ev: Mapping[str, Any], now: float) -> str:
     """announced（予告中）/ active（発生中）/ done（終了）。"""
     if now >= ev["end_ts"]:
         return "done"
     return "active" if now >= ev["start_ts"] else "announced"
 
 
-def multiplier(events: list, symbol: str, now: float) -> float:
+def multiplier(events: Sequence[Mapping[str, Any]], symbol: str, now: float) -> float:
     """いま、その銘柄の値動きの大きさにかかっている倍率（発生中のイベントだけ。なければ 1）。"""
     m = 1.0
     for ev in events:
@@ -59,7 +60,7 @@ def multiplier(events: list, symbol: str, now: float) -> float:
     return m
 
 
-def priced_weight(ev: dict, now: float) -> float:
+def priced_weight(ev: dict[str, Any], now: float) -> float:
     """オプションの値段が、そのイベントを織り込んでいる割合（予告の直後から PRICED_AT_ANNOUNCE。いまは 1 で、予告の瞬間に全部）。"""
     if now >= ev["start_ts"]:
         return 1.0
@@ -79,7 +80,7 @@ def expected_event_ticks(seconds: float, tick_seconds: float) -> float:
     return seconds / tick_seconds * DURATION_MIN / cycle / len(market.SYMBOLS)
 
 
-def extra_variance_ticks(ev: dict, now: float, seconds: float, tick_seconds: float) -> float:
+def extra_variance_ticks(ev: dict[str, Any], now: float, seconds: float, tick_seconds: float) -> float:
     """now から seconds 秒のあいだに、イベントの時間と重なる、1分ごとの刻みの数（織り込みの割合をかけたもの）。"""
     lo, hi = max(now, ev["start_ts"]), min(now + seconds, ev["end_ts"])
     if hi <= lo:
@@ -87,7 +88,7 @@ def extra_variance_ticks(ev: dict, now: float, seconds: float, tick_seconds: flo
     return (hi - lo) / tick_seconds * priced_weight(ev, now)
 
 
-def spread_alerts(history: dict, window: int = ALERT_WINDOW) -> list:
+def spread_alerts(history: dict[str, list[float]], window: int = ALERT_WINDOW) -> list[dict[str, Any]]:
     """相関崩壊の警報。history は {銘柄: 直近の価格の列（古い順）}。連動する2銘柄の値動きの差が Z_ALERT 以上に開いた組を、大きい順に返す。
 
     差 = rA − sign(ρ)·rB（rは対数の変化）。ふだんの揺れの大きさは、σ_diff = √(Σ_AA + Σ_BB − 2·sign(ρ)·Σ_AB) × √(刻みの数)。
@@ -111,7 +112,7 @@ def spread_alerts(history: dict, window: int = ALERT_WINDOW) -> list:
     return sorted(out, key=lambda x: -abs(x["z"]))
 
 
-def describe_alert(alert: dict) -> str:
+def describe_alert(alert: dict[str, Any]) -> str:
     """警報の1行。どちらが先行して、どちらが取り残されているか。"""
     a, b = market.BY_KEY[alert["a"]], market.BY_KEY[alert["b"]]
     tie = "ふつう連動する" if alert["sign"] > 0 else "ふつう逆に動く"
@@ -121,7 +122,7 @@ def describe_alert(alert: dict) -> str:
     )
 
 
-def current(events: list, now: float) -> Optional[dict]:
+def current(events: Sequence[Mapping[str, Any]], now: float) -> Mapping[str, Any] | None:
     """終わっていないイベント（予告中か発生中）を1つ返す。"""
     live = [e for e in events if phase(e, now) != "done"]
     return min(live, key=lambda e: e["start_ts"]) if live else None

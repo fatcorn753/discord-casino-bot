@@ -166,8 +166,8 @@ class BlackjackView(GameOwnerView):
         if (
             len(self.game.player) != 2 or self.game.doubled
         ):  # 最初の2枚のときだけ。無効化の表示は古い画面には届かないので、ここでも断る
-            return await interaction.response.send_message(
-                embed=ui.error_embed("ダブルできません", "ダブルは、最初の2枚のときだけ選べます。"), ephemeral=True
+            return await ui.reply_error(
+                interaction, "ダブルは、最初の2枚のときだけ選べます。", title="ダブルできません"
             )
         gid, uid, eid = self.ctx.guild_id, interaction.user.id, self.ctx.escrow_id
         casino = self.ctx.casino
@@ -175,11 +175,8 @@ class BlackjackView(GameOwnerView):
             need = self.ctx.bet - casino.balance_of(gid, uid)
             can, why = self.ctx.deps.teiai.can_borrow_for_bet(gid, uid, need)
             if not can:
-                return await interaction.response.send_message(
-                    embed=ui.error_embed(
-                        "ダブルできません", f"倍にするためのペリカが足りません。{format_failure(why)}"
-                    ),
-                    ephemeral=True,
+                return await ui.reply_error(
+                    interaction, f"倍にするためのペリカが足りません。{format_failure(why)}", title="ダブルできません"
                 )
             agreed = await confirm_action(
                 interaction,
@@ -197,9 +194,7 @@ class BlackjackView(GameOwnerView):
             ):
                 return
             if not casino.add_to_escrow(gid, eid, self.ctx.bet, credit=True):
-                return await interaction.followup.send(
-                    embed=ui.error_embed("ダブルできません", "帝愛から借りられませんでした。"), ephemeral=True
-                )
+                return await ui.reply_error(interaction, "帝愛から借りられませんでした。", title="ダブルできません")
             self.ctx.bet = casino.escrow_amount(gid, eid)
             self.game.double()
             return await self._after_origin()

@@ -17,7 +17,7 @@ CHERRY_ONE = _CFG.cherry_one  # 🍒が1つ（少し戻る）
 SYMBOLS = list(WEIGHTS)
 
 
-def spin(rng: random.Random) -> tuple:
+def spin(rng: random.Random) -> tuple[str, ...]:
     return tuple(rng.choices(SYMBOLS, weights=[WEIGHTS[s] for s in SYMBOLS], k=3))
 
 

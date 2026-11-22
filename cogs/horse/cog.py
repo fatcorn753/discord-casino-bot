@@ -9,7 +9,7 @@
 import asyncio
 import datetime
 import logging
-from typing import TYPE_CHECKING, Any, Optional, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import discord
 from discord import app_commands
@@ -23,6 +23,7 @@ from cogs.shared.announce import announce_channel
 from cogs.shared.bridges import BotBridges, IHorseAdminBridge, IHorseButtonBridge
 from cogs.shared.tasks import run_for_allowed_guilds
 from domain import horse as horse_mod
+from domain.ports.contracts import RaceRow, RaceRunResult
 from domain.ports.repos import IGuildRepo
 from services.horse import HorseDesk, HorseService
 
@@ -40,7 +41,7 @@ NONE = discord.AllowedMentions.none()
 GAP_ZOOM = 3.0  # 先頭との差を、見やすく広げる倍率（そのままだと、全馬が団子に見える）
 
 
-def display_frames(frames: list, winner: int, finish: Optional[list] = None) -> list:
+def display_frames(frames: list, winner: int, finish: list | None = None) -> list:
     """アニメーション用に、先頭がゴールした瞬間までに切り、先頭との差を GAP_ZOOM 倍に広げる（後ろに下がって見えないようにする）。
 
     最後のコマは、1着の馬がゴールに着いた瞬間。ほかの馬は、ゴールの時刻の差（finish）だけ手前にいる
@@ -51,12 +52,12 @@ def display_frames(frames: list, winner: int, finish: Optional[list] = None) -> 
     for row in frames[: end + 1]:
         lead = max(row)
         cur = [max(0.0, lead - (lead - p) * GAP_ZOOM) for p in row]
-        shown = [max(a, b) for a, b in zip(shown, cur)]  # 前のコマより後ろには下がらない
+        shown = [max(a, b) for a, b in zip(shown, cur, strict=True)]  # 前のコマより後ろには下がらない
         out.append(list(shown))
     if finish is not None:
         last = [max(0.0, 1.0 - (f - finish[winner]) / horse_mod.TICKS * GAP_ZOOM) for f in finish]
         before = out[-2] if len(out) > 1 else [0.0] * len(last)
-        out[-1] = [min(1.0, max(a, b)) for a, b in zip(before, last)]  # 前のコマより後ろには下がらない
+        out[-1] = [min(1.0, max(a, b)) for a, b in zip(before, last, strict=True)]  # 前のコマより後ろには下がらない
     out[-1][winner] = 1.0
     return out
 
@@ -78,13 +79,13 @@ def laps_for(distance: int) -> int:
     return max(1, distance // 1000)
 
 
-def lane_text(entries: list, positions: list, laps: int = 1, now: Optional[datetime.datetime] = None) -> str:
+def lane_text(entries: list, positions: list, laps: int = 1, now: datetime.datetime | None = None) -> str:
     """各馬の位置。laps>1 のときは、コースの1周が全体の 1/laps で、何周目かを頭に書く（馬ごとに、いまの周の位置を出す）。
 
     now を渡すと、季節演出の期間中は、帝愛の馬が季節の絵（例: 🦌）で走る。
     """
     rows = []
-    for e, p in zip(entries, positions):
+    for e, p in zip(entries, positions, strict=True):
         lap = min(laps - 1, int(p * laps))
         frac = 1.0 if p >= 1.0 else p * laps - lap
         k = min(TRACK_W, int(frac * TRACK_W))
@@ -98,7 +99,7 @@ def lane_text(entries: list, positions: list, laps: int = 1, now: Optional[datet
     return "```\n" + head + "\n".join(rows) + "\n```"
 
 
-def comment(entries: list, positions: list, previous_leader, final: bool, winner=None, distance: Optional[int] = None):
+def comment(entries: list, positions: list, previous_leader, final: bool, winner=None, distance: int | None = None):
     """実況の一言と、いまの先頭（馬の添字）。final のときは、winner（1着の馬の添字）を名指しする。"""
     leader = max(range(len(positions)), key=lambda i: positions[i])
     top = positions[leader]
@@ -123,8 +124,8 @@ def comment(entries: list, positions: list, previous_leader, final: bool, winner
     return f"先頭は {name}。", leader
 
 
-def result_embed(desk: HorseDesk, result: dict) -> discord.Embed:
-    e = card_embed(desk, {**result["race"], "status": "done"})
+def result_embed(desk: HorseDesk, result: RaceRunResult) -> discord.Embed:
+    e = card_embed(desk, cast("RaceRow", {**result["race"], "status": "done"}))
     bets = result["bets"]
     if bets:
         # 的中した人は、払い戻しの額だけを載せる（収支は出さない。何頭もまとめて買うと、当たっても収支は赤字になりやすいので）
@@ -196,9 +197,7 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
         desk = self._horse_svc.desk(gid)
         race = desk.race_get(race_id)
         if race is None:
-            await interaction.response.send_message(
-                embed=ui.error_embed("見つかりません", "そのレースは、もうありません。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "そのレースは、もうありません。", title="見つかりません")
             return
         if action == "card":
             await interaction.response.send_message(embed=card_embed(desk, race), ephemeral=True)
@@ -206,9 +205,7 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
         if not await approval_guard.feature_guard(interaction, self._guild_repo, "horse"):
             return
         if race["status"] != "betting" or desk.clock.now_ts() >= race["bet_close"]:
-            await interaction.response.send_message(
-                embed=ui.error_embed("買えません", "このレースの馬券は、まだ（またはもう）買えません。"), ephemeral=True
-            )
+            await ui.reply_error(interaction, "このレースの馬券は、まだ（またはもう）買えません。", title="買えません")
             return
         panel = BetPanel(self._horse_svc, interaction.user.id, race, self.post_bet_announcement)
         await interaction.response.send_message(embed=panel.embed(desk), view=panel, ephemeral=True)
@@ -250,7 +247,7 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
 
     # ------------------------------ 開催 ------------------------------ #
     async def start_special(
-        self, guild: discord.Guild, entry_min: int, bet_min: int, channel: Optional[discord.abc.Messageable] = None
+        self, guild: discord.Guild, entry_min: int, bet_min: int, channel: discord.abc.Messageable | None = None
     ) -> int:
         """臨時レースを開催する（管理者用）。channel を指定すれば、掲示・馬券・レースはそこに出す。作ったレースの番号を返す。"""
         desk = self._horse_svc.desk(guild.id)
@@ -260,7 +257,7 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
         await self._announce_entry(guild, desk, race_id)
         return race_id
 
-    async def _channel(self, guild: discord.Guild, race: dict):
+    async def _channel(self, guild: discord.Guild, race: RaceRow):
         channel = guild.get_channel(race["channel_id"]) if race["channel_id"] else None
         return channel or announce_channel(guild, self._guild_repo)
 
@@ -271,7 +268,7 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
             logthrottle.warn(("horse-post", channel.id), f"競馬の投稿に失敗: channel={channel.id}: {exc!r}")
             return None
 
-    async def post_bet_announcement(self, guild: discord.Guild, race: dict, content: str) -> None:
+    async def post_bet_announcement(self, guild: discord.Guild, race: RaceRow, content: str) -> None:
         channel = await self._channel(guild, race)
         if channel is not None:
             await self._post(channel, content=content)
@@ -292,7 +289,7 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
         if msg is not None:
             desk.race_set_message(race_id, channel.id, msg.id)
 
-    async def _retire(self, guild: discord.Guild, desk: HorseDesk, race: dict) -> None:
+    async def _retire(self, guild: discord.Guild, desk: HorseDesk, race: RaceRow) -> None:
         """締切後の古い投稿を、ボタンなしで「締め切りました」の表示に書き換える（残ると、締切の「◯秒前」が増え続ける）。
 
         チャンネルへの告知のほか、`/競馬 出馬表` で出した投稿（self._posts）も同じように書き換える。
@@ -309,7 +306,7 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
             except discord.HTTPException as exc:  # 消されていても、進行には関係ない
                 logthrottle.warn(("horse-retire", channel.id), f"競馬の古い投稿を書き換えられません: {exc!r}")
 
-    async def _close_entries(self, guild: discord.Guild, desk: HorseDesk, race: dict) -> None:
+    async def _close_entries(self, guild: discord.Guild, desk: HorseDesk, race: RaceRow) -> None:
         updated = self._horse_svc.close_entries_and_set_odds(guild.id, race["id"])
         if updated is None:
             return
@@ -326,7 +323,7 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
             if msg is not None:
                 desk.race_set_message(race["id"], channel.id, msg.id)  # 発走で書き換えるために、こちらを覚える
 
-    async def _run(self, guild: discord.Guild, desk: HorseDesk, race: dict) -> None:
+    async def _run(self, guild: discord.Guild, desk: HorseDesk, race: RaceRow) -> None:
         result = self._horse_svc.run_race(guild.id, race["id"])
         if result is None:
             return
@@ -390,15 +387,15 @@ class HorseCog(commands.Cog, IHorseAdminBridge, IHorseButtonBridge):
             if race_id:
                 await self._announce_entry(guild, desk, race_id)
             for race in desk.race_open():
-                if race["status"] == "entry" and now >= race["entry_close"]:
-                    await self._close_entries(guild, desk, race)
-                elif race["status"] == "betting" and now >= race["start_at"]:
-                    await self._run(guild, desk, race)
-                elif race["status"] == "betting" and now >= race["bet_close"] and race["id"] not in self._bet_closed:
-                    self._bet_closed.add(
-                        race["id"]
-                    )  # 馬券の締切で、投稿を「締め切りました」に書き換える（発走まで、「◯秒前」が増えるのを防ぐ）
-                    await self._retire(guild, desk, race)
+                match race["status"]:
+                    case "entry" if now >= race["entry_close"]:
+                        await self._close_entries(guild, desk, race)
+                    case "betting" if now >= race["start_at"]:
+                        await self._run(guild, desk, race)
+                    case "betting" if now >= race["bet_close"] and race["id"] not in self._bet_closed:
+                        # 馬券の締切で、投稿を「締め切りました」に書き換える（発走まで、「◯秒前」が増えるのを防ぐ）
+                        self._bet_closed.add(race["id"])
+                        await self._retire(guild, desk, race)
 
         await run_for_allowed_guilds(
             self.bot,

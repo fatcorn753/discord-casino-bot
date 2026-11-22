@@ -3,7 +3,7 @@
 import datetime
 import logging
 import math
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -18,6 +18,7 @@ from cogs.shared.confirm import confirm_action, confirmed_reply, user_session
 from cogs.shared.messages import format_failure, format_memo
 from cogs.teiai.panel import TeiaiPanel, panel_embed
 from domain import approval, skins
+from domain.errors import Failure
 from domain.ports import get_catalogs
 from domain.ports.clock import IClock
 from domain.ports.repos import IGuildRepo
@@ -95,7 +96,7 @@ class EconomyCog(commands.Cog):
         sessions: ISessionGuard,
         clock: IClock,
         *,
-        shop_bridge: Optional[IShopTitleBridge] = None,
+        shop_bridge: IShopTitleBridge | None = None,
     ):
         self.bot = bot
         self._config = config
@@ -112,7 +113,7 @@ class EconomyCog(commands.Cog):
     @group.command(name="残高", description="ペリカの残高と成績を表示")
     @app_commands.rename(member="対象")
     @app_commands.describe(member="見たい人（省略時: 自分）")
-    async def balance(self, interaction: discord.Interaction, member: Optional[discord.Member] = None):
+    async def balance(self, interaction: discord.Interaction, member: discord.Member | None = None):
         target = member or interaction.user
         card = self._economy_svc.balance_card(ui.guild_id_of(interaction), interaction.user.id, target.id)
         if card is None:
@@ -143,13 +144,12 @@ class EconomyCog(commands.Cog):
     @group.command(name="返済", description="帝愛への借金を、手元のペリカから返す（金額を省くと、返せる限り全額）")
     @app_commands.rename(amount="金額")
     @app_commands.describe(amount="返す額（省略で全額）")
-    async def repay(self, interaction: discord.Interaction, amount: Optional[app_commands.Range[int, 1]] = None):
+    async def repay(self, interaction: discord.Interaction, amount: app_commands.Range[int, 1] | None = None):
         gid, uid = ui.guild_id_of(interaction), interaction.user.id
         ok, result = self._teiai.repay(gid, uid, amount)
         if not ok:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("返せません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="返せません")
+        assert not isinstance(result, Failure)
         await interaction.response.send_message(
             embed=embeds.repaid_embed(result, self._teiai.debt_of(gid, uid)), ephemeral=True
         )
@@ -172,15 +172,14 @@ class EconomyCog(commands.Cog):
         refusal = self._teiai.can_go_bankrupt(gid, uid)
         if refusal is not None:
             title, text = embeds.BANKRUPT_REFUSALS[refusal]
-            return await interaction.response.send_message(embed=ui.error_embed(title, text), ephemeral=True)
+            return await ui.reply_error(interaction, text, title=title)
         ok = await confirm_action(interaction, "自己破産しますか？", embeds.bankrupt_warning(), "破産する")
         if ok is not True:
             return
         ok, result = self._teiai.bankrupt(gid, uid)
         if not ok:
-            return await interaction.followup.send(
-                embed=ui.error_embed("破産できません", format_failure(result)), ephemeral=True
-            )
+            return await ui.reply_error(interaction, format_failure(result), title="破産できません")
+        assert not isinstance(result, Failure)
         await interaction.followup.send(  # 公開（見せ場）。誰が破産したかも出す
             embed=embeds.bankrupt_result_embed(result, interaction.user.display_name)
         )
@@ -204,7 +203,7 @@ class EconomyCog(commands.Cog):
     )
     @app_commands.rename(member="内訳")
     @app_commands.describe(member="この人の資産の内訳を見る（省略でランキング）")
-    async def ranking(self, interaction: discord.Interaction, member: Optional[discord.Member] = None):
+    async def ranking(self, interaction: discord.Interaction, member: discord.Member | None = None):
         gid = ui.guild_id_of(interaction)
         if member is not None:
             e = ranking.build_breakdown_embed(self._ranking.for_guild(gid), member.id, member.display_name)
@@ -249,7 +248,7 @@ class EconomyCog(commands.Cog):
     )
     @manage_guild_or_owner()
     async def board_set(
-        self, interaction: discord.Interaction, channel: Optional[discord.TextChannel] = None, stop: bool = False
+        self, interaction: discord.Interaction, channel: discord.TextChannel | None = None, stop: bool = False
     ):
         await boards.board_set(self._ranking, self._guild_repo, interaction, channel, stop, BOARD_INTERVAL_MINUTES)
 
@@ -265,9 +264,7 @@ class EconomyCog(commands.Cog):
         self, interaction: discord.Interaction, member: discord.Member, amount: app_commands.Range[int, 1, 1_000_000]
     ):
         if member.bot:
-            return await interaction.response.send_message(
-                embed=ui.error_embed("送れません", "Bot には送金できません。"), ephemeral=True
-            )
+            return await ui.reply_error(interaction, "Bot には送金できません。", title="送れません")
         # 送金の間は「プレイ中」にする。ゲーム中に残高を逃がして負けや倍払いを避ける／確認待ちの間にゲームを始める、を防ぐ
         async with user_session(self._sessions, interaction, "いまは送れません") as ok:
             if not ok:
@@ -277,11 +274,10 @@ class EconomyCog(commands.Cog):
             fee = math.ceil(round(amount * TRANSFER_FEE_RATE, 6))
             # 確認ボタンを出す前に、残高を先に調べる（足りないのに確認だけさせない）
             if self._economy_svc.balance_of(gid, uid) < amount + fee:
-                return await interaction.response.send_message(
-                    embed=ui.error_embed(
-                        "送金できません", f"残高が足りません（送金額 {amount:,} + 手数料 {fee:,} が必要です）。"
-                    ),
-                    ephemeral=True,
+                return await ui.reply_error(
+                    interaction,
+                    f"残高が足りません（送金額 {amount:,} + 手数料 {fee:,} が必要です）。",
+                    title="送金できません",
                 )
             reply = await confirmed_reply(
                 interaction,
@@ -305,7 +301,7 @@ class EconomyCog(commands.Cog):
                 now=now,
             )
             if not res.ok:
-                return await reply(embed=ui.error_embed("送金できません", format_failure(res.reason)), ephemeral=True)
+                return await ui.reply_error(interaction, format_failure(res.reason), title="送金できません")
             await reply(
                 embed=ui.ok_embed(
                     "送金しました",
