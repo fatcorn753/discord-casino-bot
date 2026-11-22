@@ -136,3 +136,21 @@ def expected_value(trials: int = 200_000, seed: int = 1) -> float:
         out = compare(player, dealer)
         total += {"win": out.multiplier, "lose": -out.multiplier, "draw": 0}[out.result]
     return total / trials
+
+
+# ----------------------------- 卓（総取り） ----------------------------- #
+TABLE_RAKE = 0.10  # 卓の場代。負けた人の賭け金のうち、帝愛が取る割合（勝った人には残りが渡る）
+
+
+def pot_payouts(hands: dict[int, Hand], bet: int, rake: float = TABLE_RAKE) -> dict[int, int]:
+    """卓の総取り。いちばん強い役の人が、負けた人の賭け金（場代を引いた分）を分け合う。
+
+    返すのは、席ごとの「預かり金から払い戻す総額」（自分の賭け金を含む。負けは 0）。
+    同じ強さの人が並べば山分け（割り切れない端数は場代に回る）。全員が同じ強さなら、全員に賭け金を返す。
+    ヒフミも倍払いはなく、いちばん弱い役として扱う。
+    """
+    best = max(h.strength for h in hands.values())
+    winners = [uid for uid, h in hands.items() if h.strength == best]
+    losers = len(hands) - len(winners)
+    share = int(bet * losers * (1 - rake)) // len(winners)
+    return {uid: (bet + share if uid in winners else 0) for uid in hands}
