@@ -96,6 +96,7 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
             return False, f"投稿できませんでした: {exc}"
         if message is not None:
             self._raffle.set_message(guild.id, raffle["id"], message.id)
+            await ui.pin_message(message, log_key=("raffle-pin", guild.id), label=f"抽選 #{raffle['id']}")
         mention = getattr(target, "mention", str(target))
         return True, f"{guild.name} の {mention} に投稿しました（参加費 {ui.pelica(fee)}・{minutes}分）。"
 
@@ -122,6 +123,7 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
             self._raffle.set_message(
                 guild.id, raffle["id"], message.id, target_id
             )  # 古い投稿のボタンは、これで無効になる
+            await ui.pin_message(message, log_key=("raffle-pin", guild.id), label=f"抽選 #{raffle['id']}")
         if old_channel is not None and old_id:
             try:
                 old_msg = ui.partial_message(old_channel, old_id)
@@ -198,7 +200,7 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
         )
 
     async def _finish_message(self, guild: discord.Guild, raffle: dict, embed: discord.Embed) -> None:
-        """募集の投稿からボタンを外し、結果を同じチャンネルへ出す（当選者にはメンションする）。"""
+        """募集の投稿からボタンとピン留めを外し、結果を同じチャンネルへ出す（当選者にはメンションする）。"""
         channel = guild.get_channel(raffle["channel_id"]) if guild else None
         if channel is None:
             return
@@ -213,6 +215,7 @@ class RaffleCog(commands.Cog, IRaffleAdminBridge):
                 msg = ui.partial_message(channel, raffle["message_id"])
                 if msg is not None:
                     await msg.edit(embed=closed, view=None)
+                    await ui.unpin_message(msg, log_key=("raffle-unpin", guild.id), label=f"抽選 #{raffle['id']}")
             await ui.send_channel(
                 channel,
                 content=f"🎉 <@{winner}>" if winner else None,

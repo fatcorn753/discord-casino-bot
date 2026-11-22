@@ -271,6 +271,7 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
             msg = await interaction.original_response()
         if msg is not None and getattr(msg, "id", None):
             self._kyosai.set_motion_message(gid, motion_id, msg.channel.id, msg.id)
+            await ui.pin_message(msg, log_key=("kyosai-pin", gid), label=f"共済の動議 #{motion_id}")
 
     @group.command(name="投票", description="投票中の動議に、賛成か反対を入れる（あとから変えられる。口数で数える）")
     @app_commands.rename(choice="賛否", motion_id="番号")
@@ -303,8 +304,12 @@ class KyosaiCog(commands.Cog, IKyosaiVoteBridge):
         if not ok:
             closed = self._kyosai.motion(gid, motion_id)
             if closed is not None and closed["status"] != "open":
-                # 締めたあとのボタン（再起動の前に出た投稿など）: 投稿を結果に書き換えて、ボタンを外す
+                # 締めたあとのボタン（再起動の前に出た投稿など）: 投稿を結果に書き換えて、ボタンとピン留めを外す
                 await interaction.response.edit_message(embed=motion_embed(closed), view=None)
+                if getattr(interaction, "message", None) is not None:
+                    await ui.unpin_message(
+                        interaction.message, log_key=("kyosai-unpin", gid), label=f"共済の動議 #{motion_id}"
+                    )
                 await interaction.followup.send(f"動議 #{motion_id} は締め切られています。", ephemeral=True)
                 return
             await interaction.response.send_message(
@@ -368,7 +373,7 @@ async def _edit_open_post(guild: discord.Guild, m: dict[str, Any]) -> None:
 
 
 async def _edit_closed_post(guild: discord.Guild, m: dict[str, Any]) -> None:
-    """締めた動議の告知の投稿を、結果に書き換えてボタンを外す（投稿を覚えていないときは何もしない）。"""
+    """締めた動議の告知の投稿を、結果に書き換えてボタンとピン留めを外す（投稿を覚えていないときは何もしない）。"""
     msg = _motion_post(guild, m)
     if msg is None:
         return
@@ -376,6 +381,7 @@ async def _edit_closed_post(guild: discord.Guild, m: dict[str, Any]) -> None:
         await msg.edit(embed=motion_embed(m), view=None)
     except discord.HTTPException as exc:
         logthrottle.warn(("kyosai", m["id"]), f"共済の動議の投稿を直せません: motion={m['id']}: {exc!r}")
+    await ui.unpin_message(msg, log_key=("kyosai-unpin", guild.id), label=f"共済の動議 #{m['id']}")
 
 
 def _motion_result(motion: dict[str, Any]) -> tuple[str, str]:

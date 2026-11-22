@@ -1,9 +1,12 @@
 """画面の部品: 埋め込みの生成とペリカの表記。"""
 
 import datetime
-from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Hashable
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 import discord
+
+from cogs.shared import logthrottle
 
 if TYPE_CHECKING:
     from cogs.shared.bot import CasinoBot
@@ -54,6 +57,34 @@ def partial_message(channel: object, message_id: int) -> Any:
     """メッセージ編集・削除用の PartialMessage を取得する。"""
     getter = getattr(channel, "get_partial_message", None)
     return getter(message_id) if callable(getter) else None
+
+
+async def _toggle_pin(message: object, method: str, *, log_key: Optional[Hashable], label: str) -> bool:
+    fn = getattr(message, method, None)
+    if not callable(fn):
+        return False
+    try:
+        await cast(Any, fn)()
+        return True
+    except discord.NotFound:
+        if method == "unpin":
+            return False
+        logthrottle.warn(log_key or (method, label), f"{label}をピン留めできません: メッセージが見つかりません")
+        return False
+    except discord.HTTPException as exc:
+        action = "ピン留め" if method == "pin" else "ピン留め解除"
+        logthrottle.warn(log_key or (method, label), f"{label}を{action}できません: {exc!r}")
+        return False
+
+
+async def pin_message(message: object, *, log_key: Optional[Hashable] = None, label: str = "投稿") -> bool:
+    """メッセージをピン留めする（権限不足や上限などの失敗では落とさず False を返す）。"""
+    return await _toggle_pin(message, "pin", log_key=log_key, label=label)
+
+
+async def unpin_message(message: object, *, log_key: Optional[Hashable] = None, label: str = "投稿") -> bool:
+    """メッセージのピン留めを外す（権限不足や削除済みなどの失敗では落とさず False を返す）。"""
+    return await _toggle_pin(message, "unpin", log_key=log_key, label=label)
 
 
 def pelica(amount: int) -> str:

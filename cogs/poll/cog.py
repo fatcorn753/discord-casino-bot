@@ -85,6 +85,8 @@ class PollCog(commands.Cog, IPollButtonBridge):
             self._poll.set_message(gid, result, channel_id, message.id)
         except discord.HTTPException as exc:
             _log.warning(f"投票の投稿を記録できません: guild={gid} poll={result}: {exc!r}")
+        else:
+            await ui.pin_message(message, log_key=("poll-pin", gid), label=f"投票 #{result}")
 
     # ------------------------------ ボタン ------------------------------ #
     async def handle_button(self, interaction: discord.Interaction, act: str, poll_id: int) -> None:
@@ -127,7 +129,7 @@ class PollCog(commands.Cog, IPollButtonBridge):
         await self._refresh(interaction.guild, p)
 
     async def _refresh(self, guild: Optional[discord.Guild], p: dict[str, Any], *, closed: bool = False) -> None:
-        """投票の投稿の票数を直す。締め切ったときは、ボタンを外す。"""
+        """投票の投稿の票数を直す。締め切ったときは、ボタンとピン留めを外す。"""
         channel = guild.get_channel(p["channel_id"]) if guild else None
         msg = ui.partial_message(channel, p["message_id"]) if channel is not None and p["message_id"] else None
         if msg is None:
@@ -139,6 +141,10 @@ class PollCog(commands.Cog, IPollButtonBridge):
                 await msg.edit(embed=poll_embed(p))
         except discord.HTTPException as exc:
             logthrottle.warn(("poll", p["id"]), f"投票の投稿を直せません: poll={p['id']}: {exc!r}")
+        if closed:
+            await ui.unpin_message(
+                msg, log_key=("poll-unpin", guild.id if guild else p["id"]), label=f"投票 #{p['id']}"
+            )
 
     # ------------------------------ 締切の見回り（毎分） ------------------------------ #
     @tasks.loop(minutes=1)
