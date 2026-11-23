@@ -40,7 +40,7 @@ NOTICE_FORMATTERS: dict[str, NoticeFormatter] = {
         f"🕴️ 帝愛ファイナンスから種銭 {p['amount']:,}ペリカ が貸し付けられました。「これで取り返してこい…！」"
     ),
     "margin_losscut": lambda p: (
-        f"💥 口座の維持率が {p['losscut_ratio']:.0%} を下回り、"
+        f"💥 口座の余力が {p['losscut_ratio']:.0%} を下回り、"
         f"{p['symbol_name']}の{p['side_label']}が強制決済されました（損益 {p['profit']:+,}ペリカ）。"
     ),
     "p2p_sold": lambda p: (

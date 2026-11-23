@@ -1,4 +1,4 @@
-"""信用取引: 信用買い・クロスマージン（維持率・代用有価証券・連鎖ロスカット）。"""
+"""信用取引: 信用買い・クロスマージン（余力・代用有価証券・連鎖ロスカット）。"""
 
 import asyncio
 import itertools
@@ -89,7 +89,7 @@ def test_margin_equity_counts_longs_in_the_ranking(eco):
     assert {u: v for _, u, v in a.wallet.top(5)}[U] == INITIAL_BALANCE + 100
 
 
-# ----------------------------- 維持率と建玉の受付 ----------------------------- #
+# ----------------------------- 余力と建玉の受付 ----------------------------- #
 def test_a_position_that_leaves_the_ratio_below_the_open_limit_is_refused(eco, monkeypatch):
     monkeypatch.setattr(market, "RISK_K", OLD_NUMA_RISK_K)  # σ を下げる前の、NUMA の必要証拠金の大きさに合わせる
     a = eco.for_guild(G)
@@ -122,7 +122,7 @@ def test_collateral_cannot_be_sold_if_the_ratio_would_fall_below_the_open_limit(
     price = START["numa"]
     a.crypto.crypto_buy(U, 2_000, START["cs"], "cs")  # 担保評価 1,600
     a.bonds.bond_buy(U, "normal", 1_000, time.time())  # 担保評価 950
-    assert a.margin.long_open(U, 40_000, price, 5, "numa").ok  # 16,000ペリカ分・担保3,200・必要3,840 → 維持率 150%
+    assert a.margin.long_open(U, 40_000, price, 5, "numa").ok  # 16,000ペリカ分・担保3,200・必要3,840 → 余力 150%
     sold = a.crypto.crypto_sell(U, None, START["cs"], "cs")  # 売ると 108%
     assert not sold.ok and sold.reason.code == "crypto_collateral_locked" and a.crypto.crypto_holding(U, "cs")[0] > 0
     ok, why = a.bonds.bond_cancel(U, a.bonds.bond_list(U)["active"][0]["id"])  # 解約すると 125%
@@ -155,7 +155,7 @@ def test_chain_losscut_stops_as_soon_as_the_ratio_recovers(eco):
     assert a.margin.long_open(U, 100_000, 100.0, 5, "cs").ok  # 10,000ペリカ分・担保2,000
     assert a.margin.long_open(U, 2_000, 1000.0, 5, "teio").ok  # 2,000ペリカ分・担保400
     done = eco.margin.margin_losscut({"cs": 70.0, "teio": 1000.0})  # csだけ30%下落: 損失3,000で、口座全体は債務超過
-    assert [(s, side) for _, _, s, side, _ in done] == [("cs", "long")]  # 損の大きい cs を切れば、維持率が戻る
+    assert [(s, side) for _, _, s, side, _ in done] == [("cs", "long")]  # 損の大きい cs を切れば、余力が戻る
     assert a.margin.long_position(U, "teio")[0] > 0  # teio は切らない
 
 
@@ -186,12 +186,12 @@ def test_order_long_then_holdings_show_the_ratio_and_settle_closes_it(eco):
     eco.for_guild(G).wallet.credit(U, 20_000, "テスト")
     it = It()
     asyncio.run(invoke(MarketCog.order_margin, cog, it, choice("cs"), choice("long"), 2_000, choice(2)))
-    assert "信用買い" in it.sent[-1]["embed"].title and "維持率" in it.sent[-1]["embed"].description
+    assert "信用買い" in it.sent[-1]["embed"].title and "余力" in it.sent[-1]["embed"].description
     assert eco.for_guild(G).margin.long_position(U, "cs")[0] > 0
     it = It()
     asyncio.run(invoke(MarketCog.holdings, cog, it))
     desc = it.sent[-1]["embed"].description
-    assert "信用買い" in desc and "維持率" in desc
+    assert "信用買い" in desc and "余力" in desc
     assert ("long:cs", "🪙 CSトークン 信用買い") in cog.positions(U, G)
     it = It()
     asyncio.run(invoke(MarketCog.settle, cog, it, "long:cs", None))
@@ -206,7 +206,7 @@ def test_order_long_is_refused_when_ratio_is_too_low(eco, monkeypatch):
     eco.for_guild(G).wallet.credit(U, 20_000, "テスト")
     it = It()
     asyncio.run(invoke(MarketCog.order_margin, cog, it, choice("numa"), choice("long"), 800, choice(5)))
-    assert it.sent[-1]["ephemeral"] and "維持率" in it.sent[-1]["embed"].description
+    assert it.sent[-1]["ephemeral"] and "余力" in it.sent[-1]["embed"].description
     assert eco.for_guild(G).margin.long_positions(U) == []
 
 
