@@ -291,7 +291,7 @@ def test_total_asset_ranking_counts_the_company_without_crashing(eco):
     from domain.types import FIXED_KEYS, asset_groups
 
     found(eco)
-    rows = eco.assets.final_assets(None, NOON)
+    rows = eco.assets.net_assets(None, NOON)
     me = next(p for uid, _total, p in rows if uid == U)
     assert "company" in FIXED_KEYS and me["company"] == co.invested(1)
     assert asset_groups(me)["fixed"] >= co.invested(1)

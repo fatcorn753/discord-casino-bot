@@ -93,6 +93,7 @@ def build_services(
             shop=repos.shop,
             crypto=repos.crypto,
             bonds=repos.bonds,
+            assets=repos.assets,
         ),
         labor=LaborService(labor=repos.labor, clock=clock, relics=repos.relics),
         arena=ArenaService(arena=repos.arena, clock=clock),
@@ -124,5 +125,5 @@ def build_services(
         poll=PollService(polls=repos.polls, clock=clock),
         event=EventService(events=repos.events, clock=clock),
         admin=AdminService(wallet=repos.wallet, rtp=repos.rtp, pachinko=repos.pachinko),
-        ranking=RankingService(wallet=repos.wallet, crypto=repos.crypto, bonds=repos.bonds, assets=repos.assets),
+        ranking=RankingService(wallet=repos.wallet, assets=repos.assets),
     )

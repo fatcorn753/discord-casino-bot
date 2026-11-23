@@ -41,6 +41,14 @@ def balance_embed(card: BalanceCard, name: str, avatar_url: str) -> discord.Embe
         )
     if card.rank:
         e.add_field(name="このサーバーでの順位（純資産）", value=f"{card.rank[0]}位 / {card.rank[2]}人", inline=True)
+    if card.groups:  # 貸借対照表の区分。内訳を開かなくても、流動・固定・負債が分かるように
+        g = card.groups
+        e.add_field(
+            name="🧾 資産（貸借対照表）",
+            value=f"流動資産 {ui.pelica(g['liquid'])}　固定資産 {ui.pelica(g['fixed'])}\n"
+            f"総資産 {ui.pelica(g['gross'])} − 負債 {ui.pelica(g['liabilities'])} ＝ **純資産 {ui.pelica(g['net'])}**",
+            inline=False,
+        )
     owned, collection_total = shop.collection_value(card.inventory)
     if owned and prof["frozen"]:  # 借金中・延滞中・破産者は、ショップの品が差し押さえ中（完済してカタギに戻ると返る）
         e.add_field(

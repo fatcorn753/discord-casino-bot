@@ -212,7 +212,7 @@ class EconomyCog(commands.Cog):
             )
         view = RankingView(self._ranking, interaction.user.id, gid)
         await interaction.response.send_message(
-            embed=view.embed("normal"), view=view, allowed_mentions=discord.AllowedMentions.none()
+            embed=view.embed("net"), view=view, allowed_mentions=discord.AllowedMentions.none()
         )
 
     # ------------------- 自動で更新されるランキング掲示板（boards.py へ委譲） ------------------- #

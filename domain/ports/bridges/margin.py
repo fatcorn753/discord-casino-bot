@@ -32,7 +32,7 @@ def noop_wealthy_reader(guild_id: int) -> set[int]:
 
 
 def compose_valuation_sources(sources: tuple[ValuationSource, ...]) -> ValuationSource:
-    """複数の評価額ソースを順次束ねて純資産ランキング評価額を集計する合成ソースを返す（OCP）。"""
+    """複数の評価額ソースを順次束ねて金融純資産（富豪の判定）の評価額を集計する合成ソースを返す（OCP）。"""
 
     def collect(guild_id: int, totals: dict[int, int]) -> None:
         for source in sources:

@@ -183,7 +183,7 @@ class IWalletBalanceRepo(IGuildScopedRepo):
 
 
 class IWalletRankingReader(IGuildScopedRepo):
-    """サーバーの参加者・身分表示・純資産ランキング（読み取り）。"""
+    """サーバーの参加者・身分表示・金融純資産の順位（読み取り）。"""
 
     def touch_guild_user(self, guild_id: int, user_id: int) -> None:
         raise NotImplementedError
@@ -228,13 +228,13 @@ class IAssetRepo(IGuildScopedRepo):
     def asset_parts(self, now: float) -> dict[int, dict[str, int]]:
         raise NotImplementedError
 
-    def final_assets(
+    def net_assets(
         self, user_ids: set[int] | None = None, now: float | None = None
     ) -> list[tuple[int, int, dict[str, int]]]:
         raise NotImplementedError
 
-    def final_top(self, limit: int = 10, user_ids: set[int] | None = None) -> list[RankEntry]:
+    def net_top(self, limit: int = 10, user_ids: set[int] | None = None) -> list[RankEntry]:
         raise NotImplementedError
 
-    def final_rank_of(self, user_id: int, user_ids: set[int] | None = None) -> RankEntry | None:
+    def net_rank_of(self, user_id: int, user_ids: set[int] | None = None) -> RankEntry | None:
         raise NotImplementedError

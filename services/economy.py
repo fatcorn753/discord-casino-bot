@@ -15,6 +15,7 @@ from domain.ports.contracts import (
     WeeklyAward,
 )
 from domain.ports.repos import (
+    IAssetRepo,
     IBondRepo,
     ICryptoRepo,
     IEarningsRepo,
@@ -23,7 +24,7 @@ from domain.ports.repos import (
     IShopRepo,
     IWalletRepo,
 )
-from domain.types import INITIAL_BALANCE, DailyResult, TransferResult
+from domain.types import INITIAL_BALANCE, DailyResult, TransferResult, asset_groups
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,8 @@ class BalanceCard:
     """`/ペリカ 残高` に出す値（表示の組み立ては cogs/economy/embeds.py）。"""
 
     stats: UserRow
-    rank: RankEntry | None
+    rank: RankEntry | None  # 純資産（貸借対照表）での順位
+    groups: dict[str, int] | None  # 貸借対照表の区分の小計（domain.types.asset_groups）
     display_status: str
     profile: ProfileView
     has_frozen_equipment: bool  # 差し押さえ中の称号・カード・演出を、元は装備していたか
@@ -70,6 +72,7 @@ class EconomyService:
         shop: IShopRepo,
         crypto: ICryptoRepo,
         bonds: IBondRepo,
+        assets: IAssetRepo,
     ) -> None:
         self._wallet = wallet
         self._notices = notices
@@ -79,6 +82,7 @@ class EconomyService:
         self._shop = shop
         self._crypto = crypto
         self._bonds = bonds
+        self._assets = assets
 
     # ------------------------------ 残高・履歴（読み取り） ------------------------------ #
     def balance_of(self, guild_id: int, user_id: int) -> int:
@@ -102,13 +106,19 @@ class EconomyService:
         stats = wallet.stats(target_id) if target_id == viewer_id else wallet.peek_stats(target_id)
         if stats is None:
             return None
-        rank = wallet.rank_of(target_id)
+        # display_status は借金の利息（トイチ）を計上してから数えるので、純資産より先に読む
+        display_status = wallet.display_status(target_id)
+        ranked = self._assets.for_guild(guild_id).net_assets()
+        mine = next(((i + 1, parts) for i, (uid, _net, parts) in enumerate(ranked) if uid == target_id), None)
+        rank = (mine[0], ranked[mine[0] - 1][1], len(ranked)) if mine else None
+        groups = asset_groups(mine[1]) if mine else None
         profile = shop_repo.get_profile(target_id)  # カタギでないときは、装備が差し押さえ中で、空になって返る
         raw = shop_repo.get_profile(target_id, raw=True)
         return BalanceCard(
             stats=stats,
             rank=rank,
-            display_status=wallet.display_status(target_id),
+            groups=groups,
+            display_status=display_status,
             profile=profile,
             has_frozen_equipment=bool(profile["frozen"]) and any(raw[slot] for slot in shop_repo.SLOTS),
             inventory=shop_repo.inventory(target_id),

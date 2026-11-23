@@ -1,6 +1,7 @@
-"""ファイナル総資産: ペリカに換算できるものを、すべて合計した資産（ランキングと、人ごとの内訳）。
+"""貸借対照表（B/S）: ペリカに換算できる資産と負債を、人ごとに区分して集計する（ランキングと、人ごとの内訳）。
 
-`/ペリカ ランキング` の純資産（現金・預金・株・債券など）に、馬・持ち物・発掘品・地下作業の工具・預かり中のお金・貸し借りなどを足したもの。
+流動資産（現金・信託・株式・債券など）＋固定資産（馬・持ち物・発掘品・会社・地下作業の工具など）＝総資産、
+総資産 − 負債（帝愛への借金・個人からの借入）＝純資産。用語は docs/glossary.md を参照。
 各資産カテゴリの集計は独立したファクトリ関数が `AssetCollector`（Callable）を返す形に分離し、
 `compose_asset_collectors` で合成する（OCP）。
 """
@@ -155,7 +156,7 @@ def loan_asset_collector(db: EcoDb, loans: IOverdueLoanCollector) -> AssetCollec
 
 
 class AssetRepo(ScopedRepo, IAssetRepo):
-    """総資産内訳とファイナルランキング。"""
+    """資産の内訳（B/S）と、純資産のランキング。"""
 
     def __init__(
         self,
@@ -189,10 +190,10 @@ class AssetRepo(ScopedRepo, IAssetRepo):
             self._collector(g, add, now)
         return parts
 
-    def final_assets(
+    def net_assets(
         self, user_ids: set[int] | None = None, now: float | None = None
     ) -> list[tuple[int, int, dict[str, int]]]:
-        """[(ユーザーID, ファイナル総資産, 内訳)] を多い順に（同額はユーザーID順）。user_ids を渡すと、その人たちだけ。"""
+        """[(ユーザーID, 純資産, 内訳)] を多い順に（同額はユーザーID順）。user_ids を渡すと、その人たちだけ。"""
         out = [
             (uid, sum(p.values()), p)
             for uid, p in self.asset_parts(self._now() if now is None else now).items()
@@ -200,13 +201,13 @@ class AssetRepo(ScopedRepo, IAssetRepo):
         ]
         return sorted(out, key=lambda t: (-t[1], t[0]))
 
-    def final_top(self, limit: int = 10, user_ids: set[int] | None = None) -> list[RankEntry]:
-        """[(順位, ユーザーID, ファイナル総資産), ...]。"""
-        return [(i + 1, uid, total) for i, (uid, total, _p) in enumerate(self.final_assets(user_ids)[:limit])]
+    def net_top(self, limit: int = 10, user_ids: set[int] | None = None) -> list[RankEntry]:
+        """[(順位, ユーザーID, 純資産), ...]。"""
+        return [(i + 1, uid, total) for i, (uid, total, _p) in enumerate(self.net_assets(user_ids)[:limit])]
 
-    def final_rank_of(self, user_id: int, user_ids: set[int] | None = None) -> RankEntry | None:
-        """(順位, ファイナル総資産, 対象人数)。登録がなければ None。"""
-        ranked = self.final_assets(user_ids)
+    def net_rank_of(self, user_id: int, user_ids: set[int] | None = None) -> RankEntry | None:
+        """(順位, 純資産, 対象人数)。登録がなければ None。"""
+        ranked = self.net_assets(user_ids)
         for i, (uid, total, _p) in enumerate(ranked):
             if uid == user_id:
                 return i + 1, total, len(ranked)

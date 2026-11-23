@@ -24,26 +24,27 @@ class RankingView(ui.OwnerView):
         self.user_id = user_id
 
     def embed(self, mode: str) -> discord.Embed:
-        if mode == "final":
-            return ranking.build_final_embed(
+        if mode == "gross":
+            return ranking.build_embed(
                 self.repos,
                 None,
                 "🏆 このサーバーのランキング（総資産）",
                 self.user_id,
-                footer="総資産 = 純資産 + 馬・持ち物・発掘品・地下作業の工具・預かり中のお金・貸し借りなど、ペリカに換算できるもの全部",
+                footer="総資産 = 流動資産 + 固定資産（負債を引く前） ｜ 内訳は「自分の内訳」で",
+                measure="gross",
             )
         return ranking.build_embed(
             self.repos,
             None,
             "🏆 このサーバーのランキング（純資産）",
             self.user_id,
-            footer="純資産 = 現金 − 借金 + 信託・株・債券・オプションの評価額 ｜ ペリカはサーバーごとに別々です",
+            footer="純資産 = 総資産 − 負債（帝愛への借金・個人からの借入） ｜ ペリカはサーバーごとに別々です",
         )
 
     async def _switch(self, interaction: discord.Interaction, mode: str) -> None:
         await interaction.response.defer()
-        self.normal.style = discord.ButtonStyle.primary if mode == "normal" else discord.ButtonStyle.secondary
-        self.final.style = discord.ButtonStyle.primary if mode == "final" else discord.ButtonStyle.secondary
+        self.net.style = discord.ButtonStyle.primary if mode == "net" else discord.ButtonStyle.secondary
+        self.gross.style = discord.ButtonStyle.primary if mode == "gross" else discord.ButtonStyle.secondary
         embed = self.embed(mode)
         await interaction.edit_original_response(embed=embed, view=self)
 
@@ -51,12 +52,12 @@ class RankingView(ui.OwnerView):
         logging.getLogger(__name__).exception("ランキングの切り替えに失敗しました: %r", error)
 
     @discord.ui.button(label="純資産", emoji="🏆", style=discord.ButtonStyle.primary)
-    async def normal(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._switch(interaction, "normal")
+    async def net(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self._switch(interaction, "net")
 
     @discord.ui.button(label="総資産", emoji="💎", style=discord.ButtonStyle.secondary)
-    async def final(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._switch(interaction, "final")
+    async def gross(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self._switch(interaction, "gross")
 
     @discord.ui.button(label="自分の内訳", emoji="🧾", style=discord.ButtonStyle.secondary)
     async def mine(self, interaction: discord.Interaction, _button: discord.ui.Button):

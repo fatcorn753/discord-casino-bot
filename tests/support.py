@@ -178,12 +178,7 @@ def make_approval_cog(bot: Any):
 def make_ranking_repos(repos: RepositoryBundle):
     from services.ranking import RankingService
 
-    return RankingService(
-        wallet=repos.wallet,
-        crypto=repos.crypto,
-        bonds=repos.bonds,
-        assets=repos.assets,
-    )
+    return RankingService(wallet=repos.wallet, assets=repos.assets)
 
 
 def make_casino_deps(bot: Any):

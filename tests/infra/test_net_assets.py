@@ -1,4 +1,4 @@
-"""ファイナル総資産: 馬・持ち物・発掘品・競りの預かり・貸し借りまで数える。"""
+"""貸借対照表（B/S）の純資産: 馬・持ち物・発掘品・競りの預かり・貸し借りまで数える。"""
 
 import time
 
@@ -37,7 +37,7 @@ def give(eco, uid, item, qty=1):
 
 
 def parts(eco, uid):
-    return next(p for u, _t, p in eco.assets.final_assets() if u == uid)
+    return next(p for u, _t, p in eco.assets.net_assets() if u == uid)
 
 
 def test_items_count_at_price_and_relics_at_their_value(eco):
@@ -80,13 +80,13 @@ def test_loans_are_split_into_lent_asset_and_owed_liability(eco):
     assert parts(eco, A)["loans_lent"] == 1000 and parts(eco, B)["loans_owed"] == -1000
 
 
-def test_final_ranking_and_breakdown_embeds(eco):
+def test_net_ranking_and_breakdown_embeds(eco):
     relic = next(iter(shop.RELIC_VALUE))
     give(eco, B, relic, 3)
-    assert eco.assets.final_top(2)[0][1] == B
-    assert eco.assets.final_rank_of(A) == (2, 1000, 2)
+    assert eco.assets.net_top(2)[0][1] == B
+    assert eco.assets.net_rank_of(A) == (2, 1000, 2)
     repos = make_ranking_repos(eco)
-    text = must(ranking.build_final_embed(repos, None, "t", A).description)
+    text = must(ranking.build_embed(repos, None, "t", A).description)
     assert text.index(f"<@{B}>") < text.index(f"<@{A}>")
     d = ranking.build_breakdown_embed(repos, B, "b").description
     assert "発掘品" in must(d) and "総資産" in must(d)
@@ -111,13 +111,13 @@ def test_ranking_view_can_switch_back_and_forth(eco):
     view = RankingView(make_ranking_repos(eco), A, G)
 
     async def go():
-        await invoke(view.final, it)
-        await invoke(view.normal, it)
+        await invoke(view.gross, it)
+        await invoke(view.net, it)
 
     asyncio.run(go())
     import discord
 
-    assert view.normal.style == discord.ButtonStyle.primary and view.final.style == discord.ButtonStyle.secondary
+    assert view.net.style == discord.ButtonStyle.primary and view.gross.style == discord.ButtonStyle.secondary
     assert "総資産" in seen[0] and "純資産" in seen[1]
 
 
@@ -155,3 +155,64 @@ def test_asset_groups_match_gross_minus_liabilities_equals_net(eco):
     assert g["gross"] - g["liabilities"] == g["net"]
     assert g["liabilities"] == 400 + 500  # 帝愛への借金 + 借りている貸付
     assert g["net"] == sum(p.values())
+
+
+def test_gross_and_net_rankings_differ_by_liabilities(eco):
+    # A は借金 900 で総資産 1,900・純資産 1,000、B は借金なしで 1,500。総資産では A、純資産では B が上
+    eco.db.conn.execute("UPDATE users SET balance=1900, debt=900 WHERE guild_id=? AND user_id=?", (G, A))
+    eco.db.conn.execute("UPDATE users SET balance=1500 WHERE guild_id=? AND user_id=?", (G, B))
+    eco.db.conn.commit()
+    repos = make_ranking_repos(eco)
+    assert [(u, t) for u, t, _g in repos.ranked_assets("gross")] == [(A, 1900), (B, 1500)]
+    assert [(u, t) for u, t, _g in repos.ranked_assets("net")] == [(B, 1500), (A, 1000)]
+    net = must(ranking.build_embed(repos, None, "t").description)
+    gross = must(ranking.build_embed(repos, None, "t", measure="gross").description)
+    assert net.index(f"<@{B}>") < net.index(f"<@{A}>") and gross.index(f"<@{A}>") < gross.index(f"<@{B}>")
+    assert "**1,000ペリカ**（流動 1,900・負債 900）" in net  # 区分の小計が、内訳を開かずに見える
+    assert "**1,900ペリカ**（流動 1,900・負債 900）" in gross
+
+
+def test_balance_card_shows_bs_groups_and_net_rank(tmp_path):
+    import asyncio
+    from types import SimpleNamespace
+
+    from cogs.economy.cog import EconomyCog
+    from tests.support import make_economy_cog, make_test_bot
+
+    repos = open_repositories(str(tmp_path / "t.db"), strict=True)
+    a = repos.for_guild(G)
+    for uid, bal, debt in ((A, 1900, 900), (B, 1500, 0)):
+        a.wallet.balance(uid)
+        a.db.conn.execute("UPDATE users SET balance=?, debt=? WHERE guild_id=? AND user_id=?", (bal, debt, G, uid))
+    relic = next(iter(shop.RELIC_VALUE))
+    give(a, A, relic)
+    a.db.conn.commit()
+    cog = make_economy_cog(make_test_bot(repos=repos))
+    sent = []
+
+    async def send(*args, **kw):
+        sent.append(kw)
+
+    member = SimpleNamespace(id=A, display_name="a", display_avatar=SimpleNamespace(url="https://example.com/a.png"))
+    it = SimpleNamespace(user=member, guild=SimpleNamespace(id=G), response=SimpleNamespace(send_message=send))
+    asyncio.run(invoke(EconomyCog.balance, cog, it, None))
+    fields = {f.name: f.value for f in sent[0]["embed"].fields}
+    bs = fields["🧾 資産（貸借対照表）"]
+    worth = shop.RELIC_VALUE[relic]
+    assert f"固定資産 {worth:,}ペリカ" in bs and f"負債 {900:,}ペリカ" in bs
+    assert f"純資産 {1000 + worth:,}ペリカ" in bs
+    want_rank = 1 if 1000 + worth > 1500 else 2
+    assert fields["このサーバーでの順位（純資産）"] == f"{want_rank}位 / 2人"
+
+
+def test_net_ranking_counts_unbooked_debt_interest(eco):
+    from domain import teiai
+
+    two_days_ago = time.time() - 2 * 86400 - 60
+    eco.db.conn.execute(
+        "UPDATE users SET debt=1000, debt_interest_at=? WHERE guild_id=? AND user_id=?", (two_days_ago, G, A)
+    )
+    eco.db.conn.commit()
+    want = 1000 + int(1000 * teiai.DEBT_RATE_PER_DAY * 2)  # 2日分のトイチが、負債に入ってから並ぶ
+    (_uid, _net, g) = next(t for t in make_ranking_repos(eco).ranked_assets("net") if t[0] == A)
+    assert g["liabilities"] == want

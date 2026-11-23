@@ -210,7 +210,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
     # ランキング・統計・履歴                                              #
     # ------------------------------------------------------------------ #
     def _ranked(self, guild_id: int, user_ids: set[int] | None) -> list[tuple[int, int]]:
-        """[(ユーザーID, 純資産)] を多い順に。純資産は、残高から借金を引き、CS・預金・債券・オプションの評価額を足したもの。"""
+        """[(ユーザーID, 金融純資産)] を多い順に。金融純資産は、残高から借金を引き、CS・預金・債券・オプションの評価額を足したもの。"""
         with self._db.tx():
             targets = (
                 [r["user_id"] for r in self._all("SELECT user_id FROM users WHERE guild_id=? AND debt>0", (guild_id,))]
@@ -218,7 +218,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
                 else user_ids
             )
             for uid in targets:
-                # 残高表示と同じく、純資産にも溜まった利息（トイチ）を反映する
+                # 残高表示と同じく、金融純資産にも溜まった利息（トイチ）を反映する
                 self._debt.accrue_debt_interest_for(guild_id, uid, self._now())
             rows = self._all("SELECT user_id, balance - debt AS balance FROM users WHERE guild_id=?", (guild_id,))
             values: dict[int, int] = {}
@@ -231,7 +231,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
         return sorted(total, key=lambda t: (-t[1], t[0]))
 
     def wealthy_ids_for(self, guild_id: int) -> set[int]:
-        """富豪（純資産が WEALTHY_ASSETS 以上で、カタギ）のユーザーID。表示だけの身分で、ゲームの条件には使わない。"""
+        """富豪（金融純資産が WEALTHY_ASSETS 以上で、カタギ）のユーザーID。表示だけの身分で、ゲームの条件には使わない。"""
         return {
             uid
             for uid, total in self._ranked(guild_id, None)
@@ -243,7 +243,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
         return self.wealthy_ids_for(self._g())
 
     def display_status(self, user_id: int, wealthy: set[int] | None = None) -> str:
-        """表示用の身分。status() と同じで、カタギで純資産が WEALTHY_ASSETS 以上なら WEALTHY。wealthy を渡すと再計算しない。"""
+        """表示用の身分。status() と同じで、カタギで金融純資産が WEALTHY_ASSETS 以上なら WEALTHY。wealthy を渡すと再計算しない。"""
         gid = self._g()
         status = self._status_reader.status_for(gid, user_id, self._now())
         if status != teiai.KATAGI:
@@ -252,11 +252,11 @@ class WalletRepo(ScopedRepo, IWalletRepo):
         return teiai.WEALTHY if user_id in ids else teiai.KATAGI
 
     def top(self, limit: int = 10, user_ids: set[int] | None = None) -> list[RankEntry]:
-        """[(順位, ユーザーID, 純資産), ...]。このサーバーの口座だけで並べる。user_ids を渡すと、さらにその人たちに絞る。"""
+        """[(順位, ユーザーID, 金融純資産), ...]。このサーバーの口座だけで並べる。user_ids を渡すと、さらにその人たちに絞る。"""
         return [(i + 1, uid, bal) for i, (uid, bal) in enumerate(self._ranked(self._g(), user_ids)[:limit])]
 
     def rank_of(self, user_id: int, user_ids: set[int] | None = None) -> RankEntry | None:
-        """(順位, 純資産, 対象人数)。登録がなければ None。"""
+        """(順位, 金融純資産, 対象人数)。登録がなければ None。"""
         ranked = self._ranked(self._g(), user_ids)
         for i, (uid, bal) in enumerate(ranked):
             if uid == user_id:
