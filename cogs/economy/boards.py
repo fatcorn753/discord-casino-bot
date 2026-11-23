@@ -12,7 +12,7 @@ from services.ranking import RankingService
 
 
 class RankingView(ui.OwnerView):
-    """ランキングの切り替え（純資産 / 総資産）と、自分の資産の内訳。押せるのは、開いた本人だけ。"""
+    """ランキングの切り替え（純資産 / 流動資産）と、自分の資産の内訳。押せるのは、開いた本人だけ。"""
 
     def __init__(self, ranking_repos: RankingService, user_id: int, guild_id: int):
         super().__init__(
@@ -24,14 +24,14 @@ class RankingView(ui.OwnerView):
         self.user_id = user_id
 
     def embed(self, mode: str) -> discord.Embed:
-        if mode == "gross":
+        if mode == "liquid":
             return ranking.build_embed(
                 self.repos,
                 None,
-                "🏆 このサーバーのランキング（総資産）",
+                "🏆 このサーバーのランキング（流動資産）",
                 self.user_id,
-                footer="総資産 = 流動資産 + 固定資産（負債を引く前） ｜ 内訳は「自分の内訳」で",
-                measure="gross",
+                footer="流動資産 = 現金・預金・株式・債券など、すぐペリカにできる資産（馬・持ち物などの固定資産は含まない） ｜ 内訳は「自分の内訳」で",
+                measure="liquid",
             )
         return ranking.build_embed(
             self.repos,
@@ -44,7 +44,7 @@ class RankingView(ui.OwnerView):
     async def _switch(self, interaction: discord.Interaction, mode: str) -> None:
         await interaction.response.defer()
         self.net.style = discord.ButtonStyle.primary if mode == "net" else discord.ButtonStyle.secondary
-        self.gross.style = discord.ButtonStyle.primary if mode == "gross" else discord.ButtonStyle.secondary
+        self.liquid.style = discord.ButtonStyle.primary if mode == "liquid" else discord.ButtonStyle.secondary
         embed = self.embed(mode)
         await interaction.edit_original_response(embed=embed, view=self)
 
@@ -55,9 +55,9 @@ class RankingView(ui.OwnerView):
     async def net(self, interaction: discord.Interaction, _button: discord.ui.Button):
         await self._switch(interaction, "net")
 
-    @discord.ui.button(label="総資産", emoji="💎", style=discord.ButtonStyle.secondary)
-    async def gross(self, interaction: discord.Interaction, _button: discord.ui.Button):
-        await self._switch(interaction, "gross")
+    @discord.ui.button(label="流動資産", emoji="💧", style=discord.ButtonStyle.secondary)
+    async def liquid(self, interaction: discord.Interaction, _button: discord.ui.Button):
+        await self._switch(interaction, "liquid")
 
     @discord.ui.button(label="自分の内訳", emoji="🧾", style=discord.ButtonStyle.secondary)
     async def mine(self, interaction: discord.Interaction, _button: discord.ui.Button):

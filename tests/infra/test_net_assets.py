@@ -111,14 +111,14 @@ def test_ranking_view_can_switch_back_and_forth(eco):
     view = RankingView(make_ranking_repos(eco), A, G)
 
     async def go():
-        await invoke(view.gross, it)
+        await invoke(view.liquid, it)
         await invoke(view.net, it)
 
     asyncio.run(go())
     import discord
 
-    assert view.net.style == discord.ButtonStyle.primary and view.gross.style == discord.ButtonStyle.secondary
-    assert "総資産" in seen[0] and "純資産" in seen[1]
+    assert view.net.style == discord.ButtonStyle.primary and view.liquid.style == discord.ButtonStyle.secondary
+    assert "流動資産" in seen[0] and "純資産" in seen[1]
 
 
 def test_labor_tool_upgrades_count_toward_assets(eco):
@@ -216,3 +216,14 @@ def test_net_ranking_counts_unbooked_debt_interest(eco):
     want = 1000 + int(1000 * teiai.DEBT_RATE_PER_DAY * 2)  # 2日分のトイチが、負債に入ってから並ぶ
     (_uid, _net, g) = next(t for t in make_ranking_repos(eco).ranked_assets("net") if t[0] == A)
     assert g["liabilities"] == want
+
+
+def test_liquid_ranking_leaves_out_fixed_assets(eco):
+    # B は発掘品（固定資産）で純資産が上、流動資産（現金）だけなら同額で、ユーザーID順に A が上
+    relic = next(iter(shop.RELIC_VALUE))
+    give(eco, B, relic)
+    repos = make_ranking_repos(eco)
+    assert [u for u, _t, _g in repos.ranked_assets("net")] == [B, A]
+    assert [(u, t) for u, t, _g in repos.ranked_assets("liquid")] == [(A, 1000), (B, 1000)]
+    text = must(ranking.build_embed(repos, None, "t", measure="liquid").description)
+    assert text.index(f"<@{A}>") < text.index(f"<@{B}>") and "**1,000ペリカ**" in text

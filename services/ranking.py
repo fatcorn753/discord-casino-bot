@@ -29,7 +29,7 @@ class RankingService:
     def ranked_assets(self, measure: str, user_ids: set[int] | None = None) -> list[tuple[int, int, dict[str, int]]]:
         """[(ユーザーID, 金額, 区分の小計)] を多い順に（同額はユーザーID順）。
 
-        measure は "net"（純資産 = 総資産 − 負債）か "gross"（総資産 = 流動資産 + 固定資産）。
+        measure は "net"（純資産）・"liquid"（流動資産）・"gross"（総資産）のどれか（domain.types.asset_groups のキー）。
         """
         rows = [(uid, asset_groups(parts)) for uid, _net, parts in self.net_assets(user_ids)]
         return sorted(((uid, g[measure], g) for uid, g in rows), key=lambda t: (-t[1], t[0]))

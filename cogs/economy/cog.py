@@ -199,7 +199,7 @@ class EconomyCog(commands.Cog):
 
     @group.command(
         name="ランキング",
-        description="このサーバーで、ペリカの多い順に並べる（総資産・資産の内訳も見られる）",
+        description="このサーバーで、ペリカの多い順に並べる（流動資産・資産の内訳も見られる）",
     )
     @app_commands.rename(member="内訳")
     @app_commands.describe(member="この人の資産の内訳を見る（省略でランキング）")
