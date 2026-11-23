@@ -132,7 +132,7 @@ async def margin_order(
             f"証拠金 {ui.pelica(collateral)} × レバレッジ **{leverage}倍** → 建玉総額 約 {ui.pelica(target_notional)}"
             f"（実際は **{market.lots(units)}**・{ui.pelica(int(notional))}）\n"
             f"預ける担保 **{ui.pelica(margin)}**（価格で割り切れない分は切り捨てるので、証拠金以下）\n"
-            f"価格が{gain}です。口座ぜんたいの余力が {market.LOSSCUT_RATIO:.0%} を下回ると、損の大きい建玉から強制決済されます。",
+            f"価格が{gain}です。口座ぜんたいの担保余裕度が {market.LOSSCUT_RATIO:.0%} を下回ると、損の大きい建玉から強制決済されます。",
             f"{label}する",
         )
         if reply is None:

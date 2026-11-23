@@ -598,7 +598,7 @@ def test_short_commands(cog):
     assert cog.bot.repos.for_guild(G).margin.short_position(U)[0] == int(1_000 * 2 * 1_000 // price)
     it = It()
     run(invoke(MarketCog.holdings, cog, it))
-    assert "空売り" in it.sent[-1]["embed"].description and "余力" in it.sent[-1]["embed"].description
+    assert "空売り" in it.sent[-1]["embed"].description and "担保余裕度" in it.sent[-1]["embed"].description
     it = It()
     run(orders.margin_close(cog, as_interaction(it), "short", "cs"))
     assert (
