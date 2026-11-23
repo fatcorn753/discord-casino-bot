@@ -191,7 +191,7 @@ def test_ranking_counts_crypto_value_so_buying_does_not_drop_the_rank(tmp_path):
     assert [u for _, u, _ in a.wallet.top(10)] == [2, 1]
 
 
-def test_ranking_embed_shows_total_and_crypto_part(tmp_path):
+def test_ranking_embed_shows_total_and_bs_groups(tmp_path):
     from cogs.shared import ranking
 
     eco = open_repositories(str(tmp_path / "t.db"), strict=True)
@@ -199,7 +199,7 @@ def test_ranking_embed_shows_total_and_crypto_part(tmp_path):
     eco.market.market_set(1.0, 1000.0, 0)
     a.crypto.crypto_buy(1, 2_000, 1000.0)
     text = ranking.build_embed(make_ranking_repos(a), None, "t").description
-    assert "うちCS" in must(text) and "3,000ペリカ" in must(text)
+    assert "3,000ペリカ**（流動 3,000）" in must(text)
 
 
 def test_daily_is_1000_every_6_hours_and_next_time_is_stated(tmp_path, monkeypatch):

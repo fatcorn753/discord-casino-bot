@@ -24,6 +24,7 @@ from domain.ports.contracts import (
 )
 from domain.ports.repos import (
     IArenaRepo,
+    IAssetRepo,
     IAuctionRepo,
     IBondRepo,
     ICryptoRepo,
@@ -286,6 +287,7 @@ def test_economy_horse_and_labor_services_work_with_narrow_stubs():
         shop=cast(IShopRepo, None),
         crypto=cast(ICryptoRepo, None),
         bonds=cast(IBondRepo, None),
+        assets=cast(IAssetRepo, None),
     )
     assert econ_svc.claim_daily(10, 1, clock.now(), 0).result.ok
     assert econ_svc.backfill_weekly() == 7
