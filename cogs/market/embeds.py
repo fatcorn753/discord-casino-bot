@@ -29,7 +29,7 @@ def tax_line(res: Any) -> str:
 
 
 def margin_position_text(side: str, units: int, entry_value: float, margin: int, price: float) -> str:
-    """信用取引の建玉の状態（建値・いまの価格・損益・担保）。強制決済は口座ぜんたいの維持率で決まる。"""
+    """信用取引の建玉の状態（建値・いまの価格・損益・担保）。強制決済は口座ぜんたいの余力で決まる。"""
     avg = entry_value * market.UNIT / units
     pnl = market.margin_pnl(side, units, entry_value, price)
     pct = (avg - price) / avg * 100 if side == "short" else (price - avg) / avg * 100
@@ -41,13 +41,13 @@ def margin_position_text(side: str, units: int, entry_value: float, margin: int,
 
 
 def margin_ratio_text(status: MarginStatus) -> str:
-    """口座の維持率の表示（🟢 150%以上 / 🟡 強制決済ラインの手前 / 🔴 強制決済の対象）。建玉がなければ空文字。"""
+    """口座の余力の表示（🟢 150%以上 / 🟡 強制決済ラインの手前 / 🔴 強制決済の対象）。建玉がなければ空文字。"""
     ratio = status["ratio"]
     if ratio is None:
         return ""
     mark = "🟢" if ratio >= 1.5 else "🟡" if ratio >= market.OPEN_RATIO else "🔴"
     return (
-        f"{mark} **口座の維持率 {ratio:.0%}**　有効証拠金 {ui.pelica(int(status['equity']))} ÷ 必要証拠金 {ui.pelica(math.ceil(status['required']))}\n"
+        f"{mark} **口座の余力 {ratio:.0%}**　有効証拠金 {ui.pelica(int(status['equity']))} ÷ 必要証拠金 {ui.pelica(math.ceil(status['required']))}\n"
         f"（{market.LOSSCUT_RATIO:.0%} を下回ると、損の大きい建玉から強制決済。現物・債券は担保に数えます）"
     )
 

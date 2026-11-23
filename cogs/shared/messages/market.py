@@ -43,7 +43,7 @@ MARKET_FAILURES: dict[str, FailureFormatter] = {
     "crypto_insufficient_balance": lambda p: f"ペリカが足りません（残高 {p['balance']:,}ペリカ）。",
     "crypto_amount_too_small": "その金額では 0.001枚も買えません。金額を増やしてください。",
     "crypto_collateral_locked": lambda p: (
-        f"信用取引の担保になっているので、売れません（売ると維持率が {p['ratio']:.0%}・{p['open_ratio']:.0%} 以上が必要）。"
+        f"信用取引の担保になっているので、売れません（売ると余力が {p['ratio']:.0%}・{p['open_ratio']:.0%} 以上が必要）。"
         "先に建玉を決済してください。"
     ),
     "crypto_not_held": lambda p: f"{p['name']}を持っていません。",
@@ -64,7 +64,7 @@ MARKET_FAILURES: dict[str, FailureFormatter] = {
         f"担保が足りません（{p['need']:,}ペリカ必要・残高 {p['balance']:,}ペリカ）。"
     ),
     "margin_ratio_too_low": lambda p: (
-        f"口座の維持率が足りなくなります（建てると {p['ratio']:.0%}・{p['open_ratio']:.0%} 以上が必要）。"
+        f"口座の余力が足りなくなります（建てると {p['ratio']:.0%}・{p['open_ratio']:.0%} 以上が必要）。"
         "証拠金を減らすか、レバレッジを下げるか、現物や債券を担保に持ってください。"
     ),
     "margin_not_open": lambda p: f"{p['label']}を建てていません。",
