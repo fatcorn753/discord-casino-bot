@@ -29,7 +29,7 @@ def build_embed(
 ) -> discord.Embed:
     """上位 TOP_N 人のランキングの埋め込みを作る。guild_ids を渡すと、その人たちの中での順位。
 
-    measure は "net"（純資産 = 総資産 − 負債）か "gross"（総資産 = 流動資産 + 固定資産）。
+    measure は "net"（純資産）・"liquid"（流動資産）・"gross"（総資産）のどれか（domain.types.asset_groups のキー）。
     viewer_id を渡すと、その人が圏外のときに、自分の順位を最後に足す。
     """
     ranked = repos.ranked_assets(measure, guild_ids)
