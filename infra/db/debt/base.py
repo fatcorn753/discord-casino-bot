@@ -69,7 +69,7 @@ class DebtRepo(ScopedRepo, IDebtRepo):
             )
             if row is None:
                 return teiai.KATAGI
-            if row["bankrupt_at"] is not None and row["debt"] > 0:
+            if row["bankrupt_at"] is not None and row["blacklist_until"] is None and row["debt"] > 0:
                 return teiai.BANKRUPT
             if row["debt"] > 0 or self._loans.has_overdue_for(guild_id, user_id):
                 return teiai.UNDERGROUND
@@ -79,15 +79,17 @@ class DebtRepo(ScopedRepo, IDebtRepo):
         return self.status_for(self._g(), user_id, self._now() if now is None else now)
 
     def loan_blacklisted_for(self, guild_id: int, user_id: int, now: float) -> bool:
-        """破産のブラックリストの間か（貸付を借りられない）。"""
+        """破産のブラックリストの間か（貸付・種銭・帝愛の信用を使えない）。"""
         with self._lock:
             row = self._one(
-                "SELECT debt, bankrupt_at, blacklist_until FROM users WHERE guild_id=? AND user_id=?",
+                "SELECT bankrupt_at, blacklist_until FROM users WHERE guild_id=? AND user_id=?",
                 (guild_id, user_id),
             )
         if row is None or row["bankrupt_at"] is None:
             return False
-        return row["debt"] > 0 or row["blacklist_until"] is None or now < row["blacklist_until"]
+        if row["blacklist_until"] is None:
+            return True
+        return now < row["blacklist_until"]
 
     def loan_blacklisted(self, user_id: int, now: float | None = None) -> bool:
         return self.loan_blacklisted_for(self._g(), user_id, self._now() if now is None else now)
