@@ -47,6 +47,14 @@ _TRANSFER = get_catalogs().economy().transfer
 NONE = discord.AllowedMentions.none()
 
 
+async def _note(interaction: discord.Interaction, text: str) -> None:
+    """配信者だけに見える案内。"""
+    try:
+        await interaction.followup.send(text, ephemeral=True)
+    except discord.HTTPException as exc:
+        _log.warning(f"配信者への案内を送れません: {exc!r}")
+
+
 class StreamCog(commands.Cog, IStreamButtonBridge):
     def __init__(
         self,
@@ -99,6 +107,47 @@ class StreamCog(commands.Cog, IStreamButtonBridge):
             self._stream.set_message(gid, result, channel_id, message.id)
         except discord.HTTPException as exc:
             _log.warning(f"配信パネルの投稿を記録できません: guild={gid} stream={result}: {exc!r}")
+        await self._setup_voice(interaction, gid, result, has_url=bool(url))
+
+    async def _setup_voice(self, interaction: discord.Interaction, gid: int, stream_id: int, *, has_url: bool) -> None:
+        """配信している場所（ボイスチャンネル）を決めて、パネルに出す。
+
+        配信者が VC にいれば、そこを場所にする。いなくて外の URL もなければ、Discord で配信する用の VC を作る
+        （配信を閉じたら消す）。パネルは先に出しておき、場所はあとから書き足す（VC を作るのを待つと、
+        Discord の応答の期限（3秒）を過ぎることがあるため）。
+        """
+        user = interaction.user
+        state = getattr(user, "voice", None)  # サーバーのメンバーなら、いま入っている VC がわかる
+        voice = state.channel if state is not None else None
+        created = False
+        if voice is None and not has_url and interaction.guild is not None:
+            here = interaction.channel
+            category = here.category if isinstance(here, discord.TextChannel) else None
+            try:
+                voice = await interaction.guild.create_voice_channel(
+                    f"📺 {user.display_name}の配信"[:100], category=category, reason="/配信 開始（配信用の VC）"
+                )
+                created = True
+            except discord.HTTPException as exc:  # Forbidden（チャンネルの管理の権限がない）も含む
+                _log.warning(f"配信用の VC を作れません: guild={gid} stream={stream_id}: {exc!r}")
+                await _note(
+                    interaction,
+                    "配信用のボイスチャンネルを作れませんでした（Bot に「チャンネルの管理」の権限が要ります）。"
+                    "ボイスチャンネルに入ってから `/配信 開始` すると、そこを場所としてパネルに出します。",
+                )
+                return
+        if voice is None:
+            return
+        self._stream.set_voice(gid, stream_id, voice.id, created)
+        s = self._stream.get(gid, stream_id)
+        if s is not None:
+            await self._refresh(interaction.guild, s)
+        if created:
+            await _note(
+                interaction,
+                f"配信用のボイスチャンネル {voice.mention} を作りました。入って画面共有してください。"
+                "配信を終えると、このチャンネルは消えます。",
+            )
 
     # ------------------------------ パネルのボタン ------------------------------ #
     async def handle_button(self, interaction: discord.Interaction, act: str, stream_id: int) -> None:
@@ -277,6 +326,19 @@ class StreamCog(commands.Cog, IStreamButtonBridge):
         s = self._stream.get(guild.id, stream_id) if guild else None
         if s is not None:
             await self._refresh(guild, s)
+            await self._remove_voice(guild, s)
+
+    async def _remove_voice(self, guild: discord.Guild | None, s: StreamView) -> None:
+        """Bot が作った配信用の VC を消す（配信者が入っていた VC は消さない）。"""
+        if guild is None or not s["created_vc"] or not s["voice_channel_id"]:
+            return
+        channel = guild.get_channel(s["voice_channel_id"])
+        if channel is None:
+            return
+        try:
+            await channel.delete(reason="配信が終わったので、配信用の VC を消す")
+        except discord.HTTPException as exc:
+            logthrottle.warn(("stream", s["id"]), f"配信用の VC を消せません: stream={s['id']}: {exc!r}")
 
     # ------------------------------ 時間切れの見回り（毎分） ------------------------------ #
     @tasks.loop(minutes=1)
@@ -294,6 +356,7 @@ class StreamCog(commands.Cog, IStreamButtonBridge):
             if voided is not None:
                 await self._announce_result(guild, voided)
             await self._refresh(guild, s)
+            await self._remove_voice(guild, s)
 
 
 async def setup(bot: "CasinoBot") -> None:

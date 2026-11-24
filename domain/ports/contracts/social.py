@@ -559,6 +559,8 @@ class StreamRow(TypedDict):
     tips: int  # スパチャの合計（配信者が受け取った額）
     tip_count: int
     status: str  # live / ended
+    voice_channel_id: int  # 配信している Discord のボイスチャンネル（なければ 0）
+    created_vc: int  # 1 なら Bot が作った VC（配信を閉じたら消す）
 
 
 class StreamRoundView(TypedDict):

@@ -30,6 +30,9 @@ class StreamService:
     def set_message(self, guild_id: int, stream_id: int, channel_id: int, message_id: int) -> None:
         self._streams.for_guild(guild_id).stream_set_message(stream_id, channel_id, message_id)
 
+    def set_voice(self, guild_id: int, stream_id: int, voice_channel_id: int, created: bool) -> None:
+        self._streams.for_guild(guild_id).stream_set_voice(stream_id, voice_channel_id, created)
+
     def get(self, guild_id: int, stream_id: int) -> StreamView | None:
         return self._streams.for_guild(guild_id).stream_get(stream_id)
 

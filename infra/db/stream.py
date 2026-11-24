@@ -95,6 +95,14 @@ class StreamRepo(ScopedRepo, IStreamRepo):
                 (channel_id, message_id, self._g(), stream_id),
             )
 
+    def stream_set_voice(self, stream_id: int, voice_channel_id: int, created: bool) -> None:
+        """配信している場所（ボイスチャンネル）を記録する。created は Bot が作った VC か（閉じたら消す）。"""
+        with self._db.tx():
+            self._conn.execute(
+                "UPDATE streams SET voice_channel_id=?, created_vc=? WHERE guild_id=? AND id=?",
+                (voice_channel_id, int(created), self._g(), stream_id),
+            )
+
     def stream_add_tip(self, stream_id: int, amount: int) -> None:
         """スパチャの合計に足す（お金の移動は、送金で済んでいる）。"""
         with self._db.tx():

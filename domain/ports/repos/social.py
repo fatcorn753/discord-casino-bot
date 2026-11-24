@@ -86,6 +86,9 @@ class IStreamRepo(IGuildScopedRepo):
     def stream_set_message(self, stream_id: int, channel_id: int, message_id: int) -> None:
         raise NotImplementedError
 
+    def stream_set_voice(self, stream_id: int, voice_channel_id: int, created: bool) -> None:
+        raise NotImplementedError
+
     def stream_get(self, stream_id: int) -> StreamView | None:
         raise NotImplementedError
 

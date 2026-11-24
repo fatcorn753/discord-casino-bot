@@ -28,6 +28,8 @@ def panel_embed(s: StreamView) -> discord.Embed:
     """配信パネル。配信中はスパチャの合計と、いまの勝負の賭けの様子を出す。"""
     live = s["status"] == "live"
     lines = [f"配信者: <@{s['streamer']}>"]
+    if live and s["voice_channel_id"]:
+        lines.append(f"📍 場所: <#{s['voice_channel_id']}>")
     if s["url"]:
         lines.append(f"📺 {s['url']}")
     lines.append(f"💸 スパチャ **{ui.pelica(s['tips'])}**（{s['tip_count']:,}件）")
