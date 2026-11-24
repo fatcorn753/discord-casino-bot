@@ -236,6 +236,8 @@ def test_market_listing_appears_on_the_teiai_shelf_and_can_be_bought(eco, monkey
     assert "帝愛の出品" in must(e.fields[0].name) and "闇市品" in text and "未鑑定" in text
     select = next(c for c in view.children if isinstance(c, discord.ui.Select) and c.placeholder == "買う品を選ぶ")
     assert f"tm:{lid}" in [o.value for o in select.options]
+    buy = [c for c in view.children if isinstance(c, discord.ui.Button) and (c.label or "").startswith("🛒 購入")]
+    assert buy, "帝愛の出品だけの日も、購入ボタンが出る"
     it = FakeInteraction()
     asyncio.run(shop_actions.buy_teiai_market(cog, as_interaction(it), lid, 1, confirm_fn=_yes))
     title = it.sent[-1]["embed"].title
