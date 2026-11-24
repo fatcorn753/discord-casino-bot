@@ -62,10 +62,11 @@ def no_events(request, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_teiai_market(request, monkeypatch):
-    """帝愛の出品(#72)がランダムに棚へ並んで、ショップの画面のテストが時刻で変わらないよう、既定では出さない。"""
+    """帝愛の出品(#72)と発掘品の競りがランダムに並んで、画面のテストが時刻で変わらないよう、既定では出さない。"""
     if request.node.get_closest_marker("real_market"):
         return
     monkeypatch.setattr(teiai, "MARKET_SLOTS_PER_DAY", 0)
+    monkeypatch.setattr(teiai, "RELIC_AUCTION_PER_DAY", 0)  # 帝愛の発掘品の競りも、既定では出さない
 
 
 @pytest.fixture(autouse=True)

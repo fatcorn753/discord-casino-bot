@@ -750,3 +750,61 @@ def test_ended_posts_are_synced_once_even_when_the_listing_was_pulled_back_elsew
     n = len(chan.edits)
     asyncio.run(cog._settle_guild(guild))
     assert len(chan.edits) == n  # 二度目は、書き換えない
+
+
+# ----------------------------- 帝愛の発掘品の競り ----------------------------- #
+@pytest.fixture
+def daily(monkeypatch):
+    monkeypatch.setattr(teiai, "RELIC_AUCTION_PER_DAY", 1)
+
+
+def test_teiai_lists_one_relic_auction_a_day_at_its_reference_value(eco, daily):
+    import random
+
+    from domain import teiai_market as tm
+
+    [lid] = eco.p2p.p2p_teiai_daily(NOW, random.Random(1))
+    row = eco.p2p.p2p_get(lid)
+    assert row["seller_id"] == tm.TEIAI_SELLER and row["mode"] == "auction" and row["kind"] == "item"
+    assert row["ref"] in shop.RELIC_VALUE and row["price"] == shop.RELIC_VALUE[row["ref"]]  # 開始価格は定価
+    assert row["end_at"] == NOW + teiai.RELIC_AUCTION_HOURS * 3600
+    assert eco.p2p.p2p_teiai_daily(NOW + 60, random.Random(2)) == []  # 同じ日は、もう出さない
+    assert len(eco.p2p.p2p_teiai_daily(tm.day_start(NOW) + 86400, random.Random(3))) == 1  # 次の日は、また出す
+
+
+def test_teiai_relic_auction_pays_the_bank_and_skips_the_pair_limit(eco, daily):
+    import random
+
+    eco.wallet.credit(B, 200_000, "テスト")
+    [lid] = eco.p2p.p2p_teiai_daily(NOW, random.Random(1))
+    relic = eco.p2p.p2p_get(lid)["ref"]
+    bid = p2p.PAIR_DAILY_LIMIT + 1_000  # 帝愛からなら、同じ2人の1日の上限を超えても買える
+    assert eco.p2p.p2p_bid(B, lid, bid, NOW + 10)[0]
+    b0, cash0 = eco.wallet.balance(B), eco.bank.bank_status(time.time())["cash"]
+    assert [res for _r, res in eco.p2p.p2p_settle(NOW + 2 * 86400)] == ["sold"]
+    assert eco.shop.inventory(B)[relic] == 1 and eco.wallet.balance(B) == b0  # 入札の時点で払っている
+    assert eco.bank.bank_status(time.time())["cash"] - cash0 == pytest.approx(bid, abs=1)  # 代金は全部、帝愛銀行へ
+
+
+def test_unsold_teiai_relic_auction_just_disappears(eco, daily):
+    import random
+
+    from domain import teiai_market as tm
+
+    [lid] = eco.p2p.p2p_teiai_daily(NOW, random.Random(1))
+    assert [res for _r, res in eco.p2p.p2p_settle(NOW + 2 * 86400)] == ["expired"]
+    assert eco.p2p.p2p_get(lid)["status"] == "expired"
+    assert not eco.db.conn.execute("SELECT 1 FROM inventory WHERE user_id=?", (tm.TEIAI_SELLER,)).fetchall()
+
+
+def test_settle_loop_posts_the_teiai_auction_with_teiai_as_the_seller(cog, eco, daily, monkeypatch):
+    chan = PostChan()
+    monkeypatch.setattr(p2p_cog, "announce_channel", lambda g, e: chan)
+    guild = _guild(chan)
+    asyncio.run(cog._settle_guild(guild))
+    asyncio.run(cog._settle_guild(guild))  # 2回目の確認では、もう出さない
+    assert len(chan.sent) == 1
+    text = str(chan.sent[0]["embed"].to_dict())
+    assert "帝愛" in text and "<@0>" not in text
+    row = eco.p2p.p2p_active(mode="auction")[0]
+    assert "🕴️ 帝愛" in p2p_cog.entry_text(row, "x") and "<@0>" not in p2p_cog.entry_text(row, "x")

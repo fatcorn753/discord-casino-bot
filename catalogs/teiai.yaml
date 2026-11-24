@@ -31,6 +31,10 @@ market_fixed_qty: [2, 4]           # 定価販売の数（消耗品のとき。�
 market_black_prob: 0.2             # 闇市品（中身が未鑑定）になる確率
 market_black_worse: 0.07           # 闇市品の中身が、もっと安い品だった確率
 market_black_better: 0.03          # 闇市品の中身が、もっと高い品だった確率（残りは表示どおり）
+# 帝愛の発掘品の競り。1日（UTC）に1回、帝愛の競売（プレイヤー間の市場）に発掘品を1つ、競りで出す。
+# 品は掘れる確率に比例して選び、開始価格は目安の価値（定価）。入札で上がる。売上は帝愛銀行の収入
+relic_auction_per_day: 1          # 1日に出す数（0 で出さない）
+relic_auction_hours: 24           # 競りの長さ（時間）
 seize_rate: 0.50
 
 debt_rate_per_day: 0.01

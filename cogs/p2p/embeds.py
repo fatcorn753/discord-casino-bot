@@ -6,6 +6,7 @@ from cogs.shared import ui
 from cogs.shared.horse_display import stat_lines
 from domain import p2p
 from domain import shop as shop_mod
+from domain import teiai_market as tm
 from domain.ports.contracts import HorseRow, ListingRow
 
 ENDED_TEXT = {
@@ -30,6 +31,11 @@ def line_of(r: ListingRow, label: str) -> str:
     return f"`#{r['id']}` {label}　{price_text(r)}　{'締切' if r['mode'] == 'auction' else '期限'} {when(r['end_at'])}"
 
 
+def seller_text(r: ListingRow) -> str:
+    """出品者の表示。帝愛の出品（発掘品の競り）なら、メンションではなく「帝愛」。"""
+    return "🕴️ 帝愛" if r["seller_id"] == tm.TEIAI_SELLER else f"<@{r['seller_id']}>"
+
+
 def entry_text(r: ListingRow, label: str) -> str:
     """一覧の1件（2行）。何を・いくらで・どの方式で・誰が・いつまでか。競りは、入札の有無も。"""
     if r["mode"] == "fixed":
@@ -39,12 +45,12 @@ def entry_text(r: ListingRow, label: str) -> str:
     else:
         how = f"🔨 競り 開始 **{ui.pelica(r['price'])}**（入札なし）"
     left = "締切" if r["mode"] == "auction" else "期限"
-    return f"`#{r['id']}` **{label}**　{how}\n　└ 出品 <@{r['seller_id']}>　{left} {when(r['end_at'])}"
+    return f"`#{r['id']}` **{label}**　{how}\n　└ 出品 {seller_text(r)}　{left} {when(r['end_at'])}"
 
 
 def detail_embed(r: ListingRow, label: str, horse: HorseRow | None = None) -> discord.Embed:
     lines = [
-        f"出品者: <@{r['seller_id']}>",
+        f"出品者: {seller_text(r)}",
         price_text(r),
         f"{'締切' if r['mode'] == 'auction' else '期限'}: {when(r['end_at'])}",
     ]
@@ -86,7 +92,7 @@ def post_embed(r: ListingRow, label: str, horse: HorseRow | None = None) -> disc
         body = text.format(label=label, buyer=r["buyer_id"], price=ui.pelica(r["sold_price"]))
         return ui.embed(f"{title}: {label}", body, ui.OK if sold else ui.INFO)
     e = detail_embed(r, label, horse)
-    e.title = f"📣 出品: {label}"
+    e.title = f"{'🕴️ 帝愛の出品' if r['seller_id'] == tm.TEIAI_SELLER else '📣 出品'}: {label}"
     e.description = (
         e.description or ""
     ) + "\n\n下の「🔍 見る・買う・入札」で、買えます（`/ショップ` → 「🕴️ 帝愛の競売」からも）。"

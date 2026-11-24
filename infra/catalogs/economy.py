@@ -116,6 +116,8 @@ class TeiaiCatalog(TeiaiCatalogContract):
     market_black_prob: float = Field(ge=0, le=1)
     market_black_worse: float = Field(ge=0, le=1)
     market_black_better: float = Field(ge=0, le=1)
+    relic_auction_per_day: int = Field(ge=0)
+    relic_auction_hours: int = Field(ge=1)
     seize_rate: float = Field(gt=0, le=1)
     debt_rate_per_day: float = Field(ge=0)
     debt_interest_max_days: int = Field(gt=0)

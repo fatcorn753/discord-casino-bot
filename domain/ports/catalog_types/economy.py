@@ -88,6 +88,8 @@ class TeiaiCatalogContract:
     market_black_prob: float
     market_black_worse: float
     market_black_better: float
+    relic_auction_per_day: int
+    relic_auction_hours: int
     seize_rate: float
     debt_rate_per_day: float
     debt_interest_max_days: int
