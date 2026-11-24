@@ -80,7 +80,12 @@ class ActivityCog(commands.Cog):
             return
         self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
         app = build_app(
-            self.hub, SessionSigner(), discord_exchanger(client_id, secret, self._http), self.member_check, STATIC_DIR
+            self.hub,
+            SessionSigner(),
+            discord_exchanger(client_id, secret, self._http),
+            self.member_check,
+            STATIC_DIR,
+            client_id,
         )
         self._runner = web.AppRunner(app, access_log=None)  # URL に何も載せないが、念のためアクセスの記録は残さない
         await self._runner.setup()

@@ -46,7 +46,7 @@ async def member_check(guild_id, user_id, channel_id):
 def start(bot, signer=None):
     hub = Hub(make_casino_deps(bot))
     engine.add_register_hook(hub.on_register)
-    app = build_app(hub, signer or SessionSigner(), exchange, member_check)
+    app = build_app(hub, signer or SessionSigner(), exchange, member_check, client_id="123")
     return hub, TestClient(TestServer(app))
 
 
@@ -233,3 +233,19 @@ def test_cog_does_not_start_a_server_without_the_secret(bot):
 
     started, hooks = asyncio.run(scenario())
     assert not started and hooks == []
+
+
+def test_config_tells_the_client_id_and_static_files_are_served(bot, tmp_path):
+    (tmp_path / "index.html").write_text("<!doctype html><title>卓</title>", encoding="utf-8")
+    hub = Hub(make_casino_deps(bot))
+    app = build_app(hub, SessionSigner(), exchange, member_check, tmp_path, "123")
+
+    async def scenario():
+        async with TestClient(TestServer(app)) as client:
+            config = await (await client.get("/api/config")).json()
+            home = await (await client.get("/")).text()
+            missing = (await client.get("/../secret")).status
+            return config, home, missing
+
+    config, home, missing = asyncio.run(scenario())
+    assert config == {"client_id": "123"} and "卓" in home and missing == 404

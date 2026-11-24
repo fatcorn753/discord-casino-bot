@@ -1,5 +1,6 @@
 """Activity の画面のための HTTP サーバー（aiohttp。Bot と同じプロセスで動く）。
 
+- `GET /api/config`: 画面が Discord の SDK を始めるための client_id
 - `POST /api/token`: 認証（cogs/activity/auth.py）。成功したら access token と Bot のセッションを返す
 - `GET /ws`: WebSocket。最初のメッセージでセッションを名乗り、そのチャンネルのチンチロの卓の様子を受け取る。
   画面から送れるのは操作（卓を立てる・座る・立つ・始める・振る）だけで、出目とお金の処理は、すべてここで決める
@@ -156,8 +157,13 @@ def build_app(
     exchange: Exchanger,
     member_check: MemberCheck,
     static_dir: Path | None = None,
+    client_id: str = "",
 ) -> web.Application:
     app = web.Application(client_max_size=MAX_MESSAGE)
+
+    async def config(request: web.Request) -> web.Response:
+        # 画面が Discord の SDK を始めるのに使う（アプリケーション ID は公開の値）
+        return web.json_response({"client_id": client_id})
 
     async def token(request: web.Request) -> web.Response:
         try:
@@ -215,6 +221,7 @@ def build_app(
             hub.leave(client)
         return ws
 
+    app.router.add_get("/api/config", config)
     app.router.add_post("/api/token", token)
     app.router.add_get("/ws", ws_handler)
     if static_dir is not None and (static_dir / "index.html").is_file():
