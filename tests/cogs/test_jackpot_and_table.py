@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cogs.casino import chinchiro_table, common
+from cogs.casino import chinchiro_engine, chinchiro_table, common
 from domain.games import chinchiro as rules
 from domain.games import jackpot
 from domain.types import INITIAL_BALANCE
@@ -138,16 +138,14 @@ def test_pot_payouts_go_to_the_strongest_hand_minus_the_rake():
 
 
 def patch_table(monkeypatch, hands):
-    monkeypatch.setattr(chinchiro_table, "JOIN_SECONDS", 3600)  # 締切のタスクは走らせない
-    monkeypatch.setattr(chinchiro_table, "ROLL_SECONDS", 3600)
+    monkeypatch.setattr(chinchiro_engine, "JOIN_SECONDS", 3600)  # 締切のタスクは走らせない
+    monkeypatch.setattr(chinchiro_engine, "ROLL_SECONDS", 3600)
     it = iter(hands)
     monkeypatch.setattr(rules, "play_hand", lambda rng: next(it))
 
 
 def cancel(table):
-    for t in (table._task, table._roll_task):
-        if t:
-            t.cancel()
+    table.close()
 
 
 def test_table_pot_goes_to_the_strongest_roller(bot, monkeypatch):
@@ -158,21 +156,20 @@ def test_table_pot_goes_to_the_strongest_roller(bot, monkeypatch):
 
     async def scenario():
         table = must(await chinchiro_table.open_table(as_interaction(interaction(bot, 1, msg)), deps, 1_000))
-        assert await table.sit(as_interaction(interaction(bot, 2, msg))) is None
-        assert await table.sit(as_interaction(interaction(bot, 2, msg))) == "もう座っています。"
-        assert await table.sit(as_interaction(interaction(bot, 3, msg))) is None
+        assert await table.sit(2, "u2") is None
+        assert await table.sit(2, "u2") == "もう座っています。"
+        assert await table.sit(3, "u3") is None
         assert await table.stand(3)  # 始まる前は立てる（全額戻る）
         assert await table.roll(1) == "まだ始まっていません。"
         await table.play()
         await table.play()  # 二度目は何もしない
-        assert await table.sit(as_interaction(interaction(bot, 4, msg))) == "もう始まっています。"
+        assert await table.sit(4, "u4") == "もう始まっています。"
         assert await table.roll(4) == "この卓に座っていません。"
         assert await table.roll(2) is None
         assert await table.roll(2) == "もう振りました。"
         assert not table.all_rolled
-        assert await table.roll(1) is None
-        assert table.all_rolled
-        await table.finish()
+        assert await table.roll(1) is None  # 全員が振ったので、そのまま精算する
+        assert table.all_rolled and table.phase == chinchiro_engine.DONE
         await table.finish()  # 二度目は何もしない
         cancel(table)
         return table
@@ -195,7 +192,7 @@ def test_finish_auto_rolls_those_who_did_not_roll(bot, monkeypatch):
 
     async def scenario():
         table = must(await chinchiro_table.open_table(as_interaction(interaction(bot, 1, msg)), deps, 1_000))
-        assert await table.sit(as_interaction(interaction(bot, 2, msg))) is None
+        assert await table.sit(2, "u2") is None
         await table.play()
         assert await table.roll(1) is None
         await table.finish()  # 時間切れ: 2 は自動で振る
@@ -236,3 +233,143 @@ def test_empty_table_folds(bot, monkeypatch):
     run(scenario())
     assert "たたみました" in must(msg.edits[-1]["embed"].description)
     assert bot.repos.for_guild(G).wallet.balance(1) == INITIAL_BALANCE
+
+
+# --------------------- 卓の進め方（Discord に依存しない） --------------------- #
+def engine_table(deps, host=1, bet=1_000):
+    """Discord の投稿なしで卓を立てる（Activity の画面から立てるときと同じ形）。"""
+    table = chinchiro_engine.ChinchiroTable(deps, G, bet, host, 0)
+    ctx = common.begin_context(deps, G, host, f"u{host}", bet, chinchiro_engine.GAME)
+    assert isinstance(ctx, common.GameContext)
+    table.seat_host(ctx)
+    return table
+
+
+def test_engine_runs_without_discord_and_tells_listeners(bot, monkeypatch):
+    patch_table(monkeypatch, [hand(rules.ME, 6), hand(rules.ARASHI, 4)])
+    deps = make_casino_deps(bot)
+    seen = []
+
+    async def listener(table):
+        seen.append((table.phase, len(table.seats), len(table.rolls)))
+
+    async def scenario():
+        table = engine_table(deps)
+        table.listeners.append(listener)
+        assert await table.sit(2, "u2") is None
+        await table.play()
+        assert await table.roll(1) is None
+        assert await table.roll(2) is None  # 全員が振ったので、精算まで進む
+        table.close()
+        return table
+
+    table = run(scenario())
+    e = chinchiro_engine
+    assert seen == [(e.LOBBY, 2, 0), (e.ROLLING, 2, 0), (e.ROLLING, 2, 1), (e.DONE, 2, 2)]
+    assert table.winners == [2] and table.results[0].user_id == 2
+    assert table.results[0].net == int(1_000 * (1 - rules.TABLE_RAKE)) and table.results[1].net == -1_000
+
+
+def test_engine_keeps_going_when_a_listener_fails(bot, monkeypatch):
+    patch_table(monkeypatch, [hand(rules.ME, 2), hand(rules.ME, 5)])
+    deps = make_casino_deps(bot)
+
+    async def broken(table):
+        raise RuntimeError("表示に失敗")
+
+    async def scenario():
+        table = engine_table(deps)
+        table.listeners.append(broken)
+        assert await table.sit(2, "u2") is None
+        await table.play()
+        await table.finish()
+        table.close()
+        return table
+
+    assert run(scenario()).phase == chinchiro_engine.DONE
+
+
+def test_engine_sit_reports_why_it_could_not_seat(bot):
+    deps = make_casino_deps(bot)
+
+    async def scenario():
+        table = engine_table(deps)
+        poor = await table.sit(2, "u2")
+        deps.guild_repo.set_feature(G, "chinchiro", False)  # 管理者が止めた
+        stopped = await table.sit(3, "u3")
+        table.close()
+        return table, poor, stopped
+
+    table, poor, stopped = run(scenario())
+    assert poor is None  # 残高が足りる人は座れる
+    assert isinstance(stopped, common.BeginFailure) and stopped.title == "⏸️ 停止中"
+    assert set(table.seats) == {1, 2}
+
+
+def test_engine_sit_needs_enough_balance(bot):
+    deps = make_casino_deps(bot)
+
+    async def scenario():
+        table = engine_table(deps, bet=INITIAL_BALANCE)
+        eco = bot.repos.for_guild(G)
+        eco.wallet.balance(2)
+        with eco.db.tx():
+            eco.db.conn.execute("UPDATE users SET balance = 10 WHERE user_id = 2")
+        got = await table.sit(2, "u2")
+        table.close()
+        return got
+
+    got = run(scenario())
+    assert isinstance(got, common.BeginFailure) and got.title == "ペリカが足りません"
+
+
+# --------------------------- 卓のボタン --------------------------- #
+class Followup:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, *args, **kw):
+        self.sent.append((args, kw))
+
+
+def button_interaction(bot, uid, msg):
+    it = interaction(bot, uid, msg)
+    it.followup = Followup()
+    deferred = []
+
+    async def defer():
+        deferred.append(True)
+
+    it.response.defer = defer
+    it.response.is_done = lambda: bool(deferred or it.response.sent or it.response.edited)
+    return it
+
+
+def test_buttons_defer_then_edit_the_post(bot, monkeypatch):
+    patch_table(monkeypatch, [hand(rules.ME, 6), hand(rules.ME, 1)])
+    deps, msg = make_casino_deps(bot), Message()
+
+    async def scenario():
+        table = must(await chinchiro_table.open_table(as_interaction(interaction(bot, 1, msg)), deps, 1_000))
+        post = table.listeners[0]
+        assert isinstance(post, chinchiro_table.TablePost)
+        lobby = post.lobby
+        two = button_interaction(bot, 2, msg)
+        await lobby.sit.callback(as_interaction(two))
+        again = button_interaction(bot, 2, msg)
+        await lobby.sit.callback(as_interaction(again))
+        not_host = button_interaction(bot, 2, msg)
+        await lobby.begin.callback(as_interaction(not_host))
+        await lobby.begin.callback(as_interaction(button_interaction(bot, 1, msg)))
+        rolling = must(post.rolling)
+        for uid in (1, 2):
+            await rolling.roll.callback(as_interaction(button_interaction(bot, uid, msg)))
+        table.close()
+        return table, two, again, not_host, lobby, rolling
+
+    table, two, again, not_host, lobby, rolling = run(scenario())
+    assert not two.followup.sent  # 座れたら、投稿が書き換わるだけ
+    assert again.followup.sent[0][0] == ("もう座っています。",)
+    assert not_host.response.sent[0][0] == ("始められるのは、卓を立てた人だけです。",)
+    assert table.phase == chinchiro_engine.DONE and lobby.is_finished() and rolling.is_finished()
+    assert "u1** の総取り" in must(msg.edits[-1]["embed"].description) and msg.edits[-1]["view"] is None
