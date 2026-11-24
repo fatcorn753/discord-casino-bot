@@ -87,7 +87,8 @@ def test_premium_feeds_the_bank(eco):
     eco.bank.bank_deposit(A, 5_000, 1.0)
     before = eco.bank.bank_status(1.0)["cash"]
     ok, res = eco.options.option_buy(U, opt.PUT, "cs", 1_000, 1.0)
-    assert ok and eco.bank.bank_status(1.0)["cash"] == pytest.approx(before + res["cost"])
+    s = eco.bank.bank_status(1.0)
+    assert ok and s["cash"] == pytest.approx(before + res["cost"] - s["thermostat"]["burned"])
 
 
 def test_buy_rules(eco):
@@ -158,11 +159,13 @@ def test_the_bank_pays_only_what_it_has_and_never_creates_money(eco):
     cash = eco.bank.bank_status(1.0)["cash"]
     set_price(eco, "cs", 3000.0, ts=res["expiry"] - 10)  # 大当たり
     done = eco.options.option_settle(res["expiry"] + 1)
-    # 手元で足りない分は、帝愛共済の口の持ち主が負担する（#34）。それを超えては払わない
+    # 手元で足りない分は、熱浴の肩代わりと帝愛共済の口の持ち主が負担する（#32・#34）。それを超えては払わない
+    s = eco.bank.bank_status(res["expiry"] + 1)
     charged = eco.db.conn.execute(
         "SELECT kyosai_charged FROM teiai_bank WHERE guild_id=?", (eco.bank.guild_id,)
     ).fetchone()[0]
-    assert done[0]["paid"] <= cash + charged and eco.bank.bank_status(res["expiry"] + 1)["cash"] >= 0
+    assert done[0]["paid"] <= cash + s["thermostat"]["bailed"] + charged + 1
+    assert done[0]["paid"] < done[0]["gross"] and s["excess_unpaid"] > 0 and s["cash"] >= 0
 
 
 def test_winnings_above_the_premium_count_as_income_for_the_debt_withholding(eco):

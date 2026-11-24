@@ -98,7 +98,8 @@ def test_dividend_is_paid_once_a_day_by_units_without_going_through_the_thermost
     give(eco, A, TOTAL // 2)
     give(eco, B, TOTAL // 2)
     with eco.db.tx():
-        eco.bank.bank_income_for(G, 2_000_000, NOW)  # 負債なし・余剰がたっぷり
+        eco.bank.bank_income_for(G, 10_000, NOW)
+        eco.bank.bank_set_for(G, 2_000_000, 0)  # 負債なし・余剰がたっぷり（サーモスタットの熱量も残した状態で試す）
     assert eco.kyosai.kyosai_daily(NOW) is None  # 初回は時計を合わせるだけ
     a0, b0 = eco.wallet.balance(A), eco.wallet.balance(B)
     load0 = bank_row(eco, "thermo_load")
@@ -183,7 +184,8 @@ def test_house_units_are_sold_by_ascending_auction_and_the_price_goes_to_the_ban
     events = eco.kyosai.kyosai_auction_tick(row["ends"] + 1)
     assert [e["event"] for e in events] == ["sold", "listed"]  # 落札のあと、次の口を出す
     assert units(eco, B) == kyosai.AUCTION_LOT and eco.wallet.balance(B) == b0 - 1_100
-    assert eco.bank.bank_status(row["ends"] + 1)["cash"] == pytest.approx(cash0 + 1_100)
+    s = eco.bank.bank_status(row["ends"] + 1)
+    assert s["cash"] == pytest.approx(cash0 + 1_100 - s["thermostat"]["burned"])
     assert total_units(eco) == TOTAL
 
 
