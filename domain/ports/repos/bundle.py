@@ -32,6 +32,7 @@ from domain.ports.repos.social import (
     IQuizRepo,
     IRaffleRepo,
     IShopRepo,
+    IStreamRepo,
 )
 from domain.ports.repos.teiai import IBankRepo, IDebtRepo, IKyosaiRepo, ILoanRepo
 
@@ -50,6 +51,7 @@ class IRepositoryBundle(IGuildScopedRepo):
     records: IRecordRepo
     raffle: IRaffleRepo
     polls: IPollRepo
+    streams: IStreamRepo
     guild: IGuildRepo
     bank: IBankRepo
     debt: IDebtRepo

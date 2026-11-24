@@ -26,6 +26,7 @@ COG_MODULES: tuple[str, ...] = (
     "cogs.market.bond_cog",
     "cogs.market.cog",
     "cogs.poll.cog",
+    "cogs.stream.cog",
     "cogs.quiz.cog",
     "cogs.raffle.cog",
     "cogs.weekly.cog",

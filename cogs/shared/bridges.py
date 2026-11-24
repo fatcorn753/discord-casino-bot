@@ -196,6 +196,20 @@ class NoOpPollButtonBridge(IPollButtonBridge):
         return None
 
 
+class IStreamButtonBridge:
+    """配信パネルのボタン（StreamButton → StreamCog）のブリッジ契約（ISP 分離）。"""
+
+    async def handle_button(self, interaction: discord.Interaction, act: str, stream_id: int) -> None:
+        raise NotImplementedError
+
+
+class NoOpStreamButtonBridge(IStreamButtonBridge):
+    """StreamCog 未ロード時の既定ボタンハンドラ（LSP 準拠）。"""
+
+    async def handle_button(self, interaction: discord.Interaction, act: str, stream_id: int) -> None:
+        return None
+
+
 class IKyosaiVoteBridge:
     """共済の動議の投稿のボタン（MotionButton → KyosaiCog）のブリッジ契約（ISP 分離）。"""
 

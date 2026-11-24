@@ -16,6 +16,7 @@ from domain.ports.catalog_types.economy import (
     PollSectionContract,
     QuizpaySectionContract,
     RaffleSectionContract,
+    StreamSectionContract,
     TeiaiCatalogContract,
     TeiaiStatusContract,
     ThermostatSectionContract,
@@ -255,6 +256,18 @@ class PollSection(PollSectionContract):
 
 
 @pydantic_dataclass(frozen=True, config=STRICT_CONFIG, kw_only=True)
+class StreamSection(StreamSectionContract):
+    title_max: int = Field(gt=0)
+    max_hours: int = Field(gt=0)
+    tip_min: int = Field(gt=0)
+    tip_message_max: int = Field(gt=0)
+    bet_min: int = Field(gt=0)
+    bet_max: int = Field(gt=0)
+    rake: float = Field(ge=0, lt=1)
+    round_label_max: int = Field(gt=0)
+
+
+@pydantic_dataclass(frozen=True, config=STRICT_CONFIG, kw_only=True)
 class EconomyCatalog(EconomyCatalogContract):
     wallet: WalletSection
     transfer: TransferSection
@@ -264,6 +277,7 @@ class EconomyCatalog(EconomyCatalogContract):
     weekly: WeeklySection
     p2p: P2pSection
     poll: PollSection
+    stream: StreamSection
 
 
 @lru_cache(maxsize=1)

@@ -224,6 +224,18 @@ class PollSectionContract:
 
 
 @dataclass(frozen=True)
+class StreamSectionContract:
+    title_max: int
+    max_hours: int
+    tip_min: int
+    tip_message_max: int
+    bet_min: int
+    bet_max: int
+    rake: float
+    round_label_max: int
+
+
+@dataclass(frozen=True)
 class EconomyCatalogContract:
     wallet: WalletSectionContract
     transfer: TransferSectionContract
@@ -233,3 +245,4 @@ class EconomyCatalogContract:
     weekly: WeeklySectionContract
     p2p: P2pSectionContract
     poll: PollSectionContract
+    stream: StreamSectionContract

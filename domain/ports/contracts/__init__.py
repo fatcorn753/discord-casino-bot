@@ -112,6 +112,10 @@ from .social import (
     StakeHolding,
     StakeInvestResult,
     StakeRow,
+    StreamRoundView,
+    StreamRow,
+    StreamSettleResult,
+    StreamView,
     TeiaiMarketListing,
 )
 from .teiai import (
@@ -216,6 +220,10 @@ __all__ = [
     "PollRigResult",
     "PollRow",
     "PollView",
+    "StreamRoundView",
+    "StreamRow",
+    "StreamSettleResult",
+    "StreamView",
     "PricePoint",
     "ProfileRow",
     "ProfileView",

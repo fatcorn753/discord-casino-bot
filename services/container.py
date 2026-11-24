@@ -24,6 +24,7 @@ from services.quiz import QuizService
 from services.raffle import RaffleService
 from services.ranking import RankingService
 from services.shop import ShopService
+from services.stream import StreamService
 from services.teiai import TeiaiService
 
 
@@ -49,6 +50,7 @@ class ServiceRegistry:
     p2p: P2PService
     raffle: RaffleService
     poll: PollService
+    stream: StreamService
     event: EventService
     admin: AdminService
 
@@ -123,6 +125,7 @@ def build_services(
         p2p=P2PService(p2p=repos.p2p, horses=repos.horses, shop=repos.shop, wallet=repos.wallet, clock=clock),
         raffle=RaffleService(raffle=repos.raffle, clock=clock),
         poll=PollService(polls=repos.polls, clock=clock),
+        stream=StreamService(streams=repos.streams, wallet=repos.wallet, clock=clock),
         event=EventService(events=repos.events, clock=clock),
         admin=AdminService(wallet=repos.wallet, rtp=repos.rtp, pachinko=repos.pachinko),
         ranking=RankingService(wallet=repos.wallet, assets=repos.assets),

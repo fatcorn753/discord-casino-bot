@@ -22,6 +22,7 @@ FEATURES: dict[str, str] = {
     "quiz": "クイズ",
     "raffle": "抽選",
     "poll": "投票",
+    "stream": "配信（スパチャ・勝敗の賭け）",
     "p2p": "P2P の出品・売買",
     "shop": "ショップ",
 }
@@ -49,6 +50,7 @@ COMMANDS: dict[str, str] = {
     "地下": "labor",
     "クイズ": "quiz",
     "投票": "poll",
+    "配信": "stream",
     "ショップ": "shop",
 }
 

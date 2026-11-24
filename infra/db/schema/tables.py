@@ -623,6 +623,36 @@ def create_tables(conn: sqlite3.Connection) -> None:
             yes     INTEGER NOT NULL,
             PRIMARY KEY (poll_id, user_id)
         );
+        CREATE TABLE IF NOT EXISTS streams (           -- 配信（/配信。スパチャと勝敗の賭けを受ける配信パネル）
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id   INTEGER NOT NULL,
+            streamer   INTEGER NOT NULL,
+            title      TEXT    NOT NULL,
+            url        TEXT    NOT NULL DEFAULT '',
+            channel_id INTEGER NOT NULL DEFAULT 0,
+            message_id INTEGER NOT NULL DEFAULT 0,
+            started    REAL    NOT NULL,
+            ends       REAL    NOT NULL,          -- これを過ぎたら見回りで自動で閉じる（epoch秒）
+            tips       INTEGER NOT NULL DEFAULT 0, -- スパチャの合計（配信者が受け取った額）
+            tip_count  INTEGER NOT NULL DEFAULT 0,
+            status     TEXT    NOT NULL DEFAULT 'live'   -- live / ended
+        );
+        CREATE TABLE IF NOT EXISTS stream_rounds (     -- 配信の勝負（勝敗の賭けの1回分）
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            stream_id INTEGER NOT NULL,
+            guild_id  INTEGER NOT NULL,
+            label     TEXT    NOT NULL,
+            status    TEXT    NOT NULL DEFAULT 'open', -- open / locked / win / lose / void
+            created   REAL    NOT NULL,
+            settled   REAL    NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS stream_bets (       -- 配信の勝負への賭け（1人1つの側。同じ側なら足せる）。賭け金は精算まで預かる
+            round_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            side     TEXT    NOT NULL,             -- win / lose
+            amount   INTEGER NOT NULL,
+            PRIMARY KEY (round_id, user_id)
+        );
         CREATE TABLE IF NOT EXISTS chart_posts (       -- /証券 市況 で出したチャート（1チャンネルに1つ。最後に使ってから一定時間だけ自動で更新）
             channel_id INTEGER PRIMARY KEY,
             message_id INTEGER NOT NULL,

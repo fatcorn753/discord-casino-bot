@@ -542,3 +542,52 @@ class CompanyBankrupt(TypedDict):
 
     user_id: int
     name: str
+
+
+class StreamRow(TypedDict):
+    """配信（streams 表の行）。"""
+
+    id: int
+    guild_id: int
+    streamer: int
+    title: str
+    url: str
+    channel_id: int
+    message_id: int
+    started: float
+    ends: float  # この時刻を過ぎたら、見回りで自動で閉じる
+    tips: int  # スパチャの合計（配信者が受け取った額）
+    tip_count: int
+    status: str  # live / ended
+
+
+class StreamRoundView(TypedDict):
+    """配信の勝負（stream_rounds 表の行）に、いまの賭けの合計を足したもの。"""
+
+    id: int
+    stream_id: int
+    guild_id: int
+    label: str
+    status: str  # open（受付中）/ locked（締切）/ win / lose / void
+    created: float
+    win_total: int
+    lose_total: int
+    bettors: int
+
+
+class StreamView(StreamRow):
+    """配信の表示用（配信の行に、受付中か締切の勝負を足したもの。勝負がなければ round は None）。"""
+
+    round: StreamRoundView | None
+
+
+class StreamSettleResult(TypedDict):
+    """勝負の精算の結果。winner が None なら無効（全額返した）。"""
+
+    stream: StreamView
+    round_id: int
+    label: str
+    winner: str | None
+    payouts: dict[int, int]  # user_id → 返したペリカ（賭け金を含む）
+    rake: int
+    refunded: bool
