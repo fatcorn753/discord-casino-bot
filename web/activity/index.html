@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja" data-accent="koke">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>チンチロの卓</title>
+  </head>
+  <body>
+    <main class="room">
+      <header class="room-head">
+        <h1>チンチロの卓</h1>
+        <span class="td-badge" id="phase">卓なし</span>
+        <button class="td-btn" data-variant="ghost" type="button" id="sound" aria-pressed="true">音あり</button>
+      </header>
+      <p class="sub"><span id="title-bet" class="num"></span> <span id="clock" class="num" aria-live="polite"></span></p>
+
+      <div class="stage">
+        <canvas id="scene" aria-label="丼とサイコロ" role="img"></canvas>
+        <div class="label" id="label" hidden aria-live="polite"></div>
+      </div>
+
+      <div class="td-notice" data-tone="error" id="error" role="alert" hidden></div>
+      <p class="notice" id="notice" role="status"></p>
+
+      <ul class="seats" id="seats" aria-label="席"></ul>
+      <p class="rule" id="rule"></p>
+
+      <div class="td-empty" id="empty" hidden>
+        <p class="td-empty-title">このチャンネルには、まだ卓がありません</p>
+        <p>賭け金を決めて卓を立てると、同じチャンネルの人が座れます。</p>
+      </div>
+
+      <div class="bar">
+        <div class="actions" id="actions"></div>
+        <form class="open" id="open-form" hidden novalidate>
+          <div class="td-field">
+            <label class="td-label" for="bet">賭け金（ペリカ）</label>
+            <input class="td-input num" id="bet" name="bet" type="number" inputmode="numeric" min="100" step="100" value="1000" autocomplete="off" aria-describedby="bet-error" />
+            <p class="td-error" id="bet-error" hidden></p>
+          </div>
+          <button class="td-btn" data-variant="primary" type="submit">卓を立てる</button>
+        </form>
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
