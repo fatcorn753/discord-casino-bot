@@ -30,6 +30,8 @@ from domain.ports.contracts import (
     ShopStockInfo,
     StakeHolding,
     StakeInvestResult,
+    StreamSettleResult,
+    StreamView,
     TeiaiMarketListing,
 )
 from domain.ports.repos.base import IGuildScopedRepo
@@ -72,6 +74,42 @@ class IPollRepo(IGuildScopedRepo):
         raise NotImplementedError
 
     def poll_close_due(self, now: float) -> list[PollView]:
+        raise NotImplementedError
+
+
+class IStreamRepo(IGuildScopedRepo):
+    """配信（/配信）のパネル・スパチャの合計・勝敗の賭け。"""
+
+    def stream_start(self, streamer: int, title: str, url: str, channel_id: int, now: float) -> Outcome[int]:
+        raise NotImplementedError
+
+    def stream_set_message(self, stream_id: int, channel_id: int, message_id: int) -> None:
+        raise NotImplementedError
+
+    def stream_get(self, stream_id: int) -> StreamView | None:
+        raise NotImplementedError
+
+    def stream_add_tip(self, stream_id: int, amount: int) -> None:
+        raise NotImplementedError
+
+    def stream_round_open(self, streamer: int, stream_id: int, label: str, now: float) -> Outcome[StreamView]:
+        raise NotImplementedError
+
+    def stream_round_lock(self, streamer: int, stream_id: int) -> Outcome[StreamView]:
+        raise NotImplementedError
+
+    def stream_bet(self, user_id: int, stream_id: int, side: str, amount: int, now: float) -> Outcome[StreamView]:
+        raise NotImplementedError
+
+    def stream_round_settle(
+        self, streamer: int, stream_id: int, winner: str | None, now: float
+    ) -> Outcome[StreamSettleResult]:
+        raise NotImplementedError
+
+    def stream_end(self, streamer: int, stream_id: int, now: float) -> Outcome[StreamSettleResult | None]:
+        raise NotImplementedError
+
+    def stream_close_due(self, now: float) -> list[tuple[StreamView, StreamSettleResult | None]]:
         raise NotImplementedError
 
 

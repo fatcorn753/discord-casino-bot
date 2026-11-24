@@ -439,6 +439,7 @@ def test_all_commands_load_and_follow_discord_rules(bot, tmp_path):
         "闘技場",
         "投票",
         "共済",
+        "配信",
     }
     assert [n for n in names if re.search(r"[A-Z]", n) or not 1 <= len(n) <= 32] == []
 

@@ -90,6 +90,7 @@ from infra.db.records import RecordRepo
 from infra.db.relics import RelicRepo
 from infra.db.rtp import RtpRepo
 from infra.db.shop import ShopRepo
+from infra.db.stream import StreamRepo
 from infra.db.wallet import WalletRepo
 
 
@@ -107,6 +108,7 @@ class RepositoryBundle(IRepositoryBundle):
     records: RecordRepo
     raffle: RaffleRepo
     polls: PollRepo
+    streams: StreamRepo
     guild: GuildRepo
     bank: BankRepo
     debt: DebtRepo
@@ -147,6 +149,7 @@ class RepositoryBundle(IRepositoryBundle):
             records=self.records.for_guild(guild_id),
             raffle=self.raffle.for_guild(guild_id),
             polls=self.polls.for_guild(guild_id),
+            streams=self.streams.for_guild(guild_id),
             guild=self.guild.for_guild(guild_id),
             bank=self.bank.for_guild(guild_id),
             debt=self.debt.for_guild(guild_id),
@@ -224,6 +227,7 @@ def open_repositories(
         strict=strict,
     )
     polls = PollRepo(db, account, bank, strict=strict)
+    streams = StreamRepo(db, account, bank, strict=strict)
 
     loans = LoanRepo(db, account, debt, bank.grace_until_for, strict=strict)
     shop = ShopRepo(db, account, debt, strict=strict)
@@ -329,6 +333,7 @@ def open_repositories(
         records=records,
         raffle=raffle,
         polls=polls,
+        streams=streams,
         guild=guild,
         bank=bank,
         debt=debt,

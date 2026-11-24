@@ -46,6 +46,7 @@ from domain.ports.repos.social import (
     IQuizRepo,
     IRaffleRepo,
     IShopRepo,
+    IStreamRepo,
 )
 from domain.ports.repos.teiai import IBankRepo, IDebtRepo, IKyosaiRepo, ILoanRepo
 
@@ -87,6 +88,7 @@ __all__ = [
     "IRaceRepo",
     "IRaffleRepo",
     "IPollRepo",
+    "IStreamRepo",
     "IRecordRepo",
     "IRelicRepo",
     "IRepositoryBundle",
