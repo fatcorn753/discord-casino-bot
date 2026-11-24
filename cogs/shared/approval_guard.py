@@ -73,6 +73,17 @@ async def allow_component(
     return False
 
 
+STOPPED_TITLE = "⏸️ 停止中"
+
+
+def stopped_text(feature: str) -> str:
+    """管理者が止めた機能を断るときの本文。"""
+    return (
+        f"**{features.label(feature)}** は、いま管理者が止めています。再開まで、お待ちください。\n"
+        "（止める前に始めたものは、いつもどおり精算されます）"
+    )
+
+
 def feature_off(guild_repo: IGuildRepo, guild_id: int | None, feature: str) -> bool:
     """その機能が、このサーバーで止められているか。"""
     return guild_id is not None and feature in guild_repo.features_off(guild_id)
@@ -82,12 +93,7 @@ async def feature_guard(interaction: discord.Interaction, guild_repo: IGuildRepo
     """機能が止められていれば、本人だけに断りを返して False を返す（止まっていなければ True）。"""
     if not feature_off(guild_repo, interaction.guild_id, feature):
         return True
-    await ui.reply_error(
-        interaction,
-        f"**{features.label(feature)}** は、いま管理者が止めています。再開まで、お待ちください。\n"
-        "（止める前に始めたものは、いつもどおり精算されます）",
-        title="⏸️ 停止中",
-    )
+    await ui.reply_error(interaction, stopped_text(feature), title=STOPPED_TITLE)
     return False
 
 

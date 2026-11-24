@@ -14,7 +14,7 @@ from domain import features, missions, teiai
 from domain.games.rtplevel import MIN_BET as MIN_BET
 from domain.ports.contracts import PlayRecord
 from domain.ports.repos import IGuildRepo
-from services.casino import CasinoService
+from services.casino import BeginGameResult, CasinoService
 from services.teiai import TeiaiService
 
 _log = logging.getLogger(__name__)
@@ -122,6 +122,58 @@ class GameContext:
         self.casino.abort_game(self.guild_id, self.user_id, self.escrow_id)
 
 
+@dataclass(frozen=True)
+class BeginFailure:
+    """ゲームを始められなかった理由（返信のタイトルと本文）。Discord の返信にも、Activity の画面にも使う。"""
+
+    title: str
+    text: str
+
+
+def _begin_failure(res: BeginGameResult, bet: int, balance_factor: int, factor_reason: str) -> BeginFailure:
+    match res.reason_kind:
+        case "session":
+            return BeginFailure("まだ始められません", res.reason)
+        case "min_bet":
+            return BeginFailure("賭け金が少なすぎます", f"{ui.pelica(MIN_BET)} 以上で指定してください。")
+        case "balance_factor":
+            msg = (
+                f"{factor_reason}賭け金の **{balance_factor}倍**（{ui.pelica(bet * balance_factor)}）以上の残高が必要です（いまの残高: {ui.pelica(res.balance)}）。\n"
+                f"いまの残高なら、**{ui.pelica(res.balance // balance_factor)}** まで賭けられます。"
+            )
+            return BeginFailure("ペリカが足りません", msg)
+        case "balance":
+            msg = f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。\n`/ペリカ デイリー` で6時間ごとにもらえます。"
+            return BeginFailure("ペリカが足りません", msg)
+        case _:
+            return BeginFailure(
+                "ペリカが足りません", f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。"
+            )
+
+
+def begin_context(
+    deps: CasinoDeps,
+    guild_id: int,
+    user_id: int,
+    name: str,
+    bet: int,
+    game: str,
+    balance_factor: int = 1,
+    factor_reason: str = "",
+) -> GameContext | BeginFailure:
+    """賭け金を検証して預かる（Discord の操作に依存しない入口）。成功すれば GameContext、失敗すれば理由。"""
+    key = features.CASINO_GAMES.get(game)
+    if key is not None and approval_guard.feature_off(deps.guild_repo, guild_id, key):
+        # 管理者が止めたゲーム（「もう一度」のボタンからも始めさせない）
+        return BeginFailure(approval_guard.STOPPED_TITLE, approval_guard.stopped_text(key))
+    res = deps.casino.begin_game(guild_id, user_id, bet, game, balance_factor=balance_factor)
+    if not res.ok:
+        return _begin_failure(res, bet, balance_factor, factor_reason)
+    ctx = GameContext(deps, user_id, res.escrow_id, game, bet, guild_id, name)
+    ctx.skin = res.skin
+    return ctx
+
+
 async def start_game(
     interaction: discord.Interaction,
     deps: CasinoDeps,
@@ -131,43 +183,20 @@ async def start_game(
     factor_reason: str = "",
 ) -> GameContext | None:
     """賭け金を検証して預かる。成功すれば GameContext、失敗すれば理由を返信して None。"""
-    key = features.CASINO_GAMES.get(game)
-    if key is not None and not await approval_guard.feature_guard(interaction, deps.guild_repo, key):
-        return None  # 管理者が止めたゲーム（「もう一度」のボタンからも始めさせない）
-
-    uid = interaction.user.id
-    guild_id = ui.guild_id_of(interaction)
-    res = deps.casino.begin_game(guild_id, uid, bet, game, balance_factor=balance_factor)
-
-    if not res.ok:
-        match res.reason_kind:
-            case "session":
-                await ui.reply_error(interaction, res.reason, title="まだ始められません")
-            case "min_bet":
-                await ui.reply_error(
-                    interaction, f"{ui.pelica(MIN_BET)} 以上で指定してください。", title="賭け金が少なすぎます"
-                )
-            case "balance_factor":
-                msg = (
-                    f"{factor_reason}賭け金の **{balance_factor}倍**（{ui.pelica(bet * balance_factor)}）以上の残高が必要です（いまの残高: {ui.pelica(res.balance)}）。\n"
-                    f"いまの残高なら、**{ui.pelica(res.balance // balance_factor)}** まで賭けられます。"
-                )
-                await ui.reply_error(interaction, msg, title="ペリカが足りません")
-            case "balance":
-                msg = f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。\n`/ペリカ デイリー` で6時間ごとにもらえます。"
-                await ui.reply_error(interaction, msg, title="ペリカが足りません")
-            case _:
-                await ui.reply_error(
-                    interaction,
-                    f"賭け金 {ui.pelica(bet)} に対して、残高は {ui.pelica(res.balance)} です。",
-                    title="ペリカが足りません",
-                )
-        return None
-    ctx = GameContext(
-        deps, uid, res.escrow_id, game, bet, guild_id, getattr(interaction.user, "display_name", "") or ""
+    got = begin_context(
+        deps,
+        ui.guild_id_of(interaction),
+        interaction.user.id,
+        getattr(interaction.user, "display_name", "") or "",
+        bet,
+        game,
+        balance_factor,
+        factor_reason,
     )
-    ctx.skin = res.skin
-    return ctx
+    if isinstance(got, BeginFailure):
+        await ui.reply_error(interaction, got.text, title=got.title)
+        return None
+    return got
 
 
 def game_title(base: str, ctx: GameContext) -> str:
