@@ -38,9 +38,11 @@ relic_auction_hours: 24           # 競りの長さ（時間）
 seize_rate: 0.50
 
 debt_rate_per_day: 0.01
-debt_interest_max_days: 10
+debt_interest_cap_mult: 2.0
 grace_debt: 15000
 grace_hours: 24
+grace_penalty_half_life_days: 14.0
+grace_min_hours: 1.0
 
 bank_min_deposit: 100
 reserve_ratio: 0.20
