@@ -36,7 +36,7 @@ def balance_embed(card: BalanceCard, name: str, avatar_url: str) -> discord.Embe
         e.add_field(
             name="帝愛への借金",
             value=f"{ui.pelica(s['debt'])}（収入の{int(teiai.REPAY_RATE * 100)}%が天引きで返済されます。`/ペリカ 返済` で自分から返せます）\n"
-            f"⏳ 帝愛の利息（トイチ）: 1日ごとに借金の{teiai.DEBT_RATE_PER_DAY:.0%}が加わります（{teiai.DEBT_INTEREST_CEILING:,}ペリカまで）",
+            f"⏳ 帝愛の利息（トイチ）: 1日ごとに借金の{teiai.DEBT_RATE_PER_DAY:.0%}が加わります（元本の{teiai.DEBT_INTEREST_CAP_MULT:g}倍まで）",
             inline=False,
         )
     if card.rank:
@@ -132,7 +132,7 @@ def repaid_embed(paid: int, left: int) -> discord.Embed:
 BANKRUPT_REFUSALS = {
     "already": (
         "すでに破産者です",
-        "借金を完済すると、カタギに戻ります（貸付だけは、完済から7日、借りられません）。",
+        "借金を完済すると、カタギに戻ります（貸付・種銭・帝愛の信用は、完済から7日使えません）。",
     ),
     "nothing": ("破産できません", "借金も、貸付の借り入れもありません。"),
 }
@@ -144,7 +144,7 @@ def bankrupt_warning() -> str:
         f"換金（ショップの品は購入額の{int(teiai.SEIZE_RATE * 100)}%）して、帝愛 → 貸付（古い順）の順に配当します。\n"
         "・貸付の残りは**免責**（貸した人の損になります）\n"
         f"・帝愛の借金は、残っていても **{teiai.BANKRUPT_FLOOR:,}ペリカまで圧縮**\n"
-        f"・身分が🔴**破産者**になり、**完済して{teiai.BLACKLIST_DAYS}日たつまで、貸付を借りられません**\n"
+        f"・身分が🔴**破産者**になり、**完済して{teiai.BLACKLIST_DAYS}日たつまで、貸付・種銭・帝愛の信用を使えません**\n"
         "・**元に戻せません。**"
     )
 

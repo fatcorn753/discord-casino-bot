@@ -141,11 +141,13 @@ ECONOMY_FAILURES: dict[str, FailureFormatter] = {
         f"（いま {p['have']:,}ペリカ分。あと掛けられるのは {p['room']:,}ペリカ）。"
     ),
     "seed_bankrupt_blocked": "破産者は、完済するまで、帝愛から借りられません。",
+    "seed_blacklisted": "破産・海外逃亡のブラックリスト期間中（完済から7日）は、種銭を借りられません。",
     "seed_grace_blocked": "破産猶予の間は、新しく借りられません。",
     "seed_not_needed": lambda p: (
         f"手元が {p['seed']:,}ペリカ 以上あるので、借りられません（借りられるのは、枠の {p['seed']:,}ペリカ に足りない分まで）。"
     ),
     "credit_bankrupt_blocked": "破産者は、帝愛の信用を使えません。",
+    "credit_blacklisted": "破産・海外逃亡のブラックリスト期間中（完済から7日）は、帝愛の信用を使えません。",
     "credit_grace_blocked": "破産猶予の間は、帝愛の信用を使えません。",
     "credit_limit_exceeded": lambda p: (
         f"帝愛の信用で借りられるのは、1回 {p['seed']:,}ペリカ までです（足りない額: {p['need']:,}ペリカ）。"

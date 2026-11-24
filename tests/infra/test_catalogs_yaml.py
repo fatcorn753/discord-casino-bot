@@ -55,6 +55,9 @@ def test_all_yaml_catalogs_load_and_validate() -> None:
     assert len(catalogs.horse().npc_names) == len(horse.NPC_NAMES)
     assert len(catalogs.market().market.symbols) == len(market.SYMBOLS)
     assert len(catalogs.teiai().statuses) == len(teiai.STATUS_LABEL)
+    assert catalogs.teiai().debt_interest_cap_mult == teiai.DEBT_INTEREST_CAP_MULT == 2.0
+    assert catalogs.teiai().grace_penalty_half_life_days == teiai.GRACE_PENALTY_HALF_LIFE_DAYS == 14.0
+    assert catalogs.teiai().grace_min_hours == teiai.GRACE_MIN_HOURS == 1.0
     assert len(catalogs.games().slot.symbols) == len(slot.SYMBOLS)
     assert len(help_cog.PAGES) > 0
 

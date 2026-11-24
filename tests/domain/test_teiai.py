@@ -12,7 +12,7 @@ from domain import shop, teiai
 from domain.types import DAILY_BASE, INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_guild, as_interaction, as_member, freeze_time, must
-from tests.support import make_casino_deps, make_ranking_repos, make_shop_cog, make_test_bot
+from tests.support import make_bond_cog, make_casino_deps, make_ranking_repos, make_shop_cog, make_test_bot
 
 U, A, B = 1, 2, 3
 DAY = 86400
@@ -253,7 +253,8 @@ def test_what_the_seized_assets_cannot_cover_is_compressed_or_forgiven(eco):
     )
     assert eco.wallet.balance(A) == INITIAL_BALANCE  # 貸した人は、貸し倒れ
     assert result["compressed"] == 400_000 - (1_000 + SHOP_VALUE) - teiai.BANKRUPT_FLOOR
-    assert eco.debt.debt(U) == teiai.BANKRUPT_FLOOR + teiai.SEED  # 圧縮のあと、手元が空なので種銭が加わる
+    assert result["seed"] == 0
+    assert eco.debt.debt(U) == teiai.BANKRUPT_FLOOR  # 圧縮のあと、破産直後の種銭は貸されない
 
 
 def test_bankruptcy_keeps_the_senior_debt_up_to_the_floor_and_blocks_new_loans(eco):
@@ -262,7 +263,7 @@ def test_bankruptcy_keeps_the_senior_debt_up_to_the_floor_and_blocks_new_loans(e
         eco.db.conn.execute("UPDATE users SET balance=0, debt=500_000 WHERE user_id=?", (U,))
     ok, result = eco.debt.bankrupt(U)
     assert ok and result["compressed"] == 500_000 - teiai.BANKRUPT_FLOOR
-    assert eco.debt.debt(U) == teiai.BANKRUPT_FLOOR + teiai.SEED  # 完全には消えない
+    assert eco.debt.debt(U) == teiai.BANKRUPT_FLOOR  # 完全には消えず、破産直後の種銭も貸されない
     eco.wallet.balance(A)
     with eco.db.tx():
         eco.db.conn.execute(
@@ -518,9 +519,16 @@ def test_old_users_table_without_the_new_columns_is_upgraded(tmp_path):
         e.db.conn.execute("DROP TABLE users_new")
     e.db.conn.close()
     again = open_repositories(path, strict=True).for_guild(10)
+    migrated = again.db.conn.execute(
+        "SELECT debt_principal, grace_penalty, grace_penalty_at FROM users WHERE guild_id=10 AND user_id=1"
+    ).fetchone()
+    assert migrated["debt_principal"] == 700 and migrated["grace_penalty"] == 0 and migrated["grace_penalty_at"] == 0
     assert again.debt.debt(1) == 700 and again.wallet.balance(1) == 500  # 既存の借金は、そのまま帝愛の借金
     assert again.debt.status(1) == teiai.UNDERGROUND
     assert again.debt.repay_debt(1, 500) == (True, 500)
+    assert (
+        again.db.conn.execute("SELECT debt_principal FROM users WHERE guild_id=10 AND user_id=1").fetchone()[0] == 200
+    )
 
 
 # ----------------------------- 債券の満期と借金 ----------------------------- #
@@ -714,27 +722,234 @@ def test_debt_grows_by_daily_interest_only_after_each_full_day(eco, monkeypatch)
     )
 
 
-def test_interest_per_settlement_is_capped_so_a_long_absence_does_not_explode(eco, monkeypatch):
+def test_interest_accrues_all_elapsed_days_up_to_twice_the_principal(eco, monkeypatch):
     now = [1_800_000_000.0]
     _interest_clock(monkeypatch, eco, now)
     indebt(eco, U, debt=2_000)
     eco.debt.debt(U)
-    now[0] += 90 * DAY  # 3か月来なかった
-    assert eco.debt.debt(U) == 2_000 + int(2_000 * 0.01 * teiai.DEBT_INTEREST_MAX_DAYS)  # 数えるのは10日分まで
-    now[0] += 60  # 超えた日は捨てられていて、すぐ追加で付かない
-    assert eco.debt.debt(U) == 2_200
+    now[0] += 90 * DAY  # 10日打ち止め廃止: 90日分まるごと単利で加算される
+    assert eco.debt.debt(U) == 2_000 + int(2_000 * 0.01 * 90)
+    now[0] += 30 * DAY  # 元本の2倍（4,000）が上限
+    assert eco.debt.debt(U) == teiai.debt_interest_cap(2_000) == 4_000
+    now[0] += 30 * DAY
+    assert eco.debt.debt(U) == 4_000
 
 
-def test_interest_stops_just_before_the_bankruptcy_grace_line(eco, monkeypatch):
+def test_principal_excludes_existing_interest_and_updates_on_partial_repayment(eco, monkeypatch):
     now = [1_800_000_000.0]
     _interest_clock(monkeypatch, eco, now)
-    indebt(eco, U, debt=14_900)
-    eco.debt.debt(U)
-    now[0] += 10 * DAY
-    assert eco.debt.debt(U) == teiai.DEBT_INTEREST_CEILING  # 猶予（GRACE_DEBT）の直前で止まる
-    assert eco.bank.grace_until(U) is None  # 利息のせいで、猶予のカウントダウンは始まらない
-    now[0] += 10 * DAY
-    assert eco.debt.debt(U) == teiai.DEBT_INTEREST_CEILING
+    eco.wallet.balance(U)
+    with eco.db.tx():
+        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (U,))
+        eco.debt.owe_for(0, U, 3_000, "テスト")
+    # owe_for 時点では黒リスト外なので種銭 3,000 が追加され、元本は 6,000 ではなく明示的に 3,000 で試す
+    eco.wallet.set_balance(U, -3_000, "テスト")
+    assert eco.debt.debt(U) == 3_000
+    now[0] += 20 * DAY  # 利息 +600 → 借金 3,600（元本 3,000 のまま）
+    assert eco.debt.debt(U) == 3_600
+    with eco.db.tx():
+        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (U,))
+        eco.debt.owe_for(0, U, 2_000, "追加借入")  # 追加 2,000（種銭 3,000 も乗らないよう残高を戻す前）
+    # balance=0 なので種銭 3,000 が追加 → 追加元本は 2,000 + 3,000 = 5,000、元本合計 8,000・借金 8,600
+    row = eco.db.conn.execute("SELECT debt, debt_principal FROM users WHERE user_id=?", (U,)).fetchone()
+    assert row["debt"] == 8_600 and row["debt_principal"] == 8_000  # 既発生利息 600 は元本に組み込まれない
+    eco.wallet.credit(U, 10_000, "テスト")
+    assert eco.debt.repay_debt(U, 300) == (True, 300)  # 利息分の一部返済では元本は減らない
+    assert eco.db.conn.execute("SELECT debt_principal FROM users WHERE user_id=?", (U,)).fetchone()[0] == 8_000
+    assert eco.debt.repay_debt(U, 3_300) == (True, 3_300)  # 残高 5,000 < 旧元本 8,000 → 元本も 5,000 へ縮む
+    assert eco.db.conn.execute("SELECT debt_principal FROM users WHERE user_id=?", (U,)).fetchone()[0] == 5_000
+    assert eco.debt.repay_debt(U) == (True, 5_000)
+    row = eco.db.conn.execute("SELECT debt, debt_principal, debt_interest_at FROM users WHERE user_id=?", (U,)).fetchone()
+    assert row["debt"] == 0 and row["debt_principal"] == 0 and row["debt_interest_at"] == 0
+
+
+@pytest.mark.real_scope
+def test_accrue_all_debt_interest_and_bond_cog_tick_update_idle_debtors(tmp_path, monkeypatch):
+    monkeypatch.setattr("domain.approval.is_allowed", lambda *a: True)
+    now = [1_800_000_000.0]
+    bot = make_test_bot(str(tmp_path / "tick.db"), strict=True)
+    freeze_time(monkeypatch, bot.repos.db.clock, lambda: now[0])
+    eco = bot.repos.for_guild(10)
+    bot.guilds = [SimpleNamespace(id=10)]
+    eco.wallet.balance(U)
+    eco.wallet.balance(A)
+    eco.wallet.balance(B)  # 借金なし
+    with eco.db.tx():
+        eco.db.conn.execute("UPDATE users SET debt=4_000, balance=0 WHERE guild_id=10 AND user_id=?", (U,))
+        eco.db.conn.execute("UPDATE users SET debt=2_000, balance=0 WHERE guild_id=10 AND user_id=?", (A,))
+    # 初回ティックで起点を記録
+    cog = make_bond_cog(bot)
+    cog.run_once()
+    assert eco.debt.debt(U) == 4_000 and eco.debt.debt(A) == 2_000
+    now[0] += 2 * DAY + 10
+    # ユーザーが一切操作しなくても BondCog.run_once() で定期加算される
+    cog.run_once()
+    assert eco.db.conn.execute("SELECT debt FROM users WHERE guild_id=10 AND user_id=?", (U,)).fetchone()[0] == 4_080
+    assert eco.db.conn.execute("SELECT debt FROM users WHERE guild_id=10 AND user_id=?", (A,)).fetchone()[0] == 2_040
+    assert eco.db.conn.execute("SELECT debt FROM users WHERE guild_id=10 AND user_id=?", (B,)).fetchone()[0] == 0
+
+
+def test_interest_auto_seizure_protects_company_shop_and_kyosai(eco, monkeypatch):
+    now = [1_800_000_000.0]
+    _interest_clock(monkeypatch, eco, now)
+    eco.wallet.credit(U, 5_000_000, "テスト")
+    ok, _ = eco.company.company_found(U, "帝愛対策商事", "mine", now[0])
+    assert ok
+    item = shop.BY_ID["title_regular"]
+    assert eco.shop.purchase(U, item.id, item.name, item.price, True).ok
+    eco.kyosai.bank_sync(0, now[0])
+    with eco.db.tx():
+        eco.db.conn.execute("UPDATE kyosai_units SET units=units-100 WHERE guild_id=0 AND user_id=0")
+        eco.db.conn.execute("INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (0, ?, 100)", (U,))
+    assert eco.bank.bank_deposit(U, 3_000, now[0])[0]
+    with eco.db.tx():
+        eco.db.conn.execute(
+            "UPDATE users SET balance=2_000, debt=14_900, debt_principal=14_900, debt_interest_at=? WHERE user_id=?",
+            (now[0], U),
+        )
+    now[0] += DAY + 1  # 利息 +149 → 15,049 (>= GRACE_DEBT) → 猶予入り前に A-1 発動
+    added = eco.debt.accrue_all_debt_interest(now[0])
+    assert added == 149
+    # 現金 2,000 + 信託 3,000 = 5,000 が強制回収され、借金は 10,049 (< GRACE_DEBT) となって猶予回避
+    assert eco.debt.debt(U) == 10_049
+    assert eco.wallet.balance(U) == 0 and eco.bank.deposit_of(U) == 0
+    assert eco.bank.grace_until(U) is None and eco.debt.status(U) == teiai.UNDERGROUND
+    # 会社・ショップ・共済口は守られる
+    assert eco.company.company_get(U, now[0]) is not None
+    assert eco.shop.inventory(U).get("title_regular") == 1
+    assert eco.kyosai.units_of_for(0, U) == 100
+    notes = eco.notices.take_notices(U)
+    assert any(n.code == "debt_auto_seized" and n.params == {"seized": 5_000, "debt": 10_049} for n in notes)
+    assert any(
+        "強制回収:帝愛の利息超過（5,000ペリカ）" in r["reason"]
+        for r in eco.db.conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))
+    )
+
+
+def test_interest_auto_seizure_enters_grace_when_exhausted_and_skips_when_already_in_grace(eco, monkeypatch):
+    now = [1_800_000_000.0]
+    _interest_clock(monkeypatch, eco, now)
+    eco.wallet.credit(A, 10_000, "テスト")
+    eco.wallet.balance(U)
+    assert eco.bank.cds_buy(A, U, 1_000, now[0])[0]
+    with eco.db.tx():
+        eco.db.conn.execute(
+            "UPDATE users SET balance=100, debt=14_900, debt_principal=14_900, debt_interest_at=? WHERE user_id=?",
+            (now[0], U),
+        )
+    now[0] += 2 * DAY + 1  # 利息 +298 → 15,198。手元 100 全額差し押さえでも 15,098 >= GRACE_DEBT → 猶予入り
+    eco.debt.accrue_all_debt_interest(now[0])
+    assert eco.wallet.balance(U) == 0 and eco.debt.debt(U) == 15_098
+    assert eco.bank.grace_until(U) is not None
+    # すでに猶予中の場合、手元に現金があっても A-1 は不発で、CDS 発火と干渉しない
+    eco.wallet.credit(U, 5_000, "付与")
+    now[0] += DAY
+    eco.debt.accrue_all_debt_interest(now[0])
+    assert eco.wallet.balance(U) == 5_000
+    assert eco.bank.grace_until(U) is not None
+    done = eco.bank.grace_expire(now[0] + teiai.GRACE_HOURS * 3600 + 1)
+    assert [uid for uid, _ in done] == [U] and done[0][1]["cds_paid"] > 0
+
+
+def test_grace_penalty_accumulates_halves_duration_and_recovers_with_decay(eco, monkeypatch):
+    assert teiai.effective_grace_hours(0.0) == pytest.approx(24.0)
+    assert teiai.effective_grace_hours(1.0) == pytest.approx(12.0)
+    assert teiai.effective_grace_hours(10.0) == pytest.approx(teiai.GRACE_MIN_HOURS)
+    assert teiai.decay_grace_penalty(2.0, teiai.GRACE_PENALTY_HALF_LIFE_DAYS) == pytest.approx(1.0)
+
+    now = [1_800_000_000.0]
+    _interest_clock(monkeypatch, eco, now)
+    eco.wallet.balance(U)
+    durations: list[float] = []
+    for _ in range(6):
+        with eco.db.tx():
+            eco.db.conn.execute("UPDATE users SET debt=20_000, debt_principal=20_000 WHERE user_id=?", (U,))
+            eco.debt.after_debt_change(0, U)
+        until = must(eco.bank.grace_until(U))
+        durations.append((until - now[0]) / 3600.0)
+        with eco.db.tx():
+            eco.db.conn.execute("UPDATE users SET debt=1_000, debt_principal=1_000 WHERE user_id=?", (U,))
+            eco.debt.after_debt_change(0, U)
+        now[0] += 60  # ほぼ経過時間ゼロで再突入
+    assert durations[0] == pytest.approx(24.0)
+    assert durations[1] == pytest.approx(12.0, abs=0.01)
+    assert durations[2] == pytest.approx(6.0, abs=0.01)
+    assert durations[3] == pytest.approx(3.0, abs=0.01)
+    assert durations[4] == pytest.approx(1.5, abs=0.01)
+    assert durations[5] == pytest.approx(teiai.GRACE_MIN_HOURS)
+
+    # 半減期（14日）経過するとペナルティが減衰し、猶予時間が回復する
+    with eco.db.tx():
+        eco.db.conn.execute("UPDATE users SET grace_penalty=2.0, grace_penalty_at=? WHERE user_id=?", (now[0], U))
+    now[0] += teiai.GRACE_PENALTY_HALF_LIFE_DAYS * DAY
+    with eco.db.tx():
+        eco.db.conn.execute("UPDATE users SET debt=20_000, debt_principal=20_000 WHERE user_id=?", (U,))
+        eco.debt.after_debt_change(0, U)
+    recovered_hours = (must(eco.bank.grace_until(U)) - now[0]) / 3600.0
+    assert recovered_hours == pytest.approx(12.0, abs=0.01)
+
+
+def test_b2_bankrupt_and_escape_block_seed_and_credit_until_blacklist_expires(eco, monkeypatch):
+    now = [1_800_000_000.0]
+    _interest_clock(monkeypatch, eco, now)
+    indebt(eco, U, debt=50_000, balance=0)
+    ok, res = eco.debt.bankrupt(U)
+    assert ok and res["seed"] == 0 and eco.wallet.balance(U) == 0 and eco.debt.debt(U) == teiai.BANKRUPT_FLOOR
+    assert eco.debt.borrow_seed(U)[1].code == "seed_bankrupt_blocked"
+    assert eco.debt.can_borrow_for_bet(U, 500)[1].code == "credit_bankrupt_blocked"
+    # 破産中のデイリーや追加借金でも種銭は出ない
+    daily_res = eco.wallet.claim_daily(U, datetime.date(2026, 11, 1))
+    assert daily_res.seed == 0
+    with eco.db.tx():
+        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (U,))
+        eco.debt.owe_for(0, U, 500, "テスト")
+    assert eco.wallet.balance(U) == 0
+
+    # 完済してカタギに戻っても、ブラックリスト 7 日間は種銭・信用が遮断される
+    eco.wallet.credit(U, 50_000, "テスト")
+    assert eco.debt.repay_debt(U)[0]
+    eco.wallet.debit_up_to(U, eco.wallet.balance(U) - 500, "テスト")
+    assert eco.debt.status(U) == teiai.KATAGI and eco.debt.loan_blacklisted(U)
+    assert eco.debt.borrow_seed(U)[1].code == "seed_blacklisted"
+    assert eco.debt.can_borrow_for_bet(U, 500)[1].code == "credit_blacklisted"
+    eid = eco.escrow.place_bet(U, 500, "ブラックジャック")
+    assert not eco.escrow.add_to_escrow(eid, 1_000, credit=True)
+    eco.escrow.refund(eid)
+
+    # ブラックリスト経過後に種銭・信用が復帰する
+    now[0] += (teiai.BLACKLIST_DAYS + 1) * DAY
+    assert not eco.debt.loan_blacklisted(U)
+    assert eco.debt.borrow_seed(U) == (True, teiai.SEED - 500)
+    eid2 = eco.escrow.place_bet(U, teiai.SEED, "ブラックジャック")
+    assert eco.escrow.add_to_escrow(eid2, 1_000, credit=True)
+
+    # 海外逃亡成功後も同様にブラックリスト期間中は種銭・信用が使えない
+    indebt(eco, A, debt=20_000, balance=0)
+    ok_esc, res_esc = eco.debt.escape_attempt(A, now=now[0], rng=_Roll(0.0))
+    assert ok_esc and res_esc["escaped"] and res_esc["bankrupt"]["seed"] == 0
+    assert eco.debt.borrow_seed(A)[1].code == "seed_blacklisted"
+    assert eco.debt.can_borrow_for_bet(A, 500)[1].code == "credit_blacklisted"
+
+
+def test_ui_embeds_and_messages_reflect_principal_cap_and_safety_notices(eco):
+    from cogs.economy.embeds import balance_embed
+    from cogs.shared.messages import format_failure, format_notice
+    from cogs.teiai.panel import panel_embed
+    from domain.errors import fail, notice
+
+    indebt(eco, U, debt=5_000, balance=1_000)
+    bot = make_test_bot(repos=eco)
+    panel = panel_embed(bot.services.teiai, 0, U)
+    you_field = next(f for f in panel.fields if f.name == "あなた").value
+    assert f"元本の{teiai.DEBT_INTEREST_CAP_MULT:g}倍まで" in must(you_field)
+    card = must(bot.services.economy.balance_card(0, U, U))
+    bal_e = balance_embed(card, "たつ", "https://example.com/a.png")
+    debt_field = next(f for f in bal_e.fields if f.name == "帝愛への借金").value
+    assert f"元本の{teiai.DEBT_INTEREST_CAP_MULT:g}倍まで" in must(debt_field)
+    assert "ブラックリスト" in format_failure(fail("seed_blacklisted"))
+    assert "ブラックリスト" in format_failure(fail("credit_blacklisted"))
+    notice_text = format_notice(notice("debt_auto_seized", seized=5_000, debt=10_049))
+    assert "5,000ペリカ" in notice_text and "10,049ペリカ" in notice_text
 
 
 def test_net_worth_ranking_accrues_untouched_debt_interest_so_it_matches_the_balance_display(eco, monkeypatch):
