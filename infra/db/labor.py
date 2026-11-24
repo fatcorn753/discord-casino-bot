@@ -13,7 +13,7 @@ from domain import relics as relics_mod
 from domain import shop as shop_mod
 from domain import teiai
 from domain.errors import Outcome, fail
-from domain.ports.bridges import IHouseAccount
+from domain.ports.bridges import IBankCashFlow
 from domain.ports.contracts import (
     LaborClick,
     LaborClickFail,
@@ -76,14 +76,14 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         db: EcoDb,
         account: AccountCore,
         relics: RelicRepo,
-        house: IHouseAccount,
+        bank: IBankCashFlow,
         guild_id: int = 0,
         strict: bool = False,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
         self._relics = relics
-        self._house = house
+        self._bank = bank
 
     def _consume_drink(self, guild_id: int, user_id: int) -> bool:
         cur = self._conn.execute(
@@ -239,7 +239,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 self._account.raw_balance(guild_id, user_id),
                 f"慈善団体への寄付（地下作業のピンハネ {skimmed:,}ペリカ）",
             )
-            self._house.house_income_for(guild_id, skimmed)  # 帝愛の胴元の口座に入る
+            self._bank.bank_income_for(guild_id, skimmed, self._now())  # 帝愛銀行へ入る（サーモスタット経由）
         self._account.apply(guild_id, user_id, net, "地下作業:稼ぎ", income=net)
         row["pot"] = 0
         row["pot_workers"] = 0
