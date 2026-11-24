@@ -1,0 +1,332 @@
+/*
+ * fatcorn753-design components — tokens.css と base.css の後に読み込む。
+ * 書き方は references/components.md を参照。クラス名は .td- で始まる。
+ * 状態は class ではなく ARIA 属性と疑似クラスで表す(aria-busy, aria-invalid, aria-selected, :checked など)。
+ */
+
+/* ---------- ボタン ---------- */
+.td-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+  min-height: var(--control-h);
+  padding: 0 var(--space-4);
+  border: 1px solid transparent; border-radius: var(--shape-control);
+  font-size: var(--text-sm); font-weight: var(--weight-bold); line-height: var(--leading-ui);
+  white-space: nowrap; text-decoration: none;
+  background: var(--bg-surface); color: var(--text-primary); border-color: var(--border-subtle);
+  transition: background-color var(--dur-instant) var(--ease-standard),
+              border-color var(--dur-instant) var(--ease-standard),
+              transform var(--dur-instant) var(--ease-standard);
+}
+.td-btn:hover { background: var(--bg-subtle); }
+.td-btn:active { transform: scale(var(--motion-press)); }
+.td-btn:disabled, .td-btn[aria-disabled="true"] { opacity: 0.5; transform: none; }
+
+.td-btn[data-variant="primary"] { background: var(--accent-solid); color: var(--on-accent); border-color: transparent; }
+.td-btn[data-variant="primary"]:hover { background: var(--accent-hover); }
+.td-btn[data-variant="ghost"] { background: transparent; border-color: transparent; }
+.td-btn[data-variant="ghost"]:hover { background: var(--bg-subtle); }
+.td-btn[data-variant="danger"] { background: var(--bg-surface); color: var(--error-text); border-color: var(--border-subtle); }
+.td-btn[data-variant="danger"]:hover { background: var(--error-tint); }
+
+.td-btn[data-size="sm"] { min-height: 32px; padding: 0 var(--space-3); }
+.td-btn[data-icon-only] { padding: 0; width: var(--control-h); }
+.td-btn svg { width: 18px; height: 18px; }
+
+/* 処理中: 幅を保ったまま文字を隠し、回転の印を出す */
+.td-btn[aria-busy="true"] { position: relative; color: transparent; pointer-events: none; }
+.td-btn[aria-busy="true"]::after {
+  content: ""; position: absolute; width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent;
+  color: var(--text-primary); animation: td-spin 700ms linear infinite;
+}
+.td-btn[data-variant="primary"][aria-busy="true"]::after { color: var(--on-accent); }
+
+/* ---------- 入力欄 ---------- */
+.td-field { display: grid; gap: var(--space-1); align-content: start; min-width: 0; }
+.td-label { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--text-primary); }
+.td-label .td-optional { font-weight: var(--weight-regular); color: var(--text-secondary); margin-left: var(--space-1); }
+.td-help { font-size: var(--text-xs); color: var(--text-secondary); line-height: 1.5; }
+.td-error {
+  display: flex; gap: var(--space-1); align-items: flex-start;
+  font-size: var(--text-sm); color: var(--error-text); line-height: 1.5;
+}
+.td-error svg { width: 16px; height: 16px; margin-top: 2px; }
+
+.td-input {
+  width: 100%; min-height: var(--control-h);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-surface); color: var(--text-primary);
+  border: 1px solid var(--border-control); border-radius: var(--shape-control);
+  font-size: max(16px, var(--text-body)); /* 16px 未満だと iOS が入力時に拡大する */
+  line-height: 1.4;
+  transition: border-color var(--dur-instant) var(--ease-standard), box-shadow var(--dur-instant) var(--ease-standard);
+}
+textarea.td-input { min-height: calc(var(--control-h) * 2.5); resize: vertical; }
+.td-input::placeholder { color: var(--text-secondary); opacity: 1; }
+.td-input:hover { border-color: var(--text-secondary); }
+.td-input:focus-visible, .td-input:focus {
+  outline: none; border-color: var(--accent-text);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent-text) 25%, transparent);
+}
+.td-input[aria-invalid="true"] { border-color: var(--error-text); }
+.td-input[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px color-mix(in oklab, var(--error-text) 22%, transparent); }
+.td-input:disabled { background: var(--bg-subtle); color: var(--text-secondary); }
+select.td-input { appearance: none; padding-right: var(--space-8);
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-secondary) 50%),
+                    linear-gradient(135deg, var(--text-secondary) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%;
+  background-size: 5px 5px; background-repeat: no-repeat; }
+
+/* ---------- チェックボックス ---------- */
+.td-check {
+  position: relative; display: inline-flex; align-items: center; gap: var(--space-3);
+  min-height: var(--control-h); cursor: pointer;
+}
+.td-check input:not(.td-switch) {
+  appearance: none; margin: 0; flex: none;
+  width: 20px; height: 20px; border-radius: 6px;
+  border: 1.5px solid var(--border-control); background: var(--bg-surface);
+  display: inline-grid; place-content: center; cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
+}
+.td-check input:not(.td-switch)::before {
+  content: ""; width: 10px; height: 5.5px;
+  border: 2px solid var(--on-accent); border-top: 0; border-right: 0;
+  transform: translateY(-1px) rotate(-45deg) scale(var(--motion-pop-from));
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-spring) var(--ease-spring);
+}
+.td-check input:not(.td-switch):checked { background: var(--accent-solid); border-color: var(--accent-solid); }
+.td-check input:not(.td-switch):checked::before { opacity: 1; transform: translateY(-1px) rotate(-45deg) scale(1); }
+.td-check input:not(.td-switch):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* 完了した項目の文字は薄くし、打ち消し線を引く */
+.td-check input:not(.td-switch):checked + .td-check-text[data-strike] { color: var(--text-secondary); text-decoration: line-through; }
+/* 芽吹き: やることを完了にした瞬間だけ、チェックの上に芽が出て消える。
+   読み込み時の完了済みには出さないため、JS が change のときに data-sprout を付ける(references/components.md) */
+.td-check[data-sprout]::after {
+  content: ""; position: absolute; left: -1px; bottom: calc(50% + 8px);
+  width: 22px; height: 26px; pointer-events: none;
+  background: var(--accent-text);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 28'%3E%3Cpath d='M11.1 27V12h1.8v15z'/%3E%3Cpath d='M12 16c-1-4-4-6-8-6 0 4 3 7 8 6Z'/%3E%3Cpath d='M12 13c1-4 4-6 8-6 0 4-3 7-8 6Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 28'%3E%3Cpath d='M11.1 27V12h1.8v15z'/%3E%3Cpath d='M12 16c-1-4-4-6-8-6 0 4 3 7 8 6Z'/%3E%3Cpath d='M12 13c1-4 4-6 8-6 0 4-3 7-8 6Z'/%3E%3C/svg%3E") center / contain no-repeat;
+  transform-origin: 50% 100%;
+  animation: td-sprout 1000ms var(--ease-out) forwards;
+}
+
+/* ---------- スイッチ(input type="checkbox" role="switch") ---------- */
+.td-switch {
+  appearance: none; margin: 0; flex: none; cursor: pointer;
+  width: 40px; height: 24px; border-radius: var(--radius-full);
+  background: var(--border-control); position: relative;
+  transition: background-color var(--dur-fast) var(--ease-standard);
+}
+.td-switch::before {
+  content: ""; position: absolute; top: 3px; left: 3px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--bg-elevated); box-shadow: 0 1px 2px oklch(0 0 0 / 0.25);
+  transition: transform var(--dur-spring) var(--ease-spring);
+}
+.td-switch:checked { background: var(--accent-solid); }
+.td-switch:checked::before { transform: translateX(16px); background: var(--on-accent); }
+.td-switch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* ---------- 一覧 ---------- */
+.td-list { list-style: none; margin: 0; padding: 0; }
+.td-row {
+  display: flex; align-items: center; gap: var(--space-3);
+  min-height: var(--row-h); padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.td-row:last-child { border-bottom: 0; }
+a.td-row, button.td-row { width: 100%; text-align: left; color: inherit; text-decoration: none; background: none; border-inline: 0; border-top: 0; font: inherit; }
+a.td-row:hover, button.td-row:hover { background: var(--bg-subtle); }
+.td-row[aria-selected="true"], .td-row[aria-current="page"] { background: var(--accent-tint); }
+.td-row-main { flex: 1; min-width: 0; display: grid; }
+.td-row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-row-meta { font-size: var(--text-xs); color: var(--text-secondary); }
+.td-row-end { margin-left: auto; display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); font-size: var(--text-sm); }
+/* 追加された行。弾むのは位置だけで、不透明度は弾ませない */
+.td-row[data-new] { animation: td-enter var(--dur-spring) var(--ease-spring) both, td-fade var(--dur-fast) var(--ease-out) both; }
+
+/* ---------- カード(独立した操作の単位だけに使う。入れ子にしない) ---------- */
+.td-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle); border-radius: var(--shape-panel);
+  box-shadow: var(--shadow-sm);
+  padding: var(--pad-panel);
+  display: grid; gap: var(--gap-stack); align-content: start; min-width: 0;
+}
+
+/* ---------- 状態のバッジとお知らせ(色だけに頼らず、必ずアイコンか文字を添える) ---------- */
+.td-badge {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  padding: 2px var(--space-2); border-radius: var(--radius-sm);
+  font-size: var(--text-xs); font-weight: var(--weight-medium); line-height: 1.5; white-space: nowrap;
+  background: var(--bg-subtle); color: var(--text-secondary);
+}
+.td-badge svg { width: 12px; height: 12px; }
+.td-badge[data-tone="accent"]  { background: var(--accent-tint);  color: var(--accent-text); }
+.td-badge[data-tone="success"] { background: var(--success-tint); color: var(--success-text); }
+.td-badge[data-tone="warning"] { background: var(--warning-tint); color: var(--warning-text); }
+.td-badge[data-tone="error"]   { background: var(--error-tint);   color: var(--error-text); }
+
+.td-notice {
+  display: flex; gap: var(--space-3); align-items: flex-start;
+  padding: var(--space-3) var(--space-4); border-radius: var(--shape-control);
+  background: var(--bg-subtle); color: var(--text-primary); font-size: var(--text-sm);
+}
+.td-notice > svg { width: 18px; height: 18px; margin-top: 2px; color: var(--text-secondary); }
+.td-notice-title { font-weight: var(--weight-bold); }
+.td-notice[data-tone="success"] { background: var(--success-tint); }
+.td-notice[data-tone="success"] > svg, .td-notice[data-tone="success"] .td-notice-title { color: var(--success-text); }
+.td-notice[data-tone="warning"] { background: var(--warning-tint); }
+.td-notice[data-tone="warning"] > svg, .td-notice[data-tone="warning"] .td-notice-title { color: var(--warning-text); }
+.td-notice[data-tone="error"] { background: var(--error-tint); }
+.td-notice[data-tone="error"] > svg, .td-notice[data-tone="error"] .td-notice-title { color: var(--error-text); }
+
+/* ---------- 切り替え(segmented)とタブ ---------- */
+.td-segmented {
+  display: inline-flex; gap: 2px; padding: 3px;
+  background: var(--bg-subtle); border-radius: var(--radius-md);
+}
+.td-segmented button {
+  min-height: calc(var(--control-h) - 8px); padding: 0 var(--space-3);
+  border: 0; border-radius: calc(var(--radius-md) - 2px);
+  background: transparent; color: var(--text-secondary);
+  font-size: var(--text-sm); font-weight: var(--weight-medium);
+  transition: background-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+}
+.td-segmented button[aria-pressed="true"], .td-segmented button[aria-checked="true"] {
+  background: var(--bg-surface); color: var(--text-primary); box-shadow: var(--shadow-sm);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .td-segmented button[aria-pressed="true"],
+  :root:not([data-theme="light"]) .td-segmented button[aria-checked="true"] { background: var(--bg-elevated); }
+}
+:root[data-theme="dark"] .td-segmented button[aria-pressed="true"],
+:root[data-theme="dark"] .td-segmented button[aria-checked="true"] { background: var(--bg-elevated); }
+
+.td-tabs { display: flex; gap: var(--space-1); border-bottom: 1px solid var(--border-subtle); overflow-x: auto; }
+.td-tabs [role="tab"] {
+  min-height: var(--control-h); padding: 0 var(--space-3);
+  border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none;
+  color: var(--text-secondary); font-size: var(--text-sm); font-weight: var(--weight-medium); white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
+}
+.td-tabs [role="tab"]:hover { color: var(--text-primary); }
+.td-tabs [role="tab"][aria-selected="true"] { color: var(--text-primary); border-bottom-color: var(--accent-solid); }
+
+/* ---------- 表 ---------- */
+.td-table-wrap { overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: var(--shape-panel); background: var(--bg-surface); }
+.td-table { font-size: var(--text-sm); line-height: var(--leading-dense); }
+.td-table th, .td-table td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border-subtle); height: var(--row-h); }
+.td-table thead th { background: var(--bg-subtle); font-size: var(--text-xs); position: sticky; top: 0; }
+.td-table tbody tr:last-child td { border-bottom: 0; }
+.td-table tbody tr:hover { background: var(--bg-subtle); }
+.td-table [data-align="end"] { text-align: right; }
+
+/* ---------- ダイアログ(<dialog> を showModal() で開く) ---------- */
+.td-dialog {
+  width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 64px);
+  padding: var(--space-6); border: 1px solid var(--border-subtle); border-radius: var(--shape-panel);
+  background: var(--bg-elevated); color: var(--text-primary); box-shadow: var(--shadow-md);
+  opacity: 1; transform: none;
+  transition: opacity var(--dur-base) var(--ease-out), transform var(--dur-slow) var(--ease-standard),
+              overlay var(--dur-base) allow-discrete, display var(--dur-base) allow-discrete;
+}
+.td-dialog::backdrop { background: var(--scrim); transition: opacity var(--dur-base) var(--ease-out); }
+.td-dialog:not([open]) { opacity: 0; transform: translateY(var(--motion-enter-y)); }
+@starting-style {
+  .td-dialog[open] { opacity: 0; transform: translateY(var(--motion-enter-y)); }
+  .td-dialog[open]::backdrop { opacity: 0; }
+}
+.td-dialog h2 { font-size: var(--text-lg); }
+.td-dialog-body { margin-top: var(--space-2); color: var(--text-secondary); font-size: var(--text-sm); }
+.td-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-6); flex-wrap: wrap; }
+
+/* ---------- トースト ---------- */
+.td-toast-region {
+  position: fixed; z-index: 50; display: grid; gap: var(--space-2); pointer-events: none;
+  left: max(var(--space-4), env(safe-area-inset-left, 0px));
+  right: max(var(--space-4), env(safe-area-inset-right, 0px));
+  bottom: calc(var(--space-4) + env(safe-area-inset-bottom, 0px));
+  justify-items: center;
+}
+@media (min-width: 720px) {
+  .td-toast-region { left: auto; justify-items: end; }
+}
+.td-toast {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: var(--space-3);
+  width: min(420px, 100%); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  background: var(--text-primary); color: var(--bg-canvas);
+  border-radius: var(--shape-control); box-shadow: var(--shadow-md); font-size: var(--text-sm);
+  animation: td-enter var(--dur-spring) var(--ease-spring) both, td-fade var(--dur-fast) var(--ease-out) both;
+}
+.td-toast > span { flex: 1; min-width: 0; }
+.td-toast button {
+  border: 0; background: none; color: inherit; font-weight: var(--weight-bold); font-size: var(--text-sm);
+  min-height: 32px; padding: 0 var(--space-2); border-radius: var(--radius-sm); text-decoration: underline; text-underline-offset: 0.2em;
+}
+.td-toast button:hover { background: color-mix(in oklab, var(--bg-canvas) 14%, transparent); }
+.td-toast[data-leaving] { animation: td-fade-out var(--dur-fast) var(--ease-in) both; }
+
+/* ---------- 空状態 ---------- */
+.td-empty {
+  display: grid; justify-items: center; gap: var(--space-2); text-align: center;
+  padding: var(--space-10) var(--space-4); color: var(--text-secondary);
+}
+.td-empty > svg { width: 40px; height: 40px; color: var(--border-control); margin-bottom: var(--space-1); }
+.td-empty-title { color: var(--text-primary); font-weight: var(--weight-bold); }
+.td-empty p { max-width: 32em; font-size: var(--text-sm); }
+.td-empty .td-btn { margin-top: var(--space-2); }
+
+/* ---------- 読み込み表示(300ms 未満の処理では出さない) ---------- */
+.td-skeleton {
+  display: block; border-radius: var(--radius-sm); background: var(--bg-subtle);
+  animation: td-pulse 1600ms var(--ease-standard) infinite;
+}
+.td-spinner {
+  display: inline-block; width: 20px; height: 20px; border-radius: 50%;
+  border: 2px solid var(--border-subtle); border-top-color: var(--accent-text);
+  animation: td-spin 700ms linear infinite;
+}
+
+
+/* ---------- 数値(集計の数字: 等幅の数字 + 小さな単位 + 日ごとの刻み) ---------- */
+.td-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: var(--space-4) var(--space-3); }
+.td-stat { display: grid; gap: var(--space-1); align-content: start; min-width: 0; }
+.td-stat-label { font-size: var(--text-xs); color: var(--text-secondary); }
+.td-stat-value {
+  font-family: var(--font-mono); font-size: var(--text-xl); font-weight: var(--weight-medium);
+  font-variant-numeric: tabular-nums; line-height: 1.1; white-space: nowrap;
+}
+.td-stat-unit { font-family: var(--font-sans); font-size: var(--text-xs); font-weight: var(--weight-regular); color: var(--text-secondary); margin-left: 3px; }
+/* 刻みは 1 つが 1 日(か 1 回)。濃さは 0〜3 の 4 段階。意味は数字と文で伝え、刻みは飾りとして aria-hidden にする */
+.td-ticks { display: flex; flex-wrap: wrap; gap: 3px; }
+.td-ticks i { width: 6px; height: 10px; border-radius: 1.5px; background: var(--border-subtle); }
+.td-ticks i[data-level="1"] { background: color-mix(in oklch, var(--accent-solid) 40%, var(--border-subtle)); }
+.td-ticks i[data-level="2"] { background: color-mix(in oklch, var(--accent-solid) 70%, var(--border-subtle)); }
+.td-ticks i[data-level="3"] { background: var(--accent-solid); }
+.td-ticks i[data-today] { outline: 1px solid var(--text-secondary); outline-offset: 1px; }
+
+/* ---------- 動き ---------- */
+@keyframes td-enter { from { transform: translateY(var(--motion-enter-y)); } }
+@keyframes td-fade { from { opacity: 0; } }
+@keyframes td-fade-out { to { opacity: 0; } }
+@keyframes td-pulse { 50% { opacity: 0.55; } }
+@keyframes td-spin { to { transform: rotate(1turn); } }
+@keyframes td-sprout {
+  0%   { opacity: 1; clip-path: inset(100% 0 0 0); transform: scale(var(--motion-pop-from)); }
+  35%  { clip-path: inset(0); transform: scale(1.06); }
+  50%  { transform: scale(1); }
+  75%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; clip-path: inset(0); transform: translateY(-4px); }
+}
+@keyframes td-sprout-fade { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .td-check[data-sprout]::after { animation: td-sprout-fade 900ms linear forwards; }
+  /* 回転は意味のある表示なので止めず、点滅に置き換える */
+  .td-spinner, .td-btn[aria-busy="true"]::after { animation: td-pulse 1200ms ease-in-out infinite; }
+}

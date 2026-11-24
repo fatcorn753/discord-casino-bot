@@ -36,7 +36,14 @@
 - 1通の大きさ（4 KB）と、1秒あたりの操作の数（8回）に上限があります。
 - アクセスの記録は残しません。
 
+## 画面（`web/activity/`）
+
+TypeScript と Vite で作り、Canvas のドット絵と Web Audio の合成音で卓を見せます。絵と音は、このリポジトリで描いたものだけです。
+
+- 開発: `npm --prefix web/activity install` のあと `npm --prefix web/activity run dev`。`http://localhost:5173/?mock` で、Discord と Bot なしに試し遊びできます（偽の相手が座って振ります。`?mock` は開発中だけ効き、ビルドには入りません）。
+- ビルド: `npm --prefix web/activity run build`。型の検査のあと、`web/activity/dist/` に書き出します。Bot はこの `dist/` を配ります。
+- 本番へ送るとき: Mac でビルドしてから送ります。`web/activity/node_modules` は送らず、`web/activity/dist` は送ります（`dist` は git に入れていません）。
+
 ## まだないもの
 
-- 画面（`web/activity/`）は次の段階で作ります。
 - Activity から立てた卓は、Discord のチャンネルには投稿しません。

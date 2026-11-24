@@ -1,0 +1,252 @@
+/*
+ * fatcorn753-design tokens — 静か + 温かい
+ *
+ * 使い方
+ *   <html lang="ja" data-accent="koke">   … 苔(既定。属性を省略しても苔)
+ *   <html lang="ja" data-accent="kohaku"> … 琥珀
+ *   data-theme="light" | "dark" で端末設定を上書き(省略時は端末に従う)
+ *   data-density="compact" | "spacious" で密度を変える(省略時は中間)
+ *
+ * 色はすべて OKLCH。WCAG 2.2 AA を全組み合わせで検査済み(本文 7:1 以上、補助文字 4.5:1 以上、枠 3:1 以上)。
+ * コンポーネントは役割名のトークンだけを使う。色の生値をコンポーネントに書かない。
+ */
+
+/* ---------- ライト(既定) + 苔 ---------- */
+:root {
+  /* 地色の色相。苔は黄緑寄りの生成り、琥珀は砂色 */
+  --n-h: 98;
+
+  --bg-canvas:      oklch(0.975 0.005 var(--n-h));   /* 画面の地 */
+  --bg-surface:     oklch(0.995 0.002 var(--n-h));   /* カード・パネル・入力欄 */
+  --bg-subtle:      oklch(0.950 0.007 var(--n-h));   /* サイドバー・hover・区画 */
+  --bg-elevated:    oklch(1 0 0);                    /* メニュー・ダイアログなど浮く面 */
+  --border-subtle:  oklch(0.895 0.008 var(--n-h));   /* 区切り線(操作できない境界) */
+  --border-control: oklch(0.620 0.012 var(--n-h));   /* 入力欄・チェックボックスの枠 */
+  --text-primary:   oklch(0.250 0.010 var(--n-h));   /* 本文 */
+  --text-secondary: oklch(0.480 0.012 var(--n-h));   /* 補助・ラベル・placeholder */
+
+  --accent-solid:   oklch(0.490 0.082 133);          /* 主ボタンの地・チェック済み */
+  --accent-hover:   oklch(0.440 0.082 133);
+  --accent-text:    oklch(0.470 0.085 133);          /* リンク・選択中の文字・アイコン */
+  --accent-tint:    oklch(0.935 0.030 133);          /* 選択中の行の地 */
+  --on-accent:      oklch(0.995 0.002 98);           /* accent-solid の上の文字 */
+
+  --success-text:   oklch(0.480 0.095 168);          /* 青緑。苔と紛れないよう色相を 35° 離す */
+  --success-tint:   oklch(0.945 0.025 168);
+  --warning-text:   oklch(0.500 0.098 70);
+  --warning-tint:   oklch(0.955 0.035 85);
+  --error-text:     oklch(0.500 0.150 27);
+  --error-tint:     oklch(0.950 0.025 27);
+
+  --focus-ring:     var(--accent-text);
+  --scrim:          oklch(0.20 0.01 var(--n-h) / 0.40);   /* ダイアログの背後 */
+  --shadow-color:   0.20 0.02 var(--n-h);
+  --shadow-sm: 0 1px 2px oklch(var(--shadow-color) / 0.06);
+  --shadow-md: 0 1px 2px oklch(var(--shadow-color) / 0.06), 0 6px 20px oklch(var(--shadow-color) / 0.10);
+
+  /* ---------- 文字 ---------- */
+  /* 欧文を先、和文を後。Windows は游ゴシックの細さを避けて BIZ UDPGothic を優先 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+               "BIZ UDPGothic", "Noto Sans JP", "Yu Gothic", Meiryo, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "BIZ UDGothic", monospace;
+
+  --text-xs:  12px;
+  --text-sm:  14px;
+  --text-md:  16px;
+  --text-lg:  18px;
+  --text-xl:  20px;
+  --text-2xl: 24px;
+  --text-3xl: 32px;
+
+  --leading-ui:      1;      /* ボタンなど 1 行の部品 */
+  --leading-dense:   1.3;    /* 表のセル */
+  --leading-heading: 1.4;
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-bold:     600;    /* 和文の 700 は重いので見出しも 600 を上限にする */
+
+  /* ---------- 余白と大きさ(4px 基準) ---------- */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
+
+  --radius-sm: 6px;      /* 入力欄・小さいボタン・バッジ */
+  --radius-md: 8px;      /* ボタン・メニュー */
+  --radius-lg: 10px;     /* カード・ダイアログ・シート */
+  --radius-full: 999px;  /* スイッチ・アバターだけ */
+  /* 葉の形: 左上と右下だけを大きく丸める。この Skill の顔なので、勝手に普通の角丸へ戻さない */
+  --shape-control: 10px 3px;  /* ボタン・入力欄・お知らせ・トースト */
+  --shape-panel: 16px 4px;    /* カード・ダイアログ・表の枠 */
+
+  --measure: 38em;       /* 読み物の 1 行の最大幅(日本語で 35〜40 字) */
+  --touch-min: 44px;     /* タッチ端末での当たり判定の下限 */
+
+  /* 密度(中間) */
+  --text-body:     var(--text-md);
+  --leading-body:  1.6;
+  --control-h:     40px;   /* ボタン・入力欄の高さ */
+  --row-h:         44px;   /* 一覧の行 */
+  --gap-stack:     var(--space-4);   /* 縦に並ぶ部品の間 */
+  --pad-panel:     var(--space-5);   /* カード・パネルの内側 */
+
+  /* ---------- 動き ---------- */
+  --dur-instant: 80ms;    /* hover・押下・色の変化 */
+  --dur-fast:    150ms;   /* トグル・ドロップダウン・退出 */
+  --dur-base:    220ms;   /* タブ切替・展開・トーストの進入 */
+  --dur-slow:    320ms;   /* ダイアログ・シートの進入。日常操作はこれが上限 */
+  --dur-spring:  340ms;   /* 弾む動き(完了・スイッチ・追加だけ) */
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out:      cubic-bezier(0, 0, 0.2, 1);
+  --ease-in:       cubic-bezier(0.3, 0, 1, 1);
+  /* 減衰比 0.69 のばね。1 回だけ 5% 行き過ぎて戻る。transform にだけ使い、色と opacity には使わない */
+  --ease-spring: linear(0, 0.048, 0.162, 0.308, 0.461, 0.605, 0.731, 0.834, 0.914, 0.972,
+                        1.011, 1.035, 1.047, 1.05, 1.048, 1.042, 1.035, 1.027, 1.02, 1.014, 1);
+
+  /* 動きの距離。視差効果を減らす設定では 0 になり、フェードだけが残る */
+  --motion-enter-y:   8px;
+  --motion-pop-from:  0.6;
+  --motion-press:     0.97;
+}
+
+/* ---------- 琥珀(ライト) ---------- */
+:root[data-accent="kohaku"] {
+  --n-h: 75;
+  --accent-solid:   oklch(0.530 0.112 60);
+  --accent-hover:   oklch(0.480 0.110 58);
+  --accent-text:    oklch(0.500 0.110 58);
+  --accent-tint:    oklch(0.945 0.030 70);
+  --on-accent:      oklch(0.995 0.002 75);
+  --success-text:   oklch(0.480 0.095 155);
+  --success-tint:   oklch(0.945 0.025 155);
+  --warning-text:   oklch(0.490 0.092 95);   /* 黄寄り。琥珀と紛れるので注意表示は必ず三角アイコンを添える */
+  --warning-tint:   oklch(0.955 0.050 98);
+  --error-text:     oklch(0.490 0.155 22);
+  --error-tint:     oklch(0.950 0.021 22);
+}
+
+/* ---------- ダーク(端末設定) ---------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg-canvas:      oklch(0.185 0.006 var(--n-h));
+    --bg-surface:     oklch(0.220 0.007 var(--n-h));
+    --bg-subtle:      oklch(0.255 0.008 var(--n-h));
+    --bg-elevated:    oklch(0.290 0.008 var(--n-h));
+    --border-subtle:  oklch(0.320 0.009 var(--n-h));
+    --border-control: oklch(0.560 0.012 var(--n-h));
+    --text-primary:   oklch(0.925 0.007 var(--n-h));
+    --text-secondary: oklch(0.740 0.010 var(--n-h));
+    --accent-solid:   oklch(0.740 0.095 133);
+    --accent-hover:   oklch(0.790 0.090 133);
+    --accent-text:    oklch(0.760 0.095 133);
+    --accent-tint:    oklch(0.290 0.035 133);
+    --on-accent:      oklch(0.200 0.010 133);
+    --success-text:   oklch(0.760 0.095 168);
+    --success-tint:   oklch(0.270 0.035 168);
+    --warning-text:   oklch(0.800 0.110 80);
+    --warning-tint:   oklch(0.285 0.040 75);
+    --error-text:     oklch(0.730 0.130 27);
+    --error-tint:     oklch(0.275 0.045 27);
+    --scrim:          oklch(0 0 0 / 0.55);
+    --shadow-color:   0 0 0;
+    /* ダークでは影がほぼ見えないので、奥行きは bg-* の明るさの段差で出す */
+    --shadow-sm: none;
+    --shadow-md: 0 8px 24px oklch(0 0 0 / 0.45);
+  }
+  :root[data-accent="kohaku"]:not([data-theme="light"]) {
+    --accent-solid:   oklch(0.770 0.115 68);
+    --accent-hover:   oklch(0.820 0.105 70);
+    --accent-text:    oklch(0.780 0.110 68);
+    --accent-tint:    oklch(0.295 0.040 65);
+    --on-accent:      oklch(0.200 0.012 60);
+    --success-text:   oklch(0.760 0.095 155);
+    --success-tint:   oklch(0.270 0.035 155);
+    --warning-text:   oklch(0.830 0.120 98);
+    --warning-tint:   oklch(0.290 0.045 95);
+    --error-text:     oklch(0.720 0.140 22);
+    --error-tint:     oklch(0.275 0.045 22);
+  }
+}
+
+/* ---------- ダーク(明示指定)。上と同じ値 ---------- */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-canvas:      oklch(0.185 0.006 var(--n-h));
+  --bg-surface:     oklch(0.220 0.007 var(--n-h));
+  --bg-subtle:      oklch(0.255 0.008 var(--n-h));
+  --bg-elevated:    oklch(0.290 0.008 var(--n-h));
+  --border-subtle:  oklch(0.320 0.009 var(--n-h));
+  --border-control: oklch(0.560 0.012 var(--n-h));
+  --text-primary:   oklch(0.925 0.007 var(--n-h));
+  --text-secondary: oklch(0.740 0.010 var(--n-h));
+  --accent-solid:   oklch(0.740 0.095 133);
+  --accent-hover:   oklch(0.790 0.090 133);
+  --accent-text:    oklch(0.760 0.095 133);
+  --accent-tint:    oklch(0.290 0.035 133);
+  --on-accent:      oklch(0.200 0.010 133);
+  --success-text:   oklch(0.760 0.095 168);
+  --success-tint:   oklch(0.270 0.035 168);
+  --warning-text:   oklch(0.800 0.110 80);
+  --warning-tint:   oklch(0.285 0.040 75);
+  --error-text:     oklch(0.730 0.130 27);
+  --error-tint:     oklch(0.275 0.045 27);
+  --scrim:          oklch(0 0 0 / 0.55);
+  --shadow-color:   0 0 0;
+  --shadow-sm: none;
+  --shadow-md: 0 8px 24px oklch(0 0 0 / 0.45);
+}
+:root[data-theme="dark"][data-accent="kohaku"] {
+  --accent-solid:   oklch(0.770 0.115 68);
+  --accent-hover:   oklch(0.820 0.105 70);
+  --accent-text:    oklch(0.780 0.110 68);
+  --accent-tint:    oklch(0.295 0.040 65);
+  --on-accent:      oklch(0.200 0.012 60);
+  --success-text:   oklch(0.760 0.095 155);
+  --success-tint:   oklch(0.270 0.035 155);
+  --warning-text:   oklch(0.830 0.120 98);
+  --warning-tint:   oklch(0.290 0.045 95);
+  --error-text:     oklch(0.720 0.140 22);
+  --error-tint:     oklch(0.275 0.045 22);
+}
+
+/* ---------- 密度 ---------- */
+:root[data-density="compact"] {
+  /* 業務ツールの一覧向け。タッチ端末では下の (pointer: coarse) で当たり判定を戻す */
+  --text-body:    var(--text-sm);
+  --leading-body: 1.45;
+  --control-h:    32px;
+  --row-h:        32px;
+  --gap-stack:    var(--space-3);
+  --pad-panel:    var(--space-4);
+}
+:root[data-density="spacious"] {
+  /* 記録の振り返りなど、読む画面向け */
+  --leading-body: 1.75;
+  --control-h:    48px;
+  --row-h:        52px;
+  --gap-stack:    var(--space-5);
+  --pad-panel:    var(--space-6);
+}
+@media (pointer: coarse) {
+  :root, :root[data-density] {
+    --control-h: var(--touch-min);
+    --row-h:     48px;
+  }
+  :root[data-density="spacious"] { --row-h: 52px; --control-h: 48px; }
+}
+
+/* ---------- 視差効果を減らす ---------- */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    /* 動きを止めずに置き換える。移動と拡大縮小をなくし、短いフェードを残す */
+    --motion-enter-y:  0px;
+    --motion-pop-from: 1;
+    --motion-press:    1;
+    --ease-spring:     var(--ease-out);
+    --dur-base:        150ms;
+    --dur-slow:        150ms;
+    --dur-spring:      150ms;
+  }
+}
