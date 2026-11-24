@@ -25,6 +25,10 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     me = {r["name"] for r in conn.execute("PRAGMA table_info(manual_event)")}
     if "channel_id" not in me:
         conn.execute("ALTER TABLE manual_event ADD COLUMN channel_id INTEGER NOT NULL DEFAULT 0")
+    st = {r["name"] for r in conn.execute("PRAGMA table_info(streams)")}
+    for col in ("voice_channel_id", "created_vc"):  # 配信の場所（初回の版にはなかった）
+        if col not in st:
+            conn.execute(f"ALTER TABLE streams ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
     qq = {r["name"] for r in conn.execute("PRAGMA table_info(quiz_questions)")}
     if "shown_order" not in qq:
         conn.execute("ALTER TABLE quiz_questions ADD COLUMN shown_order TEXT NOT NULL DEFAULT ''")

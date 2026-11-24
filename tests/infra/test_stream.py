@@ -203,7 +203,7 @@ class Followup:
         self.sent = []
 
     async def send(self, *args, **kw):
-        self.sent.append(kw)
+        self.sent.append({"content": args[0] if args else kw.get("content"), **kw})
 
 
 class Msg:
@@ -227,16 +227,43 @@ class Channel:
         self.sent.append(kw["embed"])
 
 
-def _setup(eco):
+class Voice:
+    def __init__(self, cid=777, name=""):
+        self.id, self.name, self.mention, self.deleted = cid, name, f"<#{cid}>", False
+
+    async def delete(self, reason=None):
+        self.deleted = True
+
+
+class Guild:
+    """テスト用のサーバー。VC を作る・消すのを記録する。forbidden なら作れない（権限がない）。"""
+
+    def __init__(self, ch, forbidden=False):
+        self.id, self.ch, self.forbidden, self.voices = G, ch, forbidden, {}
+
+    def get_channel(self, cid):
+        return self.voices.get(cid, self.ch)
+
+    async def create_voice_channel(self, name, *, category=None, reason=None):
+        if self.forbidden:
+            import discord
+
+            raise discord.Forbidden(cast(Any, SimpleNamespace(status=403, reason="Forbidden")), "Missing Permissions")
+        v = Voice(777 + len(self.voices), name)
+        self.voices[v.id] = v
+        return v
+
+
+def _setup(eco, forbidden=False):
     ch = Channel()
-    guild = SimpleNamespace(id=G, get_channel=lambda cid: ch)
+    guild = Guild(ch, forbidden)
     bot = make_test_bot(repos=open_repositories(eco.db.db_path), config={"allowed_guild_ids": [G]})
     bot.guilds = [guild]
     cog = StreamCog(as_bot(bot), bot.config, bot.services.stream, bot.repos.guild, bot.sessions)
     return cog, ch, guild
 
 
-def _it(uid, guild, ch):
+def _it(uid, guild, ch, voice=None):
     async def original_response():
         return ch.msg
 
@@ -246,8 +273,13 @@ def _it(uid, guild, ch):
             guild_id=G,
             guild=guild,
             channel_id=555,
+            channel=None,
             user=SimpleNamespace(
-                id=uid, mention=f"<@{uid}>", display_name=f"u{uid}", display_avatar=SimpleNamespace(url="")
+                id=uid,
+                mention=f"<@{uid}>",
+                display_name=f"u{uid}",
+                display_avatar=SimpleNamespace(url=""),
+                voice=SimpleNamespace(channel=voice) if voice is not None else None,
             ),
             response=Response(),
             followup=Followup(),
@@ -332,3 +364,67 @@ def test_tip_and_settle_via_cog_post_to_the_channel(eco, monkeypatch):
     assert must(eco.streams.stream_get(sid))["status"] == "live"
     asyncio.run(cog.do_menu(_it(HOST, guild, ch), sid, "end"))
     assert must(eco.streams.stream_get(sid))["status"] == "ended" and ch.msg.edits[-1]["view"] is None
+
+
+# ----------------------------- 配信の場所と、配信用の VC（cog） ----------------------------- #
+def _only_stream(eco):
+    return must(
+        eco.streams.stream_get(
+            must(eco.db.conn.execute("SELECT id FROM streams ORDER BY id DESC LIMIT 1").fetchone())[0]
+        )
+    )
+
+
+def test_panel_shows_the_voice_channel_the_streamer_is_in_and_does_not_delete_it(eco, monkeypatch):
+    from cogs.stream import cog as stream_cog
+
+    async def yes(*a, **k):
+        return True
+
+    monkeypatch.setattr(stream_cog, "confirm_action", yes)
+    cog, ch, guild = _setup(eco)
+    mine = Voice(900)
+    guild.voices[900] = mine
+    asyncio.run(cast(Any, cog.start.callback)(cog, _it(HOST, guild, ch, voice=mine), "ランク戦", None))
+    s = _only_stream(eco)
+    assert (s["voice_channel_id"], s["created_vc"]) == (900, 0)
+    assert "📍 場所: <#900>" in must(ch.msg.edits[-1]["embed"].description)
+    assert len(guild.voices) == 1  # 入っている VC があれば、作らない
+    asyncio.run(cog.do_menu(_it(HOST, guild, ch), s["id"], "end"))
+    assert not mine.deleted  # 配信者が入っていた VC は消さない
+    assert "場所" not in must(panel_embed(_only_stream(eco)).description)  # 終わったら場所は出さない
+
+
+def test_bot_creates_a_voice_channel_when_the_streamer_is_not_in_one_and_deletes_it_at_the_end(eco):
+    cog, ch, guild = _setup(eco)
+    it = _it(HOST, guild, ch)
+    asyncio.run(cast(Any, cog.start.callback)(cog, it, "ランク戦", None))
+    s = _only_stream(eco)
+    vc = guild.voices[s["voice_channel_id"]]
+    assert s["created_vc"] == 1 and vc.name == f"📺 u{HOST}の配信"
+    assert f"📍 場所: <#{vc.id}>" in must(ch.msg.edits[-1]["embed"].description)
+    assert vc.mention in it.followup.sent[-1]["content"] and it.followup.sent[-1]["ephemeral"]
+    with eco.db.tx():  # 時間切れで閉じても、作った VC は消す
+        eco.db.conn.execute("UPDATE streams SET ends=0 WHERE id=?", (s["id"],))
+    asyncio.run(cog._tick_guild(cast(Any, guild)))
+    assert vc.deleted and _only_stream(eco)["status"] == "ended"
+
+
+def test_no_voice_channel_for_external_streams_and_a_note_when_the_bot_lacks_permission(eco, monkeypatch):
+    from cogs.stream import cog as stream_cog
+
+    async def yes(*a, **k):
+        return True
+
+    monkeypatch.setattr(stream_cog, "confirm_action", yes)
+    cog, ch, guild = _setup(eco)
+    it = _it(HOST, guild, ch)
+    asyncio.run(cast(Any, cog.start.callback)(cog, it, "ランク戦", "https://youtube.com/live/x"))
+    assert guild.voices == {} and _only_stream(eco)["voice_channel_id"] == 0 and it.followup.sent == []
+    asyncio.run(cog.do_menu(_it(HOST, guild, ch), _only_stream(eco)["id"], "end"))
+    cog, ch, guild = _setup(eco, forbidden=True)
+    it = _it(HOST, guild, ch)
+    asyncio.run(cast(Any, cog.start.callback)(cog, it, "ランク戦", None))
+    s = _only_stream(eco)
+    assert s["status"] == "live" and s["voice_channel_id"] == 0  # パネルは出たまま
+    assert "チャンネルの管理" in it.followup.sent[-1]["content"]

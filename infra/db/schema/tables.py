@@ -635,7 +635,9 @@ def create_tables(conn: sqlite3.Connection) -> None:
             ends       REAL    NOT NULL,          -- これを過ぎたら見回りで自動で閉じる（epoch秒）
             tips       INTEGER NOT NULL DEFAULT 0, -- スパチャの合計（配信者が受け取った額）
             tip_count  INTEGER NOT NULL DEFAULT 0,
-            status     TEXT    NOT NULL DEFAULT 'live'   -- live / ended
+            status     TEXT    NOT NULL DEFAULT 'live',  -- live / ended
+            voice_channel_id INTEGER NOT NULL DEFAULT 0, -- 配信している場所（Discord のボイスチャンネル。なければ 0）
+            created_vc       INTEGER NOT NULL DEFAULT 0  -- 1 なら Bot が作った VC（配信を閉じたら消す）
         );
         CREATE TABLE IF NOT EXISTS stream_rounds (     -- 配信の勝負（勝敗の賭けの1回分）
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
