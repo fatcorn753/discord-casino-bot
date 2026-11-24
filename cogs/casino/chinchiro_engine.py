@@ -36,6 +36,7 @@ FAILED = "failed"  # 精算に失敗した（精算前の席は全額返した�
 
 Rolls = list[tuple[tuple[int, ...], rules.Hand]]  # 振った目と役（目なしの振り直しも並ぶ）
 Listener = Callable[["ChinchiroTable"], Awaitable[None]]
+RegisterHook = Callable[["ChinchiroTable"], None]
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,7 @@ class ChinchiroTable:
         self.bet = bet
         self.host_id = host_id
         self.closes_at = closes_at  # 締切の UNIX 秒（表示用）
+        self.channel_id = 0  # 卓のあるチャンネル（register で決まる。Activity はこのチャンネルの卓を見せる）
         self.seats: dict[int, GameContext] = {}
         self.rolls: dict[int, Rolls] = {}
         self.phase = LOBBY
@@ -221,3 +223,51 @@ class ChinchiroTable:
         for t in (self._task, self._roll_task):
             if t:
                 t.cancel()
+
+
+# ----------------------- チャンネルごとの卓の台帳 ----------------------- #
+# Discord の投稿から立てた卓も、Activity の画面から立てた卓も、ここに載せる。Activity は、開いたチャンネル
+# （ボイスチャンネルなら、その VC のチャット）のいちばん新しい卓を見せる。Bot が再起動したら空になる
+# （預かった賭け金は、起動時に全額返る）。
+_TABLES: dict[tuple[int, int], ChinchiroTable] = {}
+_HOOKS: list[RegisterHook] = []
+
+
+def register(table: ChinchiroTable, channel_id: int) -> None:
+    """卓をチャンネルの台帳に載せる（同じチャンネルの前の卓は、新しい卓に置き換わる）。"""
+    table.channel_id = channel_id
+    _TABLES[(table.guild_id, channel_id)] = table
+    for hook in list(_HOOKS):
+        hook(table)
+
+
+def table_at(guild_id: int, channel_id: int) -> ChinchiroTable | None:
+    """そのチャンネルのいちばん新しい卓（決着したあとも、次の卓が立つまで残す）。"""
+    return _TABLES.get((guild_id, channel_id))
+
+
+def add_register_hook(hook: RegisterHook) -> None:
+    """卓が台帳に載るたびに呼ぶ関数を足す（Activity の画面が、卓の変化を受け取るため）。"""
+    _HOOKS.append(hook)
+
+
+def remove_register_hook(hook: RegisterHook) -> None:
+    if hook in _HOOKS:
+        _HOOKS.remove(hook)
+
+
+def create(
+    deps: CasinoDeps, guild_id: int, channel_id: int, host_id: int, name: str, bet: int, now: float
+) -> ChinchiroTable | BeginFailure:
+    """卓を立て、立てた人を最初の席に座らせ、台帳に載せて、締切のタスクを始める（Activity から立てるとき）。"""
+    current = table_at(guild_id, channel_id)
+    if current is not None and not current.finished:
+        return BeginFailure("卓を立てられません", "このチャンネルには、まだ決着していない卓があります。")
+    got = begin_context(deps, guild_id, host_id, name, bet, GAME)
+    if isinstance(got, BeginFailure):
+        return got
+    table = ChinchiroTable(deps, guild_id, bet, host_id, now + JOIN_SECONDS)
+    table.seat_host(got)
+    register(table, channel_id)
+    table.schedule_start()
+    return table
