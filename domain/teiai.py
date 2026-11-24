@@ -42,6 +42,8 @@ MARKET_FIXED_QTY = _CFG.market_fixed_qty
 MARKET_BLACK_PROB = _CFG.market_black_prob
 MARKET_BLACK_WORSE = _CFG.market_black_worse
 MARKET_BLACK_BETTER = _CFG.market_black_better
+RELIC_AUCTION_PER_DAY = _CFG.relic_auction_per_day  # 帝愛の発掘品の競り（domain/teiai_market.py）
+RELIC_AUCTION_HOURS = _CFG.relic_auction_hours
 SEIZE_RATE = _CFG.seize_rate  # ショップの品と、解約できない債券を差し押さえるときの換金率
 
 # ---- 帝愛の利息（トイチ）----

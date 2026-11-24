@@ -323,6 +323,9 @@ class IP2PRepo(IGuildScopedRepo):
     def p2p_settle(self, now: float) -> list[tuple[ListingRow, str]]:
         raise NotImplementedError
 
+    def p2p_teiai_daily(self, now: float, rng: random.Random) -> list[int]:
+        raise NotImplementedError
+
     def p2p_active(
         self,
         kind: str | None = None,

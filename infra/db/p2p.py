@@ -1,10 +1,12 @@
 """プレイヤー間の取引（定価の市場と競り）。数字と決まりは domain/p2p.py、表は infra/db/schema/tables.py の market_listings。"""
 
+import random
 from typing import Any
 
 from domain import horse as horse_mod
 from domain import p2p, teiai
 from domain import shop as shop_mod
+from domain import teiai_market as tm
 from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import (
     GraceReader,
@@ -94,6 +96,8 @@ class P2PRepo(ScopedRepo, IP2PRepo):
             return fail("insufficient_balance_need", need=amount, balance=bal)
         if reason := self._p2p_can_receive(guild_id, buyer_id, row):
             return reason
+        if row["seller_id"] == tm.TEIAI_SELLER:  # 帝愛からの購入は、送金の抜け道にならない
+            return None
         used = self._p2p_pair_total(guild_id, row["seller_id"], buyer_id, now)
         if used + amount > p2p.PAIR_DAILY_LIMIT:
             return fail("p2p_pair_limit", limit=p2p.PAIR_DAILY_LIMIT, used=used, amount=amount)
@@ -212,7 +216,15 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         )
 
     def _p2p_sell(self, guild_id: int, row: Any, buyer_id: int, price: int, now: float) -> None:
-        """売れた: 売り手へ（手数料を引いて）支払い、買い手へ品を渡す。買い手の支払いは、呼び出し側で済ませる。"""
+        """売れた: 売り手へ（手数料を引いて）支払い、買い手へ品を渡す。買い手の支払いは、呼び出し側で済ませる。
+
+        帝愛の出品なら、代金はすべて帝愛銀行の収入にする。
+        """
+        if row["seller_id"] == tm.TEIAI_SELLER:
+            self._bank.bank_income_for(guild_id, price, now)
+            self._p2p_give(guild_id, buyer_id, row)
+            self._p2p_close(row["id"], "sold", now, buyer_id, price)
+            return
         fee = p2p.fee_of(price)
         self._account.ensure(guild_id, row["seller_id"])
         label = self._p2p_label_for(guild_id, row)
@@ -359,16 +371,18 @@ class P2PRepo(ScopedRepo, IP2PRepo):
             )
             for row in rows:
                 label = self._p2p_label_for(gid, row)
+                teiai_row = row["seller_id"] == tm.TEIAI_SELLER  # 帝愛の売れ残りは、帝愛が引き取る（品は消える）
                 if row["mode"] != "auction" or not row["bidder_id"]:
-                    self._p2p_give(gid, row["seller_id"], row)  # 売れ残り: 売り手へ戻す
                     self._p2p_close(row["id"], "expired", now)
-                    self._notices.note_for(gid, row["seller_id"], "p2p_unsold", label=label)
+                    if not teiai_row:
+                        self._p2p_give(gid, row["seller_id"], row)  # 売れ残り: 売り手へ戻す
+                        self._notices.note_for(gid, row["seller_id"], "p2p_unsold", label=label)
                     out.append((row, "expired"))
                     continue
                 buyer = row["bidder_id"]
                 reason = self._p2p_can_receive(gid, buyer, row)
-                used = self._p2p_pair_total(gid, row["seller_id"], buyer, now)
-                if not reason and used + row["bid"] > p2p.PAIR_DAILY_LIMIT:
+                used = 0 if teiai_row else self._p2p_pair_total(gid, row["seller_id"], buyer, now)
+                if not reason and not teiai_row and used + row["bid"] > p2p.PAIR_DAILY_LIMIT:
                     reason = fail("p2p_pair_limit_short")
                 if not reason:
                     self._p2p_sell(gid, row, buyer, row["bid"], now)
@@ -379,11 +393,32 @@ class P2PRepo(ScopedRepo, IP2PRepo):
                     gid, buyer, row["bid"], f"取引:入札の返金（{label}）"
                 )  # 受け取れないので、返金して出品も戻す
                 self._notices.note_for(gid, buyer, "p2p_won_failed", label=label, reason=reason, refund=row["bid"])
-                self._p2p_give(gid, row["seller_id"], row)
                 self._p2p_close(row["id"], "expired", now)
-                self._notices.note_for(gid, row["seller_id"], "p2p_buyer_cannot_receive", label=label)
+                if not teiai_row:
+                    self._p2p_give(gid, row["seller_id"], row)
+                    self._notices.note_for(gid, row["seller_id"], "p2p_buyer_cannot_receive", label=label)
                 out.append((row, "failed"))
         return out
+
+    def p2p_teiai_daily(self, now: float, rng: random.Random) -> list[int]:
+        """帝愛の発掘品の競りを、その日（UTC）の分だけ出す。出した出品の番号を返す（もう出ていれば空）。"""
+        with self._db.tx():
+            gid = self._g()
+            done = self._scalar(
+                "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND seller_id=? AND created>=?",
+                (gid, tm.TEIAI_SELLER, tm.day_start(now)),
+            )
+            out = []
+            for _ in range(max(0, teiai.RELIC_AUCTION_PER_DAY - done)):
+                item_id, price = tm.pick_relic(rng)
+                cur = self._conn.execute(
+                    "INSERT INTO market_listings (guild_id, seller_id, kind, ref, qty, mode, price, created, end_at) "
+                    "VALUES (?, ?, 'item', ?, 1, 'auction', ?, ?, ?)",
+                    (gid, tm.TEIAI_SELLER, item_id, price, now, now + teiai.RELIC_AUCTION_HOURS * 3600),
+                )
+                assert cur.lastrowid is not None
+                out.append(cur.lastrowid)
+            return out
 
     def p2p_active(
         self,

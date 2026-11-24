@@ -20,6 +20,7 @@ from cogs.p2p.embeds import entry_text as entry_text
 from cogs.p2p.embeds import line_of as line_of
 from cogs.p2p.embeds import post_embed as post_embed
 from cogs.p2p.embeds import price_text as price_text
+from cogs.p2p.embeds import seller_text
 from cogs.p2p.embeds import when as when
 from cogs.p2p.views import (
     BidModal as BidModal,
@@ -269,6 +270,8 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
 
     async def _settle_guild(self, guild: discord.Guild) -> None:
         results = self.p2p.settle(guild.id)
+        for listing_id in self.p2p.teiai_daily(guild.id):  # 帝愛の発掘品の競り（1日1回）を出して、告知する
+            await self.announce(guild, listing_id)
         for row, _res in results:
             await self.refresh_post(guild, row["id"])  # 告知を、売れた・終了に書き換える
         for row in self.p2p.unsynced_posts(
@@ -291,7 +294,7 @@ class P2PCog(commands.Cog, IP2PNavigationBridge):
                     channel,
                     embed=ui.embed(
                         "🔨 競りの落札",
-                        f"**{self.p2p.label(guild.id, row)}** を、<@{done['buyer_id']}> が **{ui.pelica(done['sold_price'])}** で落札しました（出品者 <@{row['seller_id']}>）。",
+                        f"**{self.p2p.label(guild.id, row)}** を、<@{done['buyer_id']}> が **{ui.pelica(done['sold_price'])}** で落札しました（出品者 {seller_text(row)}）。",
                         ui.GOLD,
                     ),
                     allowed_mentions=NONE,

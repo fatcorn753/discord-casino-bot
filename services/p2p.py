@@ -1,5 +1,7 @@
 """プレイヤー間の市場と競り（出品・購入・入札・取り消し・締切の精算）のアプリケーションサービス。"""
 
+import random
+
 from domain.errors import Outcome
 from domain.ports.clock import IClock
 from domain.ports.contracts import HorseRow, ListingRow, P2PMine
@@ -68,6 +70,10 @@ class P2PService:
     def settle(self, guild_id: int) -> list[tuple[ListingRow, str]]:
         """締切の来た出品を精算する。[(出品, 結果), ...]。"""
         return self._repo(guild_id).p2p_settle(self._clock.now_ts())
+
+    def teiai_daily(self, guild_id: int) -> list[int]:
+        """帝愛の発掘品の競りを、その日の分だけ出す。出した出品の番号（もう出ていれば空）。"""
+        return self._repo(guild_id).p2p_teiai_daily(self._clock.now_ts(), random.SystemRandom())
 
     # ------------------------------ 告知の投稿の記録 ------------------------------ #
     def set_post(self, guild_id: int, listing_id: int, channel_id: int, message_id: int) -> None:

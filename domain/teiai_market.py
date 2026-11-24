@@ -4,6 +4,7 @@
 - 競売: 最初の値段（定価の MARKET_AUCTION_RATE）から、期間の終わりに MARKET_AUCTION_END 倍まで一定の速さで下がる。1つだけ
 - 定価販売: 定価の MARKET_FIXED_RATE の値段で、期間中ずっと同じ。消耗品なら MARKET_FIXED_QTY 個
 - 闇市品（MARKET_BLACK_PROB）: 中身は未鑑定。買うと、まれに別の品（安い品 MARKET_BLACK_WORSE・高い品 MARKET_BLACK_BETTER）になる。返品はできない
+- 発掘品の競り: 1日に RELIC_AUCTION_PER_DAY 回、帝愛の競売（プレイヤー間の市場）に発掘品を1つ、競りで出す（pick_relic）
 
 DB にも Discord にも触らない。乱数は呼び出し側から渡す。
 """
@@ -12,8 +13,8 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from domain import labor, teiai
 from domain import shop as shop_mod
-from domain import teiai
 
 DAY = 86400
 SAME, WORSE, BETTER = "same", "worse", "better"
@@ -106,3 +107,14 @@ def _neighbor(
         return None
     # 「ダイヤのはずが銅」「ドリンクのはずが宝石」のような当たり外れも出るよう、候補から均等に選ぶ
     return rng.choice(sorted(cands, key=lambda it: it.id))
+
+
+# ---- 発掘品の競り（帝愛の競売＝プレイヤー間の市場に、帝愛が出す）----
+TEIAI_SELLER = 0  # 市場の出品者が帝愛のときの seller_id（Discord のユーザーID は 0 にならない）
+
+
+def pick_relic(rng: random.Random) -> tuple[str, int]:
+    """帝愛が競りに出す発掘品と、開始価格（目安の価値＝定価）。掘れる確率に比例して選ぶ（★なし）。"""
+    rid = rng.choices([r[0] for r in labor.RELICS], weights=[r[3] for r in labor.RELICS])[0]
+    item_id = labor.RELIC_ID[rid]
+    return item_id, shop_mod.RELIC_VALUE[item_id]
