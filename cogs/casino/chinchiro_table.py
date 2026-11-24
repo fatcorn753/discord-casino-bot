@@ -199,5 +199,6 @@ async def open_table(interaction: discord.Interaction, deps: CasinoDeps, bet: in
         ctx.abort()
         raise
     table.listeners.append(post)
+    engine.register(table, interaction.channel_id or 0)
     table.schedule_start()
     return table

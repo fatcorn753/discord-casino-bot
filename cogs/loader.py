@@ -31,6 +31,7 @@ COG_MODULES: tuple[str, ...] = (
     "cogs.raffle.cog",
     "cogs.weekly.cog",
     "cogs.admin.cog",
+    "cogs.activity.cog",
 )
 
 

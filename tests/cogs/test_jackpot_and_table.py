@@ -109,6 +109,7 @@ def interaction(bot, uid, msg):
 
     return SimpleNamespace(
         guild_id=G,
+        channel_id=20,
         user=SimpleNamespace(id=uid, display_name=f"u{uid}"),
         client=bot,
         response=Response(),
@@ -138,6 +139,7 @@ def test_pot_payouts_go_to_the_strongest_hand_minus_the_rake():
 
 
 def patch_table(monkeypatch, hands):
+    monkeypatch.setattr(chinchiro_engine, "_TABLES", {})  # 卓の台帳を、テストごとに空にする
     monkeypatch.setattr(chinchiro_engine, "JOIN_SECONDS", 3600)  # 締切のタスクは走らせない
     monkeypatch.setattr(chinchiro_engine, "ROLL_SECONDS", 3600)
     it = iter(hands)
@@ -373,3 +375,4 @@ def test_buttons_defer_then_edit_the_post(bot, monkeypatch):
     assert not_host.response.sent[0][0] == ("始められるのは、卓を立てた人だけです。",)
     assert table.phase == chinchiro_engine.DONE and lobby.is_finished() and rolling.is_finished()
     assert "u1** の総取り" in must(msg.edits[-1]["embed"].description) and msg.edits[-1]["view"] is None
+    assert chinchiro_engine.table_at(G, 20) is table  # 投稿から立てた卓も、チャンネルの台帳に載る
