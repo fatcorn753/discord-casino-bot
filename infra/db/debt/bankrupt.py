@@ -71,6 +71,11 @@ class DebtRepo(Base):
                 "UPDATE users SET debt=debt-?, bankrupt_at=?, blacklist_until=NULL WHERE guild_id=? AND user_id=?",
                 (compressed, now, guild_id, user_id),
             )
+            final_debt = self._account.debt(guild_id, user_id)
+            self._conn.execute(
+                "UPDATE users SET debt_principal=?, debt_interest_at=0 WHERE guild_id=? AND user_id=?",
+                (final_debt, guild_id, user_id),
+            )
             self.after_debt_change(guild_id, user_id)
             seed = self._seed_if_empty_for(guild_id, user_id)
             self._conn.execute("UPDATE users SET grace_until=NULL WHERE guild_id=? AND user_id=?", (guild_id, user_id))

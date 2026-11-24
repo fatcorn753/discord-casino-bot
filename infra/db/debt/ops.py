@@ -20,9 +20,7 @@ class DebtRepo(Base):
     def seed_for(self, guild_id: int, user_id: int, amount: int) -> None:
         """帝愛が種銭を貸し付ける。手元に入り、同じ額が借金に加わる（天引きの対象にはならない）。"""
         self._account.apply(guild_id, user_id, amount, "帝愛の種銭貸付")
-        self._conn.execute(
-            "UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (amount, guild_id, user_id)
-        )
+        self._account.add_debt_principal(guild_id, user_id, amount)
         self._bank.grace_update_for(guild_id, user_id, self._now())
         self._notices.note_for(guild_id, user_id, "seed_loan", amount=amount)
 
@@ -82,7 +80,7 @@ class DebtRepo(Base):
         need -= self._bank.cds_cover_self_for(guild_id, user_id, need, self._now())
         if need <= 0:
             return 0
-        self._conn.execute("UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (need, guild_id, user_id))
+        self._account.add_debt_principal(guild_id, user_id, need)
         self._account.ledger(
             guild_id, user_id, 0, self._account.raw_balance(guild_id, user_id), f"借金:{reason}（{need:,}ペリカ）"
         )

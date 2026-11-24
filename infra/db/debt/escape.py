@@ -53,7 +53,7 @@ class DebtRepo(Base):
                 }
                 return True, escaped
             fine = max(teiai.ESCAPE_FINE_MIN, int(debt * teiai.ESCAPE_FINE_RATE))
-            self._conn.execute("UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (fine, gid, user_id))
+            self._account.add_debt_principal(gid, user_id, fine)
             self._account.ledger(
                 gid,
                 user_id,

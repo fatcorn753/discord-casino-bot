@@ -68,10 +68,7 @@ class DebtRepo(Base):
             return 0
         pay = min(self._account.debt(guild_id, user_id), amount, self._account.raw_balance(guild_id, user_id))
         if pay > 0:
-            self._conn.execute(
-                "UPDATE users SET balance=balance-?, debt=debt-? WHERE guild_id=? AND user_id=?",
-                (pay, pay, guild_id, user_id),
-            )
+            self._account.pay_debt_from_balance(guild_id, user_id, pay)
             self._account.ledger(
                 guild_id, user_id, -pay, self._account.raw_balance(guild_id, user_id), "帝愛への返済（収入から天引き）"
             )
@@ -82,10 +79,7 @@ class DebtRepo(Base):
         """入ってきた amount（元本など、収入ではないお金）を、借金があれば全額、返済に充てる。返済した合計を返す。"""
         pay = min(self._account.debt(guild_id, user_id), amount, self._account.raw_balance(guild_id, user_id))
         if pay > 0:
-            self._conn.execute(
-                "UPDATE users SET balance=balance-?, debt=debt-? WHERE guild_id=? AND user_id=?",
-                (pay, pay, guild_id, user_id),
-            )
+            self._account.pay_debt_from_balance(guild_id, user_id, pay)
             self._account.ledger(guild_id, user_id, -pay, self._account.raw_balance(guild_id, user_id), label)
             self.after_debt_change(guild_id, user_id)
         return pay + self._loans.collect_overdue_for(
