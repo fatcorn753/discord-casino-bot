@@ -128,6 +128,10 @@ class TeiaiService:
     def cds_buy(self, guild_id: int, user_id: int, target_id: int, stake: int) -> Outcome[float]:
         return self._bank.for_guild(guild_id).cds_buy(user_id, target_id, stake, self._clock.now_ts())
 
+    def debt_interest_tick(self, guild_id: int, now: float) -> int:
+        """帝愛の利息（トイチ）を債務者全員へ定期反映する。"""
+        return self._debt.for_guild(guild_id).accrue_all_debt_interest(now)
+
     def grace_expire(self, guild_id: int, now: float) -> list[tuple[int, BankruptResult]]:
         """破産猶予の時間切れ（強制破産と、CDS の配当）。(user_id, 結果) の一覧。"""
         return self._bank.for_guild(guild_id).grace_expire(now)

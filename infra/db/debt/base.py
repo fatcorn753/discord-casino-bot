@@ -98,3 +98,13 @@ class DebtRepo(ScopedRepo, IDebtRepo):
     def debt(self, user_id: int) -> int:
         """借金の残り。口座が無ければ 0（口座は作らない）。"""
         return self._account.debt_readonly(self._g(), user_id)
+
+    def _seize_assets_for(
+        self, guild_id: int, user_id: int, need: int, reason: str, now: float | None = None
+    ) -> int:
+        """現金と流動資産を順に差し押さえ、確保できた合計額を返す。"""
+        ts = self._now() if now is None else now
+        covered = _take_cash(self._account, guild_id, user_id, need, reason)
+        if covered >= need:
+            return covered
+        return covered + self._seizure_step(guild_id, user_id, need - covered, reason, ts)
