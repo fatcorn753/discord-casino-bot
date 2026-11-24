@@ -366,7 +366,7 @@ class ShopView(ui.OwnerView):
             )
             pick.callback = self._on_buy_horse
             self.add_item(pick)
-        if listed or horses:
+        if listed or market or horses:  # 帝愛の出品だけの日も、購入ボタンを出す
             self._add_buy_button()
 
     def _build_inventory(self) -> None:
