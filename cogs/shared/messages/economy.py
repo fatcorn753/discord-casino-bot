@@ -34,7 +34,7 @@ ECONOMY_FAILURES: dict[str, FailureFormatter] = {
     "company_no_funds": "会社資金がありません。",
     "company_funds_short": lambda p: f"会社資金が足りません（{p['need']:,}ペリカ 必要・いま {p['funds']:,}ペリカ）。",
     "company_nothing_to_ship": "出荷できる在庫が、まだありません。",
-    "company_no_budget": "帝愛の買取予算（胴元の口座と、今日の買取枠）が尽きていて、いまは買い取ってもらえません。日付が変わると、買取枠が戻ります。",
+    "company_no_budget": "帝愛物産の買取予算（買取プールと、今日の買取枠）が尽きていて、いまは買い取ってもらえません。日付が変わると、買取枠が戻ります。",
     "company_max_level": lambda p: f"事業所は、もう最大（Lv{p['max']}）です。",
     "company_same_kind": "いまと同じ種類です。",
     "company_funds_locked": lambda p: (

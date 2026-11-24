@@ -55,7 +55,7 @@ def company_embed(c: CompanyView) -> discord.Embed:
         ),
         inline=False,
     )
-    e.add_field(name="🕴️ 帝愛の買取予算", value=ui.pelica(c["budget"]), inline=False)
+    e.add_field(name="📦 帝愛物産の買取予算", value=ui.pelica(c["budget"]), inline=False)
     if c.get("investors"):
         e.add_field(
             name="🤝 出資",
