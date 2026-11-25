@@ -3,15 +3,15 @@
 import random
 
 
-def new_quiz_order() -> list[int]:
+def new_quiz_order(count: int = 4) -> list[int]:
     """クイズの選択肢の表示順（添字を並べ替えたもの）。登録時に1回だけ決めて固定する。"""
-    order = [0, 1, 2, 3]
+    order = list(range(count))
     random.SystemRandom().shuffle(order)
     return order
 
 
-LOANS_DDL = """
-    CREATE TABLE IF NOT EXISTS loans (              -- 貸し借り（ユーザー同士）
+LOANS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS loans (              -- 貸し借り（v1 互換: v6 で約定条件・UI 列を分離）
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id      INTEGER NOT NULL,
         lender_id     INTEGER NOT NULL,
@@ -30,11 +30,37 @@ LOANS_DDL = """
         message_id    INTEGER NOT NULL DEFAULT 0
     )"""
 
+LOANS_DDL = """
+    CREATE TABLE IF NOT EXISTS loans (              -- 個人間融資（募集時は lender_id が NULL）
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id      INTEGER NOT NULL,
+        lender_id     INTEGER CHECK (lender_id IS NULL OR lender_id > 0),
+        borrower_id   INTEGER NOT NULL CHECK (borrower_id > 0),
+        principal     INTEGER NOT NULL CHECK (principal > 0),
+        rate_tenths   INTEGER NOT NULL CHECK (rate_tenths >= 0),
+        term_days     INTEGER NOT NULL CHECK (term_days > 0),
+        status        TEXT    NOT NULL CHECK (
+            status IN ('request', 'offer', 'active', 'overdue', 'repaid', 'declined', 'cancelled', 'expired', 'discharged')
+        ),
+        created       REAL    NOT NULL,
+        offer_expires REAL    NOT NULL
+    )"""
+
+LOAN_TERMS_DDL = """
+    CREATE TABLE IF NOT EXISTS loan_terms (         -- 成立済み貸付の約定期間・返済額・通知状態
+        loan_id     INTEGER PRIMARY KEY,
+        accepted_at REAL    NOT NULL,
+        due         REAL    NOT NULL,
+        paid        INTEGER NOT NULL DEFAULT 0 CHECK (paid >= 0),
+        reminded    INTEGER NOT NULL DEFAULT 0 CHECK (reminded IN (0, 1)),
+        FOREIGN KEY (loan_id) REFERENCES loans (id) ON DELETE CASCADE
+    )"""
+
 LOANS_INDEX_DDL = """
     CREATE INDEX IF NOT EXISTS idx_loans ON loans (guild_id, borrower_id, status)"""
 
-MARKET_LISTINGS_DDL = """
-    CREATE TABLE IF NOT EXISTS market_listings (   -- プレイヤー間の市場の出品（定価と競り）。出した品・馬は、出品中は預かる
+MARKET_LISTINGS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS market_listings (   -- P2P 市場（v1 互換: v6 で入札・成約・UI 列を分離）
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id   INTEGER NOT NULL,
         seller_id  INTEGER NOT NULL,
@@ -56,11 +82,46 @@ MARKET_LISTINGS_DDL = """
         post_done  INTEGER NOT NULL DEFAULT 0      -- 終わった出品の、告知の書き換えが済んでいるか（1 = 済み）
     )"""
 
+MARKET_LISTINGS_DDL = """
+    CREATE TABLE IF NOT EXISTS market_listings (   -- P2P 市場の出品コア（帝愛出品時は seller_id が NULL）
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id  INTEGER NOT NULL,
+        seller_id INTEGER CHECK (seller_id IS NULL OR seller_id > 0),
+        kind      TEXT    NOT NULL CHECK (kind IN ('item', 'horse')),
+        ref       TEXT    NOT NULL,
+        qty       INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+        mode      TEXT    NOT NULL CHECK (mode IN ('fixed', 'auction')),
+        price     INTEGER NOT NULL CHECK (price > 0),
+        created   REAL    NOT NULL,
+        end_at    REAL    NOT NULL,
+        status    TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'sold', 'cancelled', 'expired'))
+    )"""
+
+MARKET_AUCTION_BIDS_DDL = """
+    CREATE TABLE IF NOT EXISTS market_auction_bids ( -- 進行中・終了直前の競りにおける最高入札（預かり中）
+        listing_id INTEGER PRIMARY KEY,
+        bidder_id  INTEGER NOT NULL CHECK (bidder_id > 0),
+        amount     INTEGER NOT NULL CHECK (amount > 0),
+        FOREIGN KEY (listing_id) REFERENCES market_listings (id) ON DELETE CASCADE
+    )"""
+
+MARKET_AUCTION_BIDS_BIDDER_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS idx_market_auction_bids_bidder ON market_auction_bids (bidder_id)"""
+
+MARKET_CLOSURES_DDL = """
+    CREATE TABLE IF NOT EXISTS market_closures (   -- 終了した出品の決済・終了時刻（キャンセル・期限切れは buyer_id NULL）
+        listing_id INTEGER PRIMARY KEY,
+        closed_at  REAL    NOT NULL,
+        buyer_id   INTEGER CHECK (buyer_id IS NULL OR buyer_id > 0),
+        sold_price INTEGER NOT NULL DEFAULT 0 CHECK (sold_price >= 0),
+        FOREIGN KEY (listing_id) REFERENCES market_listings (id) ON DELETE CASCADE
+    )"""
+
 MARKET_LISTINGS_INDEX_DDL = """
     CREATE INDEX IF NOT EXISTS market_listings_active ON market_listings (guild_id, status, end_at)"""
 
-QUIZ_QUESTIONS_DDL = """
-    CREATE TABLE IF NOT EXISTS quiz_questions (     -- クイズの問題（全サーバー共通。持ち主が登録する）
+QUIZ_QUESTIONS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS quiz_questions (     -- クイズの問題（v1 互換: v6 で選択肢・ユーザー出題・UI 列を分離）
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         question     TEXT    NOT NULL,
         choices      TEXT    NOT NULL,         -- JSON の配列。先頭が正解（表示のたびにシャッフルする）
@@ -80,6 +141,43 @@ QUIZ_QUESTIONS_DDL = """
         created      REAL    NOT NULL
     )"""
 
+QUIZ_QUESTIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS quiz_questions (     -- クイズ問題本体（選択肢は quiz_choices、ユーザー出題情報は quiz_user_submissions）
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        question     TEXT    NOT NULL,
+        explanation  TEXT    NOT NULL DEFAULT '',
+        creator_name TEXT    NOT NULL DEFAULT '',
+        msg_right    TEXT    NOT NULL DEFAULT '',
+        msg_wrong    TEXT    NOT NULL DEFAULT '',
+        reward       INTEGER NOT NULL,
+        expires      REAL,
+        created      REAL    NOT NULL
+    )"""
+
+QUIZ_CHOICES_DDL = """
+    CREATE TABLE IF NOT EXISTS quiz_choices (       -- クイズ選択肢（choice_idx=0 が正解、display_pos が固定表示順）
+        question_id INTEGER NOT NULL,
+        choice_idx  INTEGER NOT NULL CHECK (choice_idx >= 0),
+        label       TEXT    NOT NULL,
+        display_pos INTEGER NOT NULL CHECK (display_pos >= 0),
+        PRIMARY KEY (question_id, choice_idx),
+        UNIQUE (question_id, display_pos),
+        FOREIGN KEY (question_id) REFERENCES quiz_questions (id) ON DELETE CASCADE
+    )"""
+
+QUIZ_USER_SUBMISSIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS quiz_user_submissions ( -- ユーザー投稿クイズのサーバー・出題者・精算状態
+        question_id INTEGER PRIMARY KEY,
+        guild_id    INTEGER NOT NULL DEFAULT 0,
+        author_id   INTEGER NOT NULL CHECK (author_id > 0),
+        settled     INTEGER NOT NULL DEFAULT 0 CHECK (settled IN (0, 1)),
+        earned      INTEGER NOT NULL DEFAULT 0 CHECK (earned >= 0),
+        FOREIGN KEY (question_id) REFERENCES quiz_questions (id) ON DELETE CASCADE
+    )"""
+
+QUIZ_USER_SUBMISSIONS_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS idx_quiz_user_submissions_guild_author ON quiz_user_submissions (guild_id, author_id, settled)"""
+
 QUIZ_ANSWERS_DDL = """
     CREATE TABLE IF NOT EXISTS quiz_answers (       -- 回答（1問につき1人1回。サーバーごとに別の口座なので guild_id も持つ）
         question_id INTEGER NOT NULL,
@@ -91,8 +189,8 @@ QUIZ_ANSWERS_DDL = """
         PRIMARY KEY (question_id, guild_id, user_id)
     )"""
 
-RAFFLE_DDL = """
-    CREATE TABLE IF NOT EXISTS raffle (             -- 抽選（持ち主が開催。1サーバーに募集中は1つだけ）
+RAFFLE_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS raffle (             -- 抽選（v1 互換: v6 で UI 列を discord_posts へ分離）
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id   INTEGER NOT NULL,
         host_id    INTEGER NOT NULL,
@@ -103,6 +201,16 @@ RAFFLE_DDL = """
         status     TEXT    NOT NULL DEFAULT 'open'   -- open / done / cancelled
     )"""
 
+RAFFLE_DDL = """
+    CREATE TABLE IF NOT EXISTS raffle (             -- 抽選（持ち主が開催。1サーバーに募集中は1つだけ）
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        host_id  INTEGER NOT NULL,
+        fee      INTEGER NOT NULL,
+        closes   REAL    NOT NULL,
+        status   TEXT    NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done', 'cancelled'))
+    )"""
+
 RAFFLE_ENTRIES_DDL = """
     CREATE TABLE IF NOT EXISTS raffle_entries (     -- 抽選の参加者。参加費は締切まで預かる
         raffle_id INTEGER NOT NULL,
@@ -110,8 +218,8 @@ RAFFLE_ENTRIES_DDL = """
         PRIMARY KEY (raffle_id, user_id)
     )"""
 
-POLLS_DDL = """
-    CREATE TABLE IF NOT EXISTS polls (             -- 投票（/投票。誰でも作れる賛成・反対の二択）
+POLLS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS polls (             -- 投票（v1 互換: v6 で UI 列を discord_posts へ分離）
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id   INTEGER NOT NULL,
         creator    INTEGER NOT NULL,
@@ -125,6 +233,19 @@ POLLS_DDL = """
         status     TEXT    NOT NULL DEFAULT 'open'   -- open / closed
     )"""
 
+POLLS_DDL = """
+    CREATE TABLE IF NOT EXISTS polls (             -- 投票（/投票。誰でも作れる賛成・反対の二択）
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        creator  INTEGER NOT NULL,
+        title    TEXT    NOT NULL,
+        closes   REAL    NOT NULL,
+        adj_yes  INTEGER NOT NULL DEFAULT 0,
+        adj_no   INTEGER NOT NULL DEFAULT 0,
+        rigs     INTEGER NOT NULL DEFAULT 0 CHECK (rigs >= 0),
+        status   TEXT    NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed'))
+    )"""
+
 POLL_VOTES_DDL = """
     CREATE TABLE IF NOT EXISTS poll_votes (        -- 投票の票（1人1票。あとから変えられる）
         poll_id INTEGER NOT NULL,
@@ -133,8 +254,8 @@ POLL_VOTES_DDL = """
         PRIMARY KEY (poll_id, user_id)
     )"""
 
-STREAMS_DDL = """
-    CREATE TABLE IF NOT EXISTS streams (           -- 配信（/配信。スパチャと勝敗の賭けを受ける配信パネル）
+STREAMS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS streams (           -- 配信（v1 互換: v6 で UI/VC 列を分離）
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id         INTEGER NOT NULL,
         streamer         INTEGER NOT NULL,
@@ -149,6 +270,20 @@ STREAMS_DDL = """
         status           TEXT    NOT NULL DEFAULT 'live',  -- live / ended
         voice_channel_id INTEGER NOT NULL DEFAULT 0, -- 配信している場所（Discord のボイスチャンネル。なければ 0）
         created_vc       INTEGER NOT NULL DEFAULT 0  -- 1 なら Bot が作った VC（配信を閉じたら消す）
+    )"""
+
+STREAMS_DDL = """
+    CREATE TABLE IF NOT EXISTS streams (           -- 配信（/配信。UI・VC 情報は子表へ分離）
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id  INTEGER NOT NULL,
+        streamer  INTEGER NOT NULL,
+        title     TEXT    NOT NULL,
+        url       TEXT    NOT NULL DEFAULT '',
+        started   REAL    NOT NULL,
+        ends      REAL    NOT NULL,
+        tips      INTEGER NOT NULL DEFAULT 0 CHECK (tips >= 0),
+        tip_count INTEGER NOT NULL DEFAULT 0 CHECK (tip_count >= 0),
+        status    TEXT    NOT NULL DEFAULT 'live' CHECK (status IN ('live', 'ended'))
     )"""
 
 STREAM_ROUNDS_DDL = """
@@ -199,8 +334,8 @@ ARENA_FIGHTERS_DDL = """
 ARENA_FIGHTERS_INDEX_DDL = """
     CREATE INDEX IF NOT EXISTS idx_arena_fighters ON arena_fighters (tournament_id)"""
 
-ARENA_BETS_DDL = """
-    CREATE TABLE IF NOT EXISTS arena_bets (         -- 戦士への賭け（観客＝NPCの分は user_id が負の特定値）
+ARENA_BETS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS arena_bets (         -- 戦士への賭け（v1 互換: v6 で NPC 観客賭けを arena_npc_bets へ分離）
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         tournament_id INTEGER NOT NULL,
         stage         TEXT    NOT NULL,           -- semi / final（どの段への賭けか）
@@ -212,18 +347,56 @@ ARENA_BETS_DDL = """
         created       REAL    NOT NULL
     )"""
 
+ARENA_BETS_DDL = """
+    CREATE TABLE IF NOT EXISTS arena_bets (         -- プレイヤーの戦士への賭け（user_id > 0 のみ）
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        tournament_id INTEGER NOT NULL,
+        stage         TEXT    NOT NULL CHECK (stage IN ('semi', 'final')),
+        fighter_id    INTEGER NOT NULL,
+        user_id       INTEGER NOT NULL CHECK (user_id > 0),
+        amount        INTEGER NOT NULL CHECK (amount > 0),
+        payout        INTEGER NOT NULL DEFAULT 0 CHECK (payout >= 0),
+        settled       INTEGER NOT NULL DEFAULT 0 CHECK (settled IN (0, 1)),
+        created       REAL    NOT NULL,
+        FOREIGN KEY (tournament_id) REFERENCES arena_tournaments (id) ON DELETE CASCADE,
+        FOREIGN KEY (fighter_id) REFERENCES arena_fighters (id) ON DELETE CASCADE
+    )"""
+
 ARENA_BETS_INDEX_DDL = """
     CREATE INDEX IF NOT EXISTS idx_arena_bets ON arena_bets (tournament_id, stage, fighter_id)"""
 
 ARENA_BETS_USER_INDEX_DDL = """
     CREATE INDEX IF NOT EXISTS idx_arena_bets_user ON arena_bets (tournament_id, user_id)"""
 
+ARENA_NPC_BETS_DDL = """
+    CREATE TABLE IF NOT EXISTS arena_npc_bets (     -- NPC 観客による初期賭け
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        tournament_id INTEGER NOT NULL,
+        stage         TEXT    NOT NULL CHECK (stage IN ('semi', 'final')),
+        fighter_id    INTEGER NOT NULL,
+        amount        INTEGER NOT NULL CHECK (amount > 0),
+        settled       INTEGER NOT NULL DEFAULT 0 CHECK (settled IN (0, 1)),
+        created       REAL    NOT NULL,
+        FOREIGN KEY (tournament_id) REFERENCES arena_tournaments (id) ON DELETE CASCADE,
+        FOREIGN KEY (fighter_id) REFERENCES arena_fighters (id) ON DELETE CASCADE
+    )"""
+
+ARENA_NPC_BETS_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS idx_arena_npc_bets ON arena_npc_bets (tournament_id, stage, fighter_id)"""
+
 STATEMENTS: tuple[str, ...] = (
     LOANS_DDL,
     LOANS_INDEX_DDL,
+    LOAN_TERMS_DDL,
     MARKET_LISTINGS_DDL,
     MARKET_LISTINGS_INDEX_DDL,
+    MARKET_AUCTION_BIDS_DDL,
+    MARKET_AUCTION_BIDS_BIDDER_INDEX_DDL,
+    MARKET_CLOSURES_DDL,
     QUIZ_QUESTIONS_DDL,
+    QUIZ_CHOICES_DDL,
+    QUIZ_USER_SUBMISSIONS_DDL,
+    QUIZ_USER_SUBMISSIONS_INDEX_DDL,
     QUIZ_ANSWERS_DDL,
     RAFFLE_DDL,
     RAFFLE_ENTRIES_DDL,
@@ -239,4 +412,6 @@ STATEMENTS: tuple[str, ...] = (
     ARENA_BETS_DDL,
     ARENA_BETS_INDEX_DDL,
     ARENA_BETS_USER_INDEX_DDL,
+    ARENA_NPC_BETS_DDL,
+    ARENA_NPC_BETS_INDEX_DDL,
 )

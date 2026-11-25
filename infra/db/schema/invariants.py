@@ -145,7 +145,17 @@ _INVARIANT_SPECS: tuple[tuple[str, tuple[CandidateSpec, ...]], ...] = (
             ),
         ),
     ),
-    ("kyosai_units_sum", (("kyosai_units", ("units",), "COALESCE(SUM(units), 0)"),)),
+    (
+        "kyosai_units_sum",
+        (
+            (
+                "kyosai_state",
+                ("house_units",),
+                "COALESCE(SUM(house_units), 0) + COALESCE((SELECT SUM(units) FROM kyosai_units), 0)",
+            ),
+            ("kyosai_units", ("units",), "COALESCE(SUM(units), 0)"),
+        ),
+    ),
     ("companies_funds_sum", (("companies", ("funds",), "COALESCE(SUM(funds), 0)"),)),
     ("company_stakes_sum", (("company_stakes", ("amount",), "COALESCE(SUM(amount), 0)"),)),
     ("crypto_units_sum", (("crypto", ("units",), "COALESCE(SUM(units), 0)"),)),
@@ -178,8 +188,25 @@ _INVARIANT_SPECS: tuple[tuple[str, tuple[CandidateSpec, ...]], ...] = (
         ),
     ),
     ("bonds_principal_sum", (("bonds", ("principal",), "COALESCE(SUM(principal), 0)"),)),
-    ("options_margin_sum", (("options", ("margin",), "COALESCE(SUM(margin), 0)"),)),
+    (
+        "options_margin_sum",
+        (
+            ("option_short_margins", ("margin",), "COALESCE(SUM(margin), 0)"),
+            ("options", ("margin",), "COALESCE(SUM(margin), 0)"),
+        ),
+    ),
     ("loans_principal_sum", (("loans", ("principal",), "COALESCE(SUM(principal), 0)"),)),
+    (
+        "loans_paid_sum",
+        (
+            ("loan_terms", ("paid",), "COALESCE(SUM(paid), 0)"),
+            (
+                "loans",
+                ("accepted_at", "status", "paid"),
+                "COALESCE(SUM(CASE WHEN accepted_at IS NOT NULL OR status IN ('active','overdue','repaid','discharged') THEN MAX(0, paid) ELSE 0 END), 0)",
+            ),
+        ),
+    ),
     ("jackpot_pool_sum", (("jackpot", ("pool",), "COALESCE(SUM(pool), 0)"),)),
     (
         "labor_pot_sum",
@@ -285,6 +312,29 @@ _INVARIANT_SPECS: tuple[tuple[str, tuple[CandidateSpec, ...]], ...] = (
     ("horse_bets_count", (("horse_bets", (), "COUNT(*)"),)),
     ("horse_bets_stake_sum", (("horse_bets", ("stake",), "COALESCE(SUM(stake), 0)"),)),
     ("market_listings_count", (("market_listings", (), "COUNT(*)"),)),
+    (
+        "market_auction_bids_sum",
+        (
+            ("market_auction_bids", ("amount",), "COALESCE(SUM(amount), 0)"),
+            (
+                "market_listings",
+                ("bid", "bidder_id"),
+                "COALESCE(SUM(CASE WHEN bidder_id > 0 AND bid > 0 THEN bid ELSE 0 END), 0)",
+            ),
+        ),
+    ),
+    ("quiz_questions_count", (("quiz_questions", (), "COUNT(*)"),)),
+    (
+        "arena_bets_amount_sum",
+        (
+            (
+                "arena_npc_bets",
+                ("amount",),
+                "COALESCE(SUM(amount), 0) + COALESCE((SELECT SUM(amount) FROM arena_bets), 0)",
+            ),
+            ("arena_bets", ("amount",), "COALESCE(SUM(amount), 0)"),
+        ),
+    ),
 )
 
 

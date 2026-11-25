@@ -538,7 +538,7 @@ def test_fresh_db_initializes_directly_to_v1_without_backup(tmp_path):
     path = str(tmp_path / "fresh.db")
     eco = open_repositories(path, strict=True)
     try:
-        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION == 5
+        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION == 6
         assert eco.db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert eco.db.conn.execute("PRAGMA foreign_key_check").fetchall() == []
         tables = {r[0] for r in eco.db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -573,12 +573,25 @@ def test_fresh_db_initializes_directly_to_v1_without_backup(tmp_path):
             "horse_bet_picks",
             "horse_combo2_odds",
             "horse_trio_odds",
+            "schema_flags",
+            "discord_posts",
+            "stream_voice_channels",
+            "bond_default_checks",
+            "option_pairs",
+            "option_short_margins",
+            "loan_terms",
+            "market_auction_bids",
+            "market_closures",
+            "quiz_choices",
+            "quiz_user_submissions",
+            "arena_npc_bets",
         } <= tables
         assert not os.path.exists(f"{path}.before-v1")
         assert not os.path.exists(f"{path}.before-v2")
         assert not os.path.exists(f"{path}.before-v3")
         assert not os.path.exists(f"{path}.before-v4")
         assert not os.path.exists(f"{path}.before-v5")
+        assert not os.path.exists(f"{path}.before-v6")
         assert eco.for_guild(G).wallet.balance(U1) == INITIAL_BALANCE
     finally:
         eco.close()
@@ -591,7 +604,7 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert os.path.exists(f"{path}.before-v1")
@@ -599,6 +612,7 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
         assert os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
         assert os.path.exists(f"{path}.before-v5")
+        assert os.path.exists(f"{path}.before-v6")
 
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "guild_users" not in tables and "autoplay" not in tables and "users" not in tables
@@ -608,10 +622,20 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
         removed = {
             "teiai_bank": {"bailout_debt", "kyosai_house_ts"},
             "horses": {"rented_day", "owner_id", "listed_at"},
-            "horse_races": {"grade"},
+            "horse_races": {"grade", "channel_id", "message_id"},
             "horse_entries": {"tactic"},
             "horse_bets": {"lane", "picks"},
             "labor_workers": {"legacy"},
+            "kyosai_motions": {"channel_id", "message_id"},
+            "bonds": {"checked"},
+            "options": {"symbol2", "spot2", "margin"},
+            "loans": {"accepted_at", "due", "paid", "reminded", "channel_id", "message_id"},
+            "market_listings": {"bid", "bidder_id", "buyer_id", "sold_price", "closed_at", "channel_id", "message_id", "post_done"},
+            "quiz_questions": {"choices", "shown_order", "author_id", "guild_id", "channel_id", "message_id", "settled", "earned"},
+            "raffle": {"channel_id", "message_id"},
+            "polls": {"channel_id", "message_id"},
+            "streams": {"channel_id", "message_id", "voice_channel_id", "created_vc"},
+            "manual_event": {"channel_id"},
         }
         for table, dead_cols in removed.items():
             cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
@@ -726,13 +750,13 @@ def test_failing_migration_step_rolls_back_atomically(tmp_path):
         conn.execute("UPDATE accounts SET balance = 0")
         raise RuntimeError("boom during migration")
 
-    steps = (*schema.MIGRATIONS, schema.MigrationStep(6, "broken_v6", broken_step))
+    steps = (*schema.MIGRATIONS, schema.MigrationStep(7, "broken_v7", broken_step))
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
         with pytest.raises(RuntimeError, match="boom"):
-            schema.initialize_db(conn, path, steps=steps, target_version=6)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+            schema.initialize_db(conn, path, steps=steps, target_version=7)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
         assert (
             conn.execute("SELECT balance FROM accounts WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()[0]
             == INITIAL_BALANCE + 500
@@ -773,13 +797,14 @@ def test_v1_to_v2_splits_all_user_domains_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v1")
         assert os.path.exists(f"{path}.before-v2")
         assert os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
         assert os.path.exists(f"{path}.before-v5")
+        assert os.path.exists(f"{path}.before-v6")
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").fetchone() is None
 
         st = eco.for_guild(G).wallet.stats(U1)
@@ -858,12 +883,13 @@ def test_v2_to_v3_splits_teiai_bank_and_house_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v2")
         assert os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
         assert os.path.exists(f"{path}.before-v5")
+        assert os.path.exists(f"{path}.before-v6")
 
         tb_cols = {r[1] for r in conn.execute("PRAGMA table_info(teiai_bank)")}
         assert tb_cols == {"guild_id", "cash", "loaned", "ts"}
@@ -917,11 +943,12 @@ def test_v3_to_v4_splits_labor_and_profile_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
         assert os.path.exists(f"{path}.before-v5")
+        assert os.path.exists(f"{path}.before-v6")
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='labor'").fetchone() is None
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='profile'").fetchone() is None
 
@@ -996,10 +1023,11 @@ def test_v4_to_v5_merges_margin_and_normalizes_horse_racing_losslessly(tmp_path)
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v4")
         assert os.path.exists(f"{path}.before-v5")
+        assert os.path.exists(f"{path}.before-v6")
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='crypto_short'").fetchone() is None
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='horse_odds'").fetchone() is None
 
@@ -1013,6 +1041,174 @@ def test_v4_to_v5_merges_margin_and_normalizes_horse_racing_losslessly(tmp_path)
         assert [e["horse_id"] for e in g.races.race_entries(11, registered_only=True)] == [10]
         bets = g.races.race_bets(U1, 10)
         assert [(b["kind"], b["lane"], b["picks"], b["stake"]) for b in bets] == [("exacta", 2, "2>1", 500)]
+    finally:
+        eco.close()
+
+
+def test_v5_to_v6_normalizes_subtypes_sentinels_and_discord_ui_losslessly(tmp_path):
+    from domain import arena as arena_mod
+
+    path = str(tmp_path / "v5_only.db")
+    c = sqlite3.connect(path)
+    schema.create_v1_missing_tables(c)
+    from infra.db.schema.migrations_v2 import migrate_v1_to_v2
+    from infra.db.schema.migrations_v3 import migrate_v2_to_v3
+    from infra.db.schema.migrations_v4 import migrate_v3_to_v4
+    from infra.db.schema.migrations_v5 import migrate_v4_to_v5
+
+    migrate_v1_to_v2(c)
+    migrate_v2_to_v3(c)
+    migrate_v3_to_v4(c)
+    migrate_v4_to_v5(c)
+
+    c.execute("INSERT INTO accounts (guild_id, user_id, balance, created_at) VALUES (?, ?, 50000, ?)", (G, U1, NOW))
+    c.execute("INSERT INTO accounts (guild_id, user_id, balance, created_at) VALUES (?, ?, 30000, ?)", (G, U2, NOW))
+    c.execute("INSERT INTO teiai_bank (guild_id, cash, loaned, ts) VALUES (?, 100000.0, 0.0, ?)", (G, NOW))
+    c.execute("INSERT INTO kyosai_state (guild_id, div_ts, paid, charged) VALUES (?, ?, 100.0, 20.0)", (G, NOW))
+    c.execute("INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, 0, 8500), (?, ?, 1500)", (G, G, U1))
+    c.execute(
+        "INSERT INTO kyosai_motions (id, guild_id, proposer, premium, created, closes, status, channel_id, message_id) "
+        "VALUES (1, ?, ?, 0.01, ?, ?, 'open', 501, 601)",
+        (G, U1, NOW, EXPIRY_FUTURE),
+    )
+    c.execute(
+        "INSERT INTO quiz_questions "
+        "(id, question, choices, explanation, shown_order, author_id, guild_id, channel_id, message_id, "
+        "settled, earned, creator_name, msg_right, msg_wrong, reward, expires, created) "
+        "VALUES (1, 'システム問', '[\"A\",\"B\",\"C\",\"D\"]', '解説', '[2,0,3,1]', 0, 0, 502, 602, 0, 0, '公式', '', '', 100, NULL, ?), "
+        "(2, '投稿問', '[\"正解\",\"誤1\",\"誤2\",\"誤3\"]', '解説2', '[1,2,0,3]', ?, ?, 503, 603, 0, 50, '作成者', 'OK', 'NG', 200, ?, ?)",
+        (NOW, U1, G, EXPIRY_FUTURE, NOW),
+    )
+    c.execute(
+        "INSERT INTO loans (id, guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, "
+        "offer_expires, accepted_at, due, paid, reminded, channel_id, message_id) "
+        "VALUES (1, ?, 0, ?, 1000, 10, 5, 'request', ?, ?, NULL, NULL, 0, 0, 504, 604), "
+        "(2, ?, ?, ?, 2500, 20, 7, 'active', ?, ?, ?, ?, 300, 1, 505, 605)",
+        (G, U2, NOW, EXPIRY_FUTURE, G, U1, U2, NOW, EXPIRY_FUTURE, NOW, EXPIRY_FUTURE),
+    )
+    c.execute(
+        "INSERT INTO market_listings (id, guild_id, seller_id, kind, ref, qty, mode, price, bid, bidder_id, created, end_at, "
+        "status, buyer_id, sold_price, closed_at, channel_id, message_id, post_done) "
+        "VALUES (1, ?, 0, 'item', ?, 1, 'auction', 500, 750, ?, ?, ?, 'active', 0, 0, NULL, 506, 606, 0), "
+        "(2, ?, ?, 'item', ?, 1, 'fixed', 900, 0, 0, ?, ?, 'sold', ?, 900, ?, 507, 607, 1)",
+        (G, shop.INSURANCE, U2, NOW, EXPIRY_FUTURE, G, U1, shop.INSURANCE, NOW, EXPIRY_FUTURE, U2, NOW),
+    )
+    c.execute(
+        "INSERT INTO options (id, guild_id, user_id, kind, symbol, strike, units, premium, expiry, spot, ts, status, symbol2, spot2, side, margin) "
+        "VALUES (1, ?, ?, 'pair', 'cs', 10.0, 1000, 150, ?, 10.0, ?, 'active', 'nv', 20.0, 'long', 0), "
+        "(2, ?, ?, 'call', 'cs', 11.0, 1000, 80, ?, 10.0, ?, 'active', NULL, NULL, 'short', 900)",
+        (G, U1, EXPIRY_FUTURE, NOW, G, U1, EXPIRY_FUTURE, NOW),
+    )
+    c.execute(
+        "INSERT INTO bonds (id, guild_id, user_id, kind, principal, due, ts, checked, rate) "
+        "VALUES (1, ?, ?, 'junk', 1500, ?, ?, ?, 0.5)",
+        (G, U1, EXPIRY_FUTURE, NOW, NOW + 60.0),
+    )
+    c.execute(
+        "INSERT INTO arena_tournaments (id, guild_id, day, format, status, created) VALUES (1, ?, ?, 'duel', 'semi_betting', ?)",
+        (G, DAY, NOW),
+    )
+    c.execute(
+        "INSERT INTO arena_fighters (id, tournament_id, name, base_power, group_no, stage, bet_total) "
+        "VALUES (1, 1, '剛腕', 60, 1, 'semi', 700), (2, 1, '鉄壁', 55, 1, 'semi', 250)",
+    )
+    c.execute(
+        "INSERT INTO arena_bets (tournament_id, stage, fighter_id, user_id, amount, created) "
+        "VALUES (1, 'semi', 1, ?, 500, ?), (1, 'semi', 1, ?, 200, ?), (1, 'semi', 2, ?, 250, ?)",
+        (U1, NOW, arena_mod.NPC_SPECTATOR, NOW, arena_mod.NPC_SPECTATOR, NOW),
+    )
+    c.execute(
+        "INSERT INTO horse_races (id, guild_id, kind, start_at, entry_close, bet_close, status, channel_id, message_id, created) "
+        "VALUES (1, ?, 'regular', ?, ?, ?, 'betting', 508, 608, ?)",
+        (G, EXPIRY_FUTURE, NOW + 100, NOW + 200, NOW),
+    )
+    c.execute(
+        "INSERT INTO horse_bets (id, guild_id, race_id, user_id, kind, stake, odds, created) "
+        "VALUES (1, ?, 1, ?, 'win', 300, 2.5, ?)",
+        (G, U1, NOW),
+    )
+    c.execute("INSERT INTO horse_bet_picks (bet_id, position, lane) VALUES (1, 1, 1)")
+    c.execute(
+        "INSERT INTO raffle (id, guild_id, host_id, fee, closes, channel_id, message_id, status) "
+        "VALUES (1, ?, ?, 100, ?, 509, 609, 'open')",
+        (G, U1, EXPIRY_FUTURE),
+    )
+    c.execute(
+        "INSERT INTO polls (id, guild_id, creator, title, closes, channel_id, message_id, status) "
+        "VALUES (1, ?, ?, '賛否', ?, 510, 610, 'open')",
+        (G, U1, EXPIRY_FUTURE),
+    )
+    c.execute(
+        "INSERT INTO streams (id, guild_id, streamer, title, url, channel_id, message_id, started, ends, status, voice_channel_id, created_vc) "
+        "VALUES (1, ?, ?, '配信', '', 511, 611, ?, ?, 'live', 711, 1)",
+        (G, U1, NOW, EXPIRY_FUTURE),
+    )
+    c.execute(
+        "INSERT INTO manual_event (guild_id, game, boost, starts, ends, ended, channel_id) "
+        "VALUES (?, 'slot', 20, ?, ?, 0, 512)",
+        (G, NOW, EXPIRY_FUTURE),
+    )
+    c.execute("INSERT INTO weekly_state (guild_id, last_week) VALUES (0, 'backfilled'), (?, '2026-11-09')", (G,))
+    c.execute("PRAGMA user_version = 5")
+    c.commit()
+    c.close()
+
+    eco = open_repositories(path, strict=True)
+    try:
+        conn = eco.db.conn
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert not os.path.exists(f"{path}.before-v5")
+        assert os.path.exists(f"{path}.before-v6")
+
+        g = eco.for_guild(G)
+        q1 = g.quiz.quiz_get(1)
+        q2 = g.quiz.quiz_get(2)
+        assert q1 is not None and q1["choices"] == ["A", "B", "C", "D"] and q1["order"] == ["C", "A", "D", "B"]
+        assert (q1["author_id"], q1["channel_id"], q1["message_id"]) == (0, 502, 602)
+        assert q2 is not None and q2["author_id"] == U1 and q2["earned"] == 50 and q2["order"] == ["誤1", "誤2", "正解", "誤3"]
+
+        l1 = g.loans.loan_get(1)
+        l2 = g.loans.loan_get(2)
+        assert l1 is not None and l1["lender_id"] == 0 and l1["paid"] == 0 and l1["channel_id"] == 504
+        assert l2 is not None and l2["lender_id"] == U1 and l2["paid"] == 300 and l2["reminded"] == 1
+        assert l2["message_id"] == 605
+
+        m1 = g.p2p.p2p_get(1)
+        m2 = g.p2p.p2p_get(2)
+        assert m1 is not None and m1["seller_id"] == 0 and m1["bid"] == 750 and m1["bidder_id"] == U2
+        assert m2 is not None and m2["buyer_id"] == U2 and m2["sold_price"] == 900 and m2["post_done"] == 1
+
+        opts = g.options.option_list(U1)["active"]
+        assert [(o["id"], o["symbol2"], o["margin"]) for o in opts] == [(1, "nv", 0), (2, None, 900)]
+        bnd = g.bonds.bond_list(U1)["active"][0]
+        assert bnd["checked"] == pytest.approx(NOW + 60.0)
+
+        bd = g.arena.arena_bets_breakdown(1)
+        assert {e["user_id"]: e["amount"] for e in bd[1]} == {U1: 500, arena_mod.NPC_SPECTATOR: 200}
+        assert conn.execute("SELECT COUNT(*) FROM arena_npc_bets WHERE tournament_id=1").fetchone()[0] == 2
+        assert g.kyosai.units_of_for(G, 0) == 8500 and g.kyosai.units_of_for(G, U1) == 1500
+        ks = g.kyosai.kyosai_status(U1, NOW)
+        assert ks["motions"][0]["channel_id"] == 501 and ks["motions"][0]["message_id"] == 601
+
+        race = g.races.race_get(1)
+        assert race is not None and race["channel_id"] == 508 and race["message_id"] == 608
+        raf = g.raffle.raffle_get()
+        assert raf is not None and (raf["channel_id"], raf["message_id"]) == (509, 609)
+        pl = g.polls.poll_get(1)
+        assert pl is not None and (pl["channel_id"], pl["message_id"]) == (510, 610)
+        st = g.streams.stream_get(1)
+        assert st is not None and (st["channel_id"], st["message_id"], st["voice_channel_id"], st["created_vc"]) == (
+            511,
+            611,
+            711,
+            1,
+        )
+        ev = g.events.manual_event_get(NOW + 1)
+        assert ev is not None and ev["channel_id"] == 512
+        assert g.records.backfill_weekly(9) == 0
+        assert g.records.weekly_last_announced() == "2026-11-09"
     finally:
         eco.close()
 
@@ -1036,6 +1232,6 @@ def test_manage_migrate_check_never_modifies_source_db(tmp_path, capsys):
     assert os.path.exists(f"{path}.before-v1")
     check = sqlite3.connect(path)
     try:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 6
     finally:
         check.close()

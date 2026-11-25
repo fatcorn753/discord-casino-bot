@@ -17,18 +17,32 @@ from domain.ports.contracts import ListingRow, P2PMine
 from domain.ports.repos import IP2PRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.discord_posts import mark_discord_post_done, set_discord_message
 from infra.db.horse import HorseRepo
 from infra.db.notices import NoticeRepo
+
+_SELECT_LISTING = (
+    "SELECT l.id, l.guild_id, COALESCE(l.seller_id, 0) AS seller_id, l.kind, l.ref, l.qty, "
+    "l.mode, l.price, COALESCE(b.amount, 0) AS bid, COALESCE(b.bidder_id, 0) AS bidder_id, "
+    "l.created, l.end_at, l.status, COALESCE(c.buyer_id, 0) AS buyer_id, "
+    "COALESCE(c.sold_price, 0) AS sold_price, c.closed_at, "
+    "COALESCE(p.channel_id, 0) AS channel_id, COALESCE(p.message_id, 0) AS message_id, "
+    "COALESCE(p.post_done, 0) AS post_done "
+    "FROM market_listings l "
+    "LEFT JOIN market_auction_bids b ON b.listing_id = l.id "
+    "LEFT JOIN market_closures c ON c.listing_id = l.id "
+    "LEFT JOIN discord_posts p ON p.entity_type = 'market_listing' AND p.entity_id = l.id"
+)
 
 
 class P2PRepo(ScopedRepo, IP2PRepo):
     """プレイヤー間の取引・競り・強制引き戻し。"""
 
     P2P_ORDERS = {
-        "end": "end_at, id",  # 締切が近い順
-        "price_asc": "CASE WHEN bid>0 THEN bid ELSE price END, id",  # 安い順（競りは、いまの最高入札）
-        "price_desc": "CASE WHEN bid>0 THEN bid ELSE price END DESC, id",  # 高い順
-        "new": "id DESC",  # 新しい順
+        "end": "l.end_at, l.id",  # 締切が近い順
+        "price_asc": "CASE WHEN COALESCE(b.amount, 0)>0 THEN COALESCE(b.amount, 0) ELSE l.price END, l.id",  # 安い順（競りは、いまの最高入札）
+        "price_desc": "CASE WHEN COALESCE(b.amount, 0)>0 THEN COALESCE(b.amount, 0) ELSE l.price END DESC, l.id",  # 高い順
+        "new": "l.id DESC",  # 新しい順
     }
 
     def __init__(
@@ -60,8 +74,10 @@ class P2PRepo(ScopedRepo, IP2PRepo):
     def _p2p_pair_total(self, guild_id: int, a: int, b: int, now: float) -> int:
         """この2人（どちらが売り手でも）の、24時間の取引額の合計。共済の口の譲渡（kyosai_offers）と合わせて数える。"""
         market_sum = self._scalar(
-            "SELECT COALESCE(SUM(sold_price), 0) FROM market_listings WHERE guild_id=? AND status='sold' AND closed_at>? "
-            "AND ((seller_id=? AND buyer_id=?) OR (seller_id=? AND buyer_id=?))",
+            "SELECT COALESCE(SUM(c.sold_price), 0) "
+            "FROM market_listings l JOIN market_closures c ON c.listing_id = l.id "
+            "WHERE l.guild_id=? AND l.status='sold' AND c.closed_at>? "
+            "AND ((l.seller_id=? AND c.buyer_id=?) OR (l.seller_id=? AND c.buyer_id=?))",
             (guild_id, now - 86400, a, b, b, a),
         )
         kyosai_sum = self._scalar(
@@ -206,9 +222,12 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         return self._p2p_label_for(self._g(), row)
 
     def _p2p_close(self, row_id: int, status: str, now: float, buyer: int = 0, sold: int = 0) -> None:
+        self._conn.execute("UPDATE market_listings SET status=? WHERE id=?", (status, row_id))
         self._conn.execute(
-            "UPDATE market_listings SET status=?, buyer_id=?, sold_price=?, closed_at=? WHERE id=?",
-            (status, buyer, sold, now, row_id),
+            "INSERT INTO market_closures (listing_id, closed_at, buyer_id, sold_price) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(listing_id) DO UPDATE SET "
+            "closed_at=excluded.closed_at, buyer_id=excluded.buyer_id, sold_price=excluded.sold_price",
+            (row_id, now, buyer if buyer > 0 else None, sold),
         )
 
     def _p2p_sell(self, guild_id: int, row: Any, buyer_id: int, price: int, now: float) -> None:
@@ -234,15 +253,14 @@ class P2PRepo(ScopedRepo, IP2PRepo):
 
     def p2p_get(self, listing_id: int) -> ListingRow | None:
         with self._lock:
-            return self._one("SELECT * FROM market_listings WHERE id=? AND guild_id=?", (listing_id, self._g()))
+            return self._one(f"{_SELECT_LISTING} WHERE l.id=? AND l.guild_id=?", (listing_id, self._g()))
 
     def p2p_set_post(self, listing_id: int, channel_id: int, message_id: int) -> None:
         """告知を投稿したチャンネルとメッセージを覚える（入札・売れたときに、書き換えるため）。"""
         with self._db.tx():
-            self._conn.execute(
-                "UPDATE market_listings SET channel_id=?, message_id=? WHERE id=? AND guild_id=?",
-                (channel_id, message_id, listing_id, self._g()),
-            )
+            if self._one("SELECT 1 FROM market_listings WHERE id=? AND guild_id=?", (listing_id, self._g())) is None:
+                return
+            set_discord_message(self._conn, "market_listing", listing_id, message_id, channel_id)
 
     def p2p_buy(self, buyer_id: int, listing_id: int, now: float) -> Outcome[int]:
         """定価の出品を買う。(成功か, 理由か支払った額)。"""
@@ -291,9 +309,11 @@ class P2PRepo(ScopedRepo, IP2PRepo):
             self._account.apply(gid, bidder_id, -amount, f"取引:入札（{label}）")
             end_at = p2p.end_after_bid(row["end_at"], now)
             self._conn.execute(
-                "UPDATE market_listings SET bid=?, bidder_id=?, end_at=? WHERE id=?",
-                (amount, bidder_id, end_at, listing_id),
+                "INSERT INTO market_auction_bids (listing_id, bidder_id, amount) VALUES (?, ?, ?) "
+                "ON CONFLICT(listing_id) DO UPDATE SET bidder_id=excluded.bidder_id, amount=excluded.amount",
+                (listing_id, bidder_id, amount),
             )
+            self._conn.execute("UPDATE market_listings SET end_at=? WHERE id=?", (end_at, listing_id))
             return True, end_at
 
     def p2p_cancel(self, user_id: int, listing_id: int, now: float) -> Outcome[str]:
@@ -313,7 +333,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         """その人の出品を、すべて取り下げて品・馬を持ち物へ戻し、最高入札者になっている競りの入札は、お金を返して取り消す。"""
         pulled = {"listings": 0, "bids": 0}
         for row in self._all(
-            "SELECT * FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active'",
+            f"{_SELECT_LISTING} WHERE l.guild_id=? AND l.seller_id=? AND l.status='active'",
             (guild_id, user_id),
         ):
             label = self._p2p_label_for(guild_id, row)
@@ -329,13 +349,13 @@ class P2PRepo(ScopedRepo, IP2PRepo):
             self._p2p_close(row["id"], "cancelled", now)
             pulled["listings"] += 1
         for row in self._all(
-            "SELECT * FROM market_listings WHERE guild_id=? AND bidder_id=? AND status='active'",
+            f"{_SELECT_LISTING} WHERE l.guild_id=? AND b.bidder_id=? AND l.status='active'",
             (guild_id, user_id),
         ):
             self._account.apply(
                 guild_id, user_id, row["bid"], f"取引:入札の返金（{self._p2p_label_for(guild_id, row)}・取引停止）"
             )
-            self._conn.execute("UPDATE market_listings SET bid=0, bidder_id=0 WHERE id=?", (row["id"],))
+            self._conn.execute("DELETE FROM market_auction_bids WHERE listing_id=?", (row["id"],))
             pulled["bids"] += 1
         return pulled
 
@@ -346,15 +366,15 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         """終わった（売れた・取り消し・終了）のに、告知の投稿を、まだ書き換えていない出品。"""
         with self._lock:
             return self._all(
-                "SELECT * FROM market_listings WHERE guild_id=? AND status!='active' AND message_id>0 AND post_done=0",
+                f"{_SELECT_LISTING} WHERE l.guild_id=? AND l.status!='active' AND p.message_id>0 AND p.post_done=0",
                 (self._g(),),
             )
 
     def p2p_mark_post_done(self, listing_id: int) -> None:
         with self._db.tx():
-            self._conn.execute(
-                "UPDATE market_listings SET post_done=1 WHERE id=? AND guild_id=?", (listing_id, self._g())
-            )
+            if self._one("SELECT 1 FROM market_listings WHERE id=? AND guild_id=?", (listing_id, self._g())) is None:
+                return
+            mark_discord_post_done(self._conn, "market_listing", listing_id)
 
     def p2p_settle(self, now: float) -> list[tuple[ListingRow, str]]:
         """締切・期限を過ぎた出品を精算する。[(出品の行, 結果)]（結果は sold / expired / failed）を返す。"""
@@ -362,7 +382,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         with self._db.tx():
             gid = self._g()
             rows: list[ListingRow] = self._all(
-                "SELECT * FROM market_listings WHERE guild_id=? AND status='active' AND end_at<=? ORDER BY end_at, id",
+                f"{_SELECT_LISTING} WHERE l.guild_id=? AND l.status='active' AND l.end_at<=? ORDER BY l.end_at, l.id",
                 (gid, now),
             )
             for row in rows:
@@ -401,16 +421,16 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         with self._db.tx():
             gid = self._g()
             done = self._scalar(
-                "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND seller_id=? AND created>=?",
-                (gid, tm.TEIAI_SELLER, tm.day_start(now)),
+                "SELECT COUNT(*) FROM market_listings WHERE guild_id=? AND seller_id IS NULL AND created>=?",
+                (gid, tm.day_start(now)),
             )
             out = []
             for _ in range(max(0, teiai.RELIC_AUCTION_PER_DAY - done)):
                 item_id, price = tm.pick_relic(rng)
                 cur = self._conn.execute(
                     "INSERT INTO market_listings (guild_id, seller_id, kind, ref, qty, mode, price, created, end_at) "
-                    "VALUES (?, ?, 'item', ?, 1, 'auction', ?, ?, ?)",
-                    (gid, tm.TEIAI_SELLER, item_id, price, now, now + teiai.RELIC_AUCTION_HOURS * 3600),
+                    "VALUES (?, NULL, 'item', ?, 1, 'auction', ?, ?, ?)",
+                    (gid, item_id, price, now, now + teiai.RELIC_AUCTION_HOURS * 3600),
                 )
                 assert cur.lastrowid is not None
                 out.append(cur.lastrowid)
@@ -427,13 +447,13 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         """出ている出品。kind は horse / item、mode は fixed / auction で絞れる。order は P2P_ORDERS のどれか（既定は締切の近い順）。"""
         now = self._now() if now is None else now
         with self._lock:
-            sql = "SELECT * FROM market_listings WHERE guild_id=? AND status='active' AND end_at>?"
+            sql = f"{_SELECT_LISTING} WHERE l.guild_id=? AND l.status='active' AND l.end_at>?"
             args: list[Any] = [self._g(), now]
             if kind:
-                sql += " AND kind=?"
+                sql += " AND l.kind=?"
                 args.append(kind)
             if mode:
-                sql += " AND mode=?"
+                sql += " AND l.mode=?"
                 args.append(mode)
             ordering = self.P2P_ORDERS.get(order, self.P2P_ORDERS["end"])
             return self._all(sql + f" ORDER BY {ordering} LIMIT ?", (*args, limit))
@@ -451,11 +471,11 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         with self._lock:
             gid = self._g()
             selling: list[ListingRow] = self._all(
-                "SELECT * FROM market_listings WHERE guild_id=? AND seller_id=? AND status='active' ORDER BY end_at",
+                f"{_SELECT_LISTING} WHERE l.guild_id=? AND l.seller_id=? AND l.status='active' ORDER BY l.end_at",
                 (gid, user_id),
             )
             bidding: list[ListingRow] = self._all(
-                "SELECT * FROM market_listings WHERE guild_id=? AND bidder_id=? AND status='active' ORDER BY end_at",
+                f"{_SELECT_LISTING} WHERE l.guild_id=? AND b.bidder_id=? AND l.status='active' ORDER BY l.end_at",
                 (gid, user_id),
             )
         return {"selling": selling, "bidding": bidding}

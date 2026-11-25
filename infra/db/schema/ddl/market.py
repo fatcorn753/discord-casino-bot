@@ -67,8 +67,8 @@ MARGIN_POSITIONS_DDL = """
         PRIMARY KEY (guild_id, user_id, symbol, side)
     )"""
 
-OPTIONS_DDL = """
-    CREATE TABLE IF NOT EXISTS options (           -- オプション（爆騰コール・暴落プット）。買った分ごとに1行。相手は帝愛銀行
+OPTIONS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS options (           -- オプション（v1 互換: v6 でペア・裸売り証拠金の子表を分離）
         id       INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id INTEGER NOT NULL,
         user_id  INTEGER NOT NULL,
@@ -87,6 +87,40 @@ OPTIONS_DDL = """
         spot2    REAL,                       -- 買った時点の、相手の価格
         side     TEXT    NOT NULL DEFAULT 'long',   -- long（買い）/ short（裸売り。帝愛に売って、プレミアムを先にもらう）
         margin   INTEGER NOT NULL DEFAULT 0  -- 裸売りで預けた証拠金（買いは 0）
+    )"""
+
+OPTIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS options (           -- オプション（爆騰コール・暴落プット・ペア・裸売りの共通ヘッダ）
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        kind     TEXT    NOT NULL,
+        symbol   TEXT    NOT NULL,
+        strike   REAL    NOT NULL,
+        units    INTEGER NOT NULL CHECK (units > 0),
+        premium  INTEGER NOT NULL CHECK (premium >= 0),
+        expiry   REAL    NOT NULL,
+        spot     REAL    NOT NULL,
+        ts       REAL    NOT NULL,
+        status   TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'exercised', 'expired', 'sold')),
+        paid     INTEGER NOT NULL DEFAULT 0 CHECK (paid >= 0),
+        final    REAL,
+        side     TEXT    NOT NULL DEFAULT 'long' CHECK (side IN ('long', 'short'))
+    )"""
+
+OPTION_PAIRS_DDL = """
+    CREATE TABLE IF NOT EXISTS option_pairs (      -- ペア・ワラント用の対比銘柄・購入時点価格
+        option_id INTEGER PRIMARY KEY,
+        symbol2   TEXT    NOT NULL,
+        spot2     REAL    NOT NULL,
+        FOREIGN KEY (option_id) REFERENCES options (id) ON DELETE CASCADE
+    )"""
+
+OPTION_SHORT_MARGINS_DDL = """
+    CREATE TABLE IF NOT EXISTS option_short_margins ( -- 裸売りオプションの預託証拠金
+        option_id INTEGER PRIMARY KEY,
+        margin    INTEGER NOT NULL CHECK (margin > 0),
+        FOREIGN KEY (option_id) REFERENCES options (id) ON DELETE CASCADE
     )"""
 
 MARKET_EVENTS_DDL = """
@@ -137,6 +171,8 @@ STATEMENTS: tuple[str, ...] = (
     CRYPTO_DDL,
     MARGIN_POSITIONS_DDL,
     OPTIONS_DDL,
+    OPTION_PAIRS_DDL,
+    OPTION_SHORT_MARGINS_DDL,
     MARKET_EVENTS_DDL,
     EARNINGS_DDL,
     EARNINGS_MEMOS_DDL,

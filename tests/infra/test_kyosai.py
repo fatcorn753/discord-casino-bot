@@ -6,7 +6,7 @@ import pytest
 
 from domain import kyosai, p2p, shop, teiai
 from infra.db.repositories import open_repositories
-from tests.support import set_test_balance, set_test_debt, set_test_grace
+from tests.support import give_test_kyosai_units, set_test_balance, set_test_debt, set_test_grace
 
 G, A, B, C = 10, 1, 2, 3
 NOW = time.time()
@@ -41,17 +41,13 @@ def give(eco, uid, n):
     """帝愛の持ち口から uid へ n 口移す（競りで落札したのと同じ状態）。"""
     eco.wallet.balance(uid)
     with eco.db.tx():
-        eco.kyosai.bank_sync(G, NOW)
-        eco.db.conn.execute("UPDATE kyosai_units SET units=units-? WHERE guild_id=? AND user_id=0", (n, G))
-        eco.db.conn.execute(
-            "INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, ?) "
-            "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units",
-            (G, uid, n),
-        )
+        give_test_kyosai_units(eco, uid, n, guild_id=G, now=NOW)
 
 
 def total_units(eco):
-    return eco.db.conn.execute("SELECT SUM(units) FROM kyosai_units WHERE guild_id=?", (G,)).fetchone()[0]
+    users_sum = eco.db.conn.execute("SELECT COALESCE(SUM(units), 0) FROM kyosai_units WHERE guild_id=?", (G,)).fetchone()[0]
+    house_row = eco.db.conn.execute("SELECT house_units FROM kyosai_state WHERE guild_id=?", (G,)).fetchone()
+    return users_sum + (house_row[0] if house_row is not None else 0)
 
 
 # ----------------------------- 総口数（#93） ----------------------------- #
@@ -66,8 +62,13 @@ def test_migration_rescales_old_holdings_to_the_fixed_total_keeping_the_ratio(tm
     path = str(tmp_path / "t.db")
     repos = open_repositories(path, strict=True)
     with repos.db.tx():  # 1人1口ずつ配っていた頃: A 1口・B 1口・帝愛 1口
-        for uid in (A, B, kyosai.HOUSE):
+        for uid in (A, B):
             repos.db.conn.execute("INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, 1)", (G, uid))
+        repos.db.conn.execute(
+            "INSERT INTO kyosai_state (guild_id, house_units) VALUES (?, 1) "
+            "ON CONFLICT(guild_id) DO UPDATE SET house_units=1",
+            (G,),
+        )
         repos.db.conn.execute("PRAGMA user_version = 0")
     repos.close()
     for _ in range(2):  # 何度開いても同じ

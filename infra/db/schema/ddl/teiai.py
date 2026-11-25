@@ -55,12 +55,21 @@ TEIAI_TRUST_DDL = """
         FOREIGN KEY (guild_id) REFERENCES teiai_bank (guild_id) ON DELETE CASCADE
     )"""
 
-KYOSAI_STATE_DDL = """
-    CREATE TABLE IF NOT EXISTS kyosai_state (      -- 帝愛共済の配当・超過損失請求の状態（サーバーごとに1行）
+KYOSAI_STATE_V3_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_state (      -- 帝愛共済の状態（v3 互換: v6 で house_units を追加）
         guild_id INTEGER PRIMARY KEY,
         div_ts   REAL NOT NULL DEFAULT 0,
         paid     REAL NOT NULL DEFAULT 0,
         charged  REAL NOT NULL DEFAULT 0
+    )"""
+
+KYOSAI_STATE_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_state (      -- 帝愛共済の配当・超過損失請求・帝愛持ち口の状態（サーバーごとに1行）
+        guild_id    INTEGER PRIMARY KEY,
+        div_ts      REAL    NOT NULL DEFAULT 0,
+        paid        REAL    NOT NULL DEFAULT 0,
+        charged     REAL    NOT NULL DEFAULT 0,
+        house_units INTEGER NOT NULL DEFAULT 0 CHECK (house_units >= 0)
     )"""
 
 TEIAI_HOUSE_V1_DDL = """
@@ -109,8 +118,8 @@ CDS_DDL = """
         paid      INTEGER NOT NULL DEFAULT 0
     )"""
 
-BONDS_DDL = """
-    CREATE TABLE IF NOT EXISTS bonds (              -- 債券（買った分ごとに1行）。元本は買った時点で残高から預かる
+BONDS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS bonds (              -- 債券（v1 互換: v6 で bond_default_checks へ checked を分離）
         id        INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id  INTEGER NOT NULL,
         user_id   INTEGER NOT NULL,
@@ -124,11 +133,40 @@ BONDS_DDL = """
         rate      REAL                        -- 買ったときに決まった利率（満期までの ％。#18。NULL は種類の基準の利率）
     )"""
 
-KYOSAI_UNITS_DDL = """
-    CREATE TABLE IF NOT EXISTS kyosai_units (      -- 帝愛共済の口（人ごと。user_id=0 は帝愛の持ち口。#34）
+BONDS_DDL = """
+    CREATE TABLE IF NOT EXISTS bonds (              -- 債券（買った分ごとに1行）。元本は買った時点で残高から預かる
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id  INTEGER NOT NULL,
+        user_id   INTEGER NOT NULL,
+        kind      TEXT    NOT NULL,
+        principal INTEGER NOT NULL CHECK (principal > 0),
+        due       REAL    NOT NULL,
+        status    TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paid', 'defaulted', 'cancelled')),
+        paid      INTEGER NOT NULL DEFAULT 0 CHECK (paid >= 0),
+        ts        REAL    NOT NULL,
+        rate      REAL
+    )"""
+
+BOND_DEFAULT_CHECKS_DDL = """
+    CREATE TABLE IF NOT EXISTS bond_default_checks ( -- ジャンク債の最終倒産抽選時刻
+        bond_id    INTEGER PRIMARY KEY,
+        checked_at REAL    NOT NULL,
+        FOREIGN KEY (bond_id) REFERENCES bonds (id) ON DELETE CASCADE
+    )"""
+
+KYOSAI_UNITS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_units (      -- 帝愛共済の口（v1 互換: v6 で user_id=0 を kyosai_state.house_units へ分離）
         guild_id INTEGER NOT NULL,
         user_id  INTEGER NOT NULL,
-        units    INTEGER NOT NULL DEFAULT 0,        -- サーバーの合計は常に総口数（10,000。#93）。0 の行も残る
+        units    INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (guild_id, user_id)
+    )"""
+
+KYOSAI_UNITS_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_units (      -- 帝愛共済のプレイヤー保有口（帝愛持ち口は kyosai_state.house_units）
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL CHECK (user_id > 0),
+        units    INTEGER NOT NULL DEFAULT 0 CHECK (units >= 0),
         PRIMARY KEY (guild_id, user_id)
     )"""
 
@@ -156,8 +194,8 @@ KYOSAI_OFFERS_DDL = """
         done_at  REAL    NOT NULL DEFAULT 0         -- 成立した時刻（同じ2人の、24時間の取引額の上限に使う）
     )"""
 
-KYOSAI_MOTIONS_DDL = """
-    CREATE TABLE IF NOT EXISTS kyosai_motions (    -- 動議（信託の上乗せ金利を premium にする）。いくつも並行できる（#94）
+KYOSAI_MOTIONS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_motions (    -- 動議（v1 互換: v6 で UI 列を discord_posts へ分離）
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id   INTEGER NOT NULL,
         proposer   INTEGER NOT NULL,
@@ -169,6 +207,19 @@ KYOSAI_MOTIONS_DDL = """
         no         INTEGER NOT NULL DEFAULT 0,
         channel_id INTEGER NOT NULL DEFAULT 0,      -- 告知の投稿（締めたときに結果へ書き換え、ボタンを外す）
         message_id INTEGER NOT NULL DEFAULT 0
+    )"""
+
+KYOSAI_MOTIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_motions (    -- 動議（信託の上乗せ金利を premium にする）。いくつも並行できる（#94）
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        proposer INTEGER NOT NULL,
+        premium  REAL    NOT NULL,
+        created  REAL    NOT NULL DEFAULT 0,
+        closes   REAL    NOT NULL,
+        status   TEXT    NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'passed', 'rejected')),
+        yes      INTEGER NOT NULL DEFAULT 0,
+        no       INTEGER NOT NULL DEFAULT 0
     )"""
 
 KYOSAI_VOTES_DDL = """
@@ -276,6 +327,7 @@ STATEMENTS: tuple[str, ...] = (
     TEIAI_DEPOSITS_DDL,
     CDS_DDL,
     BONDS_DDL,
+    BOND_DEFAULT_CHECKS_DDL,
     KYOSAI_UNITS_DDL,
     KYOSAI_AUCTIONS_DDL,
     KYOSAI_OFFERS_DDL,

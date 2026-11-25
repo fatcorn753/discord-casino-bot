@@ -193,7 +193,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
     def backfill_weekly(self, utc_offset_hours: float = 9) -> int:
         """この機能の前に遊んだ分を、台帳から週間の記録に入れる（初回だけ）。入れたゲーム数を返す。"""
         with self._db.tx():
-            if self._one("SELECT 1 FROM weekly_state WHERE guild_id=0"):
+            if self._one("SELECT 1 FROM schema_flags WHERE key='weekly_backfilled'"):
                 return 0
             tz = datetime.timezone(datetime.timedelta(hours=float(utc_offset_hours)))
             by_user = collections.defaultdict(list)
@@ -211,7 +211,10 @@ class RecordRepo(ScopedRepo, IRecordRepo):
                         (g, week, uid, net),
                     )
                     count += 1
-            self._conn.execute("INSERT INTO weekly_state (guild_id, last_week) VALUES (0, 'backfilled')")
+            self._conn.execute(
+                "INSERT INTO schema_flags (key, value) VALUES ('weekly_backfilled', '1') "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+            )
             return count
 
     def play_summary(self, user_id: int) -> PlaySummary:

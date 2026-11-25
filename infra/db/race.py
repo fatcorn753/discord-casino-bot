@@ -13,8 +13,17 @@ from domain.ports.contracts import RaceBetResult, RaceBetRow, RaceCloseResult, R
 from domain.ports.repos import IRaceRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.discord_posts import init_discord_post, set_discord_message
 from infra.db.horse import HorseRepo
 from infra.db.relics import RelicRepo
+
+_SELECT_RACE = (
+    "SELECT r.id, r.guild_id, r.kind, r.start_at, r.entry_close, r.bet_close, "
+    "r.status, r.distance, r.going, "
+    "COALESCE(p.channel_id, 0) AS channel_id, COALESCE(p.message_id, 0) AS message_id, r.created "
+    "FROM horse_races r "
+    "LEFT JOIN discord_posts p ON p.entity_type = 'horse_race' AND p.entity_id = r.id"
+)
 
 
 def race_slots(now: float, tz_hours: float, days: int = 2) -> list[float]:
@@ -62,7 +71,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
 
     def race_get(self, race_id: int) -> RaceRow | None:
         with self._lock:
-            return self._one("SELECT * FROM horse_races WHERE id=? AND guild_id=?", (race_id, self._g()))
+            return self._one(f"{_SELECT_RACE} WHERE r.id=? AND r.guild_id=?", (race_id, self._g()))
 
     def race_number(self, race_id: int) -> int:
         """このサーバーでの、第何競走か。"""
@@ -73,7 +82,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
         """まだ終わっていないレース（申し込み中・発売中）。発走の早い順。"""
         with self._lock:
             return self._all(
-                "SELECT * FROM horse_races WHERE guild_id=? AND status IN ('entry','betting') ORDER BY start_at",
+                f"{_SELECT_RACE} WHERE r.guild_id=? AND r.status IN ('entry','betting') ORDER BY r.start_at",
                 (self._g(),),
             )
 
@@ -87,17 +96,18 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             if self._one("SELECT 1 FROM horse_races WHERE guild_id=? AND kind='regular' AND start_at=?", (gid, start)):
                 return None
             cur = self._conn.execute(
-                "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, channel_id, created) "
-                "VALUES (?, 'regular', ?, ?, ?, 'entry', ?, ?)",
+                "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, created) "
+                "VALUES (?, 'regular', ?, ?, ?, 'entry', ?)",
                 (
                     gid,
                     start,
                     start - horse_mod.ENTRY_LEAD_MIN * 60,
                     start - horse_mod.BET_LEAD_SEC,
-                    channel_id,
                     now,
                 ),
             )
+            assert cur.lastrowid is not None
+            init_discord_post(self._conn, "horse_race", cur.lastrowid, channel_id)
             return cur.lastrowid
 
     def race_create_special(self, now: float, entry_min: int, bet_min: int, channel_id: int = 0) -> int:
@@ -106,18 +116,17 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             entry_close = now + entry_min * 60
             bet_close = entry_close + bet_min * 60
             cur = self._conn.execute(
-                "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, channel_id, created) "
-                "VALUES (?, 'special', ?, ?, ?, 'entry', ?, ?)",
-                (self._g(), bet_close + horse_mod.BET_LEAD_SEC, entry_close, bet_close, channel_id, now),
+                "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, created) "
+                "VALUES (?, 'special', ?, ?, ?, 'entry', ?)",
+                (self._g(), bet_close + horse_mod.BET_LEAD_SEC, entry_close, bet_close, now),
             )
             assert cur.lastrowid is not None
+            init_discord_post(self._conn, "horse_race", cur.lastrowid, channel_id)
             return cur.lastrowid
 
     def race_set_message(self, race_id: int, channel_id: int, message_id: int) -> None:
         with self._db.tx():
-            self._conn.execute(
-                "UPDATE horse_races SET channel_id=?, message_id=? WHERE id=?", (channel_id, message_id, race_id)
-            )
+            set_discord_message(self._conn, "horse_race", race_id, message_id, channel_id)
 
     def _registered_entries(self, race_id: int) -> list[RaceEntryRow]:
         return [

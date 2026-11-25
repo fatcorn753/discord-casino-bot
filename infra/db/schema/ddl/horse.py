@@ -68,8 +68,8 @@ HORSE_AUCTION_LISTINGS_DDL = """
 HORSE_AUCTION_LISTINGS_INDEX_DDL = """
     CREATE INDEX IF NOT EXISTS idx_horse_auction_listings_guild ON horse_auction_listings (guild_id, listed_at, horse_id)"""
 
-HORSE_RACES_DDL = """
-    CREATE TABLE IF NOT EXISTS horse_races (     -- レース（定時と臨時）
+HORSE_RACES_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS horse_races (     -- レース（v1 互換: v6 で UI 列を discord_posts へ分離）
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id    INTEGER NOT NULL,
         kind        TEXT NOT NULL,              -- regular / special
@@ -82,6 +82,20 @@ HORSE_RACES_DDL = """
         channel_id  INTEGER NOT NULL DEFAULT 0,
         message_id  INTEGER NOT NULL DEFAULT 0,
         created     REAL NOT NULL
+    )"""
+
+HORSE_RACES_DDL = """
+    CREATE TABLE IF NOT EXISTS horse_races (     -- レース（定時と臨時）
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id    INTEGER NOT NULL,
+        kind        TEXT    NOT NULL CHECK (kind IN ('regular', 'special')),
+        start_at    REAL    NOT NULL,
+        entry_close REAL    NOT NULL,
+        bet_close   REAL    NOT NULL,
+        status      TEXT    NOT NULL CHECK (status IN ('entry', 'betting', 'done')),
+        distance    INTEGER NOT NULL DEFAULT 0,
+        going       TEXT    NOT NULL DEFAULT '',
+        created     REAL    NOT NULL
     )"""
 
 HORSE_RACES_INDEX_DDL = """

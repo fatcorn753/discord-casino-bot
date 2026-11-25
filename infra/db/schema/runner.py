@@ -13,8 +13,9 @@ from infra.db.schema.migrations_v2 import migrate_v1_to_v2
 from infra.db.schema.migrations_v3 import migrate_v2_to_v3
 from infra.db.schema.migrations_v4 import migrate_v3_to_v4
 from infra.db.schema.migrations_v5 import migrate_v4_to_v5
+from infra.db.schema.migrations_v6 import migrate_v5_to_v6
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,11 @@ MIGRATIONS: tuple[MigrationStep, ...] = (
         version=5,
         name="v4_to_v5_margin_and_horse_5nf",
         fn=migrate_v4_to_v5,
+    ),
+    MigrationStep(
+        version=6,
+        name="v5_to_v6_subtypes_sentinels_and_discord_ui",
+        fn=migrate_v5_to_v6,
     ),
 )
 

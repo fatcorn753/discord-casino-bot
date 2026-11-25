@@ -9,7 +9,7 @@ from domain import horse as horse_mod
 from domain import shop
 from infra.db.repositories import open_repositories
 from tests.fakes import invoke, must
-from tests.support import make_ranking_repos, set_test_balance, set_test_debt
+from tests.support import insert_test_loan, make_ranking_repos, set_test_balance, set_test_debt
 
 pytestmark = pytest.mark.real_scope
 
@@ -63,10 +63,13 @@ def test_horse_is_worth_price_plus_retire_value_and_stays_while_listed(eco):
     assert parts(eco, A)["horses"] == want
     eco.db.conn.execute("UPDATE horses SET status='escrow' WHERE id=?", (hid,))  # 出品中の預かり
     eco.db.conn.execute("DELETE FROM horse_ownership WHERE horse_id=?", (hid,))
+    cur = eco.db.conn.execute(
+        "INSERT INTO market_listings (guild_id, seller_id, kind, ref, qty, mode, price, created, end_at) "
+        "VALUES (?, ?, 'horse', ?, 1, 'auction', 100, 0, 9)",
+        (G, A, str(hid)),
+    )
     eco.db.conn.execute(
-        "INSERT INTO market_listings (guild_id, seller_id, kind, ref, qty, mode, price, bid, bidder_id, created, end_at) "
-        "VALUES (?, ?, 'horse', ?, 1, 'auction', 100, 300, ?, 0, 9)",
-        (G, A, str(hid), B),
+        "INSERT INTO market_auction_bids (listing_id, bidder_id, amount) VALUES (?, ?, 300)", (cur.lastrowid, B)
     )
     eco.db.conn.commit()
     assert parts(eco, A)["horses"] == want  # 出品中も持ち主のもの
@@ -74,11 +77,7 @@ def test_horse_is_worth_price_plus_retire_value_and_stays_while_listed(eco):
 
 
 def test_loans_are_split_into_lent_asset_and_owed_liability(eco):
-    eco.db.conn.execute(
-        "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, "
-        "offer_expires, accepted_at, due, paid) VALUES (?, ?, ?, 1000, 0, 7, 'active', 0, 0, ?, ?, 0)",
-        (G, A, B, time.time(), time.time() + 86400),
-    )
+    insert_test_loan(eco, A, B, 1000, guild_id=G, term_days=7, accepted_at=time.time(), due=time.time() + 86400)
     eco.db.conn.commit()
     assert parts(eco, A)["loans_lent"] == 1000 and parts(eco, B)["loans_owed"] == -1000
 
@@ -151,11 +150,7 @@ def test_asset_groups_match_gross_minus_liabilities_equals_net(eco):
 
     set_test_balance(eco, A, 1000, guild_id=G)
     set_test_debt(eco, A, 400, guild_id=G)
-    eco.db.conn.execute(
-        "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, "
-        "offer_expires, accepted_at, due, paid) VALUES (?, ?, ?, 500, 0, 7, 'active', 0, 0, ?, ?, 0)",
-        (G, B, A, time.time(), time.time() + 86400),
-    )
+    insert_test_loan(eco, B, A, 500, guild_id=G, term_days=7, accepted_at=time.time(), due=time.time() + 86400)
     eco.db.conn.commit()
     p = parts(eco, A)
     g = asset_groups(p)

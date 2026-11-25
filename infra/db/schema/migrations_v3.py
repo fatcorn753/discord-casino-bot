@@ -10,7 +10,7 @@ from infra.db.schema.ddl import (
     TEIAI_TRUST_DDL,
     V3_TEIAI_SPLIT_STATEMENTS,
 )
-from infra.db.schema.ddl.teiai import KYOSAI_STATE_DDL
+from infra.db.schema.ddl.teiai import KYOSAI_STATE_V3_DDL
 
 
 def _split_teiai_bank(conn: sqlite3.Connection) -> None:
@@ -18,14 +18,14 @@ def _split_teiai_bank(conn: sqlite3.Connection) -> None:
     if "thermo_load" not in tb_cols:
         conn.execute(TEIAI_THERMOSTAT_DDL)
         conn.execute(TEIAI_TRUST_DDL)
-        conn.execute(KYOSAI_STATE_DDL)
+        conn.execute(KYOSAI_STATE_V3_DDL)
         return
     # 子テーブルの FOREIGN KEY (teiai_bank) が RENAME で teiai_bank_v2 に書き換わらないよう、先に親を再作成する
     conn.execute("ALTER TABLE teiai_bank RENAME TO teiai_bank_v2")
     conn.execute(TEIAI_BANK_DDL)
     conn.execute(TEIAI_THERMOSTAT_DDL)
     conn.execute(TEIAI_TRUST_DDL)
-    conn.execute(KYOSAI_STATE_DDL)
+    conn.execute(KYOSAI_STATE_V3_DDL)
     conn.execute(
         "INSERT OR IGNORE INTO teiai_bank (guild_id, cash, loaned, ts) SELECT guild_id, cash, loaned, ts FROM teiai_bank_v2"
     )

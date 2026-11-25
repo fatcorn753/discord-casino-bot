@@ -701,8 +701,8 @@ def test_major_race_at_21_doubles_prizes_and_tops_up_from_house_cash(eco):
     start = NOW - (NOW % 86400) + 21 * 3600  # 適当な日の21時（まだ先）
     with eco.db.tx():
         eco.db.conn.execute(
-            "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, channel_id, created) "
-            "VALUES (?, 'regular', ?, ?, ?, 'entry', 0, ?)",
+            "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, created) "
+            "VALUES (?, 'regular', ?, ?, ?, 'entry', ?)",
             (eco.horses.guild_id, start, start - 3600, start - 60, NOW),
         )
     rid = eco.db.conn.execute("SELECT id FROM horse_races WHERE start_at=?", (start,)).fetchone()["id"]

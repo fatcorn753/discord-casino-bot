@@ -121,6 +121,58 @@ def set_test_games_played(
     )
 
 
+def give_test_kyosai_units(
+    repos: RepositoryBundle, user_id: int, units: int, *, guild_id: int | None = None, now: float = 0.0
+) -> None:
+    """テスト用: 帝愛持ち口（kyosai_state.house_units）から user_id へ共済の口を移す。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    repos.kyosai.bank_sync(gid, now)
+    repos.db.conn.execute(
+        "UPDATE kyosai_state SET house_units=house_units-? WHERE guild_id=?", (units, gid)
+    )
+    repos.db.conn.execute(
+        "INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, ?) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units",
+        (gid, user_id, units),
+    )
+
+
+def insert_test_loan(
+    repos: RepositoryBundle,
+    lender_id: int | None,
+    borrower_id: int,
+    principal: int,
+    *,
+    status: str = "active",
+    guild_id: int | None = None,
+    rate_tenths: int = 0,
+    term_days: int = 5,
+    created: float = 0.0,
+    offer_expires: float = 0.0,
+    accepted_at: float | None = None,
+    due: float | None = None,
+    paid: int = 0,
+    reminded: int = 0,
+) -> int:
+    """テスト用: 正規化された loans + loan_terms 行を直接挿入する。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    cur = repos.db.conn.execute(
+        "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (gid, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires),
+    )
+    loan_id = cur.lastrowid
+    assert loan_id is not None
+    if accepted_at is not None or due is not None:
+        eff_acc = created if accepted_at is None else accepted_at
+        eff_due = (eff_acc + term_days * 86400.0) if due is None else due
+        repos.db.conn.execute(
+            "INSERT INTO loan_terms (loan_id, accepted_at, due, paid, reminded) VALUES (?, ?, ?, ?, ?)",
+            (loan_id, eff_acc, eff_due, paid, reminded),
+        )
+    return loan_id
+
+
 def make_test_bot(
     db_path: str = ":memory:",
     *,

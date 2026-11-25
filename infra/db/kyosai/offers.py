@@ -24,8 +24,10 @@ class KyosaiRepo(Base):
             (guild_id, now - DAY, a, b, b, a),
         )
         market_sum = self._scalar(
-            "SELECT COALESCE(SUM(sold_price), 0) FROM market_listings WHERE guild_id=? AND status='sold' "
-            "AND closed_at>? AND ((seller_id=? AND buyer_id=?) OR (seller_id=? AND buyer_id=?))",
+            "SELECT COALESCE(SUM(c.sold_price), 0) "
+            "FROM market_listings l JOIN market_closures c ON c.listing_id = l.id "
+            "WHERE l.guild_id=? AND l.status='sold' AND c.closed_at>? "
+            "AND ((l.seller_id=? AND c.buyer_id=?) OR (l.seller_id=? AND c.buyer_id=?))",
             (guild_id, now - DAY, a, b, b, a),
         )
         return kyosai_sum + market_sum

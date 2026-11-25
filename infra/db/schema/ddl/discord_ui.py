@@ -62,9 +62,15 @@ WEEKLY_CHAMPIONS_DDL = """
     )"""
 
 WEEKLY_STATE_DDL = """
-    CREATE TABLE IF NOT EXISTS weekly_state (      -- サーバーごとの、最後に発表した週（guild_id=0 は、過去分の補完を済ませた印）
-        guild_id  INTEGER PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS weekly_state (      -- サーバーごとの、最後に発表した週
+        guild_id  INTEGER PRIMARY KEY CHECK (guild_id >= 0),
         last_week TEXT NOT NULL
+    )"""
+
+SCHEMA_FLAGS_DDL = """
+    CREATE TABLE IF NOT EXISTS schema_flags (      -- アプリ・移行フラグ（例: weekly_backfilled）
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
     )"""
 
 EVENT_STATE_DDL = """
@@ -75,8 +81,8 @@ EVENT_STATE_DDL = """
         PRIMARY KEY (guild_id, day)
     )"""
 
-MANUAL_EVENT_DDL = """
-    CREATE TABLE IF NOT EXISTS manual_event (      -- 持ち主が開いた特別イベント（1サーバーに1つ。新しく開くと置き換わる）
+MANUAL_EVENT_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS manual_event (      -- v1 互換（v6 で channel_id を discord_posts へ分離）
         guild_id   INTEGER PRIMARY KEY,
         game       TEXT    NOT NULL,
         boost      INTEGER NOT NULL,             -- 勝ち分に上乗せする割合（％）
@@ -84,6 +90,37 @@ MANUAL_EVENT_DDL = """
         ends       REAL    NOT NULL,
         ended      INTEGER NOT NULL DEFAULT 0,   -- 終了を告知したか（時間切れ・手動終了のどちらでも 1）
         channel_id INTEGER NOT NULL DEFAULT 0  -- 開始を告知したチャンネル（終了の告知も同じ所へ。0 なら告知チャンネル）
+    )"""
+
+MANUAL_EVENT_DDL = """
+    CREATE TABLE IF NOT EXISTS manual_event (      -- 持ち主が開いた特別イベント（1サーバーに1つ。新しく開くと置き換わる）
+        guild_id INTEGER PRIMARY KEY,
+        game     TEXT    NOT NULL,
+        boost    INTEGER NOT NULL,               -- 勝ち分に上乗せする割合（％）
+        starts   REAL    NOT NULL,
+        ends     REAL    NOT NULL,
+        ended    INTEGER NOT NULL DEFAULT 0 CHECK (ended IN (0, 1))
+    )"""
+
+DISCORD_POSTS_DDL = """
+    CREATE TABLE IF NOT EXISTS discord_posts (     -- 各ドメインエンティティに紐づく Discord 投稿先の記録
+        entity_type TEXT    NOT NULL CHECK (entity_type IN (
+            'stream', 'horse_race', 'market_listing', 'kyosai_motion',
+            'quiz', 'raffle', 'poll', 'loan', 'manual_event'
+        )),
+        entity_id   INTEGER NOT NULL,
+        channel_id  INTEGER NOT NULL DEFAULT 0,
+        message_id  INTEGER NOT NULL DEFAULT 0,
+        post_done   INTEGER NOT NULL DEFAULT 0 CHECK (post_done IN (0, 1)),
+        PRIMARY KEY (entity_type, entity_id)
+    )"""
+
+STREAM_VOICE_CHANNELS_DDL = """
+    CREATE TABLE IF NOT EXISTS stream_voice_channels ( -- 配信に紐づく Discord ボイスチャンネル
+        stream_id        INTEGER PRIMARY KEY,
+        voice_channel_id INTEGER NOT NULL CHECK (voice_channel_id > 0),
+        created_vc       INTEGER NOT NULL DEFAULT 0 CHECK (created_vc IN (0, 1)),
+        FOREIGN KEY (stream_id) REFERENCES streams (id) ON DELETE CASCADE
     )"""
 
 STATEMENTS: tuple[str, ...] = (
@@ -95,6 +132,9 @@ STATEMENTS: tuple[str, ...] = (
     WEEKLY_STATS_DDL,
     WEEKLY_CHAMPIONS_DDL,
     WEEKLY_STATE_DDL,
+    SCHEMA_FLAGS_DDL,
     EVENT_STATE_DDL,
     MANUAL_EVENT_DDL,
+    DISCORD_POSTS_DDL,
+    STREAM_VOICE_CHANNELS_DDL,
 )

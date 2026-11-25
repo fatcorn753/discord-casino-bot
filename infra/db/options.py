@@ -21,6 +21,15 @@ from infra.db.earnings import EarningsRepo
 from infra.db.market import MarketDataRepo
 from infra.db.market_events import MarketEventRepo
 
+_SELECT_OPTION = (
+    "SELECT o.id, o.guild_id, o.user_id, o.kind, o.symbol, o.strike, o.units, "
+    "o.premium, o.expiry, o.spot, o.ts, o.status, o.paid, o.final, "
+    "op.symbol2, op.spot2, o.side, COALESCE(sm.margin, 0) AS margin "
+    "FROM options o "
+    "LEFT JOIN option_pairs op ON op.option_id = o.id "
+    "LEFT JOIN option_short_margins sm ON sm.option_id = o.id"
+)
+
 
 class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
     """オプションの売買と決済。"""
@@ -68,7 +77,9 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
     def _open_margin(self, guild_id: int, user_id: int) -> int:
         """有効な裸売りの、証拠金の合計。"""
         return self._scalar(
-            "SELECT COALESCE(SUM(margin), 0) FROM options WHERE guild_id=? AND user_id=? AND status='active' AND side='short'",
+            "SELECT COALESCE(SUM(sm.margin), 0) "
+            "FROM options o JOIN option_short_margins sm ON sm.option_id = o.id "
+            "WHERE o.guild_id=? AND o.user_id=? AND o.status='active' AND o.side='short'",
             (guild_id, user_id),
         )
 
@@ -130,12 +141,17 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
             self._bank.bank_income_for(gid, cost, now)
             expiry = now + seconds
             cur = self._conn.execute(
-                "INSERT INTO options (guild_id, user_id, kind, symbol, strike, units, premium, expiry, spot, ts, symbol2, spot2) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (gid, user_id, kind, symbol, strike, units, cost, expiry, spot, now, symbol2, spot2),
+                "INSERT INTO options (guild_id, user_id, kind, symbol, strike, units, premium, expiry, spot, ts, side) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'long')",
+                (gid, user_id, kind, symbol, strike, units, cost, expiry, spot, now),
             )
             option_id = cur.lastrowid
             assert option_id is not None
+            if kind == opt.PAIR and symbol2 is not None and spot2 is not None:
+                self._conn.execute(
+                    "INSERT INTO option_pairs (option_id, symbol2, spot2) VALUES (?, ?, ?)",
+                    (option_id, symbol2, spot2),
+                )
             return True, {
                 "id": option_id,
                 "units": units,
@@ -200,12 +216,16 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                 )
             expiry = now + seconds
             cur = self._conn.execute(
-                "INSERT INTO options (guild_id, user_id, kind, symbol, strike, units, premium, expiry, spot, ts, side, margin) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'short', ?)",
-                (gid, user_id, kind, symbol, strike, units, paid, expiry, spot, now, margin),
+                "INSERT INTO options (guild_id, user_id, kind, symbol, strike, units, premium, expiry, spot, ts, side) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'short')",
+                (gid, user_id, kind, symbol, strike, units, paid, expiry, spot, now),
             )
             option_id = cur.lastrowid
             assert option_id is not None
+            self._conn.execute(
+                "INSERT INTO option_short_margins (option_id, margin) VALUES (?, ?)",
+                (option_id, margin),
+            )
             return True, {
                 "id": option_id,
                 "units": units,
@@ -275,13 +295,13 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
     def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
         with self._lock:
             now, prices = self._now(), self._market.latest_prices()
-            for r in self._all("SELECT * FROM options WHERE guild_id=? AND status='active'", (guild_id,)):
+            for r in self._all(f"{_SELECT_OPTION} WHERE o.guild_id=? AND o.status='active'", (guild_id,)):
                 totals[r["user_id"]] = totals.get(r["user_id"], 0) + self.option_value(r, now, prices)
 
     def option_list(self, user_id: int, recent: int = 5) -> HoldingBook:
         """有効なもの（満期が近い順）と、最近決着したもの（新しい順）。"""
         with self._lock:
-            rows = self._all("SELECT * FROM options WHERE guild_id=? AND user_id=? ORDER BY id", (self._g(), user_id))
+            rows = self._all(f"{_SELECT_OPTION} WHERE o.guild_id=? AND o.user_id=? ORDER BY o.id", (self._g(), user_id))
         active = sorted((r for r in rows if r["status"] == "active"), key=lambda r: r["expiry"])
         done = [r for r in reversed(rows) if r["status"] != "active"][:recent]
         return {"active": active, "done": done}
@@ -298,7 +318,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
 
     def option_close_locked_for(self, guild_id: int, user_id: int, option_id: int, now: float) -> Outcome[int]:
         row = self._one(
-            "SELECT * FROM options WHERE id=? AND guild_id=? AND user_id=? AND status='active'",
+            f"{_SELECT_OPTION} WHERE o.id=? AND o.guild_id=? AND o.user_id=? AND o.status='active'",
             (option_id, guild_id, user_id),
         )
         if row is None:
@@ -348,7 +368,7 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
             gid = self._g()
             due: list[tuple[OptionRow, float, int]] = []
             rows: list[OptionRow] = self._all(
-                "SELECT * FROM options WHERE guild_id=? AND status='active' AND expiry<=? ORDER BY id", (gid, now)
+                f"{_SELECT_OPTION} WHERE o.guild_id=? AND o.status='active' AND o.expiry<=? ORDER BY o.id", (gid, now)
             )
             for r in rows:
                 final = self._price_at(r["symbol"], r["expiry"])

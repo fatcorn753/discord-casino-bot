@@ -105,9 +105,9 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
                     continue
                 spent += amt
                 self._conn.execute(
-                    "INSERT INTO arena_bets (tournament_id, stage, fighter_id, user_id, amount, created) "
-                    "VALUES (?, 'semi', ?, ?, ?, ?)",
-                    (tournament_id, f["id"], arena_mod.NPC_SPECTATOR, amt, now),
+                    "INSERT INTO arena_npc_bets (tournament_id, stage, fighter_id, amount, created) "
+                    "VALUES (?, 'semi', ?, ?, ?)",
+                    (tournament_id, f["id"], amt, now),
                 )
                 self._conn.execute("UPDATE arena_fighters SET bet_total = bet_total + ? WHERE id=?", (amt, f["id"]))
         if spent:
@@ -158,7 +158,7 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
         losers_pool = 0
         if loser_ids:
             placeholders = ",".join("?" * len(loser_ids))
-            losers_pool = (
+            player_losers = (
                 self._scalar(
                     f"SELECT COALESCE(SUM(amount),0) FROM arena_bets WHERE tournament_id=? AND stage=? "
                     f"AND fighter_id IN ({placeholders})",
@@ -166,20 +166,32 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
                 )
                 or 0
             )
+            npc_losers = (
+                self._scalar(
+                    f"SELECT COALESCE(SUM(amount),0) FROM arena_npc_bets WHERE tournament_id=? AND stage=? "
+                    f"AND fighter_id IN ({placeholders})",
+                    (tournament_id, stage, *loser_ids),
+                )
+                or 0
+            )
+            losers_pool = player_losers + npc_losers
             self._conn.execute(
                 f"UPDATE arena_bets SET settled=1 WHERE tournament_id=? AND stage=? AND fighter_id IN ({placeholders})",
+                (tournament_id, stage, *loser_ids),
+            )
+            self._conn.execute(
+                f"UPDATE arena_npc_bets SET settled=1 WHERE tournament_id=? AND stage=? AND fighter_id IN ({placeholders})",
                 (tournament_id, stage, *loser_ids),
             )
             self._conn.execute(
                 f"UPDATE arena_fighters SET stage='out', result='lost' WHERE id IN ({placeholders})", loser_ids
             )
         rate = win_odds
-        win_bets = self._all(
+        player_bets = self._all(
             "SELECT * FROM arena_bets WHERE tournament_id=? AND stage=? AND fighter_id=? AND settled=0",
             (tournament_id, stage, winner["id"]),
         )
         # 案B(#27): 勝てば元本は必ず戻す。利益は負けた側の賭け金と、足りない分だけ帝愛の手元現金から上限つきで補う
-        player_bets = [b for b in win_bets if b["user_id"] > 0]
         # 補填と銀行の収入には時刻が要る。時刻が渡されないとき(古い呼び出し)は補填しない
         state = self._bank.bank_sync_for(guild_id, now) if now is not None else None
         cap = min(arena_mod.MATCH_SUBSIDY_MAX, max(0, int(state["cash"]))) if state is not None else 0
@@ -190,12 +202,14 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
             leftover and now is not None
         ):  # 使われなかった負け分は、カジノの負け分と同じく一部を帝愛銀行の収入にする(残りは消える)
             self._bank.bank_income_for(guild_id, int(leftover * teiai.LOSS_SHARE), now)
-        pay_of = {b["id"]: p for b, p in zip(player_bets, pays, strict=True)}
-        for b in win_bets:
-            pay = pay_of.get(b["id"], 0)
+        for b, pay in zip(player_bets, pays, strict=True):
             if pay:
                 self._account.apply(guild_id, b["user_id"], pay, "闘技場:勝利の配当", income=max(0, pay - b["amount"]))
             self._conn.execute("UPDATE arena_bets SET payout=?, settled=1 WHERE id=?", (pay, b["id"]))
+        self._conn.execute(
+            "UPDATE arena_npc_bets SET settled=1 WHERE tournament_id=? AND stage=? AND fighter_id=? AND settled=0",
+            (tournament_id, stage, winner["id"]),
+        )
         self._conn.execute("UPDATE arena_fighters SET result='won' WHERE id=?", (winner["id"],))
 
     def arena_run_semis(
@@ -259,9 +273,12 @@ class ArenaRepo(ScopedRepo, IArenaRepo):
         """戦士ごとの、誰がいくら賭けているか（大会を通じた累積）。{戦士ID: [{user_id, amount}]}（金額の多い順）。"""
         with self._lock:
             rows = self._all(
-                "SELECT fighter_id, user_id, SUM(amount) AS amount FROM arena_bets WHERE tournament_id=? "
-                "GROUP BY fighter_id, user_id ORDER BY fighter_id, amount DESC",
-                (tournament_id,),
+                "SELECT fighter_id, user_id, SUM(amount) AS amount FROM ("
+                "SELECT fighter_id, user_id, amount FROM arena_bets WHERE tournament_id=? "
+                "UNION ALL "
+                "SELECT fighter_id, ? AS user_id, amount FROM arena_npc_bets WHERE tournament_id=?"
+                ") GROUP BY fighter_id, user_id ORDER BY fighter_id, amount DESC",
+                (tournament_id, arena_mod.NPC_SPECTATOR, tournament_id),
             )
         out: dict[int, list[Any]] = {}
         for r in rows:

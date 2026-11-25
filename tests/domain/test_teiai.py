@@ -13,6 +13,8 @@ from domain.types import DAILY_BASE, INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_guild, as_interaction, as_member, freeze_time, must
 from tests.support import (
+    give_test_kyosai_units,
+    insert_test_loan,
     make_bond_cog,
     make_casino_deps,
     make_ranking_repos,
@@ -178,11 +180,7 @@ def test_status_follows_debt_and_overdue_loans(eco):
         set_test_debt(eco, U, 0)
     assert eco.debt.status(U) == teiai.KATAGI
     with eco.db.tx():
-        eco.db.conn.execute(
-            "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires, accepted_at, due, paid) "
-            "VALUES (0, ?, ?, 100, 0, 5, 'overdue', 0, 0, 0, 1, 0)",
-            (A, U),
-        )
+        insert_test_loan(eco, A, U, 100, status="overdue", accepted_at=0.0, due=1.0)
     assert eco.debt.status(U) == teiai.UNDERGROUND
 
 
@@ -212,11 +210,7 @@ def make_bankrupt_case(eco, debt=40_000):
     with eco.db.tx():
         set_test_balance(eco, U, 1_000)
         set_test_debt(eco, U, debt)
-        eco.db.conn.execute(
-            "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires, accepted_at, due, paid) "
-            "VALUES (0, ?, ?, 5000, 0, 5, 'active', 0, 0, ?, ?, 0)",
-            (A, U, time.time(), time.time() + DAY),
-        )
+        insert_test_loan(eco, A, U, 5000, status="active", accepted_at=time.time(), due=time.time() + DAY)
 
 
 SHOP_VALUE = int((20_000 + 100_000 + 13_500) * teiai.SEIZE_RATE)  # ショップの全品の換金（購入額の50%）
@@ -279,11 +273,7 @@ def test_bankruptcy_keeps_the_senior_debt_up_to_the_floor_and_blocks_new_loans(e
     assert eco.debt.debt(U) == teiai.BANKRUPT_FLOOR  # 完全には消えず、破産直後の種銭も貸されない
     eco.wallet.balance(A)
     with eco.db.tx():
-        eco.db.conn.execute(
-            "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires) "
-            "VALUES (0, ?, ?, 100, 0, 5, 'offer', 0, ?)",
-            (A, U, time.time() + DAY),
-        )
+        insert_test_loan(eco, A, U, 100, status="offer", offer_expires=time.time() + DAY)
     assert eco.loans.loan_accept(1, U, time.time())[1].code == "loan_blacklisted"  # ブラックリストの間は、借りられない
     assert eco.debt.bankrupt(U)[1].code == "bankrupt_already"
 
@@ -591,11 +581,7 @@ def test_bond_principal_pays_the_overdue_loan_when_there_is_no_senior_debt(eco, 
     assert eco.bonds.bond_buy(U, "junk", 1_000, 1.0)[0]
     eco.wallet.balance(A)
     with eco.db.tx():
-        eco.db.conn.execute(
-            "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires, accepted_at, due, paid) "
-            "VALUES (0, ?, ?, 500, 0, 5, 'overdue', 0, 0, 1000, 1000 + 86400, 0)",
-            (A, U),
-        )
+        insert_test_loan(eco, A, U, 500, status="overdue", accepted_at=1000.0, due=1000.0 + 86400)
     a_before = eco.wallet.balance(A)
 
     class Never:
@@ -820,10 +806,8 @@ def test_interest_auto_seizure_protects_company_shop_and_kyosai(eco, monkeypatch
     assert ok
     item = shop.BY_ID["title_regular"]
     assert eco.shop.purchase(U, item.id, item.name, item.price, True).ok
-    eco.kyosai.bank_sync(0, now[0])
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE kyosai_units SET units=units-100 WHERE guild_id=0 AND user_id=0")
-        eco.db.conn.execute("INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (0, ?, 100)", (U,))
+        give_test_kyosai_units(eco, U, 100, guild_id=0, now=now[0])
     assert eco.bank.bank_deposit(U, 3_000, now[0])[0]
     with eco.db.tx():
         set_test_balance(eco, U, 2_000)

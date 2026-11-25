@@ -135,10 +135,17 @@ def p2p_asset_collector(db: EcoDb, horse_worth_fn: Callable[[int, int, int], int
     conn = db.conn
 
     def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in fetch_all(conn, "SELECT * FROM market_listings WHERE guild_id=? AND status='active'", (guild_id,)):
-            if r["kind"] == "item":
+        for r in fetch_all(
+            conn,
+            "SELECT l.seller_id, l.kind, l.ref, l.qty, COALESCE(b.bidder_id, 0) AS bidder_id, "
+            "COALESCE(b.amount, 0) AS bid "
+            "FROM market_listings l LEFT JOIN market_auction_bids b ON b.listing_id = l.id "
+            "WHERE l.guild_id=? AND l.status='active'",
+            (guild_id,),
+        ):
+            if r["seller_id"] is not None and r["kind"] == "item":
                 _add_item_value(add, r["seller_id"], r["ref"], r["qty"])
-            else:
+            elif r["seller_id"] is not None:
                 h = fetch_one(conn, "SELECT races, wins, places FROM horses WHERE id=?", (int(r["ref"]),))
                 if h:
                     add(r["seller_id"], "horses", horse_worth_fn(h["races"], h["wins"], h["places"]))
@@ -153,7 +160,13 @@ def loan_asset_collector(db: EcoDb, loans: IOverdueLoanCollector) -> AssetCollec
 
     def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
         for r in fetch_all(
-            conn, "SELECT * FROM loans WHERE guild_id=? AND status IN ('active','overdue')", (guild_id,)
+            conn,
+            "SELECT l.id, l.guild_id, COALESCE(l.lender_id, 0) AS lender_id, l.borrower_id, "
+            "l.principal, l.rate_tenths, l.term_days, l.status, l.created, l.offer_expires, "
+            "t.accepted_at, t.due, COALESCE(t.paid, 0) AS paid, COALESCE(t.reminded, 0) AS reminded "
+            "FROM loans l LEFT JOIN loan_terms t ON t.loan_id = l.id "
+            "WHERE l.guild_id=? AND l.status IN ('active','overdue')",
+            (guild_id,),
         ):
             left = loans.loan_remaining(dict(r), now)
             add(r["lender_id"], "loans_lent", left)

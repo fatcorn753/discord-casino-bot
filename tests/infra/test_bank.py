@@ -8,7 +8,7 @@ from domain import rates, teiai
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import must
-from tests.support import make_test_bot, set_test_balance, set_test_debt
+from tests.support import give_test_kyosai_units, make_test_bot, set_test_balance, set_test_debt
 
 pytestmark = pytest.mark.real_scope
 
@@ -34,13 +34,7 @@ def give_units(eco, uid, n):
     """帝愛の持ち口から uid へ共済の口を n 口移す（口の持ち主が超過損失を負担する場面のため）。"""
     eco.wallet.balance(uid)
     with eco.db.tx():
-        eco.kyosai.bank_sync(G, NOW)
-        eco.db.conn.execute("UPDATE kyosai_units SET units=units-? WHERE guild_id=? AND user_id=0", (n, G))
-        eco.db.conn.execute(
-            "INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, ?) "
-            "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units",
-            (G, uid, n),
-        )
+        give_test_kyosai_units(eco, uid, n, guild_id=G, now=NOW)
 
 
 def test_deposit_keeps_only_the_reserve_ratio_as_cash(eco):
