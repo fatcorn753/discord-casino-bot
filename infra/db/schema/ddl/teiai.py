@@ -1,0 +1,180 @@
+"""帝愛銀行・帝愛物産・預金・CDS・債券・帝愛共済・差押競売・闇市の DDL。"""
+
+TEIAI_BANK_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_bank (        -- 帝愛銀行の手元（サーバーごとに1行）
+        guild_id        INTEGER PRIMARY KEY,
+        cash            REAL NOT NULL DEFAULT 0,   -- すぐ払い出せる現金
+        loaned          REAL NOT NULL DEFAULT 0,   -- 地下融資に回している額（時間がたつと現金に戻る）
+        ts              REAL NOT NULL DEFAULT 0,   -- 融資の回収を、ここまで反映した時刻
+        thermo_load     REAL NOT NULL DEFAULT 0,   -- サーモスタットの短期熱量 L
+        thermo_capacity REAL NOT NULL DEFAULT 0,   -- サーモスタットの長期キャパシティ E（0 は未初期化。下限から始める）
+        thermo_ts       REAL NOT NULL DEFAULT 0,   -- L・E を、ここまで冷ました時刻
+        thermo_burned   REAL NOT NULL DEFAULT 0,   -- 熱浴へ消えた（観測中は、消えるはずだった）額の累計
+        thermo_bailed   REAL NOT NULL DEFAULT 0,   -- 熱浴が肩代わりした（観測中は、するはずだった）額の累計
+        trust_ts        REAL NOT NULL DEFAULT 0,   -- 帝愛信託の利息を、ここまで払った時刻（0 は未開始）
+        trust_accrued   REAL NOT NULL DEFAULT 0,   -- まだ払っていない利息の端数
+        trust_paid      REAL NOT NULL DEFAULT 0,   -- これまでに払った信託の利息の累計
+        excess_unpaid   REAL NOT NULL DEFAULT 0,   -- 信託でも熱浴・共済でも払えなかった超過損失の累計
+        rf              REAL NOT NULL DEFAULT 0,   -- 無リスク金利 r_f（1日あたり。0 は未開始で、基準の金利。#18）
+        rf_ts           REAL NOT NULL DEFAULT 0,   -- r_f を、ここまで進めた時刻
+        kyosai_div_ts   REAL NOT NULL DEFAULT 0,   -- 帝愛共済の配当を、最後に配った時刻（0 は未開始。#34）
+        kyosai_paid     REAL NOT NULL DEFAULT 0,   -- これまでに配った共済の配当の累計
+        kyosai_charged  REAL NOT NULL DEFAULT 0,   -- これまでに共済へ請求した超過損失の累計
+        trust_premium   REAL                       -- 動議で決まった信託の上乗せ金利（NULL は設定の既定値）
+    )"""
+
+TEIAI_HOUSE_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛物産の買取プール（サーバーごとに1行）。/会社 の資金が出入りする。銀行の手元（預金の準備）とは別
+        guild_id   INTEGER PRIMARY KEY,
+        balance    INTEGER NOT NULL DEFAULT 0,     -- いまの残高
+        skimmed    INTEGER NOT NULL DEFAULT 0,     -- 後方互換用の累計列（現在は未使用）
+        grant_day  TEXT NOT NULL DEFAULT '',       -- 会社の買取枠（新しく出す分）を使った日
+        grant_used INTEGER NOT NULL DEFAULT 0      -- その日に、買取枠から出した額
+    )"""
+
+TEIAI_DEPOSITS_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_deposits (    -- 帝愛への預金（人ごと）
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        amount   INTEGER NOT NULL,
+        PRIMARY KEY (guild_id, user_id)
+    )"""
+
+CDS_DDL = """
+    CREATE TABLE IF NOT EXISTS cds (               -- CDS（破綻保証）。買い手が掛け金を払い、対象が強制破産すると配当（自分への CDS は借金を肩代わり）
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id  INTEGER NOT NULL,
+        buyer_id  INTEGER NOT NULL,
+        target_id INTEGER NOT NULL,
+        stake     INTEGER NOT NULL,               -- 掛け金
+        odds      REAL    NOT NULL,               -- 買ったときのオッズ（配当の見込み = 掛け金 × オッズ）
+        ts        REAL    NOT NULL,
+        expires   REAL    NOT NULL,
+        status    TEXT    NOT NULL DEFAULT 'active',   -- active / paid / expired / void
+        paid      INTEGER NOT NULL DEFAULT 0
+    )"""
+
+BONDS_DDL = """
+    CREATE TABLE IF NOT EXISTS bonds (              -- 債券（買った分ごとに1行）。元本は買った時点で残高から預かる
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id  INTEGER NOT NULL,
+        user_id   INTEGER NOT NULL,
+        kind      TEXT    NOT NULL,           -- normal / junk
+        principal INTEGER NOT NULL,
+        due       REAL    NOT NULL,           -- 満期（epoch秒）
+        status    TEXT    NOT NULL DEFAULT 'active',   -- active / paid / defaulted / cancelled
+        paid      INTEGER NOT NULL DEFAULT 0, -- 満期・売却で戻した額
+        ts        REAL    NOT NULL,           -- 買った時刻
+        checked   REAL,                       -- ジャンク債の倒産抽選を、ここまで済ませた時刻（NULL なら買った時刻）
+        rate      REAL                        -- 買ったときに決まった利率（満期までの ％。#18。NULL は種類の基準の利率）
+    )"""
+
+KYOSAI_UNITS_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_units (      -- 帝愛共済の口（人ごと。user_id=0 は帝愛の持ち口。#34）
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        units    INTEGER NOT NULL DEFAULT 0,        -- サーバーの合計は常に総口数（10,000。#93）。0 の行も残る
+        PRIMARY KEY (guild_id, user_id)
+    )"""
+
+KYOSAI_AUCTIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_auctions (   -- 帝愛の持ち口の競り（入札で値段が決まる。#93）
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id   INTEGER NOT NULL,
+        units      INTEGER NOT NULL,                -- 出した口数（帝愛の持ち口から、落札のときに移す）
+        top_bid    INTEGER NOT NULL DEFAULT 0,      -- いまの最高値（入札した人の手元から預かっている）
+        top_bidder INTEGER,
+        ends       REAL    NOT NULL,
+        status     TEXT    NOT NULL DEFAULT 'open'  -- open / sold / unsold
+    )"""
+
+KYOSAI_OFFERS_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_offers (     -- 口の譲渡の申し出（売り手 → 買い手。買い手が受けると成立）
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        seller   INTEGER NOT NULL,
+        buyer    INTEGER NOT NULL,
+        units    INTEGER NOT NULL,
+        price    INTEGER NOT NULL,                  -- 全部でいくら
+        expires  REAL    NOT NULL,
+        status   TEXT    NOT NULL DEFAULT 'open',   -- open / done / cancelled
+        done_at  REAL    NOT NULL DEFAULT 0         -- 成立した時刻（同じ2人の、24時間の取引額の上限に使う）
+    )"""
+
+KYOSAI_MOTIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_motions (    -- 動議（信託の上乗せ金利を premium にする）。いくつも並行できる（#94）
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id   INTEGER NOT NULL,
+        proposer   INTEGER NOT NULL,
+        premium    REAL    NOT NULL,
+        created    REAL    NOT NULL DEFAULT 0,      -- 出した時刻（同じ人のクールダウンに使う）
+        closes     REAL    NOT NULL,
+        status     TEXT    NOT NULL DEFAULT 'open', -- open / passed / rejected
+        yes        INTEGER NOT NULL DEFAULT 0,      -- 締めたときの賛成の口数
+        no         INTEGER NOT NULL DEFAULT 0,
+        channel_id INTEGER NOT NULL DEFAULT 0,      -- 告知の投稿（締めたときに結果へ書き換え、ボタンを外す）
+        message_id INTEGER NOT NULL DEFAULT 0
+    )"""
+
+KYOSAI_VOTES_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_votes (       -- 動議への投票（締めるときに、そのときの口数で数える）
+        motion_id INTEGER NOT NULL,
+        user_id   INTEGER NOT NULL,
+        yes       INTEGER NOT NULL,
+        PRIMARY KEY (motion_id, user_id)
+    )"""
+
+SEIZED_ITEMS_DDL = """
+    CREATE TABLE IF NOT EXISTS seized_items (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id  INTEGER NOT NULL,
+        item_id   TEXT NOT NULL,
+        qty       INTEGER NOT NULL,
+        listed_at REAL NOT NULL
+    )"""
+
+SEIZED_ITEMS_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS seized_items_item ON seized_items (guild_id, item_id, listed_at)"""
+
+TEIAI_MARKET_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_market (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id    INTEGER NOT NULL,
+        day         REAL NOT NULL,
+        item_id     TEXT NOT NULL,
+        mode        TEXT NOT NULL,
+        qty         INTEGER NOT NULL,
+        start_price INTEGER NOT NULL,
+        end_price   INTEGER NOT NULL,
+        black       INTEGER NOT NULL,
+        listed_at   REAL NOT NULL,
+        expires_at  REAL NOT NULL
+    )"""
+
+TEIAI_MARKET_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS teiai_market_day ON teiai_market (guild_id, day)"""
+
+TEIAI_MARKET_DAYS_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_market_days (
+        guild_id INTEGER NOT NULL,
+        day      REAL NOT NULL,
+        PRIMARY KEY (guild_id, day)
+    )"""
+
+STATEMENTS: tuple[str, ...] = (
+    TEIAI_BANK_DDL,
+    TEIAI_HOUSE_DDL,
+    TEIAI_DEPOSITS_DDL,
+    CDS_DDL,
+    BONDS_DDL,
+    KYOSAI_UNITS_DDL,
+    KYOSAI_AUCTIONS_DDL,
+    KYOSAI_OFFERS_DDL,
+    KYOSAI_MOTIONS_DDL,
+    KYOSAI_VOTES_DDL,
+    SEIZED_ITEMS_DDL,
+    SEIZED_ITEMS_INDEX_DDL,
+    TEIAI_MARKET_DDL,
+    TEIAI_MARKET_INDEX_DDL,
+    TEIAI_MARKET_DAYS_DDL,
+)
