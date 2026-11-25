@@ -6,7 +6,7 @@ from domain.ports import ISessionGuard
 
 
 class Sessions(ISessionGuard):
-    def __init__(self, cooldown: float = 1.5):
+    def __init__(self, cooldown: float = 0.5):  # 終わった直後の連打だけを止める。演出中は「プレイ中」で止まる
         self._active = set()
         self._last_end = {}
         self.cooldown = cooldown
