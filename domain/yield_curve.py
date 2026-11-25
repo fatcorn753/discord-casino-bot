@@ -69,6 +69,53 @@ class LiquidityParams:
             raise ValueError("loan_recovery_per_day, distress_cost, capacity はすべて正である必要があります")
 
 
+def _require_finite(*values: float, label: str) -> None:
+    if not all(math.isfinite(v) for v in values):
+        raise ValueError(f"{label}はすべて有限の実数である必要があります")
+
+
+@dataclass(frozen=True)
+class TrustParams:
+    """帝愛信託の 2 層熟成・余剰ベース貸出のパラメータ（1 日あたり連続率と安全バッファ）。"""
+
+    seasoning_rate_per_day: float
+    deploy_rate_per_day: float
+    deploy_buffer: float = 0.0
+
+    def __post_init__(self) -> None:
+        _require_finite(
+            self.seasoning_rate_per_day, self.deploy_rate_per_day, self.deploy_buffer, label="信託パラメータ"
+        )
+        if self.seasoning_rate_per_day <= 0.0:
+            raise ValueError("seasoning_rate_per_day は正である必要があります")
+        if self.deploy_rate_per_day < 0.0 or self.deploy_buffer < 0.0:
+            raise ValueError("deploy_rate_per_day と deploy_buffer は非負である必要があります")
+
+
+@dataclass(frozen=True)
+class TrustBalance:
+    """帝愛信託の 2 層残高（未熟成枠 $D_{\\mathrm{new}}$ とコア枠 $D_{\\mathrm{core}}$）。"""
+
+    unseasoned: float
+    core: float
+
+    def __post_init__(self) -> None:
+        _require_finite(self.unseasoned, self.core, label="信託残高")
+        if self.unseasoned < 0.0 or self.core < 0.0:
+            raise ValueError("信託残高は非負である必要があります")
+
+
+@dataclass(frozen=True)
+class TrustWithdrawalQuote:
+    """帝愛信託の LIFO 引出見積り結果（未熟成消費・コア消費・払戻額・留保額・事後超過準備）。"""
+
+    from_unseasoned: float
+    from_core: float
+    payout: float
+    exit_fee: float
+    surplus_after: float
+
+
 def _cir_log_bond_price(params: CirParams, r: float, tau: float) -> float:
     """ゼロクーポン債価格の対数 $\\ln P_0(r, \\tau) = \\ln A(\\tau) - B(\\tau) r$（$\\tau > 0$ 用）。"""
     kappa_q = params.kappa + params.lam
@@ -176,16 +223,35 @@ def maturity_weight(params: LiquidityParams, tau: float) -> float:
     return params.reserve_ratio + (1.0 - params.reserve_ratio) * math.exp(-params.loan_recovery_per_day * tau)
 
 
+def required_reserve(
+    locks: float,
+    deposits: float,
+    bonds: Sequence[tuple[float, float]],
+    params: LiquidityParams,
+    *,
+    unseasoned_deposits: float = 0.0,
+) -> float:
+    """必要準備額 $R = \\text{locks} + D_{\\mathrm{new}} + \\theta_0 D_{\\mathrm{core}} + \\sum_i \\theta(\\tau_i) F_i$。"""
+    if not math.isfinite(unseasoned_deposits) or unseasoned_deposits < 0.0:
+        raise ValueError("unseasoned_deposits は非負の有限実数である必要があります")
+    if unseasoned_deposits > 0.0 and unseasoned_deposits > deposits:
+        raise ValueError("unseasoned_deposits は信託総額 deposits 以下である必要があります")
+    core_deposits = deposits - unseasoned_deposits
+    bond_burden = math.fsum(maturity_weight(params, tau) * face for face, tau in bonds)
+    return locks + unseasoned_deposits + params.reserve_ratio * core_deposits + bond_burden
+
+
 def excess_reserve(
     cash: float,
     locks: float,
     deposits: float,
     bonds: Sequence[tuple[float, float]],
     params: LiquidityParams,
+    *,
+    unseasoned_deposits: float = 0.0,
 ) -> float:
-    """銀行の超過準備 $S = (C - \\text{locks}) - \\theta_0 D - \\sum_i \\theta(\\tau_i) F_i$。"""
-    bond_burden = math.fsum(maturity_weight(params, tau) * face for face, tau in bonds)
-    return (cash - locks) - params.reserve_ratio * deposits - bond_burden
+    """銀行の超過準備 $S = (C - D_{\\mathrm{new}} - \\text{locks}) - \\theta_0 D_{\\mathrm{core}} - \\sum_i \\theta(\\tau_i) F_i$。"""
+    return cash - required_reserve(locks, deposits, bonds, params, unseasoned_deposits=unseasoned_deposits)
 
 
 def shortfall_potential(surplus: float, params: LiquidityParams) -> float:
@@ -210,9 +276,11 @@ def indifference_value(
     locks: float,
     deposits: float,
     bonds: Sequence[tuple[float, float]],
+    *,
+    unseasoned_deposits: float = 0.0,
 ) -> float:
     """銀行の HJB 無差別価値関数 $V = C - D - \\sum_i P_0(r, \\tau_i) F_i - \\Psi(S; E)$。"""
-    surplus = excess_reserve(cash, locks, deposits, bonds, liq)
+    surplus = excess_reserve(cash, locks, deposits, bonds, liq, unseasoned_deposits=unseasoned_deposits)
     bond_pv = math.fsum(cir_bond_price(cir, r, tau) * face for face, tau in bonds)
     return cash - deposits - bond_pv - shortfall_potential(surplus, liq)
 
@@ -322,3 +390,203 @@ def margin_rates(
     r_long = effective_short_rate(liq, r, surplus) + long_spread
     r_short_rebate = r - borrow_fee
     return (r_long, r_short_rebate)
+
+
+def season_trust_balance(balance: TrustBalance, dt: float, trust: TrustParams) -> TrustBalance:
+    """経過日数 `dt` だけ未熟成枠 $D_{\\mathrm{new}}$ をコア枠 $D_{\\mathrm{core}}$ へ連続熟成する（総額保存）。"""
+    if not math.isfinite(dt):
+        raise ValueError("経過日数 dt は有限の実数である必要があります")
+    if dt <= 0.0 or balance.unseasoned == 0.0:
+        return balance
+    matured = balance.unseasoned * (-math.expm1(-trust.seasoning_rate_per_day * dt))
+    unseasoned_next = max(0.0, balance.unseasoned - matured)
+    core_next = balance.core + (balance.unseasoned - unseasoned_next)
+    return TrustBalance(unseasoned=unseasoned_next, core=core_next)
+
+
+def core_reserve_ratio(
+    cash: float,
+    locks: float,
+    core_deposits: float,
+    unseasoned_deposits: float,
+    bonds_principal: float,
+) -> float | None:
+    """未熟成枠を $100\\%$ 控除したコア準備率 $\\theta_{\\mathrm{core}} = \\frac{C - D_{\\mathrm{new}} - \\text{locks}}{D_{\\mathrm{core}} + B}$。"""
+    _require_finite(cash, locks, core_deposits, unseasoned_deposits, bonds_principal, label="コア準備率の入力")
+    if core_deposits < 0.0 or unseasoned_deposits < 0.0 or bonds_principal < 0.0:
+        raise ValueError("残高・元本は非負である必要があります")
+    liabilities = core_deposits + bonds_principal
+    if liabilities <= 0.0:
+        return None
+    return (cash - unseasoned_deposits - locks) / liabilities
+
+
+def marginal_trust_payout_rate(liq: LiquidityParams, surplus: float) -> float:
+    """コア信託引出の無限小極限での限界払戻率 $\\frac{1 + g(S)\\theta_0}{1 + g(S)}$。"""
+    _require_finite(surplus, label="超過準備 surplus ")
+    g = shadow_price(surplus, liq)
+    return (1.0 + g * liq.reserve_ratio) / (1.0 + g)
+
+
+def _shortfall_diff(surplus: float, delta: float, params: LiquidityParams) -> float:
+    """桁落ちを抑えてポテンシャル差分 $\\Psi(S + \\delta; E) - \\Psi(S; E)$ を計算する。"""
+    s_after = surplus + delta
+    if surplus >= 0.0 and s_after >= 0.0:
+        return shortfall_potential(surplus, params) * math.expm1(-delta / params.capacity)
+    if surplus <= 0.0 and s_after <= 0.0:
+        return -params.distress_cost * delta
+    if surplus > 0.0 > s_after:
+        return (
+            -params.distress_cost * params.capacity * math.expm1(-surplus / params.capacity)
+            - params.distress_cost * s_after
+        )
+    return (
+        params.distress_cost * params.capacity * math.expm1(-s_after / params.capacity) + params.distress_cost * surplus
+    )
+
+
+def trust_withdraw_payout(
+    liq: LiquidityParams,
+    surplus: float,
+    balance: TrustBalance,
+    amount: float,
+) -> TrustWithdrawalQuote:
+    """LIFO 優先（未熟成枠無料 $\\to$ コア枠 HJB 無差別スイング・プライシング）で解約額の払戻額を算出する。"""
+    _require_finite(surplus, amount, label="surplus と amount ")
+    if amount < 0.0:
+        raise ValueError("解約額 amount は非負である必要があります")
+    total = balance.unseasoned + balance.core
+    if amount > total:
+        raise ValueError("解約額 amount は信託残高以下である必要があります")
+
+    from_unseasoned = min(amount, balance.unseasoned)
+    from_core = amount - from_unseasoned
+    if from_core == 0.0:
+        return TrustWithdrawalQuote(
+            from_unseasoned=from_unseasoned,
+            from_core=0.0,
+            payout=from_unseasoned,
+            exit_fee=0.0,
+            surplus_after=surplus,
+        )
+
+    theta_core = liq.reserve_ratio * from_core
+    q_core = from_core
+    for _ in range(_NEWTON_MAX_ITER):
+        delta = theta_core - q_core
+        s_after = surplus + delta
+        val = (from_core - q_core) - _shortfall_diff(surplus, delta, liq)
+        deriv = -(1.0 + shadow_price(s_after, liq))
+        step = val / deriv
+        q_core -= step
+        tol = max(_NEWTON_TOL, 1e-14 * max(1.0, abs(q_core)))
+        if abs(step) <= tol and abs(val) <= tol:
+            break
+    q_core = min(from_core, max(theta_core, q_core))
+    exit_fee = max(0.0, from_core - q_core)
+    payout = from_unseasoned + q_core
+    surplus_after = surplus - q_core + theta_core
+    return TrustWithdrawalQuote(
+        from_unseasoned=from_unseasoned,
+        from_core=from_core,
+        payout=payout,
+        exit_fee=exit_fee,
+        surplus_after=surplus_after,
+    )
+
+
+def surplus_lending_step(
+    cash: float,
+    loaned: float,
+    req_reserve: float,
+    dt: float,
+    liq: LiquidityParams,
+    trust: TrustParams,
+) -> tuple[float, float]:
+    """超過準備バッファを超える余剰のみを運用配分する区分線形 ODE の厳密遷移（`cash + loaned` 保存）。"""
+    _require_finite(cash, loaned, req_reserve, dt, label="surplus_lending_step の入力")
+    if loaned < 0.0 or dt < 0.0:
+        raise ValueError("loaned と dt は非負である必要があります")
+    if dt == 0.0:
+        return (cash, loaned)
+
+    rho = liq.loan_recovery_per_day
+    alpha = trust.deploy_rate_per_day
+    s_buf = trust.deploy_buffer
+    s0 = cash - req_reserve
+
+    if s0 < s_buf:
+        max_rec = loaned * (-math.expm1(-rho * dt))
+        gap = s_buf - s0
+        if loaned <= 0.0 or max_rec <= gap:
+            loaned_next = max(0.0, loaned - max_rec)
+            cash_next = cash + (loaned - loaned_next)
+            return (cash_next, loaned_next)
+        t_cross = -math.log1p(-gap / loaned) / rho
+        cash_mid = cash + gap
+        loaned_mid = loaned - gap
+        rem = max(0.0, dt - t_cross)
+        u0 = 0.0
+    else:
+        cash_mid = cash
+        loaned_mid = loaned
+        rem = dt
+        u0 = s0 - s_buf
+
+    if rem <= 0.0:
+        return (cash_mid, loaned_mid)
+    pool = u0 + loaned_mid
+    if pool <= 0.0:
+        return (cash_mid, 0.0)
+    omega = rho + alpha
+    u_star = (rho / omega) * pool
+    decay = math.exp(-omega * rem)
+    u_next = u0 * decay + u_star * (-math.expm1(-omega * rem))
+    loaned_next = min(pool, max(0.0, pool - u_next))
+    cash_next = cash_mid + (loaned_mid - loaned_next)
+    return (cash_next, loaned_next)
+
+
+def bank_net_worth(
+    cash: float,
+    loaned: float,
+    locks: float,
+    deposits: float,
+    bonds_liability: float,
+) -> float:
+    """銀行の純資産（自己資本）$NW = (C + L - \\text{locks}) - (D + B)$。"""
+    _require_finite(cash, loaned, locks, deposits, bonds_liability, label="純資産計算の入力")
+    return (cash + loaned - locks) - (deposits + bonds_liability)
+
+
+def solvency_capped_dividend_pool(
+    available: float,
+    core_liabilities: float,
+    net_worth: float,
+    *,
+    target_ratio: float,
+    dividend_share: float,
+    dividend_cap: float,
+    unseasoned_deposits: float = 0.0,
+) -> float:
+    """純資産 $NW$ とコア流動性余剰の両方でキャップした共済の日次配当原資。"""
+    _require_finite(
+        available,
+        core_liabilities,
+        net_worth,
+        target_ratio,
+        dividend_share,
+        dividend_cap,
+        unseasoned_deposits,
+        label="配当計算の入力",
+    )
+    if not (0.0 <= target_ratio <= 1.0) or not (0.0 <= dividend_share <= 1.0):
+        raise ValueError("target_ratio と dividend_share は [0, 1] の範囲である必要があります")
+    if core_liabilities < 0.0 or dividend_cap < 0.0 or unseasoned_deposits < 0.0:
+        raise ValueError("core_liabilities, dividend_cap, unseasoned_deposits は非負である必要があります")
+    core_available = available - unseasoned_deposits
+    liq_surplus = core_available - target_ratio * core_liabilities
+    distributable = min(liq_surplus, net_worth)
+    if distributable <= 0.0:
+        return 0.0
+    return min(dividend_cap, distributable * dividend_share)
