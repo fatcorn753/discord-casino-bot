@@ -896,7 +896,9 @@ def test_pachinko_sets_play_in_one_go_and_settle_once(bot, monkeypatch):
     assert "×" in it.sent[0]["embed"].description and "5セット" in it.sent[0]["embed"].description
     final = it.edits[-1]["embed"]
     assert "5セット" in final.description or "セット" in final.description
-    assert len(it.edits) == 2 + 5 + 1 and ledger_matches_balance(bot)  # 打ち出し2コマ + セットの数ぶん + 結果
+    tables = [e for e in it.edits[:-1] if "入賞" in e["embed"].description and "回転目" not in e["embed"].description]
+    # 表はセットの数ぶん（あいだに、ガセのリーチが入ることがある）
+    assert len(tables) == 5 and ledger_matches_balance(bot)
     assert_clean(bot)
 
 

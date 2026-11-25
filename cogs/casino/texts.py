@@ -178,6 +178,19 @@ PACHINKO_STORIES: dict[str, list[tuple[str, str]]] = {
 
 PACHINKO_NORMAL_WHISPERS = ["ざわ… ざわ…", "じわ… じわ…", "…どっちだ…"]
 
+# 当たりの演出の格（出玉の合計の下限, 予告の色の候補, リーチの格の候補）。上から順に見て、最初に合うものを使う。
+# 演出の強さを出玉に比例させるため、当たりの見せ方は抽選の omen / tier ではなく、出玉の合計から決める（当落と還元率は変えない）。
+PACHINKO_GRADES: tuple[tuple[int, tuple[str, ...], tuple[str, ...]], ...] = (
+    (60, ("gold",), ("premium",)),
+    (30, ("red", "gold"), ("super", "premium")),
+    (10, ("blue", "red"), ("normal", "super", "super")),
+    (0, ("", "", "blue"), ("", "normal", "normal")),
+)
+# 外れるリーチ（ガセ）を、1セットで何回まで見せるか。連続投入では、全体で何回までか
+PACHINKO_SHOWN_MISSES = 1
+PACHINKO_MULTI_SHOWN_MISSES = 2
+PACHINKO_CHAIN_WAIT = ["継続抽選… 🎲", "…続くか…！？", "ざわ… 次は…！？"]  # 連チャンの継続を待つ間のひと言
+
 PACHINKO_REVIVE_TEXT: list[tuple[str, str]] = [
     ("それでも!!!", "…諦めない…！！"),
     ("と、思っていたのか", "…画面が震えている…！！"),
