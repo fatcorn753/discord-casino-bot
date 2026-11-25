@@ -10,8 +10,9 @@ from infra.db.schema.invariants import capture_invariants, verify_invariants
 from infra.db.schema.migrations import add_missing_columns, migrate_to_guild_scope, retire_autoplay
 from infra.db.schema.migrations_v1 import migrate_v0_to_v1
 from infra.db.schema.migrations_v2 import migrate_v1_to_v2
+from infra.db.schema.migrations_v3 import migrate_v2_to_v3
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,11 @@ MIGRATIONS: tuple[MigrationStep, ...] = (
         version=2,
         name="v1_to_v2_split_users",
         fn=migrate_v1_to_v2,
+    ),
+    MigrationStep(
+        version=3,
+        name="v2_to_v3_split_teiai_bank_house",
+        fn=migrate_v2_to_v3,
     ),
 )
 

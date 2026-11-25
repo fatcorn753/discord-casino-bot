@@ -162,7 +162,7 @@ def test_the_bank_pays_only_what_it_has_and_never_creates_money(eco):
     # 手元で足りない分は、熱浴の肩代わりと帝愛共済の口の持ち主が負担する（#32・#34）。それを超えては払わない
     s = eco.bank.bank_status(res["expiry"] + 1)
     charged = eco.db.conn.execute(
-        "SELECT kyosai_charged FROM teiai_bank WHERE guild_id=?", (eco.bank.guild_id,)
+        "SELECT COALESCE((SELECT charged FROM kyosai_state WHERE guild_id=?), 0)", (eco.bank.guild_id,)
     ).fetchone()[0]
     assert done[0]["paid"] <= cash + s["thermostat"]["bailed"] + charged + 1
     assert done[0]["paid"] < done[0]["gross"] and s["excess_unpaid"] > 0 and s["cash"] >= 0

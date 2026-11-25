@@ -422,11 +422,17 @@ def build_legacy_v0_db(path: str) -> None:
     c.execute("INSERT INTO profile (guild_id, user_id, title) VALUES (?, ?, 'title_rookie')", (G, U1))
     c.execute("INSERT INTO jackpot (guild_id, pool) VALUES (?, 8000)", (G,))
     c.execute(
-        "INSERT INTO teiai_bank (guild_id, cash, loaned, ts, thermo_ts, trust_ts, rf_ts, kyosai_div_ts, bailout_debt, kyosai_house_ts) "
-        "VALUES (?, 150000.0, 5000.0, ?, ?, ?, ?, ?, 99.0, 123.0)",
+        "INSERT INTO teiai_bank (guild_id, cash, loaned, ts, thermo_load, thermo_capacity, thermo_ts, "
+        "thermo_burned, thermo_bailed, trust_ts, trust_accrued, trust_paid, excess_unpaid, rf, rf_ts, "
+        "kyosai_div_ts, kyosai_paid, kyosai_charged, bailout_debt, kyosai_house_ts, trust_premium) "
+        "VALUES (?, 150000.0, 5000.0, ?, 12.5, 50000.0, ?, 321.0, 45.0, ?, 1.5, 678.0, 89.0, 0.02, ?, ?, "
+        "1234.0, 567.0, 99.0, 123.0, 0.015)",
         (G, NOW, NOW, NOW, NOW, NOW),
     )
-    c.execute("INSERT INTO teiai_house (guild_id, balance, skimmed) VALUES (?, 25000, 777)", (G,))
+    c.execute(
+        "INSERT INTO teiai_house (guild_id, balance, skimmed, grant_day, grant_used) VALUES (?, 25000, 777, ?, 4000)",
+        (G, DAY),
+    )
     c.execute("INSERT INTO teiai_deposits (guild_id, user_id, amount) VALUES (?, ?, 10000)", (G, U1))
     c.execute("INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, 0, 9000), (?, ?, 1000)", (G, G, U1))
     c.execute(
@@ -494,7 +500,7 @@ def test_fresh_db_initializes_directly_to_v1_without_backup(tmp_path):
     path = str(tmp_path / "fresh.db")
     eco = open_repositories(path, strict=True)
     try:
-        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION == 2
+        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION == 3
         assert eco.db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert eco.db.conn.execute("PRAGMA foreign_key_check").fetchall() == []
         tables = {r[0] for r in eco.db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -507,9 +513,14 @@ def test_fresh_db_initializes_directly_to_v1_without_backup(tmp_path):
             "teiai_grace",
             "teiai_bankruptcies",
             "teiai_escapes",
+            "teiai_thermostat",
+            "teiai_trust",
+            "kyosai_state",
+            "teiai_house_grants",
         } <= tables
         assert not os.path.exists(f"{path}.before-v1")
         assert not os.path.exists(f"{path}.before-v2")
+        assert not os.path.exists(f"{path}.before-v3")
         assert eco.for_guild(G).wallet.balance(U1) == INITIAL_BALANCE
     finally:
         eco.close()
@@ -522,11 +533,12 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert os.path.exists(f"{path}.before-v1")
         assert os.path.exists(f"{path}.before-v2")
+        assert os.path.exists(f"{path}.before-v3")
 
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "guild_users" not in tables and "autoplay" not in tables and "users" not in tables
@@ -635,13 +647,13 @@ def test_failing_migration_step_rolls_back_atomically(tmp_path):
         conn.execute("UPDATE accounts SET balance = 0")
         raise RuntimeError("boom during migration")
 
-    steps = (*schema.MIGRATIONS, schema.MigrationStep(3, "broken_v3", broken_step))
+    steps = (*schema.MIGRATIONS, schema.MigrationStep(4, "broken_v4", broken_step))
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
         with pytest.raises(RuntimeError, match="boom"):
-            schema.initialize_db(conn, path, steps=steps, target_version=3)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+            schema.initialize_db(conn, path, steps=steps, target_version=4)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert (
             conn.execute("SELECT balance FROM accounts WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()[0]
             == INITIAL_BALANCE + 500
@@ -682,10 +694,11 @@ def test_v1_to_v2_splits_all_user_domains_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v1")
         assert os.path.exists(f"{path}.before-v2")
+        assert os.path.exists(f"{path}.before-v3")
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").fetchone() is None
 
         st = eco.for_guild(G).wallet.stats(U1)
@@ -735,6 +748,58 @@ def test_runtime_auction_and_race_purge_zero_qty_and_done_odds(tmp_path):
         eco.close()
 
 
+def test_v2_to_v3_splits_teiai_bank_and_house_losslessly(tmp_path):
+    path = str(tmp_path / "v2_only.db")
+    c = sqlite3.connect(path)
+    schema.create_v1_missing_tables(c)
+    from infra.db.schema.migrations_v2 import migrate_v1_to_v2
+
+    migrate_v1_to_v2(c)
+    c.execute(
+        "INSERT INTO teiai_bank (guild_id, cash, loaned, ts, thermo_load, thermo_capacity, thermo_ts, "
+        "thermo_burned, thermo_bailed, trust_ts, trust_accrued, trust_paid, excess_unpaid, rf, rf_ts, "
+        "kyosai_div_ts, kyosai_paid, kyosai_charged, trust_premium) "
+        "VALUES (?, 80000.0, 20000.0, ?, 15.0, 60000.0, ?, 111.0, 222.0, ?, 3.5, 444.0, 55.0, 0.03, ?, ?, "
+        "777.0, 888.0, 0.025)",
+        (G, NOW, NOW, NOW, NOW, NOW),
+    )
+    c.execute(
+        "INSERT INTO teiai_house (guild_id, balance, skimmed, grant_day, grant_used) VALUES (?, 19000, 500, ?, 3200)",
+        (G, DAY),
+    )
+    c.execute("PRAGMA user_version = 2")
+    c.commit()
+    c.close()
+
+    eco = open_repositories(path, strict=True)
+    try:
+        conn = eco.db.conn
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert not os.path.exists(f"{path}.before-v2")
+        assert os.path.exists(f"{path}.before-v3")
+
+        tb_cols = {r[1] for r in conn.execute("PRAGMA table_info(teiai_bank)")}
+        assert tb_cols == {"guild_id", "cash", "loaned", "ts"}
+        th_cols = {r[1] for r in conn.execute("PRAGMA table_info(teiai_house)")}
+        assert th_cols == {"guild_id", "balance", "skimmed"}
+
+        g = eco.for_guild(G)
+        st = g.bank.bank_status(NOW)
+        assert st["cash"] == pytest.approx(80_000.0) and st["loaned"] == pytest.approx(20_000.0)
+        assert st["thermostat"]["burned"] == pytest.approx(111.0)
+        assert st["thermostat"]["bailed"] == pytest.approx(222.0)
+        assert st["trust_paid"] == pytest.approx(444.0)
+        assert st["excess_unpaid"] == pytest.approx(55.0)
+        assert g.bank.trust_premium_for(G) == pytest.approx(0.025)
+        ks = g.kyosai.kyosai_status(U1, NOW)
+        assert ks["paid"] == pytest.approx(777.0) and ks["charged"] == pytest.approx(888.0)
+        assert g.bank.house_account() == {"balance": 19_000, "skimmed": 500}
+        assert g.bank.house_grant_left_for(G, DAY, 10_000) == 6_800
+    finally:
+        eco.close()
+
+
 def test_manage_migrate_check_never_modifies_source_db(tmp_path, capsys):
     path = str(tmp_path / "prod_v0.db")
     build_legacy_v0_db(path)
@@ -754,6 +819,6 @@ def test_manage_migrate_check_never_modifies_source_db(tmp_path, capsys):
     assert os.path.exists(f"{path}.before-v1")
     check = sqlite3.connect(path)
     try:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 3
     finally:
         check.close()

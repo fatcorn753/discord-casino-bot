@@ -90,7 +90,61 @@ _INVARIANT_SPECS: tuple[tuple[str, tuple[CandidateSpec, ...]], ...] = (
     ("teiai_deposits_sum", (("teiai_deposits", ("amount",), "COALESCE(SUM(amount), 0)"),)),
     ("teiai_bank_cash_sum", (("teiai_bank", ("cash",), "COALESCE(SUM(cash), 0.0)"),)),
     ("teiai_bank_loaned_sum", (("teiai_bank", ("loaned",), "COALESCE(SUM(loaned), 0.0)"),)),
+    (
+        "teiai_thermo_burned_sum",
+        (
+            ("teiai_thermostat", ("burned",), "COALESCE(SUM(burned), 0.0)"),
+            ("teiai_bank", ("thermo_burned",), "COALESCE(SUM(thermo_burned), 0.0)"),
+        ),
+    ),
+    (
+        "teiai_thermo_bailed_sum",
+        (
+            ("teiai_thermostat", ("bailed",), "COALESCE(SUM(bailed), 0.0)"),
+            ("teiai_bank", ("thermo_bailed",), "COALESCE(SUM(thermo_bailed), 0.0)"),
+        ),
+    ),
+    (
+        "teiai_trust_paid_sum",
+        (
+            ("teiai_trust", ("paid",), "COALESCE(SUM(paid), 0.0)"),
+            ("teiai_bank", ("trust_paid",), "COALESCE(SUM(trust_paid), 0.0)"),
+        ),
+    ),
+    (
+        "teiai_excess_unpaid_sum",
+        (
+            ("teiai_trust", ("excess_unpaid",), "COALESCE(SUM(excess_unpaid), 0.0)"),
+            ("teiai_bank", ("excess_unpaid",), "COALESCE(SUM(excess_unpaid), 0.0)"),
+        ),
+    ),
+    (
+        "kyosai_paid_sum",
+        (
+            ("kyosai_state", ("paid",), "COALESCE(SUM(paid), 0.0)"),
+            ("teiai_bank", ("kyosai_paid",), "COALESCE(SUM(kyosai_paid), 0.0)"),
+        ),
+    ),
+    (
+        "kyosai_charged_sum",
+        (
+            ("kyosai_state", ("charged",), "COALESCE(SUM(charged), 0.0)"),
+            ("teiai_bank", ("kyosai_charged",), "COALESCE(SUM(kyosai_charged), 0.0)"),
+        ),
+    ),
     ("teiai_house_balance_sum", (("teiai_house", ("balance",), "COALESCE(SUM(balance), 0)"),)),
+    ("teiai_house_skimmed_sum", (("teiai_house", ("skimmed",), "COALESCE(SUM(skimmed), 0)"),)),
+    (
+        "teiai_house_grant_used_sum",
+        (
+            ("teiai_house_grants", ("used",), "COALESCE(SUM(used), 0)"),
+            (
+                "teiai_house",
+                ("grant_day", "grant_used"),
+                "COALESCE(SUM(CASE WHEN grant_day != '' AND grant_used > 0 THEN grant_used ELSE 0 END), 0)",
+            ),
+        ),
+    ),
     ("kyosai_units_sum", (("kyosai_units", ("units",), "COALESCE(SUM(units), 0)"),)),
     ("companies_funds_sum", (("companies", ("funds",), "COALESCE(SUM(funds), 0)"),)),
     ("company_stakes_sum", (("company_stakes", ("amount",), "COALESCE(SUM(amount), 0)"),)),

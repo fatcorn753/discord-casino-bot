@@ -39,19 +39,16 @@ class BankRepo(Base):
 
     def house_grant_left_for(self, guild_id: int, day: str, cap: int) -> int:
         """会社の買取枠（買取プールが足りないとき、帝愛が新しく出す分）の、day の残り。1日の上限は cap。"""
-        row = self._one("SELECT grant_day, grant_used FROM teiai_house WHERE guild_id=?", (guild_id,))
-        used = row["grant_used"] if row and row["grant_day"] == day else 0
-        return max(0, cap - used)
+        used = self._scalar("SELECT used FROM teiai_house_grants WHERE guild_id=? AND day=?", (guild_id, day))
+        return max(0, cap - (used or 0))
 
     def house_grant_use_for(self, guild_id: int, day: str, amount: int) -> None:
-        """買取枠から amount を出したと記録する（日が変わっていたら、数え直す）。"""
+        """買取枠から amount を出したと記録する。"""
         if amount <= 0:
             return
         self._conn.execute(
-            "INSERT INTO teiai_house (guild_id, balance, skimmed, grant_day, grant_used) VALUES (?, 0, 0, ?, ?) "
-            "ON CONFLICT(guild_id) DO UPDATE SET "
-            "grant_used=CASE WHEN grant_day=excluded.grant_day THEN grant_used ELSE 0 END + excluded.grant_used, "
-            "grant_day=excluded.grant_day",
+            "INSERT INTO teiai_house_grants (guild_id, day, used) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, day) DO UPDATE SET used=used+excluded.used",
             (guild_id, day, amount),
         )
 

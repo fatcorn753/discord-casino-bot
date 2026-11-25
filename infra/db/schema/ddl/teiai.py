@@ -1,7 +1,7 @@
 """帝愛銀行・帝愛物産・預金・CDS・債券・帝愛共済・差押競売・闇市の DDL。"""
 
-TEIAI_BANK_DDL = """
-    CREATE TABLE IF NOT EXISTS teiai_bank (        -- 帝愛銀行の手元（サーバーごとに1行）
+TEIAI_BANK_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_bank (        -- 帝愛銀行の手元（v1 互換: v3 で 4 表へ分離）
         guild_id        INTEGER PRIMARY KEY,
         cash            REAL NOT NULL DEFAULT 0,   -- すぐ払い出せる現金
         loaned          REAL NOT NULL DEFAULT 0,   -- 地下融資に回している額（時間がたつと現金に戻る）
@@ -23,13 +23,68 @@ TEIAI_BANK_DDL = """
         trust_premium   REAL                       -- 動議で決まった信託の上乗せ金利（NULL は設定の既定値）
     )"""
 
-TEIAI_HOUSE_DDL = """
-    CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛物産の買取プール（サーバーごとに1行）。/会社 の資金が出入りする。銀行の手元（預金の準備）とは別
+TEIAI_BANK_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_bank (        -- 帝愛銀行の手元（サーバーごとに1行）
+        guild_id INTEGER PRIMARY KEY,
+        cash     REAL NOT NULL DEFAULT 0,          -- すぐ払い出せる現金
+        loaned   REAL NOT NULL DEFAULT 0,          -- 地下融資に回している額（時間がたつと現金に戻る）
+        ts       REAL NOT NULL DEFAULT 0           -- 融資の回収を、ここまで反映した時刻
+    )"""
+
+TEIAI_THERMOSTAT_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_thermostat (  -- サーモスタット（熱浴）の状態（サーバーごとに1行）
+        guild_id INTEGER PRIMARY KEY,
+        load     REAL NOT NULL DEFAULT 0,
+        capacity REAL NOT NULL DEFAULT 0,
+        ts       REAL NOT NULL DEFAULT 0,
+        burned   REAL NOT NULL DEFAULT 0,
+        bailed   REAL NOT NULL DEFAULT 0,
+        FOREIGN KEY (guild_id) REFERENCES teiai_bank (guild_id) ON DELETE CASCADE
+    )"""
+
+TEIAI_TRUST_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_trust (       -- 帝愛信託の金利・利息・超過損失（サーバーごとに1行）
+        guild_id      INTEGER PRIMARY KEY,
+        rf            REAL NOT NULL DEFAULT 0,
+        rf_ts         REAL NOT NULL DEFAULT 0,
+        trust_ts      REAL NOT NULL DEFAULT 0,
+        accrued       REAL NOT NULL DEFAULT 0,
+        paid          REAL NOT NULL DEFAULT 0,
+        excess_unpaid REAL NOT NULL DEFAULT 0,
+        premium       REAL,
+        FOREIGN KEY (guild_id) REFERENCES teiai_bank (guild_id) ON DELETE CASCADE
+    )"""
+
+KYOSAI_STATE_DDL = """
+    CREATE TABLE IF NOT EXISTS kyosai_state (      -- 帝愛共済の配当・超過損失請求の状態（サーバーごとに1行）
+        guild_id INTEGER PRIMARY KEY,
+        div_ts   REAL NOT NULL DEFAULT 0,
+        paid     REAL NOT NULL DEFAULT 0,
+        charged  REAL NOT NULL DEFAULT 0
+    )"""
+
+TEIAI_HOUSE_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛物産の買取プール（v1 互換: v3 で 2 表へ分離）
         guild_id   INTEGER PRIMARY KEY,
         balance    INTEGER NOT NULL DEFAULT 0,     -- いまの残高
         skimmed    INTEGER NOT NULL DEFAULT 0,     -- 後方互換用の累計列（現在は未使用）
         grant_day  TEXT NOT NULL DEFAULT '',       -- 会社の買取枠（新しく出す分）を使った日
         grant_used INTEGER NOT NULL DEFAULT 0      -- その日に、買取枠から出した額
+    )"""
+
+TEIAI_HOUSE_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛物産の買取プール（サーバーごとに1行）。/会社 の資金が出入りする
+        guild_id INTEGER PRIMARY KEY,
+        balance  INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0),
+        skimmed  INTEGER NOT NULL DEFAULT 0 CHECK (skimmed >= 0)
+    )"""
+
+TEIAI_HOUSE_GRANTS_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_house_grants ( -- 帝愛物産の日次買取枠の使用状況
+        guild_id INTEGER NOT NULL,
+        day      TEXT NOT NULL,
+        used     INTEGER NOT NULL DEFAULT 0 CHECK (used >= 0),
+        PRIMARY KEY (guild_id, day)
     )"""
 
 TEIAI_DEPOSITS_DDL = """
@@ -213,7 +268,11 @@ STATEMENTS: tuple[str, ...] = (
     TEIAI_BANKRUPTCIES_DDL,
     TEIAI_ESCAPES_DDL,
     TEIAI_BANK_DDL,
+    TEIAI_THERMOSTAT_DDL,
+    TEIAI_TRUST_DDL,
+    KYOSAI_STATE_DDL,
     TEIAI_HOUSE_DDL,
+    TEIAI_HOUSE_GRANTS_DDL,
     TEIAI_DEPOSITS_DDL,
     CDS_DDL,
     BONDS_DDL,

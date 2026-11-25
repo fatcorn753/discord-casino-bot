@@ -81,8 +81,12 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo):
             pulled += 1
         return pulled
 
+    def _ensure_state_for(self, guild_id: int) -> None:
+        self._conn.execute("INSERT OR IGNORE INTO kyosai_state (guild_id) VALUES (?)", (guild_id,))
+
     def bank_sync(self, guild_id: int, now: float) -> None:
-        self._bank.bank_sync_for(guild_id, now)  # 銀行の行を作っておく（kyosai_* の列がそこにある）
+        self._bank.bank_sync_for(guild_id, now)
+        self._ensure_state_for(guild_id)
         self._ensure_supply_for(guild_id)
 
     def _ensure_supply_for(self, guild_id: int) -> None:

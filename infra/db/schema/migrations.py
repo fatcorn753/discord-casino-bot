@@ -10,6 +10,41 @@ from domain.types import INITIAL_BALANCE
 from infra.db.schema.tables import INVENTORY_DDL, PROFILE_DDL, USERS_DDL, new_quiz_order
 
 
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None
+
+
+def _add_teiai_legacy_columns(conn: sqlite3.Connection) -> None:
+    tb = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_bank)")}
+    if tb and not _table_exists(conn, "teiai_thermostat"):
+        for col in (
+            "thermo_load",
+            "thermo_capacity",
+            "thermo_ts",
+            "thermo_burned",
+            "thermo_bailed",
+            "trust_ts",
+            "trust_accrued",
+            "trust_paid",
+            "excess_unpaid",
+            "rf",
+            "rf_ts",
+            "kyosai_div_ts",
+            "kyosai_paid",
+            "kyosai_charged",
+        ):
+            if col not in tb:
+                conn.execute(f"ALTER TABLE teiai_bank ADD COLUMN {col} REAL NOT NULL DEFAULT 0")
+        if "trust_premium" not in tb:
+            conn.execute("ALTER TABLE teiai_bank ADD COLUMN trust_premium REAL")
+    th = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_house)")}
+    if th and not _table_exists(conn, "teiai_house_grants"):
+        if "grant_day" not in th:
+            conn.execute("ALTER TABLE teiai_house ADD COLUMN grant_day TEXT NOT NULL DEFAULT ''")
+        if "grant_used" not in th:
+            conn.execute("ALTER TABLE teiai_house ADD COLUMN grant_used INTEGER NOT NULL DEFAULT 0")
+
+
 def add_missing_columns(conn: sqlite3.Connection) -> None:
     """作成済みの古い表に、あとから増えた列を足す。"""
     # 作成済みの古い表に、列を足す（初回の版には元のニックネームの記録がなかった）
@@ -45,27 +80,7 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     co = {r["name"] for r in conn.execute("PRAGMA table_info(companies)")}
     if co and "dividend_rate" not in co:
         conn.execute("ALTER TABLE companies ADD COLUMN dividend_rate REAL NOT NULL DEFAULT 0")
-    tb = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_bank)")}
-    for col in (
-        "thermo_load",
-        "thermo_capacity",
-        "thermo_ts",
-        "thermo_burned",
-        "thermo_bailed",
-        "trust_ts",
-        "trust_accrued",
-        "trust_paid",
-        "excess_unpaid",
-        "rf",
-        "rf_ts",
-        "kyosai_div_ts",
-        "kyosai_paid",
-        "kyosai_charged",
-    ):
-        if col not in tb:
-            conn.execute(f"ALTER TABLE teiai_bank ADD COLUMN {col} REAL NOT NULL DEFAULT 0")
-    if tb and "trust_premium" not in tb:
-        conn.execute("ALTER TABLE teiai_bank ADD COLUMN trust_premium REAL")
+    _add_teiai_legacy_columns(conn)
     ko = {r["name"] for r in conn.execute("PRAGMA table_info(kyosai_offers)")}
     if ko and "done_at" not in ko:
         conn.execute("ALTER TABLE kyosai_offers ADD COLUMN done_at REAL NOT NULL DEFAULT 0")
@@ -77,12 +92,6 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE kyosai_motions ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
 
     normalize_kyosai_units(conn)
-
-    th = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_house)")}
-    if "grant_day" not in th:
-        conn.execute("ALTER TABLE teiai_house ADD COLUMN grant_day TEXT NOT NULL DEFAULT ''")
-    if "grant_used" not in th:
-        conn.execute("ALTER TABLE teiai_house ADD COLUMN grant_used INTEGER NOT NULL DEFAULT 0")
     hs = {r["name"] for r in conn.execute("PRAGMA table_info(horses)")}
     if "bonus" not in hs:
         conn.execute("ALTER TABLE horses ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0")

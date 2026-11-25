@@ -115,9 +115,7 @@ class KyosaiRepo(Base):
                 )
                 if passed:
                     self.bank_sync(gid, now)
-                    self._conn.execute(
-                        "UPDATE teiai_bank SET trust_premium=? WHERE guild_id=?", (motion["premium"], gid)
-                    )
+                    self._bank.set_trust_premium_for(gid, motion["premium"], now)
                 out.append({**motion, "status": status, "yes": yes, "no": no, "circulating": circulating})
         return out
 

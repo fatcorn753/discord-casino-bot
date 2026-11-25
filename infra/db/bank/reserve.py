@@ -57,11 +57,12 @@ class BankRepo(Base):
             else:
                 level = "danger"
             thermo = self._thermo_state_for(gid, now)
-            totals = self._one(
-                "SELECT thermo_burned, thermo_bailed, trust_paid, excess_unpaid FROM teiai_bank WHERE guild_id=?",
-                (gid,),
-            )
-            assert totals is not None
+            th = self._one("SELECT burned, bailed FROM teiai_thermostat WHERE guild_id=?", (gid,))
+            tr = self._one("SELECT paid, excess_unpaid FROM teiai_trust WHERE guild_id=?", (gid,))
+            burned = th["burned"] if th is not None else 0.0
+            bailed = th["bailed"] if th is not None else 0.0
+            trust_paid = tr["paid"] if tr is not None else 0.0
+            excess_unpaid = tr["excess_unpaid"] if tr is not None else 0.0
             return {
                 "cash": state["cash"],
                 "loaned": state["loaned"],
@@ -76,12 +77,12 @@ class BankRepo(Base):
                     "load": thermo.load,
                     "capacity": thermo.capacity,
                     "room": max(thermo.capacity - thermostat.COUPLING * thermo.load, 0.0) / thermostat.COUPLING,
-                    "burned": totals["thermo_burned"],
-                    "bailed": totals["thermo_bailed"],
+                    "burned": burned,
+                    "bailed": bailed,
                 },
                 "trust_rate": self.trust_rate_per_day_for(gid, now),
                 "risk_free": self.risk_free_per_day_for(gid, now),
                 "rf_target": rates.rf_target(ratio),
-                "trust_paid": totals["trust_paid"],
-                "excess_unpaid": totals["excess_unpaid"],
+                "trust_paid": trust_paid,
+                "excess_unpaid": excess_unpaid,
             }

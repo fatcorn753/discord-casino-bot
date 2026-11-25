@@ -32,6 +32,8 @@ class KyosaiRepo(Base):
             collected += share
         if collected:
             self._conn.execute(
-                "UPDATE teiai_bank SET kyosai_charged=kyosai_charged+? WHERE guild_id=?", (collected, guild_id)
+                "INSERT INTO kyosai_state (guild_id, charged) VALUES (?, ?) "
+                "ON CONFLICT(guild_id) DO UPDATE SET charged=charged+excluded.charged",
+                (guild_id, collected),
             )
         return collected

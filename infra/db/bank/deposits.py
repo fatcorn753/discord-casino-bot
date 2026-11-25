@@ -40,10 +40,19 @@ class BankRepo(Base):
 
     def trust_premium_for(self, guild_id: int) -> float:
         """信託の上乗せ金利。共済の動議で決まっていればその値、なければ設定の既定値（#34）。"""
-        row = self._one("SELECT trust_premium FROM teiai_bank WHERE guild_id=?", (guild_id,))
-        if row is None or row["trust_premium"] is None:
+        row = self._one("SELECT premium FROM teiai_trust WHERE guild_id=?", (guild_id,))
+        if row is None or row["premium"] is None:
             return teiai.TRUST_PREMIUM_PER_DAY
-        return row["trust_premium"]
+        return row["premium"]
+
+    def set_trust_premium_for(self, guild_id: int, premium: float | None, now: float) -> None:
+        """共済の動議で決まった信託の上乗せ金利を保存する。"""
+        self.bank_sync_for(guild_id, now)
+        self._conn.execute(
+            "INSERT INTO teiai_trust (guild_id, premium) VALUES (?, ?) "
+            "ON CONFLICT(guild_id) DO UPDATE SET premium=excluded.premium",
+            (guild_id, premium),
+        )
 
     # 預金
 

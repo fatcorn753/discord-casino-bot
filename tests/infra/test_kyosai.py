@@ -25,7 +25,16 @@ def units(eco, uid):
 
 
 def bank_row(eco, col):
-    return eco.db.conn.execute(f"SELECT {col} FROM teiai_bank WHERE guild_id=?", (G,)).fetchone()[0]
+    mapping = {
+        "kyosai_paid": ("kyosai_state", "paid"),
+        "kyosai_charged": ("kyosai_state", "charged"),
+        "kyosai_div_ts": ("kyosai_state", "div_ts"),
+        "thermo_load": ("teiai_thermostat", "load"),
+        "excess_unpaid": ("teiai_trust", "excess_unpaid"),
+    }
+    table, target = mapping.get(col, ("teiai_bank", col))
+    row = eco.db.conn.execute(f"SELECT {target} FROM {table} WHERE guild_id=?", (G,)).fetchone()
+    return row[0] if row is not None else 0.0
 
 
 def give(eco, uid, n):

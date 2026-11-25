@@ -139,7 +139,9 @@ def test_trust_interest_is_never_taken_from_the_trust_itself(eco):
     assert eco.wallet.balance(A) == a0 + paid
     s = eco.bank.bank_status(NOW + 86400)
     assert paid > 0 and s["excess_unpaid"] == 0  # 手元で払えない分は、熱浴と帝愛共済の口の持ち主が負担する（#32・#34）
-    charged = eco.db.conn.execute("SELECT kyosai_charged FROM teiai_bank WHERE guild_id=?", (G,)).fetchone()[0]
+    charged = eco.db.conn.execute(
+        "SELECT COALESCE((SELECT charged FROM kyosai_state WHERE guild_id=?), 0)", (G,)
+    ).fetchone()[0]
     assert charged + s["thermostat"]["bailed"] == pytest.approx(paid, abs=1)
 
 
@@ -483,7 +485,9 @@ def test_shortfall_within_the_trust_is_shared_by_size_and_never_goes_negative(ec
     # 信託の総額を超えた 73万は、熱浴の肩代わりと帝愛共済（#34）の口の持ち主が負担する
     s = eco.bank.bank_status(NOW)
     assert s["excess_unpaid"] == 0
-    charged = eco.db.conn.execute("SELECT kyosai_charged FROM teiai_bank WHERE guild_id=?", (G,)).fetchone()[0]
+    charged = eco.db.conn.execute(
+        "SELECT COALESCE((SELECT charged FROM kyosai_state WHERE guild_id=?), 0)", (G,)
+    ).fetchone()[0]
     assert s["thermostat"]["bailed"] + charged - s["cash"] == pytest.approx(730_000, abs=1)
 
 
@@ -589,14 +593,13 @@ def test_thermostat_columns_are_added_to_an_existing_database(tmp_path):
     from domain import thermostat
 
     path = str(tmp_path / "old.db")
-    repos = open_repositories(path, strict=True).for_guild(G)
-    with repos.db.tx():
-        repos.bank.bank_income_for(G, 1_000, NOW)
-    cash_before = repos.bank.bank_status(NOW)["cash"]
-    repos.db.conn.close()
+    cash_before = 1_000.0
     conn = sqlite3.connect(path)
-    for col in ("thermo_load", "thermo_capacity", "thermo_ts", "thermo_burned", "thermo_bailed"):
-        conn.execute(f"ALTER TABLE teiai_bank DROP COLUMN {col}")  # サーモスタット導入前の表に戻す
+    conn.execute(
+        "CREATE TABLE teiai_bank (guild_id INTEGER PRIMARY KEY, cash REAL NOT NULL DEFAULT 0, "
+        "loaned REAL NOT NULL DEFAULT 0, ts REAL NOT NULL DEFAULT 0)"
+    )
+    conn.execute("INSERT INTO teiai_bank (guild_id, cash, loaned, ts) VALUES (?, ?, 0.0, ?)", (G, cash_before, NOW))
     conn.execute("PRAGMA user_version = 0")
     conn.commit()
     conn.close()
