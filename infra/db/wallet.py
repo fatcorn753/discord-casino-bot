@@ -19,6 +19,28 @@ from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
 from infra.db.relics import RelicRepo
 
+_SELECT_USER_ROW = (
+    "SELECT a.guild_id, a.user_id, a.balance, "
+    "COALESCE(ud.streak, 0) AS daily_streak, ud.last_daily, "
+    "COALESCE(ps.games_played, 0) AS games_played, "
+    "COALESCE(ps.total_wagered, 0) AS total_wagered, "
+    "COALESCE(ps.total_won, 0) AS total_won, "
+    "COALESCE(ps.biggest_win, 0) AS biggest_win, "
+    "a.created_at, ud.last_slot, "
+    "COALESCE(td.debt, 0) AS debt, "
+    "COALESCE(td.principal, 0) AS debt_principal, "
+    "COALESCE(tg.penalty, 0.0) AS grace_penalty, "
+    "COALESCE(tg.penalty_at, 0.0) AS grace_penalty_at, "
+    "tb.bankrupt_at, tb.blacklist_until "
+    "FROM accounts a "
+    "LEFT JOIN user_daily ud ON ud.guild_id = a.guild_id AND ud.user_id = a.user_id "
+    "LEFT JOIN user_play_stats ps ON ps.guild_id = a.guild_id AND ps.user_id = a.user_id "
+    "LEFT JOIN teiai_debts td ON td.guild_id = a.guild_id AND td.user_id = a.user_id "
+    "LEFT JOIN teiai_grace tg ON tg.guild_id = a.guild_id AND tg.user_id = a.user_id "
+    "LEFT JOIN teiai_bankruptcies tb ON tb.guild_id = a.guild_id AND tb.user_id = a.user_id "
+    "WHERE a.guild_id=? AND a.user_id=?"
+)
+
 
 class WalletRepo(ScopedRepo, IWalletRepo):
     """残高操作・デイリーボーナス・ランキング・統計・履歴・送金。"""
@@ -80,10 +102,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
             if target != before:
                 self._account.apply(gid, user_id, target - before, reason)
             if amount < 0 and -amount != debt_before:
-                self._conn.execute(
-                    "UPDATE users SET debt=?, debt_principal=?, debt_interest_at=0 WHERE guild_id=? AND user_id=?",
-                    (-amount, -amount, gid, user_id),
-                )
+                self._account.set_debt(gid, user_id, -amount, -amount, 0.0)
                 self._account.ledger(
                     gid,
                     user_id,
@@ -121,32 +140,32 @@ class WalletRepo(ScopedRepo, IWalletRepo):
             gid = self._g()
             self._account.ensure(gid, user_id)
             row = self._one(
-                "SELECT daily_streak, last_daily, last_slot FROM users WHERE guild_id=? AND user_id=?",
+                "SELECT streak AS daily_streak, last_daily, last_slot FROM user_daily WHERE guild_id=? AND user_id=?",
                 (gid, user_id),
             )
-            assert row is not None  # 直前に ensure 済み
-            last = datetime.date.fromisoformat(row["last_daily"]) if row["last_daily"] else None
-            last_slot = row["last_slot"]
+            cur_streak = row["daily_streak"] if row is not None else 0
+            last = datetime.date.fromisoformat(row["last_daily"]) if row and row["last_daily"] else None
+            last_slot = row["last_slot"] if row is not None else None
             if last_slot is None and last is not None:
                 last_slot = last.toordinal()  # 時間帯を記録する前の受け取りは、その日の1回として扱う
             if (last is not None and last > today) or (last_slot is not None and slot <= last_slot):
                 return DailyResult(
-                    False, streak=row["daily_streak"], balance=self._account.raw_balance(gid, user_id)
+                    False, streak=cur_streak, balance=self._account.raw_balance(gid, user_id)
                 )  # 時計が戻っても二重に受け取れない
             if last == today:
-                streak, guarded = max(1, row["daily_streak"]), 0
+                streak, guarded = max(1, cur_streak), 0
             elif last == today - datetime.timedelta(days=1):
-                streak, guarded = row["daily_streak"] + 1, 0
+                streak, guarded = cur_streak + 1, 0
             else:
                 # 受け取れなかった日が守り券の枚数以内なら、1枚で1日ぶん埋めて連続をつなぐ（足りなければ1枚も使わない）
                 missed = (today - last).days - 1 if last is not None else 0
                 streak, guarded = 1, 0
-                if missed > 0 and row["daily_streak"] > 0:
+                if missed > 0 and cur_streak > 0:
                     cur = self._conn.execute(
                         "UPDATE inventory SET qty = qty - ? WHERE guild_id=? AND user_id=? AND item_id=? AND qty>=?",
                         (missed, gid, user_id, STREAK_GUARD, missed),
                     )
-                    streak, guarded = (row["daily_streak"] + 1, missed) if cur.rowcount else (1, 0)
+                    streak, guarded = (cur_streak + 1, missed) if cur.rowcount else (1, 0)
             amount = self.DAILY_BASE + self.DAILY_STREAK_BONUS * min(streak - 1, self.DAILY_STREAK_CAP)
             prof = self._one("SELECT daily_boost FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id))
             boosted = bool(prof and prof["daily_boost"] > 0)
@@ -181,8 +200,10 @@ class WalletRepo(ScopedRepo, IWalletRepo):
             repaid = debt_before - self._account.debt(gid, user_id)
             seed = self._debt.topup_seed_for(gid, user_id)  # 借金中で、手元が種銭の枠に満たなければ、枠まで貸す
             self._conn.execute(
-                "UPDATE users SET daily_streak=?, last_daily=?, last_slot=? WHERE guild_id=? AND user_id=?",
-                (streak, today.isoformat(), slot, gid, user_id),
+                "INSERT INTO user_daily (guild_id, user_id, streak, last_daily, last_slot) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "streak=excluded.streak, last_daily=excluded.last_daily, last_slot=excluded.last_slot",
+                (gid, user_id, streak, today.isoformat(), slot),
             )
             return DailyResult(
                 True,
@@ -203,14 +224,22 @@ class WalletRepo(ScopedRepo, IWalletRepo):
         """[(ユーザーID, 金融純資産)] を多い順に。金融純資産は、残高から借金を引き、CS・預金・債券・オプションの評価額を足したもの。"""
         with self._db.tx():
             targets = (
-                [r["user_id"] for r in self._all("SELECT user_id FROM users WHERE guild_id=? AND debt>0", (guild_id,))]
+                [
+                    r["user_id"]
+                    for r in self._all("SELECT user_id FROM teiai_debts WHERE guild_id=? AND debt>0", (guild_id,))
+                ]
                 if user_ids is None
                 else user_ids
             )
             for uid in targets:
                 # 残高表示と同じく、金融純資産にも溜まった利息（トイチ）を反映する
                 self._debt.accrue_debt_interest_for(guild_id, uid, self._now())
-            rows = self._all("SELECT user_id, balance - debt AS balance FROM users WHERE guild_id=?", (guild_id,))
+            rows = self._all(
+                "SELECT a.user_id, a.balance - COALESCE(d.debt, 0) AS balance "
+                "FROM accounts a LEFT JOIN teiai_debts d ON d.guild_id=a.guild_id AND d.user_id=a.user_id "
+                "WHERE a.guild_id=?",
+                (guild_id,),
+            )
             values: dict[int, int] = {}
             self._valuation_source(guild_id, values)
         total = [
@@ -256,7 +285,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
     def peek_stats(self, user_id: int) -> UserRow | None:
         """読み取り専用。未登録の人を作らずに、成績を返す（未登録なら None）。"""
         with self._lock:
-            return self._one("SELECT * FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id))
+            return self._one(_SELECT_USER_ROW, (self._g(), user_id))
 
     def stats(self, user_id: int) -> UserRow:
         with self._db.tx():
@@ -265,7 +294,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
             self._debt.accrue_debt_interest_for(
                 gid, user_id, self._now()
             )  # 画面に出す借金に、帝愛の利息（トイチ）を含める
-            row = self._one("SELECT * FROM users WHERE guild_id=? AND user_id=?", (gid, user_id))
+            row = self._one(_SELECT_USER_ROW, (gid, user_id))
             assert row is not None  # 直前に ensure 済み
             return row
 
@@ -307,7 +336,10 @@ class WalletRepo(ScopedRepo, IWalletRepo):
                     (gid, sender, day_start_ts),
                 )
             )
-            if self._scalar("SELECT games_played FROM users WHERE guild_id=? AND user_id=?", (gid, sender)) < min_games:
+            played = self._scalar(
+                "SELECT games_played FROM user_play_stats WHERE guild_id=? AND user_id=?", (gid, sender)
+            )
+            if (played if played is not None else 0) < min_games:
                 return TransferResult(False, fail("transfer_min_games", min_games=min_games))
             if sent_today + amount > daily_limit:
                 return TransferResult(

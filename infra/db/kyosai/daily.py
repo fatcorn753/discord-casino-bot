@@ -55,7 +55,7 @@ class KyosaiRepo(Base):
                 (guild_id, user_id),
             )
             if last is None:
-                row = self._one("SELECT created_at FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+                row = self._one("SELECT created_at FROM accounts WHERE guild_id=? AND user_id=?", (guild_id, user_id))
                 last = row["created_at"] if row and row["created_at"] else None
             if last is not None and last < since:
                 recovered += self.recover_units_for(guild_id, user_id, now)

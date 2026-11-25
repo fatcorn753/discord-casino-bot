@@ -41,8 +41,10 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                 (gid, user_id, amount, game, self._now()),
             )
             self._conn.execute(
-                "UPDATE users SET total_wagered = total_wagered + ? WHERE guild_id=? AND user_id=?",
-                (amount, gid, user_id),
+                "INSERT INTO user_play_stats (guild_id, user_id, total_wagered) VALUES (?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "total_wagered = user_play_stats.total_wagered + excluded.total_wagered",
+                (gid, user_id, amount),
             )
             return cur.lastrowid
 
@@ -66,8 +68,10 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                 "UPDATE escrow SET amount = amount + ? WHERE id=? AND guild_id=?", (extra, escrow_id, gid)
             )
             self._conn.execute(
-                "UPDATE users SET total_wagered = total_wagered + ? WHERE guild_id=? AND user_id=?",
-                (extra, gid, row["user_id"]),
+                "INSERT INTO user_play_stats (guild_id, user_id, total_wagered) VALUES (?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "total_wagered = user_play_stats.total_wagered + excluded.total_wagered",
+                (gid, row["user_id"], extra),
             )
             return True
 
@@ -134,9 +138,13 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
             taken = max(penalty, 0)
             net = total - amount - taken
             self._conn.execute(
-                "UPDATE users SET games_played = games_played + 1, total_won = total_won + ?, "
-                "biggest_win = MAX(biggest_win, ?) WHERE guild_id=? AND user_id=?",
-                (total, net, gid, user_id),
+                "INSERT INTO user_play_stats (guild_id, user_id, games_played, total_won, biggest_win) "
+                "VALUES (?, ?, 1, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "games_played = user_play_stats.games_played + 1, "
+                "total_won = user_play_stats.total_won + excluded.total_won, "
+                "biggest_win = MAX(user_play_stats.biggest_win, excluded.biggest_win)",
+                (gid, user_id, total, max(0, net)),
             )
             return net, taken, insured
 

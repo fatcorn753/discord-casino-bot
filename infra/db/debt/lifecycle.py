@@ -14,46 +14,42 @@ class DebtRepo(Base):
         """利息加算で破産猶予ラインに達したとき、猶予入り前に流動資産を差し押さえて返済する（A-1）。"""
         seized = self._seize_assets_for(guild_id, user_id, new_debt, "強制回収:帝愛の利息超過", now=now)
         if seized > 0:
-            cur = self._one("SELECT debt, debt_principal FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
-            assert cur is not None
-            remaining = max(0, cur["debt"] - seized)
-            new_principal = min(cur["debt_principal"], remaining)
-            self._conn.execute(
-                "UPDATE users SET debt=?, debt_principal=?, debt_interest_at=? WHERE guild_id=? AND user_id=?",
-                (remaining, new_principal, 0.0 if remaining == 0 else new_since, guild_id, user_id),
+            cur = self._one(
+                "SELECT debt, principal FROM teiai_debts WHERE guild_id=? AND user_id=?", (guild_id, user_id)
             )
-            self._account.ledger(
-                guild_id,
-                user_id,
-                0,
-                self._account.raw_balance(guild_id, user_id),
-                f"強制回収:帝愛の利息超過（{seized:,}ペリカ）",
-            )
-            self._notices.note_for(guild_id, user_id, "debt_auto_seized", seized=seized, debt=remaining)
+            if cur is not None:
+                remaining = max(0, cur["debt"] - seized)
+                new_principal = min(cur["principal"], remaining)
+                self._account.set_debt(
+                    guild_id, user_id, remaining, new_principal, 0.0 if remaining == 0 else new_since
+                )
+                self._account.ledger(
+                    guild_id,
+                    user_id,
+                    0,
+                    self._account.raw_balance(guild_id, user_id),
+                    f"強制回収:帝愛の利息超過（{seized:,}ペリカ）",
+                )
+                self._notices.note_for(guild_id, user_id, "debt_auto_seized", seized=seized, debt=remaining)
         self.after_debt_change(guild_id, user_id, now=now)
 
     def accrue_debt_interest_for(self, guild_id: int, user_id: int, now: float) -> int:
         """帝愛の利息（トイチ）を、借金に加える。加えた額を返す。呼び出し側のトランザクションの中で使う。"""
         row = self._one(
-            "SELECT debt, debt_principal, debt_interest_at, grace_until FROM users WHERE guild_id=? AND user_id=?",
+            "SELECT d.debt, d.principal, d.interest_at, g.grace_until "
+            "FROM teiai_debts d LEFT JOIN teiai_grace g ON g.guild_id=d.guild_id AND g.user_id=d.user_id "
+            "WHERE d.guild_id=? AND d.user_id=?",
             (guild_id, user_id),
         )
         if row is None:
             return 0
-        debt, since = row["debt"], row["debt_interest_at"]
+        debt, since = row["debt"], row["interest_at"]
         if debt <= 0:
-            if since or row["debt_principal"]:
-                self._conn.execute(
-                    "UPDATE users SET debt_interest_at=0, debt_principal=0 WHERE guild_id=? AND user_id=?",
-                    (guild_id, user_id),
-                )
+            self._account.set_debt(guild_id, user_id, 0)
             return 0
-        principal = min(row["debt_principal"], debt) if row["debt_principal"] > 0 else debt
+        principal = min(row["principal"], debt) if row["principal"] > 0 else debt
         if not since:
-            self._conn.execute(
-                "UPDATE users SET debt_interest_at=?, debt_principal=? WHERE guild_id=? AND user_id=?",
-                (now, principal, guild_id, user_id),
-            )
+            self._account.set_debt(guild_id, user_id, debt, principal, now)
             return 0
         days = int(max(0.0, now - since) // 86400)
         if days <= 0:
@@ -63,10 +59,7 @@ class DebtRepo(Base):
         new_since = since + days * 86400.0
         new_debt = debt + add
         # 差し押さえフック内で debt() が再帰的に呼ばれても days == 0 に収束するよう先に更新する
-        self._conn.execute(
-            "UPDATE users SET debt=?, debt_principal=?, debt_interest_at=? WHERE guild_id=? AND user_id=?",
-            (new_debt, principal, new_since, guild_id, user_id),
-        )
+        self._account.set_debt(guild_id, user_id, new_debt, principal, new_since)
         if add <= 0:
             return 0
         balance = self._account.raw_balance(guild_id, user_id)
@@ -89,7 +82,7 @@ class DebtRepo(Base):
             gid = self._g()
             uids = [
                 r["user_id"]
-                for r in self._all("SELECT user_id FROM users WHERE guild_id=? AND debt>0 ORDER BY user_id", (gid,))
+                for r in self._all("SELECT user_id FROM teiai_debts WHERE guild_id=? AND debt>0 ORDER BY user_id", (gid,))
             ]
             for uid in uids:
                 total += self.accrue_debt_interest_for(gid, uid, now)
@@ -102,12 +95,11 @@ class DebtRepo(Base):
         """借金が増減したあとの後始末。破産猶予の出入りを直し、破産者が完済したら、そこから BLACKLIST_DAYS 日が始まる。"""
         ts = self._now() if now is None else now
         self._bank.grace_update_for(guild_id, user_id, ts)
-        debt = self._scalar("SELECT debt FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
-        if debt is None or debt > 0:
+        debt = self._scalar("SELECT debt FROM teiai_debts WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+        if debt is not None and debt > 0:
             return
         self._conn.execute(
-            "UPDATE users SET blacklist_until=? WHERE guild_id=? AND user_id=? AND bankrupt_at IS NOT NULL "
-            "AND blacklist_until IS NULL",
+            "UPDATE teiai_bankruptcies SET blacklist_until=? WHERE guild_id=? AND user_id=? AND blacklist_until IS NULL",
             (ts + teiai.BLACKLIST_DAYS * 86400, guild_id, user_id),
         )
 

@@ -143,7 +143,7 @@ class HoldingBook(TypedDict, Generic[RowT]):
 
 
 class UserRow(TypedDict):
-    """ユーザーの口座（users 表の行）。"""
+    """ユーザーの口座・デイリー・成績・借金・破産の結合射影。"""
 
     guild_id: int
     user_id: int

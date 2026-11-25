@@ -338,8 +338,10 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             label = "・".join(names)
             self._account.apply(gid, user_id, -stake, f"競馬:馬券（{horse_mod.BET_KINDS[kind]}・{label}）")
             self._conn.execute(
-                "UPDATE users SET total_wagered = total_wagered + ? WHERE guild_id=? AND user_id=?",
-                (stake, gid, user_id),
+                "INSERT INTO user_play_stats (guild_id, user_id, total_wagered) VALUES (?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "total_wagered = user_play_stats.total_wagered + excluded.total_wagered",
+                (gid, user_id, stake),
             )
             picks = horse_mod.combo_key(kind, lanes) if kind in horse_mod.COMBO_SIZE else ""
             cur = self._conn.execute(
@@ -500,9 +502,13 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                     lost += b["stake"]
                 self._conn.execute("UPDATE horse_bets SET payout=?, settled=1 WHERE id=?", (pay, b["id"]))
                 self._conn.execute(
-                    "UPDATE users SET games_played = games_played + 1, total_won = total_won + ?, "
-                    "biggest_win = MAX(biggest_win, ?) WHERE guild_id=? AND user_id=?",
-                    (pay, pay - b["stake"], gid, b["user_id"]),
+                    "INSERT INTO user_play_stats (guild_id, user_id, games_played, total_won, biggest_win) "
+                    "VALUES (?, ?, 1, ?, ?) "
+                    "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                    "games_played = user_play_stats.games_played + 1, "
+                    "total_won = user_play_stats.total_won + excluded.total_won, "
+                    "biggest_win = MAX(user_play_stats.biggest_win, excluded.biggest_win)",
+                    (gid, b["user_id"], pay, max(0, pay - b["stake"])),
                 )
                 b["payout"] = pay
                 bets.append(b)

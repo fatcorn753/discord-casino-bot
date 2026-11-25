@@ -126,10 +126,10 @@ class GuildRepo(ScopedRepo, IGuildRepo):
             rows = [
                 r["user_id"]
                 for r in self._all(
-                    "SELECT user_id FROM users WHERE guild_id=? AND (debt > 0 OR EXISTS (SELECT 1 FROM loans l WHERE "
-                    "l.guild_id=users.guild_id AND l.borrower_id=users.user_id AND l.status='overdue')) "
+                    "SELECT user_id FROM teiai_debts WHERE guild_id=? AND debt > 0 "
+                    "UNION SELECT borrower_id AS user_id FROM loans WHERE guild_id=? AND status='overdue' "
                     "UNION SELECT user_id FROM nick_prefs WHERE guild_id=? AND enabled=0",
-                    (gid, gid),
+                    (gid, gid, gid),
                 )
             ]
         return rows + sorted(self._wealthy_reader(gid))

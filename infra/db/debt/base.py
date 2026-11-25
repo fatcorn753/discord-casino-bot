@@ -64,7 +64,11 @@ class DebtRepo(ScopedRepo, IDebtRepo):
         """身分。読み取り専用で、口座は作らない。"""
         with self._lock:
             row = self._one(
-                "SELECT debt, bankrupt_at, blacklist_until FROM users WHERE guild_id=? AND user_id=?",
+                "SELECT COALESCE(d.debt, 0) AS debt, b.bankrupt_at, b.blacklist_until "
+                "FROM accounts a "
+                "LEFT JOIN teiai_debts d ON d.guild_id=a.guild_id AND d.user_id=a.user_id "
+                "LEFT JOIN teiai_bankruptcies b ON b.guild_id=a.guild_id AND b.user_id=a.user_id "
+                "WHERE a.guild_id=? AND a.user_id=?",
                 (guild_id, user_id),
             )
             if row is None:
@@ -82,7 +86,7 @@ class DebtRepo(ScopedRepo, IDebtRepo):
         """破産のブラックリストの間か（貸付・種銭・帝愛の信用を使えない）。"""
         with self._lock:
             row = self._one(
-                "SELECT bankrupt_at, blacklist_until FROM users WHERE guild_id=? AND user_id=?",
+                "SELECT bankrupt_at, blacklist_until FROM teiai_bankruptcies WHERE guild_id=? AND user_id=?",
                 (guild_id, user_id),
             )
         if row is None or row["bankrupt_at"] is None:

@@ -187,7 +187,9 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             return True, result
 
     def _games_played(self, guild_id: int, user_id: int) -> int:
-        v = self._scalar("SELECT games_played FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+        v = self._scalar(
+            "SELECT games_played FROM user_play_stats WHERE guild_id=? AND user_id=?", (guild_id, user_id)
+        )
         return v if v is not None else 0
 
     def _quiz_pay_author(self, guild_id: int, q: Mapping[str, Any]) -> tuple[int, int]:

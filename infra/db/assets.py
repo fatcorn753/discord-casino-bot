@@ -55,7 +55,13 @@ def cash_and_debt_collector(db: EcoDb) -> AssetCollector:
     conn = db.conn
 
     def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in fetch_all(conn, "SELECT user_id, balance, debt FROM users WHERE guild_id=?", (guild_id,)):
+        for r in fetch_all(
+            conn,
+            "SELECT a.user_id, a.balance, COALESCE(d.debt, 0) AS debt "
+            "FROM accounts a LEFT JOIN teiai_debts d ON d.guild_id=a.guild_id AND d.user_id=a.user_id "
+            "WHERE a.guild_id=?",
+            (guild_id,),
+        ):
             add(r["user_id"], "cash", r["balance"])
             add(r["user_id"], "debt", -r["debt"])
 
@@ -180,7 +186,7 @@ class AssetRepo(ScopedRepo, IAssetRepo):
             g = self._g()
             parts: dict[int, dict[str, int]] = {
                 r["user_id"]: dict.fromkeys(PART_KEYS, 0)
-                for r in self._all("SELECT user_id FROM users WHERE guild_id=?", (g,))
+                for r in self._all("SELECT user_id FROM accounts WHERE guild_id=?", (g,))
             }
 
             def add(uid: int, key: str, value: int) -> None:

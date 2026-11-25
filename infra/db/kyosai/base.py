@@ -97,5 +97,7 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo):
 
     def _gate_locked_for(self, guild_id: int, now: float) -> bool:
         theta = self._bank.bank_reserve_for(guild_id, now)[2]
-        debtors = self._scalar("SELECT COUNT(*) FROM users WHERE guild_id=? AND grace_until IS NOT NULL", (guild_id,))
+        debtors = self._scalar(
+            "SELECT COUNT(*) FROM teiai_grace WHERE guild_id=? AND grace_until IS NOT NULL", (guild_id,)
+        )
         return kyosai.gate_locked(theta, debtors)

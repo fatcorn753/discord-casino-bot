@@ -157,7 +157,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         """作業員の稼ぎを pot に足し、切れた契約を決算する（更新なら契約料を払い、払えなければ退職）。"""
         workers = self._workers_of(guild_id, user_id)
         if workers:
-            bal = self._one("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+            bal = self._one("SELECT balance FROM accounts WHERE guild_id=? AND user_id=?", (guild_id, user_id))
             plan = labor_mod.settle_plan(
                 workers,
                 bool(row["renew"]),
@@ -287,7 +287,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now, buffs.get("recovery", 0.0))
             if row["day"] != day:
                 row["day_earned"] = row["day_click"] = 0
-            bal = self._scalar("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (gid, user_id))
+            bal = self._scalar("SELECT balance FROM accounts WHERE guild_id=? AND user_id=?", (gid, user_id))
             row["balance"] = bal if bal is not None else 0
             workers = self._workers_of(gid, user_id)
             plan = labor_mod.settle_plan(

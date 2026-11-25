@@ -14,7 +14,7 @@ class DebtRepo(Base):
     def escape_left(self, user_id: int) -> int:
         """海外逃亡を、あと何回試せるか。読み取り専用。"""
         with self._lock:
-            v = self._scalar("SELECT escape_tries FROM users WHERE guild_id=? AND user_id=?", (self._g(), user_id))
+            v = self._scalar("SELECT tries FROM teiai_escapes WHERE guild_id=? AND user_id=?", (self._g(), user_id))
         return max(0, teiai.ESCAPE_MAX_TRIES - (v if v is not None else 0))
 
     def escape_attempt(self, user_id: int, now: float, rng: random.Random | None = None) -> Outcome[EscapeResult]:
@@ -28,16 +28,21 @@ class DebtRepo(Base):
             debt = self._account.debt(gid, user_id)
             if debt < teiai.ESCAPE_MIN_DEBT:
                 return False, fail("escape_min_debt", min_debt=teiai.ESCAPE_MIN_DEBT)
-            row = self._one("SELECT escape_at, escape_tries FROM users WHERE guild_id=? AND user_id=?", (gid, user_id))
-            assert row is not None  # 直前に ensure 済み
-            if row["escape_tries"] >= teiai.ESCAPE_MAX_TRIES:
+            row = self._one(
+                "SELECT last_attempt_at, tries FROM teiai_escapes WHERE guild_id=? AND user_id=?", (gid, user_id)
+            )
+            tries = int(row["tries"]) if row is not None else 0
+            last_attempt_at = row["last_attempt_at"] if row is not None else None
+            if tries >= teiai.ESCAPE_MAX_TRIES:
                 return False, fail("escape_max_tries", max_tries=teiai.ESCAPE_MAX_TRIES)
-            ready = (row["escape_at"] or 0) + teiai.ESCAPE_COOLDOWN_HOURS * 3600
+            ready = (last_attempt_at or 0) + teiai.ESCAPE_COOLDOWN_HOURS * 3600
             if now < ready:
                 return False, fail("escape_cooldown", ready=ready)
             self._conn.execute(
-                "UPDATE users SET escape_at=?, escape_tries=escape_tries+1 WHERE guild_id=? AND user_id=?",
-                (now, gid, user_id),
+                "INSERT INTO teiai_escapes (guild_id, user_id, last_attempt_at, tries) VALUES (?, ?, ?, 1) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "last_attempt_at=excluded.last_attempt_at, tries=teiai_escapes.tries+1",
+                (gid, user_id, now),
             )
             if rng.random() < teiai.ESCAPE_CHANCE:
                 ok, result = self.bankrupt_for(gid, user_id, escape=True)

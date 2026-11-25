@@ -111,7 +111,7 @@ class LoanRepo(ScopedRepo, ILoanRepo):
                 (gid, user_id),
             )
             assert live is not None  # 集計なので必ず1行返る
-            row = self._one("SELECT bankrupt_at FROM users WHERE guild_id=? AND user_id=?", (gid, user_id))
+            row = self._one("SELECT bankrupt_at FROM teiai_bankruptcies WHERE guild_id=? AND user_id=?", (gid, user_id))
             return {
                 "status": self._status_reader.status_for(gid, user_id, now),
                 "debt": self._account.debt_readonly(gid, user_id),
