@@ -50,7 +50,6 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         "thermo_load",
         "thermo_capacity",
         "thermo_ts",
-        "bailout_debt",
         "thermo_burned",
         "thermo_bailed",
         "trust_ts",
@@ -62,7 +61,6 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         "kyosai_div_ts",
         "kyosai_paid",
         "kyosai_charged",
-        "kyosai_house_ts",
     ):
         if col not in tb:
             conn.execute(f"ALTER TABLE teiai_bank ADD COLUMN {col} REAL NOT NULL DEFAULT 0")
@@ -88,22 +86,15 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     hs = {r["name"] for r in conn.execute("PRAGMA table_info(horses)")}
     if "bonus" not in hs:
         conn.execute("ALTER TABLE horses ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0")
-    if "rented_day" not in hs:
-        conn.execute("ALTER TABLE horses ADD COLUMN rented_day TEXT")
     if "style" not in hs:
         conn.execute("ALTER TABLE horses ADD COLUMN style TEXT")
     lf = {r["name"] for r in conn.execute("PRAGMA table_info(labor_finds)")}
     if "collected" not in lf:
         conn.execute("ALTER TABLE labor_finds ADD COLUMN collected INTEGER NOT NULL DEFAULT 0")
-    hr = {r["name"] for r in conn.execute("PRAGMA table_info(horse_races)")}
-    if "grade" not in hr:
-        conn.execute("ALTER TABLE horse_races ADD COLUMN grade TEXT NOT NULL DEFAULT ''")
     he = {r["name"] for r in conn.execute("PRAGMA table_info(horse_entries)")}
     for col in ("races", "wins", "places"):
         if col not in he:
             conn.execute(f"ALTER TABLE horse_entries ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
-    if "tactic" not in he:
-        conn.execute("ALTER TABLE horse_entries ADD COLUMN tactic TEXT NOT NULL DEFAULT 'pace'")
     if "style" not in he:
         conn.execute("ALTER TABLE horse_entries ADD COLUMN style TEXT")
     us = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
@@ -134,12 +125,7 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE options ADD COLUMN {col} {ddl}")
     ls = {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}
     for col, ddl in (
-        ("apprentice", "INTEGER NOT NULL DEFAULT 0"),
-        ("miner", "INTEGER NOT NULL DEFAULT 0"),
-        ("craftsman", "INTEGER NOT NULL DEFAULT 0"),
-        ("foreman", "INTEGER NOT NULL DEFAULT 0"),
         ("dorm", "INTEGER NOT NULL DEFAULT 0"),
-        ("wage", "TEXT NOT NULL DEFAULT 'normal'"),
         ("idle_at", "REAL NOT NULL DEFAULT 0"),
         ("renew", "INTEGER NOT NULL DEFAULT 1"),
         ("ores", "TEXT NOT NULL DEFAULT ''"),
@@ -216,11 +202,12 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     if idx and idx["sql"] and "format" not in idx["sql"]:  # 1日1形式だった頃の索引（同日に両形式を両立できなかった）
         conn.execute("DROP INDEX idx_arena_tournaments_day")
         conn.execute("CREATE UNIQUE INDEX idx_arena_tournaments_day ON arena_tournaments (guild_id, day, format)")
-    conn.execute(  # レンタル制の廃止：買わずに残っている当日のレンタル馬を消す（出走予定のものは残す）
-        "DELETE FROM horses WHERE rented_day IS NOT NULL AND id NOT IN "
-        "(SELECT e.horse_id FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
-        "WHERE r.status IN ('entry','betting'))"
-    )
+    if "rented_day" in hs:
+        conn.execute(  # レンタル制の廃止：買わずに残っている当日のレンタル馬を消す（出走予定のものは残す）
+            "DELETE FROM horses WHERE rented_day IS NOT NULL AND id NOT IN "
+            "(SELECT e.horse_id FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
+            "WHERE r.status IN ('entry','betting'))"
+        )
 
 
 # 銘柄を足す前の表（主キーに symbol がない）。CSトークンだけだった頃の記録は、すべて symbol='cs' として移す
@@ -245,6 +232,9 @@ _SYMBOL_TABLES = {
 
 def _migrate_labor_counts(conn: sqlite3.Connection, now: float | None = None) -> None:
     """作業員を「人数の列」で持っていた版から、契約つきの1人1行の表（labor_workers）へ移す。いまの人は、今から7日の契約にする（何度動かしても安全）。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}
+    if not {"apprentice", "miner", "craftsman", "foreman"}.issubset(cols):
+        return
     now = time.time() if now is None else now
     for r in conn.execute(
         "SELECT guild_id, user_id, apprentice, miner, craftsman, foreman FROM labor "

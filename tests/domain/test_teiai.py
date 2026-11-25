@@ -419,6 +419,7 @@ def test_old_nick_prefs_rows_are_treated_as_the_title_choice(tmp_path):
             "PRIMARY KEY (guild_id, user_id))"
         )
         e.db.conn.execute("INSERT INTO nick_prefs VALUES (10, 1, NULL, NULL)")
+        e.db.conn.execute("PRAGMA user_version = 0")
     e.db.conn.close()
     again = open_repositories(path, strict=True).for_guild(10)
     assert again.guild.nick_pref(10, 1) is True  # 既存の行は、称号の表示を自分で選んだ人
@@ -517,6 +518,7 @@ def test_old_users_table_without_the_new_columns_is_upgraded(tmp_path):
             "INSERT INTO users (guild_id, user_id, balance, created_at, debt) VALUES (10, 1, 500, 0, 700)"
         )
         e.db.conn.execute("DROP TABLE users_new")
+        e.db.conn.execute("PRAGMA user_version = 0")
     e.db.conn.close()
     again = open_repositories(path, strict=True).for_guild(10)
     migrated = again.db.conn.execute(

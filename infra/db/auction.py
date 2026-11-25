@@ -134,6 +134,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
             self._account.apply(gid, user_id, -total, f"競売:{shop_mod.label(item)}" + (f"×{qty}" if qty > 1 else ""))
             for row_id, n in take:
                 self._conn.execute("UPDATE seized_items SET qty = qty - ? WHERE id=?", (n, row_id))
+                self._conn.execute("DELETE FROM seized_items WHERE id=? AND qty<=0", (row_id,))
             self._conn.execute(
                 "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty",

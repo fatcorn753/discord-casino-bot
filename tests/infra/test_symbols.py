@@ -175,6 +175,7 @@ def test_old_single_symbol_tables_become_cs_without_losing_rows(tmp_path):
         "CREATE TABLE chart_posts (channel_id INTEGER PRIMARY KEY, message_id INTEGER NOT NULL, guild_id INTEGER NOT NULL DEFAULT 0, period TEXT NOT NULL DEFAULT '24h', ts REAL NOT NULL DEFAULT 0)"
     )
     c.execute("INSERT INTO chart_posts (channel_id, message_id) VALUES (5, 99)")
+    c.execute("PRAGMA user_version = 0")
     c.commit()
     c.close()
     again = open_repositories(path, strict=True)

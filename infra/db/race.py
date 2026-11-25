@@ -509,6 +509,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
             self._bank.bank_income_for(
                 gid, int(lost * teiai.LOSS_SHARE), self._now()
             )  # 負けた額の一部が、帝愛銀行の収入になる
+            self._conn.execute("DELETE FROM horse_odds WHERE race_id=?", (race_id,))
             return {
                 "race": race,
                 "entries": entries,

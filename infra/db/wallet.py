@@ -197,19 +197,6 @@ class WalletRepo(ScopedRepo, IWalletRepo):
             )
 
     # ------------------------------------------------------------------ #
-    # サーバー別ランキング用: どのサーバーで遊んだか                      #
-    # ------------------------------------------------------------------ #
-    def touch_guild_user(self, guild_id: int, user_id: int) -> None:
-        with self._db.tx():
-            self._conn.execute(
-                "INSERT OR IGNORE INTO guild_users (guild_id, user_id) VALUES (?, ?)", (guild_id, user_id)
-            )
-
-    def guild_user_ids(self, guild_id: int) -> set[int]:
-        with self._lock:
-            return {r["user_id"] for r in self._all("SELECT user_id FROM guild_users WHERE guild_id=?", (guild_id,))}
-
-    # ------------------------------------------------------------------ #
     # ランキング・統計・履歴                                              #
     # ------------------------------------------------------------------ #
     def _ranked(self, guild_id: int, user_ids: set[int] | None) -> list[tuple[int, int]]:

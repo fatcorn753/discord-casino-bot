@@ -94,9 +94,7 @@ def test_ranking_global_and_per_guild(eco):
     for uid, extra in ((1, 5000), (2, 100), (3, 9000)):
         eco.wallet.credit(uid, extra, "テスト")
     assert [uid for _, uid, _ in eco.wallet.top(10)] == [3, 1, 2]
-    eco.wallet.touch_guild_user(10, 1)
-    eco.wallet.touch_guild_user(10, 2)
-    ids = eco.wallet.guild_user_ids(10)
+    ids = {1, 2}
     assert [uid for _, uid, _ in eco.wallet.top(10, ids)] == [1, 2]  # サーバー内だけで並べる
     assert eco.wallet.rank_of(2, ids) == (2, INITIAL_BALANCE + 100, 2)
     assert eco.wallet.rank_of(99) is None

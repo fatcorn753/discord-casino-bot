@@ -65,10 +65,8 @@ U = 100
 
 def _make_standalone_db() -> EcoDb:
     db = EcoDb(":memory:")
-    schema.migrate_to_guild_scope(db.conn, db.db_path, None)
-    with db.tx():
-        schema.create_tables(db.conn)
-        schema.add_missing_columns(db.conn)
+    with db.lock:
+        schema.initialize_db(db.conn, db.db_path, None)
     return db
 
 

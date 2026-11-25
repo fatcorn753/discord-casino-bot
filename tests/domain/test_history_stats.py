@@ -132,6 +132,7 @@ def test_play_state_without_summary_columns_is_upgraded(tmp_path):
         "best_streak INTEGER NOT NULL DEFAULT 0, day_streak INTEGER NOT NULL DEFAULT 0, streak_day TEXT, PRIMARY KEY (guild_id, user_id))"
     )
     e.db.conn.execute("INSERT INTO play_state VALUES (10, 1, 2, 5, 0, NULL)")
+    e.db.conn.execute("PRAGMA user_version = 0")
     e.db.conn.commit()
     e.db.conn.close()
     again = open_repositories(path, strict=True).for_guild(G)

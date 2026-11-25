@@ -597,8 +597,9 @@ def test_thermostat_columns_are_added_to_an_existing_database(tmp_path):
     cash_before = repos.bank.bank_status(NOW)["cash"]
     repos.db.conn.close()
     conn = sqlite3.connect(path)
-    for col in ("thermo_load", "thermo_capacity", "thermo_ts", "bailout_debt", "thermo_burned", "thermo_bailed"):
+    for col in ("thermo_load", "thermo_capacity", "thermo_ts", "thermo_burned", "thermo_bailed"):
         conn.execute(f"ALTER TABLE teiai_bank DROP COLUMN {col}")  # サーモスタット導入前の表に戻す
+    conn.execute("PRAGMA user_version = 0")
     conn.commit()
     conn.close()
     reopened = open_repositories(path, strict=True).for_guild(G)

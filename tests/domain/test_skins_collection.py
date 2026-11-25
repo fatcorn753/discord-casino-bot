@@ -216,6 +216,7 @@ def test_old_profile_table_without_skin_columns_is_upgraded(tmp_path):
             "PRIMARY KEY (guild_id, user_id))"
         )
         e.db.conn.execute("INSERT INTO profile (guild_id, user_id, title) VALUES (10, 7, 'title_rookie')")
+        e.db.conn.execute("PRAGMA user_version = 0")
     e.db.close()
     again = open_repositories(path, strict=True).for_guild(G)
     prof = again.shop.get_profile(U)

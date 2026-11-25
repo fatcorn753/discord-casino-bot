@@ -125,6 +125,7 @@ def test_play_state_table_from_the_previous_version_is_upgraded(tmp_path):
         "best_streak INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, user_id))"
     )
     e.db.conn.execute("INSERT INTO play_state VALUES (10, 1, 4, 6)")
+    e.db.conn.execute("PRAGMA user_version = 0")
     e.db.conn.commit()
     e.db.conn.close()
     again = open_repositories(path, strict=True).for_guild(G)

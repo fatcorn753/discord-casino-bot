@@ -273,6 +273,7 @@ def test_old_positions_without_the_interest_columns_get_them_on_startup(tmp_path
     e = open_repositories(path, strict=True)
     e.db.conn.execute("ALTER TABLE crypto_long DROP COLUMN interest_at")
     e.db.conn.execute("ALTER TABLE crypto_long DROP COLUMN accrued")
+    e.db.conn.execute("PRAGMA user_version = 0")
     e.db.conn.commit()
     again = open_repositories(path, strict=True)
     cols = {r["name"] for r in again.db.conn.execute("PRAGMA table_info(crypto_long)")}

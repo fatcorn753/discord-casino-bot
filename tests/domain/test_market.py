@@ -511,6 +511,7 @@ def test_chart_posts_table_from_the_previous_version_is_upgraded(tmp_path):
         e.db.conn.execute("DROP TABLE chart_posts")
         e.db.conn.execute("CREATE TABLE chart_posts (channel_id INTEGER PRIMARY KEY, message_id INTEGER NOT NULL)")
         e.db.conn.execute("INSERT INTO chart_posts VALUES (5, 99)")
+        e.db.conn.execute("PRAGMA user_version = 0")
     e.db.conn.close()
     again = open_repositories(path, strict=True)
     row = again.market.live_chart_posts()[0]

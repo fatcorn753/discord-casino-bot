@@ -187,7 +187,12 @@ def open_repositories(
     """
     clock = clock if clock is not None else ConfigClock({})
     db = EcoDb(db_path, clock)
-    schema.migrate_to_guild_scope(db.conn, db.db_path, legacy_guild_id)
+    try:
+        with db.lock:
+            schema.initialize_db(db.conn, db.db_path, legacy_guild_id)
+    except Exception:
+        db.close()
+        raise
 
     account = AccountCore(db, debt_hook=LazyDebtLifecycleHook(lambda: debt))
     notices = NoticeRepo(db, strict=strict)
@@ -314,11 +319,7 @@ def open_repositories(
     assets = AssetRepo(db, asset_collector, horse_worth_fn=horses.horse_worth, strict=strict)
 
     with db.tx():
-        schema.create_tables(db.conn)
-        schema.add_missing_columns(db.conn)
         auction.purge_unlistable_auctions()
-    with db.tx():
-        schema.retire_autoplay(db.conn)
 
     return RepositoryBundle(
         db=db,

@@ -29,7 +29,6 @@ class HorseRow(TypedDict):
     bonus: int
     created: float
     listed_at: float | None
-    rented_day: str | None
     style: str | None
 
 
@@ -39,7 +38,6 @@ class RaceRow(TypedDict):
     id: int
     guild_id: int
     kind: str  # regular / special
-    grade: str
     start_at: float
     entry_close: float
     bet_close: float
@@ -66,7 +64,6 @@ class RaceEntryRow(TypedDict):
     stamina: int
     power: int
     guts: int
-    tactic: str
     style: str | None
     form: int
     races: int

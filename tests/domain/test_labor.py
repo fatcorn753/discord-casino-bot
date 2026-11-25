@@ -504,18 +504,32 @@ def test_dismiss_removes_the_earliest_expiring_worker(eco):
     )  # 古い契約から消える
 
 
-def test_old_count_columns_migrate_to_contracts(eco):
+@pytest.mark.real_scope
+def test_old_count_columns_migrate_to_contracts(tmp_path):
+    import sqlite3
+
     from infra.db import schema
 
-    eco.db.conn.execute("INSERT OR IGNORE INTO labor (guild_id, user_id) VALUES (?, ?)", (eco.labor.guild_id, U))
-    eco.db.conn.execute(
-        "UPDATE labor SET apprentice=2, miner=1 WHERE guild_id=? AND user_id=?", (eco.labor.guild_id, U)
-    )
-    schema._migrate_labor_counts(eco.db.conn, T0)
-    schema._migrate_labor_counts(eco.db.conn, T0)  # 二度動かしても、増えない
-    s = eco.labor.labor_state(U, T0, DAY)
+    path = str(tmp_path / "v0_counts.db")
+    c = sqlite3.connect(path)
+    c.row_factory = sqlite3.Row
+    schema.create_tables(c)
+    for col in ("apprentice", "miner", "craftsman", "foreman"):
+        c.execute(f"ALTER TABLE labor ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+    c.execute("ALTER TABLE labor_workers ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0")
+    c.execute("INSERT INTO users (guild_id, user_id, balance, created_at) VALUES (10, ?, 1000, ?)", (U, T0))
+    c.execute("INSERT INTO labor (guild_id, user_id, apprentice, miner) VALUES (10, ?, 2, 1)", (U,))
+    schema._migrate_labor_counts(c, T0)
+    schema._migrate_labor_counts(c, T0)  # 二度動かしても、増えない
+    assert c.execute("SELECT apprentice+miner FROM labor WHERE user_id=?", (U,)).fetchone()[0] == 0
+    c.commit()
+    c.close()
+
+    reopened = open_repositories(path).for_guild(10)
+    s = reopened.labor.labor_state(U, T0, DAY)
     assert s["apprentice"] == 2 and s["miner"] == 1 and s["expires"]["miner"] == T0 + 7 * 86400  # 移行は、7日の契約
-    assert eco.db.conn.execute("SELECT apprentice+miner c FROM labor WHERE user_id=?", (U,)).fetchone()["c"] == 0
+    cols = {r[1] for r in reopened.db.conn.execute("PRAGMA table_info(labor)")}
+    assert not ({"apprentice", "miner", "craftsman", "foreman"} & cols)
 
 
 # ------------------------------ 鉱石 ------------------------------ #
@@ -606,7 +620,7 @@ def test_old_contracts_are_refunded_and_cancelled_once_when_the_legacy_column_is
         assert e.labor.labor_hire(U, kind, T0, DAY)[0]
     balance_after_hiring = e.wallet.balance(U)
     assert balance_after_hiring == 10_000 - 2 * FEE["craftsman"] - FEE["apprentice"] - FEE["foreman"]
-    e.db.conn.execute("ALTER TABLE labor_workers DROP COLUMN legacy")  # この列が無かった頃の記録にする
+    e.db.conn.execute("PRAGMA user_version = 0")  # 旧版（legacy 列が無かった頃）として再マイグレーションさせる
     e.db.conn.commit()
     e.db.conn.close()
 

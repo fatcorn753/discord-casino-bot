@@ -222,6 +222,7 @@ def test_bulk_and_old_schema_keep_the_creator(tmp_path):
     c.executescript(
         "ALTER TABLE quiz_questions RENAME TO old_q; CREATE TABLE quiz_questions AS SELECT id, question, choices, explanation, shown_order, reward, expires, created, author_id, guild_id, channel_id, message_id, settled, earned FROM old_q; DROP TABLE old_q;"
     )
+    c.execute("PRAGMA user_version = 0")
     c.commit()
     c.close()
     assert (

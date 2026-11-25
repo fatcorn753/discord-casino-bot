@@ -58,6 +58,7 @@ def test_migration_rescales_old_holdings_to_the_fixed_total_keeping_the_ratio(tm
     with repos.db.tx():  # 1人1口ずつ配っていた頃: A 1口・B 1口・帝愛 1口
         for uid in (A, B, kyosai.HOUSE):
             repos.db.conn.execute("INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, 1)", (G, uid))
+        repos.db.conn.execute("PRAGMA user_version = 0")
     repos.close()
     for _ in range(2):  # 何度開いても同じ
         again = open_repositories(path, strict=True)

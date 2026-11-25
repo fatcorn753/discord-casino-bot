@@ -234,6 +234,7 @@ def test_old_questions_without_a_saved_order_get_one_on_upgrade(tmp_path):
     c.executescript("""DROP TABLE quiz_questions; CREATE TABLE quiz_questions (id INTEGER PRIMARY KEY AUTOINCREMENT, question TEXT NOT NULL,
         choices TEXT NOT NULL, explanation TEXT NOT NULL DEFAULT '', reward INTEGER NOT NULL, expires REAL, created REAL NOT NULL);
         INSERT INTO quiz_questions (question, choices, reward, created) VALUES ('q', '["a","b","c","d"]', 100, 1);""")
+    c.execute("PRAGMA user_version = 0")
     c.commit()
     c.close()
     first = must(open_repositories(path).quiz.quiz_get(1))["order"]
@@ -490,6 +491,7 @@ def test_old_schema_gets_author_columns(tmp_path):
     c.executescript("""DROP TABLE quiz_questions; CREATE TABLE quiz_questions (id INTEGER PRIMARY KEY AUTOINCREMENT, question TEXT NOT NULL,
         choices TEXT NOT NULL, explanation TEXT NOT NULL DEFAULT '', shown_order TEXT NOT NULL DEFAULT '', reward INTEGER NOT NULL, expires REAL, created REAL NOT NULL);
         INSERT INTO quiz_questions (question, choices, reward, created) VALUES ('q', '["a","b","c","d"]', 100, 1);""")
+    c.execute("PRAGMA user_version = 0")
     c.commit()
     c.close()
     q = open_repositories(path).quiz.quiz_get(1)
