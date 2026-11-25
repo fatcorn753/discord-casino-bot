@@ -135,3 +135,33 @@ class AccountCore:
         if delta > 0 and income > 0:
             self._debt_hook.withhold_income(guild_id, user_id, min(income, delta))
         return self.raw_balance(guild_id, user_id) - before
+
+    def reduce_debt(self, guild_id: int, user_id: int, amount: int) -> None:
+        """シニア債権（帝愛への借金）を amount だけ減らす（呼び出し側のトランザクション内で使う）。"""
+        if amount <= 0:
+            return
+        self._conn.execute(
+            "UPDATE teiai_debts SET debt=debt-? WHERE guild_id=? AND user_id=?", (amount, guild_id, user_id)
+        )
+
+    def record_wager(self, guild_id: int, user_id: int, amount: int) -> None:
+        """賭け金の累計を amount だけ増やす（呼び出し側のトランザクション内で使う）。"""
+        if amount <= 0:
+            return
+        self._conn.execute(
+            "INSERT INTO user_play_stats (guild_id, user_id, total_wagered) VALUES (?, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+            "total_wagered = user_play_stats.total_wagered + excluded.total_wagered",
+            (guild_id, user_id, amount),
+        )
+
+    def record_game_result(self, guild_id: int, user_id: int, won: int, net: int) -> None:
+        """対局結果を記録する（呼び出し側のトランザクション内で使う）。biggest_win には max(0, net) を入れる。"""
+        self._conn.execute(
+            "INSERT INTO user_play_stats (guild_id, user_id, games_played, total_won, biggest_win) VALUES (?, ?, 1, ?, ?) "
+            "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+            "games_played = user_play_stats.games_played + 1, "
+            "total_won = user_play_stats.total_won + excluded.total_won, "
+            "biggest_win = MAX(user_play_stats.biggest_win, excluded.biggest_win)",
+            (guild_id, user_id, won, max(0, net)),
+        )

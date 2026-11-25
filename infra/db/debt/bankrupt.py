@@ -43,9 +43,7 @@ class DebtRepo(Base):
             total_pool = pool
             to_senior = min(pool, self._account.debt(guild_id, user_id))
             if to_senior > 0:
-                self._conn.execute(
-                    "UPDATE teiai_debts SET debt=debt-? WHERE guild_id=? AND user_id=?", (to_senior, guild_id, user_id)
-                )
+                self._account.reduce_debt(guild_id, user_id, to_senior)
             pool -= to_senior
             junior_paid, forgiven = 0, 0
             for loan in loans:
@@ -79,7 +77,7 @@ class DebtRepo(Base):
             )
             self.after_debt_change(guild_id, user_id)
             seed = 0  # 破産・逃亡直後の自動種銭付与は行わない（B-2）
-            self._conn.execute("UPDATE teiai_grace SET grace_until=NULL WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+            self._bank.grace_clear_for(guild_id, user_id)
             payable = forced or in_grace
             cds_paid = self._bank.cds_settle_default_for(guild_id, user_id, debt_before, now) if payable else 0
             if not payable:

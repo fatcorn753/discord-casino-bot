@@ -42,6 +42,12 @@ class BankRepo(Base):
             )
             self._notices.note_for(guild_id, user_id, "grace_exited")
 
+    def grace_clear_for(self, guild_id: int, user_id: int) -> None:
+        """猶予を解除する（呼び出し側のトランザクション内で使う）。"""
+        self._conn.execute(
+            "UPDATE teiai_grace SET grace_until=NULL WHERE guild_id=? AND user_id=?", (guild_id, user_id)
+        )
+
     def grace_until_for(self, guild_id: int, user_id: int) -> float | None:
         with self._lock:
             return self._scalar("SELECT grace_until FROM teiai_grace WHERE guild_id=? AND user_id=?", (guild_id, user_id))

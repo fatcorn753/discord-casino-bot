@@ -142,6 +142,9 @@ class IBankCdsBridge:
     def grace_update_for(self, guild_id: int, user_id: int, now: float) -> None:
         raise NotImplementedError
 
+    def grace_clear_for(self, guild_id: int, user_id: int) -> None:
+        raise NotImplementedError
+
     def cds_cover_self_for(self, guild_id: int, user_id: int, shortfall: int, now: float) -> int:
         raise NotImplementedError
 
@@ -159,6 +162,9 @@ class NoOpBankCdsBridge(IBankCdsBridge):
         return None
 
     def grace_update_for(self, guild_id: int, user_id: int, now: float) -> None:
+        return None
+
+    def grace_clear_for(self, guild_id: int, user_id: int) -> None:
         return None
 
     def cds_cover_self_for(self, guild_id: int, user_id: int, shortfall: int, now: float) -> int:
