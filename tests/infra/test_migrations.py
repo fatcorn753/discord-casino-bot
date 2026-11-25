@@ -494,11 +494,22 @@ def test_fresh_db_initializes_directly_to_v1_without_backup(tmp_path):
     path = str(tmp_path / "fresh.db")
     eco = open_repositories(path, strict=True)
     try:
-        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION
+        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION == 2
         assert eco.db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert eco.db.conn.execute("PRAGMA foreign_key_check").fetchall() == []
         tables = {r[0] for r in eco.db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert "guild_users" not in tables
+        assert "guild_users" not in tables and "users" not in tables
+        assert {
+            "accounts",
+            "user_daily",
+            "user_play_stats",
+            "teiai_debts",
+            "teiai_grace",
+            "teiai_bankruptcies",
+            "teiai_escapes",
+        } <= tables
         assert not os.path.exists(f"{path}.before-v1")
+        assert not os.path.exists(f"{path}.before-v2")
         assert eco.for_guild(G).wallet.balance(U1) == INITIAL_BALANCE
     finally:
         eco.close()
@@ -511,12 +522,14 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert os.path.exists(f"{path}.before-v1")
+        assert os.path.exists(f"{path}.before-v2")
 
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert "guild_users" not in tables and "autoplay" not in tables
+        assert "guild_users" not in tables and "autoplay" not in tables and "users" not in tables
 
         removed = {
             "teiai_bank": {"bailout_debt", "kyosai_house_ts"},
@@ -604,7 +617,10 @@ def test_future_schema_version_is_rejected_without_touching_db(tmp_path):
     check = sqlite3.connect(path)
     try:
         assert check.execute("PRAGMA user_version").fetchone()[0] == 999
-        assert check.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()[0] == INITIAL_BALANCE + 123
+        assert (
+            check.execute("SELECT balance FROM accounts WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()[0]
+            == INITIAL_BALANCE + 123
+        )
     finally:
         check.close()
 
@@ -616,22 +632,77 @@ def test_failing_migration_step_rolls_back_atomically(tmp_path):
     eco.close()
 
     def broken_step(conn: sqlite3.Connection) -> None:
-        conn.execute("UPDATE users SET balance = 0")
+        conn.execute("UPDATE accounts SET balance = 0")
         raise RuntimeError("boom during migration")
 
-    steps = (*schema.MIGRATIONS, schema.MigrationStep(2, "broken_v2", broken_step))
+    steps = (*schema.MIGRATIONS, schema.MigrationStep(3, "broken_v3", broken_step))
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
         with pytest.raises(RuntimeError, match="boom"):
-            schema.initialize_db(conn, path, steps=steps, target_version=2)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+            schema.initialize_db(conn, path, steps=steps, target_version=3)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
         assert (
-            conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()[0]
+            conn.execute("SELECT balance FROM accounts WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()[0]
             == INITIAL_BALANCE + 500
         )
     finally:
         conn.close()
+
+
+def test_v1_to_v2_splits_all_user_domains_losslessly(tmp_path):
+    import time
+
+    now_ts = time.time()
+    path = str(tmp_path / "v1_only.db")
+    c = sqlite3.connect(path)
+    schema.create_v1_missing_tables(c)
+    c.execute(
+        "INSERT INTO users (guild_id, user_id, balance, daily_streak, last_daily, last_slot, "
+        "games_played, total_wagered, total_won, biggest_win, created_at, debt, debt_principal, "
+        "debt_interest_at, grace_until, grace_penalty, grace_penalty_at, bankrupt_at, blacklist_until, "
+        "escape_at, escape_tries) "
+        "VALUES (?, ?, 42000, 4, '2026-11-09', 200, 12, 9000, 11000, 3500, ?, 18000, 15000, ?, ?, 1.5, ?, ?, ?, ?, 2)",
+        (
+            G,
+            U1,
+            now_ts,
+            now_ts - 10,
+            now_ts + 86400,
+            now_ts - 20,
+            now_ts - 500,
+            now_ts + 86400,
+            now_ts - 300,
+        ),
+    )
+    c.execute("PRAGMA user_version = 1")
+    c.commit()
+    c.close()
+
+    eco = open_repositories(path, strict=True)
+    try:
+        conn = eco.db.conn
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert not os.path.exists(f"{path}.before-v1")
+        assert os.path.exists(f"{path}.before-v2")
+        assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").fetchone() is None
+
+        st = eco.for_guild(G).wallet.stats(U1)
+        assert st["balance"] == 42_000
+        assert st["daily_streak"] == 4 and st["last_daily"] == "2026-11-09" and st["last_slot"] == 200
+        assert (st["games_played"], st["total_wagered"], st["total_won"], st["biggest_win"]) == (12, 9000, 11000, 3500)
+        assert st["debt"] == 18_000 and st["debt_principal"] == 15_000
+        assert st["grace_penalty"] == pytest.approx(1.5)
+        assert st["bankrupt_at"] == pytest.approx(now_ts - 500)
+        assert st["blacklist_until"] == pytest.approx(now_ts + 86400)
+        assert eco.for_guild(G).debt.escape_left(U1) >= 0
+        esc = conn.execute("SELECT tries, last_attempt_at FROM teiai_escapes WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()
+        assert esc is not None and esc["tries"] == 2 and esc["last_attempt_at"] == pytest.approx(now_ts - 300)
+        grc = conn.execute("SELECT grace_until FROM teiai_grace WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()
+        assert grc is not None and grc["grace_until"] == pytest.approx(now_ts + 86400)
+    finally:
+        eco.close()
 
 
 def test_runtime_auction_and_race_purge_zero_qty_and_done_odds(tmp_path):
@@ -683,6 +754,6 @@ def test_manage_migrate_check_never_modifies_source_db(tmp_path, capsys):
     assert os.path.exists(f"{path}.before-v1")
     check = sqlite3.connect(path)
     try:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 2
     finally:
         check.close()

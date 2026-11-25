@@ -9,7 +9,7 @@ from domain import horse as horse_mod
 from domain import shop
 from infra.db.repositories import open_repositories
 from tests.fakes import invoke, must
-from tests.support import make_ranking_repos
+from tests.support import make_ranking_repos, set_test_balance, set_test_debt
 
 pytestmark = pytest.mark.real_scope
 
@@ -22,7 +22,7 @@ def eco(tmp_path):
     e = open_repositories(str(tmp_path / "t.db"), strict=True).for_guild(G)
     for uid in (A, B):
         e.wallet.balance(uid)
-        e.db.conn.execute("UPDATE users SET balance=1000 WHERE user_id=?", (uid,))
+        set_test_balance(e, uid, 1000)
     e.db.conn.commit()
     return e
 
@@ -134,7 +134,7 @@ def test_labor_tool_upgrades_count_toward_assets(eco):
 
 
 def test_debt_is_a_separate_liability_from_cash(eco):
-    eco.db.conn.execute("UPDATE users SET debt=300 WHERE guild_id=? AND user_id=?", (G, A))
+    set_test_debt(eco, A, 300, guild_id=G)
     eco.db.conn.commit()
     p = parts(eco, A)
     assert p["cash"] == 1000 and p["debt"] == -300  # 現金は借金を引かず、借金は別の負債項目になる
@@ -143,7 +143,8 @@ def test_debt_is_a_separate_liability_from_cash(eco):
 def test_asset_groups_match_gross_minus_liabilities_equals_net(eco):
     from domain.types import asset_groups
 
-    eco.db.conn.execute("UPDATE users SET debt=400, balance=1000 WHERE guild_id=? AND user_id=?", (G, A))
+    set_test_balance(eco, A, 1000, guild_id=G)
+    set_test_debt(eco, A, 400, guild_id=G)
     eco.db.conn.execute(
         "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, "
         "offer_expires, accepted_at, due, paid) VALUES (?, ?, ?, 500, 0, 7, 'active', 0, 0, ?, ?, 0)",
@@ -159,8 +160,9 @@ def test_asset_groups_match_gross_minus_liabilities_equals_net(eco):
 
 def test_gross_and_net_rankings_differ_by_liabilities(eco):
     # A は借金 900 で総資産 1,900・純資産 1,000、B は借金なしで 1,500。総資産では A、純資産では B が上
-    eco.db.conn.execute("UPDATE users SET balance=1900, debt=900 WHERE guild_id=? AND user_id=?", (G, A))
-    eco.db.conn.execute("UPDATE users SET balance=1500 WHERE guild_id=? AND user_id=?", (G, B))
+    set_test_balance(eco, A, 1900, guild_id=G)
+    set_test_debt(eco, A, 900, guild_id=G)
+    set_test_balance(eco, B, 1500, guild_id=G)
     eco.db.conn.commit()
     repos = make_ranking_repos(eco)
     assert [(u, t) for u, t, _g in repos.ranked_assets("gross")] == [(A, 1900), (B, 1500)]
@@ -183,7 +185,8 @@ def test_balance_card_shows_bs_groups_and_net_rank(tmp_path):
     a = repos.for_guild(G)
     for uid, bal, debt in ((A, 1900, 900), (B, 1500, 0)):
         a.wallet.balance(uid)
-        a.db.conn.execute("UPDATE users SET balance=?, debt=? WHERE guild_id=? AND user_id=?", (bal, debt, G, uid))
+        set_test_balance(a, uid, bal, guild_id=G)
+        set_test_debt(a, uid, debt, guild_id=G)
     relic = next(iter(shop.RELIC_VALUE))
     give(a, A, relic)
     a.db.conn.commit()
@@ -209,9 +212,7 @@ def test_net_ranking_counts_unbooked_debt_interest(eco):
     from domain import teiai
 
     two_days_ago = time.time() - 2 * 86400 - 60
-    eco.db.conn.execute(
-        "UPDATE users SET debt=1000, debt_interest_at=? WHERE guild_id=? AND user_id=?", (two_days_ago, G, A)
-    )
+    set_test_debt(eco, A, 1000, interest_at=two_days_ago, guild_id=G)
     eco.db.conn.commit()
     want = 1000 + int(1000 * teiai.DEBT_RATE_PER_DAY * 2)  # 2日分のトイチが、負債に入ってから並ぶ
     (_uid, _net, g) = next(t for t in make_ranking_repos(eco).ranked_assets("net") if t[0] == A)

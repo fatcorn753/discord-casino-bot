@@ -6,6 +6,7 @@ from domain import company as co
 from domain import teiai
 from domain.errors import Failure
 from infra.db.repositories import open_repositories
+from tests.support import set_test_debt
 
 pytestmark = pytest.mark.real_scope
 
@@ -340,7 +341,7 @@ def test_invest_rules_self_min_cap_katagi_and_no_company(eco):
     assert eco.company.stake_invest(V, U, co.STAKE_MIN, NOON)[1].code == "stake_cap"  # もう枠がない
     rich(eco, W)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=5000 WHERE guild_id=? AND user_id=?", (G, W))
+        set_test_debt(eco, W, 5000, guild_id=G)
     assert eco.company.stake_invest(W, U, co.STAKE_MIN, NOON)[1].code == "company_katagi_only"
 
 

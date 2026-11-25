@@ -18,10 +18,107 @@ from cogs.shared.bridges import (
     IShopTitleBridge,
 )
 from domain.ports.session import ISessionGuard
+from domain.types import INITIAL_BALANCE
 from infra.clock import ConfigClock
 from infra.db.repositories import RepositoryBundle, open_repositories
 from services import ServiceRegistry, build_services
 from services.session import Sessions
+
+
+def _resolve_guild_id(repos: RepositoryBundle, guild_id: int | None) -> int:
+    return repos.wallet.guild_id if guild_id is None else guild_id
+
+
+def _ensure_account_row(repos: RepositoryBundle, gid: int, user_id: int) -> None:
+    repos.db.conn.execute(
+        "INSERT OR IGNORE INTO accounts (guild_id, user_id, balance, created_at) VALUES (?, ?, ?, 0.0)",
+        (gid, user_id, INITIAL_BALANCE),
+    )
+
+
+def set_test_balance(repos: RepositoryBundle, user_id: int, balance: int, *, guild_id: int | None = None) -> None:
+    """テスト用: accounts.balance を直接書き換える（既存 tx の有無を問わず利用可）。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    repos.db.conn.execute("UPDATE accounts SET balance=? WHERE guild_id=? AND user_id=?", (balance, gid, user_id))
+
+
+def set_test_debt(
+    repos: RepositoryBundle,
+    user_id: int,
+    debt: int,
+    *,
+    principal: int | None = None,
+    interest_at: float = 0.0,
+    guild_id: int | None = None,
+) -> None:
+    """テスト用: teiai_debts の借金を設定する（0 以下なら行削除）。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    if debt <= 0:
+        repos.db.conn.execute("DELETE FROM teiai_debts WHERE guild_id=? AND user_id=?", (gid, user_id))
+        return
+    _ensure_account_row(repos, gid, user_id)
+    eff_principal = debt if principal is None else principal
+    repos.db.conn.execute(
+        "INSERT INTO teiai_debts (guild_id, user_id, debt, principal, interest_at) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+        "debt=excluded.debt, principal=excluded.principal, interest_at=excluded.interest_at",
+        (gid, user_id, debt, eff_principal, interest_at),
+    )
+
+
+def set_test_grace(
+    repos: RepositoryBundle,
+    user_id: int,
+    grace_until: float | None,
+    *,
+    penalty: float = 0.0,
+    penalty_at: float = 0.0,
+    guild_id: int | None = None,
+) -> None:
+    """テスト用: teiai_grace の猶予・ペナルティを設定する。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    _ensure_account_row(repos, gid, user_id)
+    repos.db.conn.execute(
+        "INSERT INTO teiai_grace (guild_id, user_id, grace_until, penalty, penalty_at) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+        "grace_until=excluded.grace_until, penalty=excluded.penalty, penalty_at=excluded.penalty_at",
+        (gid, user_id, grace_until, penalty, penalty_at),
+    )
+
+
+def set_test_bankrupt(
+    repos: RepositoryBundle,
+    user_id: int,
+    bankrupt_at: float | None,
+    blacklist_until: float | None = None,
+    *,
+    guild_id: int | None = None,
+) -> None:
+    """テスト用: teiai_bankruptcies の破産・ブラックリスト時刻を設定する（None で削除）。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    if bankrupt_at is None:
+        repos.db.conn.execute("DELETE FROM teiai_bankruptcies WHERE guild_id=? AND user_id=?", (gid, user_id))
+        return
+    _ensure_account_row(repos, gid, user_id)
+    repos.db.conn.execute(
+        "INSERT INTO teiai_bankruptcies (guild_id, user_id, bankrupt_at, blacklist_until) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+        "bankrupt_at=excluded.bankrupt_at, blacklist_until=excluded.blacklist_until",
+        (gid, user_id, bankrupt_at, blacklist_until),
+    )
+
+
+def set_test_games_played(
+    repos: RepositoryBundle, user_id: int, games_played: int, *, guild_id: int | None = None
+) -> None:
+    """テスト用: user_play_stats.games_played を直接設定する。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    _ensure_account_row(repos, gid, user_id)
+    repos.db.conn.execute(
+        "INSERT INTO user_play_stats (guild_id, user_id, games_played) VALUES (?, ?, ?) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET games_played=excluded.games_played",
+        (gid, user_id, games_played),
+    )
 
 
 def make_test_bot(

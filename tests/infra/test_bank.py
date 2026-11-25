@@ -8,7 +8,7 @@ from domain import rates, teiai
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import must
-from tests.support import make_test_bot
+from tests.support import make_test_bot, set_test_balance, set_test_debt
 
 pytestmark = pytest.mark.real_scope
 
@@ -173,7 +173,7 @@ def test_grace_starts_at_the_threshold_and_ends_when_debt_falls(eco):
     go_into_debt(eco, A, 20_000)
     assert eco.bank.grace_until(A) is not None and [u for u, *_ in eco.bank.grace_list()] == [A]
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=100 WHERE user_id=?", (A,))
+        set_test_debt(eco, A, 100, guild_id=G)
         eco.debt.after_debt_change(G, A)
     assert eco.bank.grace_until(A) is None
 
@@ -197,10 +197,8 @@ def test_grace_penalty_and_a1_work_together_in_strict_guild_scope(eco):
     eco.wallet.credit(A, 10_000, "テスト")
     eco.bank.bank_deposit(A, 4_000, NOW)
     with eco.db.tx():
-        eco.db.conn.execute(
-            "UPDATE users SET balance=1_000, debt=14_900, debt_principal=14_900, debt_interest_at=? WHERE guild_id=? AND user_id=?",
-            (NOW, G, A),
-        )
+        set_test_balance(eco, A, 1_000, guild_id=G)
+        set_test_debt(eco, A, 14_900, principal=14_900, interest_at=NOW, guild_id=G)
     # 2日後の定期更新: 利息 +298 (15,198) → A-1 で現金 1,000 + 預金 4,000 を回収し 10,198 → 猶予回避
     eco.debt.accrue_all_debt_interest(NOW + 2 * 86400 + 1)
     assert eco.debt.debt_for(G, A) == 10_198
@@ -211,7 +209,7 @@ def test_grace_penalty_and_a1_work_together_in_strict_guild_scope(eco):
     until1 = must(eco.bank.grace_until(A))
     assert until1 > NOW + 23 * HOUR
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=1_000, debt_principal=1_000 WHERE guild_id=? AND user_id=?", (G, A))
+        set_test_debt(eco, A, 1_000, principal=1_000, guild_id=G)
         eco.debt.after_debt_change(G, A)
     assert eco.bank.grace_until(A) is None
     with eco.db.tx():

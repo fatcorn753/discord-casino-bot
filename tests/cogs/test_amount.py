@@ -42,7 +42,7 @@ def choices(eco, current="", minimum=100, maximum=10_000):
 def set_balance(eco, balance):
     eco.wallet.balance(USER)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=? WHERE user_id=?", (balance, USER))
+        eco.db.conn.execute("UPDATE accounts SET balance=? WHERE user_id=?", (balance, USER))
 
 
 def test_typed_amount_reads_digits_commas_and_full_width():
@@ -84,7 +84,7 @@ def test_the_balance_is_shown_even_when_it_is_below_the_minimum_or_above_the_max
 def test_new_player_sees_the_starting_balance_and_no_account_is_created(eco):
     found = choices(eco)
     assert f"残高 {INITIAL_BALANCE:,}ペリカ" in found[0][1]
-    assert eco.db.conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0  # 候補を出しただけでは、口座を作らない
+    assert eco.db.conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0  # 候補を出しただけでは、口座を作らない
 
 
 def test_dm_has_no_balance_and_no_choices(eco):

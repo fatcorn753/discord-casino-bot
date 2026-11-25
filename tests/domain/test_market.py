@@ -16,7 +16,7 @@ from domain import market
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, fake_response, invoke
-from tests.support import make_market_cog, make_test_bot
+from tests.support import make_market_cog, make_test_bot, set_test_debt
 
 pytestmark = pytest.mark.real_scope
 
@@ -556,7 +556,7 @@ def test_short_validation(eco):
     assert not a.margin.short_close(U, None, 100.0).ok  # 建てていない
     a.wallet.balance(U)
     with a.db.tx():
-        a.db.conn.execute("UPDATE users SET debt=100 WHERE user_id=?", (U,))
+        set_test_debt(a, U, 100, guild_id=G)
     assert a.margin.short_open(U, 10_000, 100.0, 1).reason.code == "margin_debt_blocks"  # 借金中は建てられない
 
 
@@ -585,7 +585,7 @@ def test_short_counts_in_ranking_and_payout_repays_debt(eco):
     set_price(eco, 90.0)
     assert {u: v for _, u, v in a.wallet.top(5)}[U] == INITIAL_BALANCE + 100
     with a.db.tx():
-        a.db.conn.execute("UPDATE users SET debt=300 WHERE user_id=?", (U,))  # 建てたあとに借金ができても
+        set_test_debt(a, U, 300, guild_id=G)  # 建てたあとに借金ができても
     a.margin.short_close(U, None, 90.0)  # 決済で戻るのは、もともと自分のお金なので、天引きされない
     assert a.debt.debt(U) == 300
     assert a.debt.repay_debt(U)[0] and a.debt.debt(U) == 0

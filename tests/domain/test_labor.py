@@ -11,7 +11,7 @@ from domain import labor as lab
 from domain import teiai
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, button, buttons, freeze_time, invoke, must
-from tests.support import make_labor_cog, make_test_bot
+from tests.support import make_labor_cog, make_test_bot, set_test_balance, set_test_debt
 
 U = 1
 DAY = "2026-11-10"
@@ -513,7 +513,7 @@ def test_old_count_columns_migrate_to_contracts(tmp_path):
     path = str(tmp_path / "v0_counts.db")
     c = sqlite3.connect(path)
     c.row_factory = sqlite3.Row
-    schema.create_tables(c)
+    schema.create_v1_missing_tables(c)
     for col in ("apprentice", "miner", "craftsman", "foreman"):
         c.execute(f"ALTER TABLE labor ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
     c.execute("ALTER TABLE labor_workers ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0")
@@ -672,7 +672,8 @@ def test_labor_skim_goes_to_the_teiai_bank(eco, monkeypatch):
 def test_the_skim_applies_to_everyone_and_the_debt_withholding_takes_its_share_of_the_rest(eco, monkeypatch):
     monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.10)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0, debt=1000 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
+        set_test_debt(eco, U, 1000)
     click(eco, 20)
     pot = eco.labor.labor_state(U, T0 + 100, DAY)["pot_total"]
     debt_before = eco.debt.debt(U)

@@ -11,7 +11,7 @@ from domain import horse as horse_mod
 from domain import p2p, shop, teiai
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, invoke, must
-from tests.support import make_p2p_cog, make_shop_cog, make_test_bot
+from tests.support import make_p2p_cog, make_shop_cog, make_test_bot, set_test_balance, set_test_debt
 
 pytestmark = pytest.mark.real_scope
 
@@ -121,7 +121,7 @@ def test_buy_checks_self_balance_debt_ownership_and_expiry(eco):
     assert eco.p2p.p2p_buy(S, lid, NOW + 1)[1].code == "p2p_self_buy"
     give(eco, B, CARD)
     assert eco.p2p.p2p_buy(B, lid, NOW + 1)[1].code == "already_owned"  # 見た目の品は、1つだけ
-    eco.db.conn.execute("UPDATE users SET balance=10 WHERE user_id=?", (C,))
+    set_test_balance(eco, C, 10, guild_id=G)
     assert (
         eco.p2p.p2p_buy(C, lid, NOW + 1)[1].code == "insufficient_balance_need"
         and eco.shop.inventory(S).get(CARD) is None
@@ -133,7 +133,7 @@ def test_a_debtor_cannot_buy(eco):
     give(eco, S, CARROT)
     _, lid = eco.p2p.p2p_list(S, "item", CARROT, 1, "fixed", 1_000, None, NOW)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=5000 WHERE user_id=?", (B,))
+        set_test_debt(eco, B, 5000, guild_id=G)
     ok, why = eco.p2p.p2p_buy(B, lid, NOW + 1)
     assert not ok and why.code == "p2p_katagi_only"
 
@@ -667,7 +667,7 @@ def _into_grace(eco, uid):
     """uid を、破産猶予に入る借金の額にする。"""
     eco.wallet.balance(uid)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE guild_id=? AND user_id=?", (G, uid))
+        set_test_balance(eco, uid, 0, guild_id=G)
         eco.debt.owe_for(G, uid, teiai.GRACE_DEBT + 5_000, "テスト")
     assert eco.bank.grace_until(uid) is not None
 
@@ -723,7 +723,7 @@ def test_bankruptcy_pulls_back_listings_so_they_are_seized_not_hidden(eco):
     give(eco, B, CARROT, 3)
     eco.p2p.p2p_list(B, "item", CARROT, 3, "fixed", 1_500, None, NOW)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=2000 WHERE guild_id=? AND user_id=?", (G, B))  # 猶予の手前の借金
+        set_test_debt(eco, B, 2000, guild_id=G)  # 猶予の手前の借金
     assert eco.bank.grace_until(B) is None and eco.shop.inventory(B).get(CARROT, 0) == 0
     ok, result = eco.debt.bankrupt(B)
     assert ok

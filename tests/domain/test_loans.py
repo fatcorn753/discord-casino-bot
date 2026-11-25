@@ -12,7 +12,7 @@ from domain import loans, teiai
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, as_item, call, freeze_time, invoke, must
-from tests.support import make_loan_cog, make_test_bot
+from tests.support import make_loan_cog, make_test_bot, set_test_balance, set_test_bankrupt, set_test_debt
 
 NOW = 1_000_000.0
 DAY = 86400
@@ -92,16 +92,16 @@ def test_accept_guards(eco):
     assert eco.loans.loan_accept(lid, B, NOW + loans.OFFER_HOURS * 3600)[1].code == "loan_offer_expired"
     eco.wallet.balance(B)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET bankrupt_at=?, blacklist_until=NULL WHERE user_id=?", (NOW, B))
+        set_test_bankrupt(eco, B, NOW, None)
     assert (
         eco.loans.loan_accept(lid, B, NOW + 1)[1].code == "loan_blacklisted"
     )  # 破産者のブラックリスト中は、借りられない
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET bankrupt_at=NULL WHERE user_id=?", (B,))
-        eco.db.conn.execute("UPDATE users SET balance=10 WHERE user_id=?", (A,))  # 貸す側の残高が減った
+        set_test_bankrupt(eco, B, None)
+        set_test_balance(eco, A, 10)  # 貸す側の残高が減った
     assert eco.loans.loan_accept(lid, B, NOW + 1)[1].code == "loan_lender_insufficient_balance"
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=?", (INITIAL_BALANCE,))
+        eco.db.conn.execute("UPDATE accounts SET balance=?", (INITIAL_BALANCE,))
     assert (
         eco.loans.loan_accept(lid, B, NOW + 1)[0]
         and eco.loans.loan_accept(lid, B, NOW + 2)[1].code == "loan_offer_ended"
@@ -165,10 +165,10 @@ def test_repay_guards(eco):
     lid = active(eco)
     assert eco.loans.loan_repay(lid, C, None, NOW + 5)[1].code == "loan_repay_borrower_only"
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (B,))
+        set_test_balance(eco, B, 0)
     assert eco.loans.loan_repay(lid, B, None, NOW + 5)[1].code == "repay_no_cash"
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=100 WHERE user_id=?", (B,))
+        set_test_balance(eco, B, 100)
     assert eco.loans.loan_repay(lid, B, 500, NOW + 5)[1].code == "insufficient_balance"
     ok, paid = eco.loans.loan_repay(lid, B, None, NOW + 5)  # 省略なら、残高の範囲で
     assert ok and paid == 100 and eco.loans.loan_get(lid)["status"] == "active"
@@ -193,7 +193,7 @@ def test_shortfall_becomes_overdue_then_is_collected_from_income(eco, monkeypatc
     freeze_time(monkeypatch, eco.db.clock, NOW + 1 + 10 * DAY)  # 期限ちょうど（遅延損害金は、まだ付かない）
     lid = active(eco)  # 借りた1000を使い切った想定
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=300 WHERE user_id=?", (B,))
+        set_test_balance(eco, B, 300)
     out = eco.loans.loan_collect_due(NOW + 1 + 10 * DAY)
     assert out[0]["status"] == "overdue" and out[0]["collected"] == 300 and out[0]["left"] == 900
     assert eco.wallet.balance(B) == 0 and eco.loans.loan_get(lid)["status"] == "overdue"
@@ -213,7 +213,8 @@ def test_shortfall_becomes_overdue_then_is_collected_from_income(eco, monkeypatc
 def test_teiai_debt_is_withheld_before_overdue_loans(eco):
     lid = active(eco)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0, debt=200 WHERE user_id=?", (B,))
+        set_test_balance(eco, B, 0)
+        set_test_debt(eco, B, 200)
     eco.loans.loan_collect_due(NOW + 1 + 10 * DAY)
     assert eco.loans.loan_get(lid)["status"] == "overdue"
     earn(eco, B, 500)  # 天引き150は、全部が帝愛（シニア債権）へ
@@ -225,7 +226,7 @@ def test_teiai_debt_is_withheld_before_overdue_loans(eco):
 def test_a_debtor_can_still_borrow_from_other_players(eco):
     eco.wallet.balance(B)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=500 WHERE user_id=?", (B,))
+        set_test_debt(eco, B, 500)
     lid = offer(eco)
     assert eco.loans.loan_accept(lid, B, NOW + 1) == (True, "")  # 借金中でも借りられる（借り換え）
 
@@ -377,7 +378,7 @@ def test_run_once_collects_notifies_and_expires(eco, monkeypatch):
         "⏰" in (t or "") and "貸付 #2" in t for t, _ in chan.sent
     )
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (C,))
+        set_test_balance(eco, C, 0)
     asyncio.run(cog.run_once())
     with eco.db.tx():
         eco.db.conn.execute("UPDATE loans SET due=1 WHERE id=?", (soon,))
@@ -486,9 +487,7 @@ def test_lender_needs_balance_and_borrower_state_is_rechecked(eco):
     assert eco.loans.loan_lend(lid, A, NOW)[1].code == "insufficient_balance"
     lid2 = request(eco, borrower=C)
     with eco.db.tx():
-        eco.db.conn.execute(
-            "UPDATE users SET bankrupt_at=?, blacklist_until=? WHERE user_id=?", (NOW, time.time() + DAY, C)
-        )
+        set_test_bankrupt(eco, C, NOW, time.time() + DAY)
     ok, reason = eco.loans.loan_lend(lid2, A, NOW + 1)  # 募集のあとで破産者になった
     assert not ok and reason.code == "loan_borrower_blocked"
     assert eco.wallet.balance(A) == INITIAL_BALANCE  # お金は動いていない
@@ -536,7 +535,7 @@ def test_overdue_loan_keeps_growing_so_waiting_is_never_cheaper(eco, monkeypatch
     lid = active(eco)
     due = eco.loans.loan_get(lid)["due"]
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (B,))
+        set_test_balance(eco, B, 0)
     eco.loans.loan_collect_due(due)
     loan = eco.loans.loan_get(lid)
     assert loan["status"] == "overdue"

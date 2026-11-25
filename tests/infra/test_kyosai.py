@@ -6,6 +6,7 @@ import pytest
 
 from domain import kyosai, p2p, shop, teiai
 from infra.db.repositories import open_repositories
+from tests.support import set_test_balance, set_test_debt, set_test_grace
 
 G, A, B, C = 10, 1, 2, 3
 NOW = time.time()
@@ -76,7 +77,7 @@ def test_excess_loss_is_charged_by_units_and_shortfall_becomes_debt_with_a_ledge
     eco.wallet.credit(B, 10_000, "テスト")
     cash_b = eco.wallet.balance(B)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=100 WHERE guild_id=? AND user_id=?", (G, A))
+        set_test_balance(eco, A, 100, guild_id=G)
         charged = eco.kyosai.charge_excess_for(G, 10_000, NOW)
     assert charged == 10_000
     assert eco.wallet.balance(A) == 0 and eco.debt.debt(A) == 4_900  # 手元 100 + 借金 4,900
@@ -122,7 +123,7 @@ def test_dividend_pool_comes_only_from_cash_above_the_target_reserve():
 def _age_ledger(eco, uid, ts):
     with eco.db.tx():
         eco.db.conn.execute("UPDATE ledger SET ts=? WHERE guild_id=? AND user_id=?", (ts, G, uid))
-        eco.db.conn.execute("UPDATE users SET created_at=? WHERE guild_id=? AND user_id=?", (ts, G, uid))
+        eco.db.conn.execute("UPDATE accounts SET created_at=? WHERE guild_id=? AND user_id=?", (ts, G, uid))
 
 
 def test_dormant_accounts_lose_their_units_to_the_house(eco):
@@ -194,7 +195,7 @@ def test_auction_refuses_debtors_and_relists_quietly_when_unsold(eco):
     eco.kyosai.kyosai_auction_tick(NOW)
     eco.wallet.balance(A)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=100 WHERE guild_id=? AND user_id=?", (G, A))
+        set_test_debt(eco, A, 100, guild_id=G)
     ok, why = eco.kyosai.kyosai_bid(A, 10, NOW)
     assert not ok and why.code == "debt_blocks"
     events = eco.kyosai.kyosai_auction_tick(NOW + kyosai.AUCTION_HOURS * 3600 + 1)
@@ -214,9 +215,8 @@ def test_auction_keeps_running_while_transfers_are_gated(eco):
     eco.wallet.credit(A, 10_000, "テスト")
     eco.wallet.balance(C)
     with eco.db.tx():
-        eco.db.conn.execute(
-            "UPDATE users SET debt=100000, grace_until=? WHERE guild_id=? AND user_id=?", (NOW + DAY, G, C)
-        )
+        set_test_debt(eco, C, 100_000, guild_id=G)
+        set_test_grace(eco, C, NOW + DAY, guild_id=G)
     ok, _ = eco.kyosai.kyosai_bid(A, 500, NOW)
     assert ok
 
@@ -288,9 +288,8 @@ def test_trading_is_locked_while_someone_is_in_grace(eco):
     eco.wallet.balance(B)
     eco.wallet.balance(C)
     with eco.db.tx():
-        eco.db.conn.execute(
-            "UPDATE users SET debt=100000, grace_until=? WHERE guild_id=? AND user_id=?", (NOW + DAY, G, C)
-        )
+        set_test_debt(eco, C, 100_000, guild_id=G)
+        set_test_grace(eco, C, NOW + DAY, guild_id=G)
     ok, why = eco.kyosai.kyosai_offer(A, B, 1, 0, NOW)
     assert not ok and why.code == "kyosai_gate_locked"
 
@@ -338,7 +337,7 @@ def test_self_bankruptcy_pulls_the_bid_back_into_the_estate_and_leaves_no_escape
     ok, row = eco.kyosai.kyosai_bid(A, 1_000, NOW)
     assert ok
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=200_000 WHERE guild_id=? AND user_id=?", (G, A))
+        set_test_debt(eco, A, 200_000, guild_id=G)
     ok, result = eco.debt.bankrupt(A)
     assert ok and eco.debt.status(A) == teiai.BANKRUPT and eco.debt.debt(A) > 0
     auction = _open_auction_row(eco)

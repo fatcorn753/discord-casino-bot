@@ -12,7 +12,16 @@ from domain import shop, teiai
 from domain.types import DAILY_BASE, INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_guild, as_interaction, as_member, freeze_time, must
-from tests.support import make_bond_cog, make_casino_deps, make_ranking_repos, make_shop_cog, make_test_bot
+from tests.support import (
+    make_bond_cog,
+    make_casino_deps,
+    make_ranking_repos,
+    make_shop_cog,
+    make_test_bot,
+    set_test_balance,
+    set_test_debt,
+    set_test_grace,
+)
 
 U, A, B = 1, 2, 3
 DAY = 86400
@@ -27,7 +36,8 @@ def indebt(eco, user_id=U, debt=10_000, balance=0):
     """借金のある人にする（種銭などの副作用なしに、状態だけ作る）。"""
     eco.wallet.balance(user_id)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=?, balance=? WHERE user_id=?", (debt, balance, user_id))
+        set_test_balance(eco, user_id, balance)
+        set_test_debt(eco, user_id, debt)
 
 
 def earn(eco, user_id, amount):
@@ -104,7 +114,7 @@ def test_a_shortfall_seizes_crypto_then_bonds_before_becoming_debt(eco):
     assert eco.crypto.crypto_buy(U, 2_000, 100.0).ok
     assert eco.bonds.bond_buy(U, "normal", 3_000, time.time())[0]
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
         owed = eco.debt.owe_for(0, U, 5_000, "テスト")
     assert eco.crypto.crypto_holding(U)[0] == 0  # CSトークンは全部差し押さえ
     assert (
@@ -130,7 +140,7 @@ def test_assets_are_kept_when_cash_covers_the_shortfall(eco):
 def test_a_debtor_with_an_empty_hand_gets_the_seed_money(eco):
     eco.wallet.balance(U)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
         owed = eco.debt.owe_for(0, U, 2_000, "テスト")
     assert owed == 2_000
     assert eco.wallet.balance(U) == teiai.SEED and eco.debt.debt(U) == 2_000 + teiai.SEED
@@ -142,7 +152,7 @@ def test_a_shortfall_keeps_the_daily_streak(eco):
     eco.wallet.claim_daily(U, datetime.date(2026, 11, 2))
     assert eco.wallet.stats(U)["daily_streak"] == 2
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
         eco.debt.owe_for(0, U, 500, "テスト")
     assert eco.wallet.stats(U)["daily_streak"] == 2  # 地下労働者に落ちても、連続ログインは途切れない
 
@@ -165,7 +175,7 @@ def test_status_follows_debt_and_overdue_loans(eco):
     indebt(eco, debt=10)
     assert eco.debt.status(U) == teiai.UNDERGROUND
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=0 WHERE user_id=?", (U,))
+        set_test_debt(eco, U, 0)
     assert eco.debt.status(U) == teiai.KATAGI
     with eco.db.tx():
         eco.db.conn.execute(
@@ -183,7 +193,7 @@ def test_equipment_is_frozen_while_not_a_katagi_and_comes_back_after(eco):
     assert eco.shop.equip(U, "title", item.id)
     assert eco.shop.get_profile(U)["title"] == item.id and eco.shop.get_profile(U)["frozen"] is False
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=100 WHERE user_id=?", (U,))
+        set_test_debt(eco, U, 100)
     frozen = eco.shop.get_profile(U)
     assert frozen["title"] is None and frozen["frozen"] and frozen["status"] == teiai.UNDERGROUND  # 差し押さえ中
     assert eco.shop.get_profile(U, raw=True)["title"] == item.id  # 記録は残っている
@@ -200,7 +210,8 @@ def make_bankrupt_case(eco, debt=40_000):
     eco.shop.equip(U, "title", "title_lucky")
     eco.wallet.balance(A)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=1_000, debt=? WHERE user_id=?", (debt, U))
+        set_test_balance(eco, U, 1_000)
+        set_test_debt(eco, U, debt)
         eco.db.conn.execute(
             "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires, accepted_at, due, paid) "
             "VALUES (0, ?, ?, 5000, 0, 5, 'active', 0, 0, ?, ?, 0)",
@@ -239,7 +250,8 @@ def test_bankruptcy_seizes_everything_and_pays_the_senior_then_the_junior_credit
     assert eco.debt.loan_blacklisted(U)  # 貸付のブラックリストは、完済から7日続く
     assert eco.wallet.balance(U) == pool - 45_000  # 借金をすべて払って、あまった分は手元に残る
     assert (
-        eco.db.conn.execute("SELECT blacklist_until FROM users WHERE user_id=?", (U,)).fetchone()[0] is not None
+        eco.db.conn.execute("SELECT blacklist_until FROM teiai_bankruptcies WHERE user_id=?", (U,)).fetchone()[0]
+        is not None
     )  # 完済済みなので、7日が始まる
 
 
@@ -260,7 +272,8 @@ def test_what_the_seized_assets_cannot_cover_is_compressed_or_forgiven(eco):
 def test_bankruptcy_keeps_the_senior_debt_up_to_the_floor_and_blocks_new_loans(eco):
     eco.wallet.balance(U)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0, debt=500_000 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
+        set_test_debt(eco, U, 500_000)
     ok, result = eco.debt.bankrupt(U)
     assert ok and result["compressed"] == 500_000 - teiai.BANKRUPT_FLOOR
     assert eco.debt.debt(U) == teiai.BANKRUPT_FLOOR  # 完全には消えず、破産直後の種銭も貸されない
@@ -278,12 +291,13 @@ def test_bankruptcy_keeps_the_senior_debt_up_to_the_floor_and_blocks_new_loans(e
 def test_a_bankrupt_person_returns_to_katagi_when_the_debt_is_paid_but_the_loan_blacklist_lasts_seven_days(eco):
     eco.wallet.balance(U)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0, debt=20_000 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
+        set_test_debt(eco, U, 20_000)
     eco.debt.bankrupt(U)
     assert eco.debt.status(U) == teiai.BANKRUPT  # 借金が残っている間は、破産者
     eco.wallet.credit(U, 100_000, "付与")
     assert eco.debt.repay_debt(U)[0] and eco.debt.debt(U) == 0
-    row = eco.db.conn.execute("SELECT blacklist_until FROM users WHERE user_id=?", (U,)).fetchone()
+    row = eco.db.conn.execute("SELECT blacklist_until FROM teiai_bankruptcies WHERE user_id=?", (U,)).fetchone()
     assert row[0] is not None  # 完済から7日が始まる
     assert eco.debt.status(U) == teiai.KATAGI  # 身分は、完済ですぐ、カタギに戻る
     assert eco.debt.loan_blacklisted(U) and eco.debt.loan_blacklisted(
@@ -295,7 +309,8 @@ def test_a_bankrupt_person_returns_to_katagi_when_the_debt_is_paid_but_the_loan_
 def test_a_bankrupt_person_with_debt_left_is_still_blacklisted_for_loans_however_long_it_takes(eco):
     eco.wallet.balance(U)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0, debt=500_000 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
+        set_test_debt(eco, U, 500_000)
     eco.debt.bankrupt(U)
     assert eco.debt.debt(U) > 0 and eco.debt.status(U) == teiai.BANKRUPT
     assert eco.debt.loan_blacklisted(U, now=time.time() + 365 * DAY)  # 借金が残っている間は、期間なしで続く
@@ -346,7 +361,8 @@ def test_status_tag_is_added_for_a_debtor_and_removed_after_paying_off(eco):
     asyncio.run(cog.sync_status_nick(as_guild(guild), as_member(member)))
     assert len(member.edits) == 1  # 変わらないなら、書き換えない
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=0, balance=100 WHERE user_id=?", (U,))
+        set_test_debt(eco, U, 0)
+        set_test_balance(eco, U, 100)
     asyncio.run(cog.sync_status_nick(as_guild(guild), as_member(member)))
     assert member.nick == "あだ名" and not eco.guild.nick_managed(0, U)  # 元のニックネームに戻り、記録も消える
 
@@ -362,7 +378,7 @@ def test_status_tag_restores_no_nickname_and_never_touches_a_normal_player(eco):
     asyncio.run(cog.sync_status_nick(as_guild(guild), as_member(member)))
     assert member.nick == "たつ【地下労働者】"
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=0 WHERE user_id=?", (U,))
+        set_test_debt(eco, U, 0)
     asyncio.run(cog.sync_status_nick(as_guild(guild), as_member(member)))
     assert member.nick is None  # もともとニックネームがなければ、なしに戻る
 
@@ -377,11 +393,11 @@ def test_status_replaces_the_title_tag_and_the_title_comes_back_for_those_who_ch
     asyncio.run(cog.sync_status_nick(as_guild(guild), as_member(member)))
     assert member.nick == "たつ【常連】"
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=500 WHERE user_id=?", (U,))
+        set_test_debt(eco, U, 500)
     asyncio.run(cog.sync_status_nick(as_guild(guild), as_member(member)))
     assert member.nick == "たつ【地下労働者】"  # 差し押さえ中は、称号ではなく身分
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=0 WHERE user_id=?", (U,))
+        set_test_debt(eco, U, 0)
     asyncio.run(cog.sync_status_nick(as_guild(guild), as_member(member)))
     assert member.nick == "たつ【常連】" and eco.guild.nick_pref(0, U)  # 完済すると、称号に戻る
 
@@ -438,7 +454,7 @@ def test_chinchiro_result_shows_what_was_seized_and_the_seed_money(tmp_path):
     eco.market.market_set(time.time(), 100.0)
     assert eco.crypto.crypto_buy(U, 20_000, 100.0).ok
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=3000 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 3000)
 
     class It:
         user = SimpleNamespace(id=U, display_name="たろう")
@@ -476,7 +492,7 @@ def test_ranking_marks_people_who_are_not_katagi(eco):
 def _set_balance(eco, user_id, balance):
     eco.wallet.balance(user_id)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=? WHERE user_id=?", (balance, user_id))
+        set_test_balance(eco, user_id, balance)
 
 
 def test_wealthy_is_display_only_and_needs_katagi_with_enough_assets(eco):
@@ -504,32 +520,32 @@ def test_ranking_marks_the_wealthy(eco):
 
 @pytest.mark.real_scope
 def test_old_users_table_without_the_new_columns_is_upgraded(tmp_path):
+    import sqlite3
+
     path = str(tmp_path / "old.db")
-    e = open_repositories(path, strict=True)
-    with e.db.tx():
-        e.db.conn.execute("ALTER TABLE users RENAME TO users_new")
-        e.db.conn.execute(
-            "CREATE TABLE users (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, balance INTEGER NOT NULL, "
-            "daily_streak INTEGER NOT NULL DEFAULT 0, last_daily TEXT, games_played INTEGER NOT NULL DEFAULT 0, "
-            "total_wagered INTEGER NOT NULL DEFAULT 0, total_won INTEGER NOT NULL DEFAULT 0, biggest_win INTEGER NOT NULL DEFAULT 0, "
-            "created_at REAL NOT NULL, last_slot INTEGER, debt INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, user_id))"
-        )
-        e.db.conn.execute(
-            "INSERT INTO users (guild_id, user_id, balance, created_at, debt) VALUES (10, 1, 500, 0, 700)"
-        )
-        e.db.conn.execute("DROP TABLE users_new")
-        e.db.conn.execute("PRAGMA user_version = 0")
-    e.db.conn.close()
+    c = sqlite3.connect(path)
+    c.execute(
+        "CREATE TABLE users (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, balance INTEGER NOT NULL, "
+        "daily_streak INTEGER NOT NULL DEFAULT 0, last_daily TEXT, games_played INTEGER NOT NULL DEFAULT 0, "
+        "total_wagered INTEGER NOT NULL DEFAULT 0, total_won INTEGER NOT NULL DEFAULT 0, biggest_win INTEGER NOT NULL DEFAULT 0, "
+        "created_at REAL NOT NULL, last_slot INTEGER, debt INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (guild_id, user_id))"
+    )
+    c.execute("INSERT INTO users (guild_id, user_id, balance, created_at, debt) VALUES (10, 1, 500, 0, 700)")
+    c.execute("PRAGMA user_version = 0")
+    c.commit()
+    c.close()
     again = open_repositories(path, strict=True).for_guild(10)
+    assert again.db.conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").fetchone() is None
     migrated = again.db.conn.execute(
-        "SELECT debt_principal, grace_penalty, grace_penalty_at FROM users WHERE guild_id=10 AND user_id=1"
+        "SELECT debt, principal FROM teiai_debts WHERE guild_id=10 AND user_id=1"
     ).fetchone()
-    assert migrated["debt_principal"] == 700 and migrated["grace_penalty"] == 0 and migrated["grace_penalty_at"] == 0
+    assert migrated["debt"] == 700 and migrated["principal"] == 700
+    assert again.wallet.stats(1)["grace_penalty"] == 0 and again.wallet.stats(1)["grace_penalty_at"] == 0
     assert again.debt.debt(1) == 700 and again.wallet.balance(1) == 500  # 既存の借金は、そのまま帝愛の借金
     assert again.debt.status(1) == teiai.UNDERGROUND
     assert again.debt.repay_debt(1, 500) == (True, 500)
     assert (
-        again.db.conn.execute("SELECT debt_principal FROM users WHERE guild_id=10 AND user_id=1").fetchone()[0] == 200
+        again.db.conn.execute("SELECT principal FROM teiai_debts WHERE guild_id=10 AND user_id=1").fetchone()[0] == 200
     )
 
 
@@ -541,7 +557,8 @@ def test_junk_bond_principal_goes_to_the_debt_when_it_matures_while_indebted(eco
         eco.bank.bank_set_for(0, 1_000_000, 0)  # 利息の原資
     assert eco.bonds.bond_buy(U, "junk", 1_000, 1.0)[0]  # 元本1,000・利息+20%
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=5_000, balance=0 WHERE user_id=?", (U,))
+        set_test_debt(eco, U, 5_000)
+        set_test_balance(eco, U, 0)
 
     class Never:
         def random(self):
@@ -646,7 +663,8 @@ class _Roll:
 def _in_debt(eco, debt=20_000):
     eco.wallet.credit(U, 10_000, "テスト")
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=1_000, debt=? WHERE user_id=?", (debt, U))
+        set_test_balance(eco, U, 1_000)
+        set_test_debt(eco, U, debt)
 
 
 def test_escape_success_wipes_the_whole_debt_but_takes_everything(eco):
@@ -676,7 +694,7 @@ def test_escape_has_a_minimum_fine_and_a_minimum_debt(eco):
     assert ok and r["fine"] == teiai.ESCAPE_FINE_MIN  # 500 ではなく、最低 1,000
     _in_debt(eco, 4_999)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET escape_at=NULL WHERE user_id=?", (U,))
+        eco.db.conn.execute("UPDATE teiai_escapes SET last_attempt_at=NULL WHERE user_id=?", (U,))
     ok, reason = eco.debt.escape_attempt(U, now=NOW_E, rng=_Roll(0.0))
     assert not ok and reason.code == "escape_min_debt"
 
@@ -742,7 +760,7 @@ def test_principal_excludes_existing_interest_and_updates_on_partial_repayment(e
     _interest_clock(monkeypatch, eco, now)
     eco.wallet.balance(U)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
         eco.debt.owe_for(0, U, 3_000, "テスト")
     # owe_for 時点では黒リスト外なので種銭 3,000 が追加され、元本は 6,000 ではなく明示的に 3,000 で試す
     eco.wallet.set_balance(U, -3_000, "テスト")
@@ -750,19 +768,20 @@ def test_principal_excludes_existing_interest_and_updates_on_partial_repayment(e
     now[0] += 20 * DAY  # 利息 +600 → 借金 3,600（元本 3,000 のまま）
     assert eco.debt.debt(U) == 3_600
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
         eco.debt.owe_for(0, U, 2_000, "追加借入")  # 追加 2,000（種銭 3,000 も乗らないよう残高を戻す前）
     # balance=0 なので種銭 3,000 が追加 → 追加元本は 2,000 + 3,000 = 5,000、元本合計 8,000・借金 8,600
-    row = eco.db.conn.execute("SELECT debt, debt_principal FROM users WHERE user_id=?", (U,)).fetchone()
-    assert row["debt"] == 8_600 and row["debt_principal"] == 8_000  # 既発生利息 600 は元本に組み込まれない
+    row = eco.db.conn.execute("SELECT debt, principal FROM teiai_debts WHERE user_id=?", (U,)).fetchone()
+    assert row["debt"] == 8_600 and row["principal"] == 8_000  # 既発生利息 600 は元本に組み込まれない
     eco.wallet.credit(U, 10_000, "テスト")
     assert eco.debt.repay_debt(U, 300) == (True, 300)  # 利息分の一部返済では元本は減らない
-    assert eco.db.conn.execute("SELECT debt_principal FROM users WHERE user_id=?", (U,)).fetchone()[0] == 8_000
+    assert eco.db.conn.execute("SELECT principal FROM teiai_debts WHERE user_id=?", (U,)).fetchone()[0] == 8_000
     assert eco.debt.repay_debt(U, 3_300) == (True, 3_300)  # 残高 5,000 < 旧元本 8,000 → 元本も 5,000 へ縮む
-    assert eco.db.conn.execute("SELECT debt_principal FROM users WHERE user_id=?", (U,)).fetchone()[0] == 5_000
+    assert eco.db.conn.execute("SELECT principal FROM teiai_debts WHERE user_id=?", (U,)).fetchone()[0] == 5_000
     assert eco.debt.repay_debt(U) == (True, 5_000)
-    row = eco.db.conn.execute("SELECT debt, debt_principal, debt_interest_at FROM users WHERE user_id=?", (U,)).fetchone()
-    assert row["debt"] == 0 and row["debt_principal"] == 0 and row["debt_interest_at"] == 0
+    assert eco.db.conn.execute("SELECT debt, principal, interest_at FROM teiai_debts WHERE user_id=?", (U,)).fetchone() is None
+    st = eco.wallet.stats(U)
+    assert st["debt"] == 0 and st["debt_principal"] == 0
 
 
 @pytest.mark.real_scope
@@ -777,8 +796,10 @@ def test_accrue_all_debt_interest_and_bond_cog_tick_update_idle_debtors(tmp_path
     eco.wallet.balance(A)
     eco.wallet.balance(B)  # 借金なし
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=4_000, balance=0 WHERE guild_id=10 AND user_id=?", (U,))
-        eco.db.conn.execute("UPDATE users SET debt=2_000, balance=0 WHERE guild_id=10 AND user_id=?", (A,))
+        set_test_debt(eco, U, 4_000, guild_id=10)
+        set_test_balance(eco, U, 0, guild_id=10)
+        set_test_debt(eco, A, 2_000, guild_id=10)
+        set_test_balance(eco, A, 0, guild_id=10)
     # 初回ティックで起点を記録
     cog = make_bond_cog(bot)
     cog.run_once()
@@ -786,9 +807,9 @@ def test_accrue_all_debt_interest_and_bond_cog_tick_update_idle_debtors(tmp_path
     now[0] += 2 * DAY + 10
     # ユーザーが一切操作しなくても BondCog.run_once() で定期加算される
     cog.run_once()
-    assert eco.db.conn.execute("SELECT debt FROM users WHERE guild_id=10 AND user_id=?", (U,)).fetchone()[0] == 4_080
-    assert eco.db.conn.execute("SELECT debt FROM users WHERE guild_id=10 AND user_id=?", (A,)).fetchone()[0] == 2_040
-    assert eco.db.conn.execute("SELECT debt FROM users WHERE guild_id=10 AND user_id=?", (B,)).fetchone()[0] == 0
+    assert eco.db.conn.execute("SELECT debt FROM teiai_debts WHERE guild_id=10 AND user_id=?", (U,)).fetchone()[0] == 4_080
+    assert eco.db.conn.execute("SELECT debt FROM teiai_debts WHERE guild_id=10 AND user_id=?", (A,)).fetchone()[0] == 2_040
+    assert eco.db.conn.execute("SELECT debt FROM teiai_debts WHERE guild_id=10 AND user_id=?", (B,)).fetchone() is None
 
 
 def test_interest_auto_seizure_protects_company_shop_and_kyosai(eco, monkeypatch):
@@ -805,10 +826,8 @@ def test_interest_auto_seizure_protects_company_shop_and_kyosai(eco, monkeypatch
         eco.db.conn.execute("INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (0, ?, 100)", (U,))
     assert eco.bank.bank_deposit(U, 3_000, now[0])[0]
     with eco.db.tx():
-        eco.db.conn.execute(
-            "UPDATE users SET balance=2_000, debt=14_900, debt_principal=14_900, debt_interest_at=? WHERE user_id=?",
-            (now[0], U),
-        )
+        set_test_balance(eco, U, 2_000)
+        set_test_debt(eco, U, 14_900, principal=14_900, interest_at=now[0])
     now[0] += DAY + 1  # 利息 +149 → 15,049 (>= GRACE_DEBT) → 猶予入り前に A-1 発動
     added = eco.debt.accrue_all_debt_interest(now[0])
     assert added == 149
@@ -835,10 +854,8 @@ def test_interest_auto_seizure_enters_grace_when_exhausted_and_skips_when_alread
     eco.wallet.balance(U)
     assert eco.bank.cds_buy(A, U, 1_000, now[0])[0]
     with eco.db.tx():
-        eco.db.conn.execute(
-            "UPDATE users SET balance=100, debt=14_900, debt_principal=14_900, debt_interest_at=? WHERE user_id=?",
-            (now[0], U),
-        )
+        set_test_balance(eco, U, 100)
+        set_test_debt(eco, U, 14_900, principal=14_900, interest_at=now[0])
     now[0] += 2 * DAY + 1  # 利息 +298 → 15,198。手元 100 全額差し押さえでも 15,098 >= GRACE_DEBT → 猶予入り
     eco.debt.accrue_all_debt_interest(now[0])
     assert eco.wallet.balance(U) == 0 and eco.debt.debt(U) == 15_098
@@ -865,12 +882,12 @@ def test_grace_penalty_accumulates_halves_duration_and_recovers_with_decay(eco, 
     durations: list[float] = []
     for _ in range(6):
         with eco.db.tx():
-            eco.db.conn.execute("UPDATE users SET debt=20_000, debt_principal=20_000 WHERE user_id=?", (U,))
+            set_test_debt(eco, U, 20_000, principal=20_000)
             eco.debt.after_debt_change(0, U)
         until = must(eco.bank.grace_until(U))
         durations.append((until - now[0]) / 3600.0)
         with eco.db.tx():
-            eco.db.conn.execute("UPDATE users SET debt=1_000, debt_principal=1_000 WHERE user_id=?", (U,))
+            set_test_debt(eco, U, 1_000, principal=1_000)
             eco.debt.after_debt_change(0, U)
         now[0] += 60  # ほぼ経過時間ゼロで再突入
     assert durations[0] == pytest.approx(24.0)
@@ -882,10 +899,10 @@ def test_grace_penalty_accumulates_halves_duration_and_recovers_with_decay(eco, 
 
     # 半減期（14日）経過するとペナルティが減衰し、猶予時間が回復する
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET grace_penalty=2.0, grace_penalty_at=? WHERE user_id=?", (now[0], U))
+        set_test_grace(eco, U, None, penalty=2.0, penalty_at=now[0])
     now[0] += teiai.GRACE_PENALTY_HALF_LIFE_DAYS * DAY
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=20_000, debt_principal=20_000 WHERE user_id=?", (U,))
+        set_test_debt(eco, U, 20_000, principal=20_000)
         eco.debt.after_debt_change(0, U)
     recovered_hours = (must(eco.bank.grace_until(U)) - now[0]) / 3600.0
     assert recovered_hours == pytest.approx(12.0, abs=0.01)
@@ -903,7 +920,7 @@ def test_b2_bankrupt_and_escape_block_seed_and_credit_until_blacklist_expires(ec
     daily_res = eco.wallet.claim_daily(U, datetime.date(2026, 11, 1))
     assert daily_res.seed == 0
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
         eco.debt.owe_for(0, U, 500, "テスト")
     assert eco.wallet.balance(U) == 0
 
@@ -977,7 +994,7 @@ def test_a_paid_off_debt_forgets_the_interest_clock(eco, monkeypatch):
     assert eco.debt.debt(U) == 0
     now[0] += 30 * DAY  # 長い間、借金なし
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=500 WHERE user_id=?", (U,))  # 新しい借金
+        set_test_debt(eco, U, 500)  # 新しい借金
     assert eco.debt.debt(U) == 500  # 昔の時刻から数えず、いまから
     now[0] += DAY + 1
     assert eco.debt.debt(U) == 505

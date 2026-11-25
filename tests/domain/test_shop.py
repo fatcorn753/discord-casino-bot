@@ -14,7 +14,7 @@ from domain import shop
 from domain.types import DAILY_BASE, DAILY_STREAK_BONUS, DAILY_STREAK_CAP, INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_guild, as_interaction, as_member, fake_response, must
-from tests.support import make_shop_cog, make_test_bot
+from tests.support import make_shop_cog, make_test_bot, set_test_balance, set_test_debt
 
 
 @pytest.fixture
@@ -89,7 +89,7 @@ def test_equip_requires_ownership_and_can_be_removed(eco):
 
 def test_get_profile_does_not_create_accounts(eco):
     assert eco.shop.get_profile(99)["title"] is None
-    assert eco.db.conn.execute("SELECT COUNT(*) FROM users WHERE user_id=99").fetchone()[0] == 0
+    assert eco.db.conn.execute("SELECT COUNT(*) FROM accounts WHERE user_id=99").fetchone()[0] == 0
 
 
 # ------------------------- 消耗品の効果 ------------------------- #
@@ -446,7 +446,7 @@ def test_use_prefers_the_owned_item_when_names_collide(cog, eco):
 def test_list_does_not_create_an_account(cog, eco):
     it = FakeInteraction(uid=77)
     shop_cog.ShopView(cog, it.user.id, it.guild.id).embed()
-    assert eco.db.conn.execute("SELECT COUNT(*) FROM users WHERE user_id=77").fetchone()[0] == 0
+    assert eco.db.conn.execute("SELECT COUNT(*) FROM accounts WHERE user_id=77").fetchone()[0] == 0
 
 
 def test_buying_without_enough_pelica_shows_a_clear_message(cog, eco):
@@ -509,7 +509,7 @@ def _seized(eco, uid=1):
     assert buy(eco, "title_regular", uid=uid).ok  # 称号は、没収するだけで、競売に出さない
     assert buy(eco, CARD, uid=uid).ok
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (uid,))
+        set_test_balance(eco, uid, 0)
         eco.debt.owe_for(eco.debt.guild_id, uid, 500, "テスト")
     assert eco.debt.bankrupt(uid)[0]
 
@@ -556,7 +556,7 @@ def test_auction_buy_moves_item_pays_bank_and_blocks_non_katagi(eco):
     assert eco.bank.bank_status(time.time())["cash"] > cash_before  # 売上は帝愛の収入
     # 破産者（カタギでない）は、買えない。持っているものは買えない
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=100 WHERE user_id=1")  # 借金のある人（カタギでない）は、買えない
+        set_test_debt(eco, 1, 100)  # 借金のある人（カタギでない）は、買えない
     assert not eco.auction.auction_buy(1, CARD).ok
     assert eco.auction.auction_buy(2, CARD).ok and not eco.auction.auction_buy(2, CARD).ok
 
@@ -566,7 +566,7 @@ def test_auction_buy_rejects_missing_or_unaffordable(eco):
     assert not eco.auction.auction_buy(2, shop.STREAK_GUARD, qty=3).ok  # 在庫は2
     eco.wallet.balance(2)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=100 WHERE user_id=2")
+        set_test_balance(eco, 2, 100)
     res = eco.auction.auction_buy(2, CARD)
     assert not res.ok and res.reason.code == "insufficient_balance_need"  # 払えないときは、買えない
 

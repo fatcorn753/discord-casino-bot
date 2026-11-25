@@ -12,7 +12,7 @@ from domain import bonds
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, must
-from tests.support import make_bond_cog, make_market_cog, make_ranking_repos, make_test_bot
+from tests.support import make_bond_cog, make_market_cog, make_ranking_repos, make_test_bot, set_test_debt
 
 NOW = 1_000_000.0
 DAY = 86400
@@ -144,7 +144,7 @@ def test_buy_guards(eco):
     assert not eco.bonds.bond_buy(1, "normal", INITIAL_BALANCE + 1, NOW)[0]  # 残高不足
     eco.wallet.stats(2)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=500 WHERE user_id=2")
+        set_test_debt(eco, 2, 500)
     assert not eco.bonds.bond_buy(2, "normal", 1000, NOW)[0]  # 借金中
     eco.wallet.credit(3, 20_000, "テスト")
     assert eco.bonds.bond_buy(3, "junk", 6000, NOW)[0] is True

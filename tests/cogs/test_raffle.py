@@ -11,7 +11,7 @@ from cogs.raffle.cog import raffle_embed, result_embed
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_guild, as_interaction, must
-from tests.support import make_raffle_cog, make_test_bot
+from tests.support import make_raffle_cog, make_test_bot, set_test_balance, set_test_debt
 
 NOW = 1_000_000.0
 
@@ -60,11 +60,11 @@ def test_join_guards(eco):
     assert not eco.raffle.raffle_join(2, NOW + 3601)[0]  # 締切後
     eco.wallet.stats(3)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=500 WHERE user_id=3")
+        set_test_debt(eco, 3, 500)
     assert not eco.raffle.raffle_join(3, NOW)[0]  # 借金中
     eco.wallet.stats(4)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=1999 WHERE user_id=4")
+        set_test_balance(eco, 4, 1999)
     assert not eco.raffle.raffle_join(4, NOW)[0]  # 残高不足
     assert eco.raffle.raffle_get()["entries"] == [1]
     assert not open_raffle(eco)[0]  # 募集中は1つだけ
