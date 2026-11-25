@@ -156,8 +156,8 @@ def test_old_single_symbol_tables_become_cs_without_losing_rows(tmp_path):
     path = str(tmp_path / "old.db")
     first = open_repositories(path, strict=True)
     c = first.db.conn
-    for t in ("market_prices", "crypto", "crypto_short"):
-        c.execute(f"DROP TABLE {t}")
+    for t in ("market_prices", "crypto", "crypto_short", "crypto_long", "margin_positions"):
+        c.execute(f"DROP TABLE IF EXISTS {t}")
     c.execute("CREATE TABLE market_prices (ts REAL PRIMARY KEY, price REAL NOT NULL, event INTEGER NOT NULL DEFAULT 0)")
     c.execute(
         "CREATE TABLE crypto (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, units INTEGER NOT NULL DEFAULT 0,"

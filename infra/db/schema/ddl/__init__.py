@@ -15,6 +15,26 @@ from infra.db.schema.ddl import (
     telemetry,
 )
 from infra.db.schema.ddl.core import ACCOUNTS_DDL, USER_DAILY_DDL, USER_PLAY_STATS_DDL, USERS_DDL
+from infra.db.schema.ddl.horse import (
+    HORSE_AUCTION_LISTINGS_DDL,
+    HORSE_AUCTION_LISTINGS_INDEX_DDL,
+    HORSE_BET_PICKS_DDL,
+    HORSE_BETS_DDL,
+    HORSE_BETS_INDEX_DDL,
+    HORSE_BETS_V1_DDL,
+    HORSE_COMBO2_ODDS_DDL,
+    HORSE_ENTRIES_DDL,
+    HORSE_ENTRIES_INDEX_DDL,
+    HORSE_ENTRIES_V1_DDL,
+    HORSE_ODDS_V1_DDL,
+    HORSE_OWNERSHIP_DDL,
+    HORSE_OWNERSHIP_INDEX_DDL,
+    HORSE_RACE_REGISTRATIONS_DDL,
+    HORSE_TRIO_ODDS_DDL,
+    HORSES_DDL,
+    HORSES_V1_DDL,
+    HORSES_V1_INDEX_DDL,
+)
 from infra.db.schema.ddl.labor import (
     LABOR_DAILY_DDL,
     LABOR_DAILY_RANK_INDEX_DDL,
@@ -26,6 +46,7 @@ from infra.db.schema.ddl.labor import (
     LABOR_UPGRADES_DDL,
     LABOR_V1_DDL,
 )
+from infra.db.schema.ddl.market import CRYPTO_LONG_DDL, CRYPTO_SHORT_DDL, MARGIN_POSITIONS_DDL
 from infra.db.schema.ddl.shop import INVENTORY_DDL, PROFILE_DDL, SHOP_STOCK_DDL, USER_BUFFS_DDL, USER_EQUIPMENT_DDL
 from infra.db.schema.ddl.social import new_quiz_order
 from infra.db.schema.ddl.teiai import (
@@ -72,13 +93,28 @@ V4_LABOR_PROFILE_STATEMENTS: tuple[str, ...] = (
     USER_EQUIPMENT_DDL,
     USER_BUFFS_DDL,
 )
+V5_MARGIN_HORSE_STATEMENTS: tuple[str, ...] = (
+    MARGIN_POSITIONS_DDL,
+    HORSE_OWNERSHIP_DDL,
+    HORSE_OWNERSHIP_INDEX_DDL,
+    HORSE_AUCTION_LISTINGS_DDL,
+    HORSE_AUCTION_LISTINGS_INDEX_DDL,
+    HORSE_RACE_REGISTRATIONS_DDL,
+    HORSE_BET_PICKS_DDL,
+    HORSE_COMBO2_ODDS_DDL,
+    HORSE_TRIO_ODDS_DDL,
+)
 _V1_SKIP_SET = frozenset(
     (
         *V2_USER_SPLIT_STATEMENTS,
         *V3_TEIAI_SPLIT_STATEMENTS,
         *V4_LABOR_PROFILE_STATEMENTS,
+        *V5_MARGIN_HORSE_STATEMENTS,
         TEIAI_BANK_DDL,
         TEIAI_HOUSE_DDL,
+        HORSES_DDL,
+        HORSE_ENTRIES_DDL,
+        HORSE_BETS_DDL,
     )
 )
 
@@ -118,6 +154,18 @@ def create_v1_missing_tables(conn: sqlite3.Connection) -> None:
         conn.execute(LABOR_V1_DDL)
     if not _has_table(conn, "user_equipment"):
         conn.execute(PROFILE_DDL)
+    if not _has_table(conn, "margin_positions"):
+        conn.execute(CRYPTO_SHORT_DDL)
+        conn.execute(CRYPTO_LONG_DDL)
+    if not _has_table(conn, "horse_ownership"):
+        conn.execute(HORSES_V1_DDL)
+        conn.execute(HORSES_V1_INDEX_DDL)
+    if not _has_table(conn, "horse_race_registrations"):
+        conn.execute(HORSE_ENTRIES_V1_DDL)
+    if not _has_table(conn, "horse_bet_picks"):
+        conn.execute(HORSE_BETS_V1_DDL)
+    if not _has_table(conn, "horse_combo2_odds"):
+        conn.execute(HORSE_ODDS_V1_DDL)
     for stmt in ALL_STATEMENTS:
         if stmt not in _V1_SKIP_SET:
             conn.execute(stmt)
@@ -125,7 +173,13 @@ def create_v1_missing_tables(conn: sqlite3.Connection) -> None:
 
 __all__ = [
     "ALL_STATEMENTS",
+    "HORSES_DDL",
+    "HORSE_BETS_DDL",
+    "HORSE_BETS_INDEX_DDL",
+    "HORSE_ENTRIES_DDL",
+    "HORSE_ENTRIES_INDEX_DDL",
     "INVENTORY_DDL",
+    "MARGIN_POSITIONS_DDL",
     "PROFILE_DDL",
     "SHOP_STOCK_DDL",
     "TEIAI_BANK_DDL",
@@ -134,6 +188,7 @@ __all__ = [
     "V2_USER_SPLIT_STATEMENTS",
     "V3_TEIAI_SPLIT_STATEMENTS",
     "V4_LABOR_PROFILE_STATEMENTS",
+    "V5_MARGIN_HORSE_STATEMENTS",
     "create_all_tables",
     "create_v1_missing_tables",
     "new_quiz_order",

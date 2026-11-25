@@ -33,7 +33,6 @@ class MarginRepo(ScopedRepo, IMarginRepo):
 
     SHORT_LEVERAGES = market_mod.SHORT_LEVERAGES
     MARGIN_LEVERAGES = SHORT_LEVERAGES
-    _MARGIN_TABLE = {"short": "crypto_short", "long": "crypto_long"}  # 表の名前は固定の文字列だけ（SQL に埋め込むため）
     SIDE_NAME = market_mod.SIDE_NAME
 
     def __init__(
@@ -60,9 +59,9 @@ class MarginRepo(ScopedRepo, IMarginRepo):
 
     def _margin_position_for(self, guild_id: int, user_id: int, symbol: str, side: str) -> MarginPosition:
         r = self._one(
-            f"SELECT units, entry_value, margin FROM {self._MARGIN_TABLE[side]} "
-            "WHERE guild_id=? AND user_id=? AND symbol=?",
-            (guild_id, user_id, symbol),
+            "SELECT units, entry_value, margin FROM margin_positions "
+            "WHERE guild_id=? AND user_id=? AND symbol=? AND side=?",
+            (guild_id, user_id, symbol, side),
         )
         return (r["units"], r["entry_value"], r["margin"]) if r else (0, 0.0, 0)
 
@@ -79,14 +78,15 @@ class MarginRepo(ScopedRepo, IMarginRepo):
 
     def margin_positions_for(self, guild_id: int, user_id: int) -> list[tuple[str, str, int, float, int]]:
         """建てている信用取引すべて [(side, 銘柄, 口数, 建てた総額, 担保), ...]（空売り・信用買いの両方）。"""
-        out: list[tuple[str, str, int, float, int]] = []
-        for side, table in self._MARGIN_TABLE.items():
+        return [
+            (r["side"], r["symbol"], r["units"], r["entry_value"], r["margin"])
             for r in self._all(
-                f"SELECT symbol, units, entry_value, margin FROM {table} WHERE guild_id=? AND user_id=? AND units>0 ORDER BY symbol",
+                "SELECT side, symbol, units, entry_value, margin FROM margin_positions "
+                "WHERE guild_id=? AND user_id=? AND units>0 "
+                "ORDER BY CASE side WHEN 'short' THEN 0 ELSE 1 END, symbol",
                 (guild_id, user_id),
-            ):
-                out.append((side, r["symbol"], r["units"], r["entry_value"], r["margin"]))
-        return out
+            )
+        ]
 
     def margin_positions(self, user_id: int) -> list[tuple[str, str, int, float, int]]:
         with self._lock:
@@ -106,7 +106,8 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             return [
                 (r["user_id"], r["units"], r["entry_value"])
                 for r in self._all(
-                    "SELECT user_id, units, entry_value FROM crypto_short WHERE guild_id=? AND symbol=? AND units>0 "
+                    "SELECT user_id, units, entry_value FROM margin_positions "
+                    "WHERE guild_id=? AND symbol=? AND side='short' AND units>0 "
                     "ORDER BY units DESC, user_id LIMIT ?",
                     (self._g(), symbol, limit),
                 )
@@ -122,17 +123,15 @@ class MarginRepo(ScopedRepo, IMarginRepo):
     def collect_values(self, guild_id: int, totals: dict[int, int]) -> None:
         with self._lock:
             prices = self._market.latest_prices()
-            for side, table in self._MARGIN_TABLE.items():
-                rows = [
-                    r
-                    for r in self._all(
-                        f"SELECT user_id, symbol, units, entry_value, margin FROM {table} WHERE guild_id=?", (guild_id,)
-                    )
-                    if r["symbol"] in prices
-                ]
-                for r in rows:
-                    pnl = market_mod.margin_pnl(side, r["units"], r["entry_value"], prices[r["symbol"]])
-                    totals[r["user_id"]] = totals.get(r["user_id"], 0) + max(0, r["margin"] + pnl)
+            rows = self._all(
+                "SELECT user_id, symbol, side, units, entry_value, margin FROM margin_positions WHERE guild_id=?",
+                (guild_id,),
+            )
+            for r in rows:
+                if r["symbol"] not in prices:
+                    continue
+                pnl = market_mod.margin_pnl(r["side"], r["units"], r["entry_value"], prices[r["symbol"]])
+                totals[r["user_id"]] = totals.get(r["user_id"], 0) + max(0, r["margin"] + pnl)
 
     def _collateral_value_for(self, guild_id: int, user_id: int, prices: Mapping[str, float]) -> float:
         """代用有価証券の評価（現物は売った手取り×掛目、債券は元本×掛目）。信用取引の担保には数えない。"""
@@ -252,7 +251,6 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                         "margin_min_collateral",
                         min_margin=market_mod.SHORT_MIN_MARGIN,
                         leverage=leverage,
-                        # 担保は総額÷レバレッジの切り上げなので、最低担保に届く最小の総額はこれ
                         min_total=(market_mod.SHORT_MIN_MARGIN - 1) * leverage + 1,
                         balance=bal,
                     ),
@@ -280,10 +278,10 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                 f"{name}{label}担保:{market_mod.lots(units)}@{market_mod.fmt(price)}（{leverage}倍）",
             )
             self._conn.execute(
-                f"INSERT INTO {self._MARGIN_TABLE[side]} (guild_id, user_id, symbol, units, entry_value, margin) "
-                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(guild_id, user_id, symbol) DO UPDATE SET units=units+excluded.units, "
-                "entry_value=entry_value+excluded.entry_value, margin=margin+excluded.margin",
-                (gid, user_id, symbol, units, notional, margin),
+                "INSERT INTO margin_positions (guild_id, user_id, symbol, side, units, entry_value, margin) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(guild_id, user_id, symbol, side) DO UPDATE SET "
+                "units=units+excluded.units, entry_value=entry_value+excluded.entry_value, margin=margin+excluded.margin",
+                (gid, user_id, symbol, side, units, notional, margin),
             )
             return CryptoResult(True, units=units, money=margin, balance=self._account.raw_balance(gid, user_id))
 
@@ -321,18 +319,18 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         payout = max(0, part_margin + pnl)
         tax = self._tax(guild_id, user_id, pnl, taxable, self.SIDE_NAME[side] + "決済")
         payout -= tax
-        table = self._MARGIN_TABLE[side]
         if payout:
             self._account.apply(guild_id, user_id, payout, f"{label}:{market_mod.lots(units)}@{market_mod.fmt(price)}")
         if whole:
             self._conn.execute(
-                f"DELETE FROM {table} WHERE guild_id=? AND user_id=? AND symbol=?", (guild_id, user_id, symbol)
+                "DELETE FROM margin_positions WHERE guild_id=? AND user_id=? AND symbol=? AND side=?",
+                (guild_id, user_id, symbol, side),
             )
         else:
             self._conn.execute(
-                f"UPDATE {table} SET units=units-?, entry_value=entry_value-?, margin=margin-? "
-                "WHERE guild_id=? AND user_id=? AND symbol=?",
-                (units, part_entry, part_margin, guild_id, user_id, symbol),
+                "UPDATE margin_positions SET units=units-?, entry_value=entry_value-?, margin=margin-? "
+                "WHERE guild_id=? AND user_id=? AND symbol=? AND side=?",
+                (units, part_entry, part_margin, guild_id, user_id, symbol, side),
             )
         shortfall = -(part_margin + pnl)
         if owe and shortfall > 0:  # 担保を超える損失は、手元の現金や現物から取り立てて、足りなければ借金になる
@@ -403,10 +401,8 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             prices = prices or self._market.latest_prices()
             uids = {
                 r["user_id"]
-                for table in self._MARGIN_TABLE.values()
-                for r in self._all(f"SELECT user_id FROM {table} WHERE guild_id=? AND units>0", (gid,))
+                for r in self._all("SELECT DISTINCT user_id FROM margin_positions WHERE guild_id=? AND units>0", (gid,))
             }
-            # 価格のある建玉だけを先に絞ってから、1建玉ずつロスカット水準を二分探索で求める
             positions = [
                 (uid, side, symbol, units)
                 for uid in uids
@@ -416,7 +412,7 @@ class MarginRepo(ScopedRepo, IMarginRepo):
             for uid, side, symbol, units in positions:
                 spot = prices[symbol]
                 notional = units * spot / market_mod.UNIT
-                sign = -1 if side == "long" else 1  # 買い建ては下へ、空売りは上へ動くと損
+                sign = -1 if side == "long" else 1
 
                 def broken(
                     move: float, uid: int = uid, symbol: str = symbol, spot: float = spot, sign: int = sign
@@ -437,18 +433,17 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         """全サーバーの建玉に、信用金利（信用買いは借入金利、空売りは貸株料）を数えて、貯まった分を担保から引く。[(サーバー, ユーザー, 銘柄, 向き, 引いた額)]。"""
         done: list[tuple[int, int, str, str, int]] = []
         with self._db.tx():
-            rows = [
-                (r, side, table, market_mod.BORROW_RATE_PER_DAY[side])
-                for side, table in self._MARGIN_TABLE.items()
-                for r in self._all(
-                    f"SELECT guild_id, user_id, symbol, entry_value, margin, interest_at, accrued FROM {table}"
-                )
-            ]
-            for r, side, table, rate in rows:
-                key = (r["guild_id"], r["user_id"], r["symbol"])
-                if r["interest_at"] <= 0:  # 数え始め（金利の列がなかった頃の建玉は、ここから数える）
+            rows = self._all(
+                "SELECT guild_id, user_id, symbol, side, entry_value, margin, interest_at, accrued FROM margin_positions"
+            )
+            for r in rows:
+                side = r["side"]
+                rate = market_mod.BORROW_RATE_PER_DAY[side]
+                key = (r["guild_id"], r["user_id"], r["symbol"], side)
+                if r["interest_at"] <= 0:
                     self._conn.execute(
-                        f"UPDATE {table} SET interest_at=? WHERE guild_id=? AND user_id=? AND symbol=?", (now, *key)
+                        "UPDATE margin_positions SET interest_at=? WHERE guild_id=? AND user_id=? AND symbol=? AND side=?",
+                        (now, *key),
                     )
                     continue
                 base = market_mod.margin_interest_base(side, r["entry_value"], r["margin"])
@@ -458,7 +453,8 @@ class MarginRepo(ScopedRepo, IMarginRepo):
                     charge = min(int(accrued), r["margin"])
                     accrued -= int(accrued)
                 self._conn.execute(
-                    f"UPDATE {table} SET margin=margin-?, accrued=?, interest_at=? WHERE guild_id=? AND user_id=? AND symbol=?",
+                    "UPDATE margin_positions SET margin=margin-?, accrued=?, interest_at=? "
+                    "WHERE guild_id=? AND user_id=? AND symbol=? AND side=?",
                     (charge, accrued, now, *key),
                 )
                 if charge <= 0:
@@ -480,15 +476,16 @@ class MarginRepo(ScopedRepo, IMarginRepo):
         return done
 
     def margin_losscut(self, prices: Mapping[str, float]) -> list[tuple[int, int, str, str, int]]:
-        """全サーバーの口座を調べ、維持率が LOSSCUT_RATIO を下回る口座を、連鎖ロスカットする。prices は {銘柄: いまの価格}。[(サーバー, ユーザー, 銘柄, 向き, 損失)]。"""
+        """全サーバーの口座を調べ、維持率が LOSSCUT_RATIO を下回る口座を、連鎖ロスカットする。"""
         done = []
         with self._db.tx():
-            accounts: set[tuple[int, int]] = set()
-            for table in self._MARGIN_TABLE.values():
-                accounts.update(
-                    (r["guild_id"], r["user_id"]) for r in self._all(f"SELECT guild_id, user_id FROM {table}")
-                )
-            for guild_id, user_id in sorted(accounts):
+            accounts = sorted(
+                {
+                    (r["guild_id"], r["user_id"])
+                    for r in self._all("SELECT DISTINCT guild_id, user_id FROM margin_positions")
+                }
+            )
+            for guild_id, user_id in accounts:
                 try:
                     gid = validate_guild_id(guild_id)
                 except ValueError:

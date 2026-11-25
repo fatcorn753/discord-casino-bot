@@ -28,7 +28,7 @@ CRYPTO_DDL = """
     )"""
 
 CRYPTO_SHORT_DDL = """
-    CREATE TABLE IF NOT EXISTS crypto_short (      -- 銘柄ごとの空売り（1人が、銘柄ごとに1つの建玉）
+    CREATE TABLE IF NOT EXISTS crypto_short (      -- v1 互換定義（v5 で margin_positions へ統合）
         guild_id    INTEGER NOT NULL,
         user_id     INTEGER NOT NULL,
         symbol      TEXT    NOT NULL DEFAULT 'cs',
@@ -41,7 +41,7 @@ CRYPTO_SHORT_DDL = """
     )"""
 
 CRYPTO_LONG_DDL = """
-    CREATE TABLE IF NOT EXISTS crypto_long (       -- 銘柄ごとの信用買い（レバレッジをかけた買い建て。空売りと同じ形）
+    CREATE TABLE IF NOT EXISTS crypto_long (       -- v1 互換定義（v5 で margin_positions へ統合）
         guild_id    INTEGER NOT NULL,
         user_id     INTEGER NOT NULL,
         symbol      TEXT    NOT NULL,
@@ -51,6 +51,20 @@ CRYPTO_LONG_DDL = """
         interest_at REAL NOT NULL DEFAULT 0,  -- 信用金利（借入金利）を、ここまで数えた時刻
         accrued     REAL NOT NULL DEFAULT 0,  -- 数えたが、まだ担保から引いていない金利（小数）
         PRIMARY KEY (guild_id, user_id, symbol)
+    )"""
+
+MARGIN_POSITIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS margin_positions (  -- 銘柄・売買方向ごとの信用建玉（空売り・信用買い統合）
+        guild_id    INTEGER NOT NULL,
+        user_id     INTEGER NOT NULL,
+        symbol      TEXT    NOT NULL,
+        side        TEXT    NOT NULL CHECK (side IN ('long', 'short')),
+        units       INTEGER NOT NULL CHECK (units > 0),
+        entry_value REAL    NOT NULL,
+        margin      INTEGER NOT NULL CHECK (margin >= 0),
+        interest_at REAL    NOT NULL DEFAULT 0,
+        accrued     REAL    NOT NULL DEFAULT 0,
+        PRIMARY KEY (guild_id, user_id, symbol, side)
     )"""
 
 OPTIONS_DDL = """
@@ -121,8 +135,7 @@ STATEMENTS: tuple[str, ...] = (
     MARKET_PRICES_DDL,
     MARKET_FAIR_DDL,
     CRYPTO_DDL,
-    CRYPTO_SHORT_DDL,
-    CRYPTO_LONG_DDL,
+    MARGIN_POSITIONS_DDL,
     OPTIONS_DDL,
     MARKET_EVENTS_DDL,
     EARNINGS_DDL,

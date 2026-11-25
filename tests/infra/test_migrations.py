@@ -440,23 +440,55 @@ def build_legacy_v0_db(path: str) -> None:
     c.execute("INSERT INTO teiai_deposits (guild_id, user_id, amount) VALUES (?, ?, 10000)", (G, U1))
     c.execute("INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, 0, 9000), (?, ?, 1000)", (G, G, U1))
     c.execute(
-        "INSERT INTO horses (guild_id, owner_id, name, coat, silks, speed, stamina, power, guts, created, rented_day) "
-        "VALUES (?, ?, 'ハヤブサ', '鹿毛', '赤', 60, 60, 60, 60, ?, NULL)",
-        (G, U1, NOW),
+        "INSERT INTO horses (id, guild_id, owner_id, name, coat, silks, speed, stamina, power, guts, created, listed_at, rented_day) "
+        "VALUES (1, ?, ?, 'ハヤブサ', '鹿毛', '赤', 60, 60, 60, 60, ?, NULL, NULL), "
+        "(2, ?, -1, 'アラシ', '栗毛', '青', 55, 55, 55, 55, ?, ?, NULL), "
+        "(3, ?, -2, 'インタイ', '黒鹿毛', '白', 50, 50, 50, 50, ?, NULL, NULL)",
+        (G, U1, NOW, G, NOW, NOW, G, NOW),
     )
     c.execute(
         "INSERT INTO horse_races (id, guild_id, kind, grade, start_at, entry_close, bet_close, status, created) "
-        "VALUES (1, ?, 'regular', 'G1', ?, ?, ?, 'done', ?), (2, ?, 'regular', '', ?, ?, ?, 'betting', ?)",
-        (G, NOW - 10, NOW - 20, NOW - 15, NOW - 30, G, EXPIRY_FUTURE, NOW + 3600, NOW + 7200, NOW),
+        "VALUES (1, ?, 'regular', 'G1', ?, ?, ?, 'done', ?), "
+        "(2, ?, 'regular', '', ?, ?, ?, 'betting', ?), "
+        "(3, ?, 'special', '', ?, ?, ?, 'entry', ?)",
+        (
+            G,
+            NOW - 10,
+            NOW - 20,
+            NOW - 15,
+            NOW - 30,
+            G,
+            EXPIRY_FUTURE,
+            NOW + 3600,
+            NOW + 7200,
+            NOW,
+            G,
+            EXPIRY_FUTURE,
+            NOW + 1800,
+            NOW + 3600,
+            NOW,
+        ),
     )
-    c.execute("INSERT INTO horse_entries (race_id, lane, horse_id, owner_id, name, tactic) VALUES (1, 1, 1, ?, 'ハヤブサ', 'pace')", (U1,))
-    c.execute("INSERT INTO horse_entries (race_id, lane, horse_id, owner_id, name, tactic) VALUES (2, 1, 1, ?, 'ハヤブサ', 'pace')", (U1,))
     c.execute(
-        "INSERT INTO horse_bets (guild_id, race_id, user_id, kind, lane, stake, odds, settled, created) "
-        "VALUES (?, 2, ?, 'win', 1, 400, 2.5, 0, ?)",
-        (G, U1, NOW),
+        "INSERT INTO horse_entries (race_id, lane, horse_id, owner_id, name, tactic) "
+        "VALUES (1, 1, 1, ?, 'ハヤブサ', 'pace'), "
+        "(2, 1, 1, ?, 'ハヤブサ', 'pace'), "
+        "(2, 2, 0, 0, '帝愛2号', 'pace'), "
+        "(3, -1, 1, ?, 'ハヤブサ', 'pace')",
+        (U1, U1, U1),
     )
-    c.execute("INSERT INTO horse_odds (race_id, kind, key, odds) VALUES (1, 'quinella', '1-2', 5.0), (2, 'quinella', '1-2', 4.5)")
+    c.execute(
+        "INSERT INTO horse_bets (guild_id, race_id, user_id, kind, lane, picks, stake, odds, settled, created) "
+        "VALUES (?, 2, ?, 'win', 1, '', 400, 2.5, 0, ?), "
+        "(?, 2, ?, 'exacta', 1, '1>2', 200, 12.0, 0, ?), "
+        "(?, 2, ?, 'trio', 1, '1-2-3', 100, 18.0, 0, ?)",
+        (G, U1, NOW, G, U1, NOW, G, U1, NOW),
+    )
+    c.execute(
+        "INSERT INTO horse_odds (race_id, kind, key, odds) VALUES "
+        "(1, 'quinella', '1-2', 5.0), (2, 'quinella', '1-2', 4.5), "
+        "(1, 'trio', '1-2-3', 20.0), (2, 'trio', '1-2-3', 18.0)"
+    )
     c.execute(
         "INSERT INTO labor (guild_id, user_id, pick, glove, helmet, pot, pot_workers, donated, relics, day, "
         "day_earned, day_click, last_click, rest_until, clicks, earned_total, apprentice, miner, dorm, idle_at, ores, wage) "
@@ -506,12 +538,13 @@ def test_fresh_db_initializes_directly_to_v1_without_backup(tmp_path):
     path = str(tmp_path / "fresh.db")
     eco = open_repositories(path, strict=True)
     try:
-        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION == 4
+        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION == 5
         assert eco.db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert eco.db.conn.execute("PRAGMA foreign_key_check").fetchall() == []
         tables = {r[0] for r in eco.db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "guild_users" not in tables and "users" not in tables
         assert "labor" not in tables and "profile" not in tables
+        assert {"crypto_short", "crypto_long", "horse_odds"}.isdisjoint(tables)
         assert {
             "accounts",
             "user_daily",
@@ -533,11 +566,19 @@ def test_fresh_db_initializes_directly_to_v1_without_backup(tmp_path):
             "labor_pending_relics",
             "user_equipment",
             "user_buffs",
+            "margin_positions",
+            "horse_ownership",
+            "horse_auction_listings",
+            "horse_race_registrations",
+            "horse_bet_picks",
+            "horse_combo2_odds",
+            "horse_trio_odds",
         } <= tables
         assert not os.path.exists(f"{path}.before-v1")
         assert not os.path.exists(f"{path}.before-v2")
         assert not os.path.exists(f"{path}.before-v3")
         assert not os.path.exists(f"{path}.before-v4")
+        assert not os.path.exists(f"{path}.before-v5")
         assert eco.for_guild(G).wallet.balance(U1) == INITIAL_BALANCE
     finally:
         eco.close()
@@ -550,34 +591,38 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert os.path.exists(f"{path}.before-v1")
         assert os.path.exists(f"{path}.before-v2")
         assert os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
+        assert os.path.exists(f"{path}.before-v5")
 
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "guild_users" not in tables and "autoplay" not in tables and "users" not in tables
         assert "labor" not in tables and "profile" not in tables
+        assert {"crypto_short", "crypto_long", "horse_odds"}.isdisjoint(tables)
 
         removed = {
             "teiai_bank": {"bailout_debt", "kyosai_house_ts"},
-            "horses": {"rented_day"},
+            "horses": {"rented_day", "owner_id", "listed_at"},
             "horse_races": {"grade"},
             "horse_entries": {"tactic"},
+            "horse_bets": {"lane", "picks"},
             "labor_workers": {"legacy"},
         }
         for table, dead_cols in removed.items():
             cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
             assert not (dead_cols & cols), f"{table} に廃止列が残っている: {dead_cols & cols}"
 
-        # 不要行の掃除: qty<=0 の seized_items と、完了レースの horse_odds だけが消える
+        # 不要行の掃除: qty<=0 の seized_items と、完了レースの組合せオッズだけが消える
         seized = conn.execute("SELECT qty FROM seized_items ORDER BY id").fetchall()
         assert [r[0] for r in seized] == [4]
-        odds = conn.execute("SELECT race_id FROM horse_odds").fetchall()
-        assert [r[0] for r in odds] == [2]
+        odds2 = conn.execute("SELECT race_id FROM horse_combo2_odds").fetchall()
+        odds3 = conn.execute("SELECT race_id FROM horse_trio_odds").fetchall()
+        assert [r[0] for r in odds2] == [2] and [r[0] for r in odds3] == [2]
 
         # autoplay (750) は残高に返金され、作業員の旧人数列は労働契約へ引き継がれる
         g = eco.for_guild(G)
@@ -594,6 +639,17 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
         prof = g.shop.get_profile(U1, raw=True)
         assert prof["title"] == "title_rookie" and prof["skin_dice"] == "skin_kuro"
         assert prof["daily_boost"] == 2 and prof["insurance"] == 1
+        assert g.margin.short_position(U1, "cs") == (1000, 10.0, 1500)
+        assert g.margin.long_position(U1, "cs") == (1000, 10.0, 2000)
+        assert [h["name"] for h in g.horses.auction_horses(NOW)] == ["アラシ"]
+        h3 = g.horses.horse_get(3)
+        assert h3 is not None and h3["owner_id"] == -2
+        assert [e["horse_id"] for e in g.races.race_entries(3, registered_only=True)] == [1]
+        assert [(b["kind"], b["lane"], b["picks"]) for b in g.races.race_bets(U1, 2)] == [
+            ("win", 1, ""),
+            ("exacta", 1, "1>2"),
+            ("trio", 1, "1-2-3"),
+        ]
 
         # B/S（asset_parts / asset_groups）および escrow テーブルの整合性確認
         assert conn.execute("SELECT COALESCE(SUM(amount), 0) FROM escrow").fetchone()[0] == 300
@@ -670,13 +726,13 @@ def test_failing_migration_step_rolls_back_atomically(tmp_path):
         conn.execute("UPDATE accounts SET balance = 0")
         raise RuntimeError("boom during migration")
 
-    steps = (*schema.MIGRATIONS, schema.MigrationStep(5, "broken_v5", broken_step))
+    steps = (*schema.MIGRATIONS, schema.MigrationStep(6, "broken_v6", broken_step))
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
         with pytest.raises(RuntimeError, match="boom"):
-            schema.initialize_db(conn, path, steps=steps, target_version=5)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+            schema.initialize_db(conn, path, steps=steps, target_version=6)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert (
             conn.execute("SELECT balance FROM accounts WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()[0]
             == INITIAL_BALANCE + 500
@@ -717,12 +773,13 @@ def test_v1_to_v2_splits_all_user_domains_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v1")
         assert os.path.exists(f"{path}.before-v2")
         assert os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
+        assert os.path.exists(f"{path}.before-v5")
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").fetchone() is None
 
         st = eco.for_guild(G).wallet.stats(U1)
@@ -763,11 +820,14 @@ def test_runtime_auction_and_race_purge_zero_qty_and_done_odds(tmp_path):
                 "win": {str(e["lane"]): 2.0 for e in g.races.race_entries(rid)},
                 "place": {str(e["lane"]): 1.5 for e in g.races.race_entries(rid)},
                 "quinella": {"1-2": 5.0},
+                "trio": {"1-2-3": 12.0},
             },
         )
-        assert eco.db.conn.execute("SELECT COUNT(*) FROM horse_odds WHERE race_id=?", (rid,)).fetchone()[0] == 1
+        assert eco.db.conn.execute("SELECT COUNT(*) FROM horse_combo2_odds WHERE race_id=?", (rid,)).fetchone()[0] == 1
+        assert eco.db.conn.execute("SELECT COUNT(*) FROM horse_trio_odds WHERE race_id=?", (rid,)).fetchone()[0] == 1
         assert g.races.race_run(rid, tz_hours=9.0) is not None
-        assert eco.db.conn.execute("SELECT COUNT(*) FROM horse_odds WHERE race_id=?", (rid,)).fetchone()[0] == 0
+        assert eco.db.conn.execute("SELECT COUNT(*) FROM horse_combo2_odds WHERE race_id=?", (rid,)).fetchone()[0] == 0
+        assert eco.db.conn.execute("SELECT COUNT(*) FROM horse_trio_odds WHERE race_id=?", (rid,)).fetchone()[0] == 0
     finally:
         eco.close()
 
@@ -798,11 +858,12 @@ def test_v2_to_v3_splits_teiai_bank_and_house_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v2")
         assert os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
+        assert os.path.exists(f"{path}.before-v5")
 
         tb_cols = {r[1] for r in conn.execute("PRAGMA table_info(teiai_bank)")}
         assert tb_cols == {"guild_id", "cash", "loaned", "ts"}
@@ -856,10 +917,11 @@ def test_v3_to_v4_splits_labor_and_profile_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
+        assert os.path.exists(f"{path}.before-v5")
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='labor'").fetchone() is None
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='profile'").fetchone() is None
 
@@ -876,6 +938,81 @@ def test_v3_to_v4_splits_labor_and_profile_losslessly(tmp_path):
         assert prof["title"] == "title_rookie" and prof["card_color"] == "card_gold"
         assert prof["card_icon"] is None and prof["skin_dice"] == "skin_kuro" and prof["skin_table"] == "skin_vip"
         assert prof["daily_boost"] == 3 and prof["insurance"] == 2
+    finally:
+        eco.close()
+
+
+def test_v4_to_v5_merges_margin_and_normalizes_horse_racing_losslessly(tmp_path):
+    path = str(tmp_path / "v4_only.db")
+    c = sqlite3.connect(path)
+    schema.create_v1_missing_tables(c)
+    from infra.db.schema.migrations_v2 import migrate_v1_to_v2
+    from infra.db.schema.migrations_v3 import migrate_v2_to_v3
+    from infra.db.schema.migrations_v4 import migrate_v3_to_v4
+
+    migrate_v1_to_v2(c)
+    migrate_v2_to_v3(c)
+    migrate_v3_to_v4(c)
+    c.execute("INSERT INTO accounts (guild_id, user_id, balance, created_at) VALUES (?, ?, 50000, ?)", (G, U1, NOW))
+    c.execute(
+        "INSERT INTO crypto_short (guild_id, user_id, symbol, units, entry_value, margin, interest_at, accrued) "
+        "VALUES (?, ?, 'cs', 2000, 20.0, 1200, ?, 1.5)",
+        (G, U1, NOW),
+    )
+    c.execute(
+        "INSERT INTO crypto_long (guild_id, user_id, symbol, units, entry_value, margin, interest_at, accrued) "
+        "VALUES (?, ?, 'nv', 3000, 60.0, 2400, ?, 2.5)",
+        (G, U1, NOW),
+    )
+    c.execute(
+        "INSERT INTO horses (id, guild_id, owner_id, name, coat, silks, speed, stamina, power, guts, created, listed_at) "
+        "VALUES (10, ?, ?, 'カチドキ', '鹿毛', '赤', 65, 55, 50, 50, ?, NULL), "
+        "(11, ?, -1, 'セリウマ', '白毛', '青', 50, 50, 50, 50, ?, ?)",
+        (G, U1, NOW, G, NOW, NOW - 60),
+    )
+    c.execute(
+        "INSERT INTO horse_races (id, guild_id, kind, start_at, entry_close, bet_close, status, created) "
+        "VALUES (10, ?, 'regular', ?, ?, ?, 'betting', ?), (11, ?, 'special', ?, ?, ?, 'entry', ?)",
+        (G, EXPIRY_FUTURE, NOW + 100, NOW + 200, NOW, G, EXPIRY_FUTURE, NOW + 100, NOW + 200, NOW),
+    )
+    c.execute(
+        "INSERT INTO horse_entries (race_id, lane, horse_id, owner_id, name, coat, silks) "
+        "VALUES (10, 1, 10, ?, 'カチドキ', '鹿毛', '赤'), (10, 2, 0, 0, '帝愛2号', '栗毛', '白'), "
+        "(11, -1, 10, ?, 'カチドキ', '鹿毛', '赤')",
+        (U1, U1),
+    )
+    c.execute(
+        "INSERT INTO horse_bets (id, guild_id, race_id, user_id, kind, lane, picks, stake, odds, settled, created) "
+        "VALUES (20, ?, 10, ?, 'exacta', 2, '2>1', 500, 9.5, 0, ?)",
+        (G, U1, NOW),
+    )
+    c.execute(
+        "INSERT INTO horse_odds (race_id, kind, key, odds) VALUES (10, 'exacta', '2>1', 9.5), (10, 'trio', '1-2-3', 14.0)"
+    )
+    c.execute("PRAGMA user_version = 4")
+    c.commit()
+    c.close()
+
+    eco = open_repositories(path, strict=True)
+    try:
+        conn = eco.db.conn
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert not os.path.exists(f"{path}.before-v4")
+        assert os.path.exists(f"{path}.before-v5")
+        assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='crypto_short'").fetchone() is None
+        assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='horse_odds'").fetchone() is None
+
+        g = eco.for_guild(G)
+        assert g.margin.short_position(U1, "cs") == (2000, 20.0, 1200)
+        assert g.margin.long_position(U1, "nv") == (3000, 60.0, 2400)
+        assert [h["id"] for h in g.horses.horse_list(U1)] == [10]
+        assert [h["id"] for h in g.horses.auction_horses(NOW)] == [11]
+        assert g.races.race_odds(10, "exacta", [2, 1]) == pytest.approx(9.5)
+        assert g.races.race_odds(10, "trio", [3, 1, 2]) == pytest.approx(14.0)
+        assert [e["horse_id"] for e in g.races.race_entries(11, registered_only=True)] == [10]
+        bets = g.races.race_bets(U1, 10)
+        assert [(b["kind"], b["lane"], b["picks"], b["stake"]) for b in bets] == [("exacta", 2, "2>1", 500)]
     finally:
         eco.close()
 
@@ -899,6 +1036,6 @@ def test_manage_migrate_check_never_modifies_source_db(tmp_path, capsys):
     assert os.path.exists(f"{path}.before-v1")
     check = sqlite3.connect(path)
     try:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 5
     finally:
         check.close()

@@ -149,8 +149,34 @@ _INVARIANT_SPECS: tuple[tuple[str, tuple[CandidateSpec, ...]], ...] = (
     ("companies_funds_sum", (("companies", ("funds",), "COALESCE(SUM(funds), 0)"),)),
     ("company_stakes_sum", (("company_stakes", ("amount",), "COALESCE(SUM(amount), 0)"),)),
     ("crypto_units_sum", (("crypto", ("units",), "COALESCE(SUM(units), 0)"),)),
-    ("crypto_short_margin_sum", (("crypto_short", ("margin",), "COALESCE(SUM(margin), 0)"),)),
-    ("crypto_long_margin_sum", (("crypto_long", ("margin",), "COALESCE(SUM(margin), 0)"),)),
+    (
+        "crypto_short_margin_sum",
+        (
+            ("margin_positions", ("side", "margin"), "COALESCE(SUM(CASE WHEN side='short' THEN margin ELSE 0 END), 0)"),
+            ("crypto_short", ("margin",), "COALESCE(SUM(margin), 0)"),
+        ),
+    ),
+    (
+        "crypto_long_margin_sum",
+        (
+            ("margin_positions", ("side", "margin"), "COALESCE(SUM(CASE WHEN side='long' THEN margin ELSE 0 END), 0)"),
+            ("crypto_long", ("margin",), "COALESCE(SUM(margin), 0)"),
+        ),
+    ),
+    (
+        "crypto_short_units_sum",
+        (
+            ("margin_positions", ("side", "units"), "COALESCE(SUM(CASE WHEN side='short' THEN units ELSE 0 END), 0)"),
+            ("crypto_short", ("units",), "COALESCE(SUM(units), 0)"),
+        ),
+    ),
+    (
+        "crypto_long_units_sum",
+        (
+            ("margin_positions", ("side", "units"), "COALESCE(SUM(CASE WHEN side='long' THEN units ELSE 0 END), 0)"),
+            ("crypto_long", ("units",), "COALESCE(SUM(units), 0)"),
+        ),
+    ),
     ("bonds_principal_sum", (("bonds", ("principal",), "COALESCE(SUM(principal), 0)"),)),
     ("options_margin_sum", (("options", ("margin",), "COALESCE(SUM(margin), 0)"),)),
     ("loans_principal_sum", (("loans", ("principal",), "COALESCE(SUM(principal), 0)"),)),
@@ -241,7 +267,23 @@ _INVARIANT_SPECS: tuple[tuple[str, tuple[CandidateSpec, ...]], ...] = (
         "seized_items_positive_qty_sum",
         (("seized_items", ("qty",), "COALESCE(SUM(CASE WHEN qty > 0 THEN qty ELSE 0 END), 0)"),),
     ),
+    ("horses_count", (("horses", (), "COUNT(*)"),)),
+    (
+        "horses_owned_count",
+        (
+            ("horse_ownership", (), "COUNT(*)"),
+            ("horses", ("owner_id",), "COUNT(CASE WHEN owner_id > 0 THEN 1 END)"),
+        ),
+    ),
+    (
+        "horses_auction_count",
+        (
+            ("horse_auction_listings", (), "COUNT(*)"),
+            ("horses", ("owner_id",), "COUNT(CASE WHEN owner_id = -1 THEN 1 END)"),
+        ),
+    ),
     ("horse_bets_count", (("horse_bets", (), "COUNT(*)"),)),
+    ("horse_bets_stake_sum", (("horse_bets", ("stake",), "COALESCE(SUM(stake), 0)"),)),
     ("market_listings_count", (("market_listings", (), "COUNT(*)"),)),
 )
 

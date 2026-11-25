@@ -269,15 +269,23 @@ def test_interest_never_takes_more_than_the_margin_and_no_double_charge(eco):
 
 
 def test_old_positions_without_the_interest_columns_get_them_on_startup(tmp_path):
+    import sqlite3
+
     path = str(tmp_path / "old.db")
-    e = open_repositories(path, strict=True)
-    e.db.conn.execute("ALTER TABLE crypto_long DROP COLUMN interest_at")
-    e.db.conn.execute("ALTER TABLE crypto_long DROP COLUMN accrued")
-    e.db.conn.execute("PRAGMA user_version = 0")
-    e.db.conn.commit()
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE crypto_long (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, symbol TEXT NOT NULL, "
+        "units INTEGER NOT NULL, entry_value REAL NOT NULL, margin INTEGER NOT NULL, "
+        "PRIMARY KEY (guild_id, user_id, symbol))"
+    )
+    conn.execute("INSERT INTO crypto_long VALUES (?, ?, 'cs', 5000, 5000.0, 2500)", (G, U))
+    conn.execute("PRAGMA user_version = 0")
+    conn.commit()
+    conn.close()
     again = open_repositories(path, strict=True)
-    cols = {r["name"] for r in again.db.conn.execute("PRAGMA table_info(crypto_long)")}
+    cols = {r["name"] for r in again.db.conn.execute("PRAGMA table_info(margin_positions)")}
     assert {"interest_at", "accrued"} <= cols
+    assert again.for_guild(G).margin.long_position(U, "cs") == (5000, 5000.0, 2500)
 
 
 # ----------------------------- 最低担保の案内(#69・#75・#78) ----------------------------- #

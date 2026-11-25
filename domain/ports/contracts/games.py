@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 class HorseRow(TypedDict):
-    """馬主が持つ競走馬（horses 表の行）。"""
+    """馬主が持つ競走馬（horses・horse_ownership・horse_auction_listings の結合ビュー）。"""
 
     id: int
     guild_id: int
@@ -50,7 +50,7 @@ class RaceRow(TypedDict):
 
 
 class RaceEntryRow(TypedDict):
-    """出走馬（horse_entries 表の行）。"""
+    """出走馬（horse_entries・horse_race_registrations の共通投影行）。"""
 
     id: int
     race_id: int
@@ -75,7 +75,7 @@ class RaceEntryRow(TypedDict):
 
 
 class RaceBetRow(TypedDict):
-    """馬券（horse_bets 表の行）。"""
+    """馬券（horse_bets・horse_bet_picks の結合投影行）。"""
 
     id: int
     guild_id: int

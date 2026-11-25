@@ -19,7 +19,7 @@ class CryptoHoldingRow(TypedDict):
 
 
 class MarginRow(TypedDict):
-    """信用の建玉（crypto_short / crypto_long 表の行。空売りと信用買いで同じ形）。"""
+    """信用の建玉（margin_positions 表の行プロジェクト）。"""
 
     guild_id: int
     user_id: int

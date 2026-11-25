@@ -51,19 +51,22 @@ def test_items_count_at_price_and_relics_at_their_value(eco):
 
 
 def test_horse_is_worth_price_plus_retire_value_and_stays_while_listed(eco):
-    eco.db.conn.execute(
-        "INSERT INTO horses (guild_id, owner_id, name, coat, silks, speed, stamina, power, guts, races, wins, places, created) "
-        "VALUES (?, ?, 'h', 'c', 's', 50, 50, 50, 50, 10, 2, 4, 0)",
-        (G, A),
+    cur = eco.db.conn.execute(
+        "INSERT INTO horses (guild_id, status, name, coat, silks, speed, stamina, power, guts, races, wins, places, created) "
+        "VALUES (?, 'owned', 'h', 'c', 's', 50, 50, 50, 50, 10, 2, 4, 0)",
+        (G,),
     )
+    hid = cur.lastrowid
+    eco.db.conn.execute("INSERT INTO horse_ownership (horse_id, guild_id, owner_id) VALUES (?, ?, ?)", (hid, G, A))
     eco.db.conn.commit()
     want = max(0, eco.horses.HORSE_PRICE + horse_mod.retire_value(10, 2, 4))
     assert parts(eco, A)["horses"] == want
-    eco.db.conn.execute("UPDATE horses SET owner_id=-3")  # 出品中の預かり
+    eco.db.conn.execute("UPDATE horses SET status='escrow' WHERE id=?", (hid,))  # 出品中の預かり
+    eco.db.conn.execute("DELETE FROM horse_ownership WHERE horse_id=?", (hid,))
     eco.db.conn.execute(
         "INSERT INTO market_listings (guild_id, seller_id, kind, ref, qty, mode, price, bid, bidder_id, created, end_at) "
-        "VALUES (?, ?, 'horse', '1', 1, 'auction', 100, 300, ?, 0, 9)",
-        (G, A, B),
+        "VALUES (?, ?, 'horse', ?, 1, 'auction', 100, 300, ?, 0, 9)",
+        (G, A, str(hid), B),
     )
     eco.db.conn.commit()
     assert parts(eco, A)["horses"] == want  # 出品中も持ち主のもの

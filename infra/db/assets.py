@@ -121,7 +121,8 @@ def horse_asset_collector(db: EcoDb, horse_worth_fn: Callable[[int, int, int], i
     def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
         for r in fetch_all(
             conn,
-            "SELECT owner_id, races, wins, places FROM horses WHERE guild_id=? AND owner_id>0",
+            "SELECT o.owner_id, h.races, h.wins, h.places "
+            "FROM horse_ownership o JOIN horses h ON h.id=o.horse_id WHERE o.guild_id=?",
             (guild_id,),
         ):
             add(r["owner_id"], "horses", horse_worth_fn(r["races"], r["wins"], r["places"]))

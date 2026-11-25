@@ -126,18 +126,18 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
 
     normalize_kyosai_units(conn)
     hs = {r["name"] for r in conn.execute("PRAGMA table_info(horses)")}
-    if "bonus" not in hs:
+    if hs and "bonus" not in hs:
         conn.execute("ALTER TABLE horses ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0")
-    if "style" not in hs:
+    if hs and "style" not in hs:
         conn.execute("ALTER TABLE horses ADD COLUMN style TEXT")
     lf = {r["name"] for r in conn.execute("PRAGMA table_info(labor_finds)")}
     if "collected" not in lf:
         conn.execute("ALTER TABLE labor_finds ADD COLUMN collected INTEGER NOT NULL DEFAULT 0")
     he = {r["name"] for r in conn.execute("PRAGMA table_info(horse_entries)")}
     for col in ("races", "wins", "places"):
-        if col not in he:
+        if he and col not in he:
             conn.execute(f"ALTER TABLE horse_entries ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
-    if "style" not in he:
+    if he and "style" not in he:
         conn.execute("ALTER TABLE horse_entries ADD COLUMN style TEXT")
     us = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
     if us:
@@ -212,13 +212,12 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
                 conn.execute(f"ALTER TABLE users ADD COLUMN {col} REAL")
         if "escape_tries" not in users_cols:
             conn.execute("ALTER TABLE users ADD COLUMN escape_tries INTEGER NOT NULL DEFAULT 0")
-    for table, col, ddl in (
-        ("horse_bets", "picks", "TEXT NOT NULL DEFAULT ''"),
-        ("horses", "listed_at", "REAL"),
-    ):
-        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
-        if cols and col not in cols:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+    if not _table_exists(conn, "horse_bet_picks"):
+        hb_cols = {r["name"] for r in conn.execute("PRAGMA table_info(horse_bets)")}
+        if hb_cols and "picks" not in hb_cols:
+            conn.execute("ALTER TABLE horse_bets ADD COLUMN picks TEXT NOT NULL DEFAULT ''")
+    if not _table_exists(conn, "horse_auction_listings") and hs and "listed_at" not in hs:
+        conn.execute("ALTER TABLE horses ADD COLUMN listed_at REAL")
     _add_symbol_columns(conn)
     idx = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_arena_tournaments_day'"
@@ -327,7 +326,8 @@ def _refund_legacy_contracts(conn: sqlite3.Connection, now: float | None = None)
 def _add_symbol_columns(conn: sqlite3.Connection) -> None:
     """市場・保有・空売りの表に、銘柄の列を足す（主キーが変わるので、表を作り直して、記録を写す）。チャートの記録は、列を足すだけ。"""
     for table, (ddl, columns) in _SYMBOL_TABLES.items():
-        if "symbol" in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if not cols or "symbol" in cols:
             continue
         conn.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
         conn.execute(ddl)

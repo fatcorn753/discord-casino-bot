@@ -149,11 +149,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
                 horse = self._horses.horse_get_for(gid, int(ref)) if str(ref).isdigit() else None
                 if horse is None or horse["owner_id"] != user_id:
                     return False, fail("horse_select_own")
-                if self._one(
-                    "SELECT 1 FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
-                    "WHERE e.horse_id=? AND r.status IN ('entry','betting')",
-                    (horse["id"],),
-                ):
+                if self._horses.horse_is_in_active_race_for(horse["id"]):
                     return False, fail("p2p_horse_in_race")
                 lo, hi = p2p.price_range("horse")
             if not lo <= price <= hi:
@@ -171,7 +167,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
                     )
             else:
                 assert horse is not None
-                self._conn.execute("UPDATE horses SET owner_id=? WHERE id=?", (p2p.ESCROW_OWNER, horse["id"]))
+                self._horses.horse_set_escrow_for(horse["id"])
             duration_sec = (
                 (hours if hours is not None else p2p.AUCTION_HOURS[0]) * 3600
                 if mode == "auction"
@@ -189,7 +185,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
 
     def _p2p_give(self, guild_id: int, user_id: int, row: Any) -> None:
         if row["kind"] == "horse":
-            self._conn.execute("UPDATE horses SET owner_id=?, listed_at=NULL WHERE id=?", (user_id, int(row["ref"])))
+            self._horses.horse_assign_owner_for(guild_id, int(row["ref"]), user_id)
         else:
             self._conn.execute(
                 "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
