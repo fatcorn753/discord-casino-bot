@@ -15,14 +15,27 @@ from domain.ports.contracts import PlayRecord, PlaySummary, WeeklyAward, WeeklyR
 from domain.ports.repos import IRecordRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.inventory import InventoryCore
+from infra.db.profile import ProfileCore
 
 
 class RecordRepo(ScopedRepo, IRecordRepo):
     """連勝・デイリーミッション・週間ランキング・成績サマリ。"""
 
-    def __init__(self, db: EcoDb, account: AccountCore, guild_id: int = 0, strict: bool = False) -> None:
+    def __init__(
+        self,
+        db: EcoDb,
+        account: AccountCore,
+        guild_id: int = 0,
+        strict: bool = False,
+        *,
+        inventory: InventoryCore | None = None,
+        profile: ProfileCore | None = None,
+    ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
+        self._inventory = inventory or InventoryCore(db)
+        self._profile = profile or ProfileCore(db)
 
     def record_play(
         self, user_id: int, game: str, bet: int, net: int, day: datetime.date, tags: Iterable[str] = ()
@@ -158,12 +171,9 @@ class RecordRepo(ScopedRepo, IRecordRepo):
             last = self.weekly_last_announced()
             if last is not None and last >= week:
                 return None
-            previous = [
-                r["user_id"]
-                for r in self._all("SELECT user_id FROM inventory WHERE guild_id=? AND item_id=?", (g, king))
-            ]
-            self._conn.execute("DELETE FROM inventory WHERE guild_id=? AND item_id=?", (g, king))
-            self._conn.execute("DELETE FROM user_equipment WHERE guild_id=? AND slot='title' AND item_id=?", (g, king))
+            previous = self._inventory.holders_of(g, king)
+            self._inventory.delete_item_in_guild(g, king)
+            self._profile.unequip_item_in_guild(g, "title", king)
             top = self._one(
                 "SELECT user_id, net, plays FROM weekly_stats WHERE guild_id=? AND week=? AND net>0 AND plays>=? "
                 "ORDER BY net DESC, plays ASC, user_id LIMIT 1",
@@ -176,11 +186,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
                     "INSERT OR REPLACE INTO weekly_champions (guild_id, week, user_id, net) VALUES (?, ?, ?, ?)",
                     (g, week, top["user_id"], top["net"]),
                 )
-                self._conn.execute(
-                    "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, 1) "
-                    "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty=1",
-                    (g, top["user_id"], king),
-                )
+                self._inventory.add(g, top["user_id"], king, 1)
                 wins = self.weekly_champion_count(top["user_id"])
             self.set_weekly_announced(week)
             return {

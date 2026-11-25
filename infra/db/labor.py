@@ -26,6 +26,7 @@ from domain.ports.contracts import (
 from domain.ports.repos import ILaborRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.inventory import InventoryCore
 from infra.db.relics import RelicRepo
 
 
@@ -62,18 +63,17 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         bank: IBankCashFlow,
         guild_id: int = 0,
         strict: bool = False,
+        *,
+        inventory: InventoryCore | None = None,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
         self._relics = relics
         self._bank = bank
+        self._inventory = inventory or InventoryCore(db)
 
     def _consume_drink(self, guild_id: int, user_id: int) -> bool:
-        cur = self._conn.execute(
-            "UPDATE inventory SET qty = qty - 1 WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
-            (guild_id, user_id, shop_mod.LABOR_DRINK),
-        )
-        return bool(cur.rowcount)
+        return self._inventory.consume(guild_id, user_id, shop_mod.LABOR_DRINK, 1)
 
     def _load_labor_row(self, guild_id: int, user_id: int, day: str) -> tuple[dict[str, Any], bool, bool]:
         upgrades = self._one(
@@ -335,11 +335,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             row["expires"] = {}
             for w in stay:
                 row["expires"][w["kind"]] = min(row["expires"].get(w["kind"], w["expires_at"]), w["expires_at"])
-            inv = self._scalar(
-                "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=?",
-                (gid, user_id, shop_mod.LABOR_DRINK),
-            )
-            row["drinks"] = inv if inv is not None else 0
+            row["drinks"] = self._inventory.qty(gid, user_id, shop_mod.LABOR_DRINK)
             row["finds"] = self.labor_finds(user_id)
             row["held_relics"] = self._relics.relic_stock_for(gid, user_id)
             row["donated_all"] = self.labor_donated_total()  # このサーバーの全員の寄付の合計
@@ -489,11 +485,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 (gid, user_id),
             )
             for item_id, n in relics.items():
-                self._conn.execute(
-                    "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
-                    "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty",
-                    (gid, user_id, item_id, n),
-                )
+                self._inventory.add(gid, user_id, item_id, n)
             row["relics"] = {}
             if row["_existed"] or amount > 0 or relics or self._workers_of(gid, user_id):
                 self._labor_save(gid, user_id, row)

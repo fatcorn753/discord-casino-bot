@@ -426,12 +426,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 return False, fail("insufficient_balance", balance=bal)
             label = "・".join(names)
             self._account.apply(gid, user_id, -stake, f"競馬:馬券（{horse_mod.BET_KINDS[kind]}・{label}）")
-            self._conn.execute(
-                "INSERT INTO user_play_stats (guild_id, user_id, total_wagered) VALUES (?, ?, ?) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                "total_wagered = user_play_stats.total_wagered + excluded.total_wagered",
-                (gid, user_id, stake),
-            )
+            self._account.record_wager(gid, user_id, stake)
             cur = self._conn.execute(
                 "INSERT INTO horse_bets (guild_id, race_id, user_id, kind, stake, odds, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -587,15 +582,7 @@ class RaceRepo(ScopedRepo, IRaceRepo):
                 else:
                     lost += raw_bet["stake"]
                 self._conn.execute("UPDATE horse_bets SET payout=?, settled=1 WHERE id=?", (pay, raw_bet["id"]))
-                self._conn.execute(
-                    "INSERT INTO user_play_stats (guild_id, user_id, games_played, total_won, biggest_win) "
-                    "VALUES (?, ?, 1, ?, ?) "
-                    "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                    "games_played = user_play_stats.games_played + 1, "
-                    "total_won = user_play_stats.total_won + excluded.total_won, "
-                    "biggest_win = MAX(user_play_stats.biggest_win, excluded.biggest_win)",
-                    (gid, raw_bet["user_id"], pay, max(0, pay - raw_bet["stake"])),
-                )
+                self._account.record_game_result(gid, raw_bet["user_id"], pay, pay - raw_bet["stake"])
                 hydrated = self._hydrate_bet({**raw_bet, "payout": pay, "settled": 1})
                 bets.append(hydrated)
             self._bank.bank_income_for(gid, int(lost * teiai.LOSS_SHARE), self._now())

@@ -19,7 +19,9 @@ from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
 from infra.db.discord_posts import mark_discord_post_done, set_discord_message
 from infra.db.horse import HorseRepo
+from infra.db.inventory import InventoryCore
 from infra.db.notices import NoticeRepo
+from infra.db.profile import ProfileCore
 
 _SELECT_LISTING = (
     "SELECT l.id, l.guild_id, COALESCE(l.seller_id, 0) AS seller_id, l.kind, l.ref, l.qty, "
@@ -56,6 +58,9 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         notices: NoticeRepo,
         guild_id: int = 0,
         strict: bool = False,
+        *,
+        inventory: InventoryCore | None = None,
+        profile: ProfileCore | None = None,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
@@ -64,6 +69,8 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         self._bank = bank
         self._grace_reader: GraceReader = grace_reader
         self._notices = notices
+        self._inventory = inventory or InventoryCore(db)
+        self._profile = profile or ProfileCore(db)
 
     def prepare(self, guild_id: int, user_id: int, now: float) -> None:
         self.p2p_pull_back_for(guild_id, user_id, now)
@@ -94,10 +101,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
                 return fail("p2p_horse_limit", max_horses=horse_mod.MAX_HORSES)
             return None
         item = shop_mod.BY_ID[row["ref"]]
-        if item.unique and self._one(
-            "SELECT 1 FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
-            (guild_id, buyer_id, row["ref"]),
-        ):
+        if item.unique and self._inventory.has(guild_id, buyer_id, row["ref"]):
             return fail("already_owned")
         return None
 
@@ -147,17 +151,14 @@ class P2PRepo(ScopedRepo, IP2PRepo):
             )
             if active >= p2p.MAX_ACTIVE:
                 return False, fail("p2p_max_active", max_active=p2p.MAX_ACTIVE)
-            item, have, horse = None, None, None
+            item, have_qty, horse = None, 0, None
             if kind == "item":
                 if not p2p.tradable(ref):
                     return False, fail("p2p_item_not_tradable")
                 item = shop_mod.BY_ID[ref]
                 qty = 1 if item.unique else qty
-                have = self._one(
-                    "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=?",
-                    (gid, user_id, ref),
-                )
-                if qty < 1 or have is None or have["qty"] < qty:
+                have_qty = self._inventory.qty(gid, user_id, ref)
+                if qty < 1 or have_qty < qty:
                     return False, fail("p2p_insufficient_qty")
                 lo, hi = p2p.price_range("item", ref, qty)
             else:
@@ -170,17 +171,11 @@ class P2PRepo(ScopedRepo, IP2PRepo):
                 lo, hi = p2p.price_range("horse")
             if not lo <= price <= hi:
                 return False, fail("p2p_price_range", lo=lo, hi=hi)
-            if item is not None and have is not None:
-                self._conn.execute(
-                    "UPDATE inventory SET qty = qty - ? WHERE guild_id=? AND user_id=? AND item_id=?",
-                    (qty, gid, user_id, ref),
-                )
+            if item is not None:
+                self._inventory.consume(gid, user_id, ref, qty)
                 slot = p2p.SLOT_OF_KIND.get(item.kind)
-                if slot and have["qty"] - qty <= 0:  # 装備中の品は、外れる
-                    self._conn.execute(
-                        "DELETE FROM user_equipment WHERE guild_id=? AND user_id=? AND slot=? AND item_id=?",
-                        (gid, user_id, slot, ref),
-                    )
+                if slot and have_qty - qty <= 0:  # 装備中の品は、外れる
+                    self._profile.unequip_if_matches(gid, user_id, slot, ref)
             else:
                 assert horse is not None
                 self._horses.horse_set_escrow_for(horse["id"])
@@ -203,11 +198,7 @@ class P2PRepo(ScopedRepo, IP2PRepo):
         if row["kind"] == "horse":
             self._horses.horse_assign_owner_for(guild_id, int(row["ref"]), user_id)
         else:
-            self._conn.execute(
-                "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty",
-                (guild_id, user_id, row["ref"], row["qty"]),
-            )
+            self._inventory.add(guild_id, user_id, row["ref"], row["qty"])
 
     def _p2p_label_for(self, guild_id: int, row: ListingRow) -> str:
         if row["kind"] == "horse":

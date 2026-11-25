@@ -7,6 +7,7 @@ from domain.ports.repos import IEscrowRepo
 from domain.types import INSURANCE_CAP
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.profile import ProfileCore
 
 
 class EscrowRepo(ScopedRepo, IEscrowRepo):
@@ -20,11 +21,14 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
         debt: IDebtOps,
         guild_id: int = 0,
         strict: bool = False,
+        *,
+        profile: ProfileCore | None = None,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
         self._bank = bank
         self._debt = debt
+        self._profile = profile or ProfileCore(db)
 
     def place_bet(self, user_id: int, amount: int, game: str) -> int | None:
         """賭け金を残高から預かり、預かり金IDを返す。残高不足なら None。"""
@@ -40,12 +44,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                 "INSERT INTO escrow (guild_id, user_id, amount, game, created_at) VALUES (?, ?, ?, ?, ?)",
                 (gid, user_id, amount, game, self._now()),
             )
-            self._conn.execute(
-                "INSERT INTO user_play_stats (guild_id, user_id, total_wagered) VALUES (?, ?, ?) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                "total_wagered = user_play_stats.total_wagered + excluded.total_wagered",
-                (gid, user_id, amount),
-            )
+            self._account.record_wager(gid, user_id, amount)
             return cur.lastrowid
 
     def add_to_escrow(self, escrow_id: int, extra: int, credit: bool = False) -> bool:
@@ -67,12 +66,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
             self._conn.execute(
                 "UPDATE escrow SET amount = amount + ? WHERE id=? AND guild_id=?", (extra, escrow_id, gid)
             )
-            self._conn.execute(
-                "INSERT INTO user_play_stats (guild_id, user_id, total_wagered) VALUES (?, ?, ?) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                "total_wagered = user_play_stats.total_wagered + excluded.total_wagered",
-                (gid, row["user_id"], extra),
-            )
+            self._account.record_wager(gid, row["user_id"], extra)
             return True
 
     def escrow_amount(self, escrow_id: int) -> int:
@@ -88,25 +82,6 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
         result = self.settle_with_penalty(escrow_id, payout, game, 0)
         return None if result is None else result[0]
 
-    def _consume_insurance(self, guild_id: int, user_id: int) -> bool:
-        row = self._one(
-            "SELECT charges FROM user_buffs WHERE guild_id=? AND user_id=? AND buff='insurance'",
-            (guild_id, user_id),
-        )
-        if not row or row["charges"] <= 0:
-            return False
-        if row["charges"] > 1:
-            self._conn.execute(
-                "UPDATE user_buffs SET charges = charges - 1 WHERE guild_id=? AND user_id=? AND buff='insurance'",
-                (guild_id, user_id),
-            )
-        else:
-            self._conn.execute(
-                "DELETE FROM user_buffs WHERE guild_id=? AND user_id=? AND buff='insurance'",
-                (guild_id, user_id),
-            )
-        return True
-
     def settle_with_penalty(self, escrow_id: int, payout: int, game: str, penalty: int) -> tuple[int, int, int] | None:
         """精算と、倍払いなどの追加の支払いを、1回のトランザクションで行う。
 
@@ -121,7 +96,9 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                 return None
             user_id, amount = row["user_id"], row["amount"]
             payout = max(0, int(payout))
-            insured = min(amount // 2, INSURANCE_CAP) if payout == 0 and self._consume_insurance(gid, user_id) else 0
+            insured = (
+                min(amount // 2, INSURANCE_CAP) if payout == 0 and self._profile.consume_buff(gid, user_id, "insurance") else 0
+            )
             total = payout + insured
             if total:
                 # 払い戻しのうち、賭け金を超えた分（純利益）だけが収入。賭け金の返金や、保険券の返金からは天引きしない
@@ -153,15 +130,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                 self._debt.owe_for(gid, user_id, penalty - taken, f"{game}の倍払い")
             taken = max(penalty, 0)
             net = total - amount - taken
-            self._conn.execute(
-                "INSERT INTO user_play_stats (guild_id, user_id, games_played, total_won, biggest_win) "
-                "VALUES (?, ?, 1, ?, ?) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                "games_played = user_play_stats.games_played + 1, "
-                "total_won = user_play_stats.total_won + excluded.total_won, "
-                "biggest_win = MAX(user_play_stats.biggest_win, excluded.biggest_win)",
-                (gid, user_id, total, max(0, net)),
-            )
+            self._account.record_game_result(gid, user_id, total, net)
             return net, taken, insured
 
     def jackpot_pool(self) -> int:

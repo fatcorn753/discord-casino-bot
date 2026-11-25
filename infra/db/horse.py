@@ -11,6 +11,7 @@ from domain.shop import CARROT, GOLD_CARROT, HORSE_VOUCHER
 from domain.types import PurchaseResult
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.inventory import InventoryCore
 
 _SELECT_HORSE = (
     "SELECT h.id, h.guild_id, "
@@ -36,18 +37,17 @@ class HorseRepo(ScopedRepo, IHorseRepo):
         bank: IBankCashFlow,
         guild_id: int = 0,
         strict: bool = False,
+        *,
+        inventory: InventoryCore | None = None,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
         self._status_reader = status_reader
         self._bank = bank
+        self._inventory = inventory or InventoryCore(db)
 
     def _consume(self, guild_id: int, user_id: int, item_id: str) -> bool:
-        cur = self._conn.execute(
-            "UPDATE inventory SET qty = qty - 1 WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
-            (guild_id, user_id, item_id),
-        )
-        return bool(cur.rowcount)
+        return self._inventory.consume(guild_id, user_id, item_id, 1)
 
     def horse_retire_for(self, horse_id: int) -> None:
         self._conn.execute("UPDATE horses SET status='retired' WHERE id=?", (horse_id,))

@@ -14,6 +14,8 @@ from domain.ports.repos import IShopRepo
 from domain.types import CONSUMABLE_EFFECTS, PurchaseResult
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.inventory import InventoryCore
+from infra.db.profile import ProfileCore
 
 
 class ShopRepo(ScopedRepo, IShopRepo):
@@ -28,30 +30,27 @@ class ShopRepo(ScopedRepo, IShopRepo):
         status_reader: IStatusReader,
         guild_id: int = 0,
         strict: bool = False,
+        *,
+        inventory: InventoryCore | None = None,
+        profile: ProfileCore | None = None,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
         self._status_reader = status_reader
+        self._inventory = inventory or InventoryCore(db)
+        self._profile = profile or ProfileCore(db)
 
     def seize_belongings_for(self, guild_id: int, user_id: int) -> SeizedBelongings:
         """破産で、持ち物・装備・消耗品（デイリー2倍券・保険券）をすべて没収する。没収した品と個数を返す。
 
         呼び出し側のトランザクションの中で使う。
         """
-        items = [
-            (r["item_id"], r["qty"])
-            for r in self._all(
-                "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0", (guild_id, user_id)
-            )
-        ]
+        items = list(self._inventory.items(guild_id, user_id).items())
         buff_items = {"daily_boost": shop_mod.DAILY_DOUBLE, "insurance": shop_mod.INSURANCE}
-        for r in self._all(
-            "SELECT buff, charges FROM user_buffs WHERE guild_id=? AND user_id=? AND charges>0", (guild_id, user_id)
-        ):
-            items.append((buff_items[r["buff"]], r["charges"]))
-        self._conn.execute("DELETE FROM inventory WHERE guild_id=? AND user_id=?", (guild_id, user_id))
-        self._conn.execute("DELETE FROM user_equipment WHERE guild_id=? AND user_id=?", (guild_id, user_id))
-        self._conn.execute("DELETE FROM user_buffs WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+        for buff, charges in self._profile.buffs(guild_id, user_id).items():
+            items.append((buff_items[buff], charges))
+        self._inventory.delete_for_user(guild_id, user_id)
+        self._profile.clear_user(guild_id, user_id)
         return SeizedBelongings(items=tuple(items))
 
     def shop_stock(self, user_id: int, item_id: str, now: float) -> ShopStockInfo | None:
@@ -100,11 +99,8 @@ class ShopRepo(ScopedRepo, IShopRepo):
                     fail("shop_out_of_stock", stock=stock["stock"], next_at=stock["next_at"]),
                     self._account.raw_balance(gid, user_id),
                 )
-            have = self._one(
-                "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=?",
-                (gid, user_id, item_id),
-            )
-            if unique and have:
+            have = self._inventory.qty(gid, user_id, item_id)
+            if unique and have > 0:
                 return PurchaseResult(False, fail("already_owned"), self._account.raw_balance(gid, user_id))
             debt = self._account.debt(gid, user_id)
             if debt > 0:
@@ -127,39 +123,25 @@ class ShopRepo(ScopedRepo, IShopRepo):
                     "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET stock=excluded.stock, updated=excluded.updated",
                     (gid, user_id, item_id, stock["exact"] - qty, now),
                 )
-            self._conn.execute(
-                "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty",
-                (gid, user_id, item_id, qty),
-            )
+            self._inventory.add(gid, user_id, item_id, qty)
             return PurchaseResult(True, balance=self._account.raw_balance(gid, user_id))
 
     def inventory(self, user_id: int) -> dict[str, int]:
         with self._lock:
-            return {
-                r["item_id"]: r["qty"]
-                for r in self._all(
-                    "SELECT item_id, qty FROM inventory WHERE guild_id=? AND user_id=? AND qty>0",
-                    (self._g(), user_id),
-                )
-            }
+            return self._inventory.items(self._g(), user_id)
 
     def _load_profile(self, guild_id: int, user_id: int) -> dict[str, Any]:
-        equip_rows = self._all(
-            "SELECT slot, item_id FROM user_equipment WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-        )
-        buff_rows = self._all(
-            "SELECT buff, charges FROM user_buffs WHERE guild_id=? AND user_id=?", (guild_id, user_id)
-        )
+        equipment = self._profile.equipment(guild_id, user_id)
+        buffs = self._profile.buffs(guild_id, user_id)
         prof: dict[str, Any] = {"user_id": user_id, **dict.fromkeys(self.SLOTS), "daily_boost": 0, "insurance": 0}
-        if equip_rows or buff_rows:
+        if equipment or buffs:
             prof["guild_id"] = guild_id
-        for r in equip_rows:
-            if r["slot"] in self.SLOTS:
-                prof[r["slot"]] = r["item_id"]
-        for r in buff_rows:
-            if r["buff"] in ("daily_boost", "insurance"):
-                prof[r["buff"]] = r["charges"]
+        for slot, item_id in equipment.items():
+            if slot in self.SLOTS:
+                prof[slot] = item_id
+        for buff, charges in buffs.items():
+            if buff in ("daily_boost", "insurance"):
+                prof[buff] = charges
         return prof
 
     def get_profile(self, user_id: int, raw: bool = False) -> ProfileView:
@@ -185,21 +167,11 @@ class ShopRepo(ScopedRepo, IShopRepo):
         with self._db.tx():
             gid = self._g()
             if item_id is None:
-                self._conn.execute(
-                    "DELETE FROM user_equipment WHERE guild_id=? AND user_id=? AND slot=?",
-                    (gid, user_id, slot),
-                )
+                self._profile.unequip(gid, user_id, slot)
                 return True
-            if not self._one(
-                "SELECT 1 FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
-                (gid, user_id, item_id),
-            ):
+            if not self._inventory.has(gid, user_id, item_id):
                 return False
-            self._conn.execute(
-                "INSERT INTO user_equipment (guild_id, user_id, slot, item_id) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(guild_id, user_id, slot) DO UPDATE SET item_id=excluded.item_id",
-                (gid, user_id, slot, item_id),
-            )
+            self._profile.equip(gid, user_id, slot, item_id)
             return True
 
     def arm(self, user_id: int, item_id: str) -> bool:
@@ -209,15 +181,7 @@ class ShopRepo(ScopedRepo, IShopRepo):
             return False
         with self._db.tx():
             gid = self._g()
-            cur = self._conn.execute(
-                "UPDATE inventory SET qty = qty - 1 WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
-                (gid, user_id, item_id),
-            )
-            if not cur.rowcount:
+            if not self._inventory.consume(gid, user_id, item_id, 1):
                 return False
-            self._conn.execute(
-                "INSERT INTO user_buffs (guild_id, user_id, buff, charges) VALUES (?, ?, ?, 1) "
-                "ON CONFLICT(guild_id, user_id, buff) DO UPDATE SET charges = charges + 1",
-                (gid, user_id, effect),
-            )
+            self._profile.add_buff(gid, user_id, effect, 1)
             return True

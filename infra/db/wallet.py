@@ -17,6 +17,8 @@ from domain.shop import STREAK_GUARD
 from domain.types import DAILY_BASE, DAILY_STREAK_BONUS, DAILY_STREAK_CAP, DailyResult, TransferResult
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.inventory import InventoryCore
+from infra.db.profile import ProfileCore
 from infra.db.relics import RelicRepo
 
 _SELECT_USER_ROW = (
@@ -60,6 +62,9 @@ class WalletRepo(ScopedRepo, IWalletRepo):
         valuation_source: ValuationSource,
         guild_id: int = 0,
         strict: bool = False,
+        *,
+        inventory: InventoryCore | None = None,
+        profile: ProfileCore | None = None,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
@@ -68,6 +73,8 @@ class WalletRepo(ScopedRepo, IWalletRepo):
         self._status_reader = status_reader
         self._relics = relics
         self._valuation_source: ValuationSource = valuation_source
+        self._inventory = inventory or InventoryCore(db)
+        self._profile = profile or ProfileCore(db)
 
     # ------------------------------------------------------------------ #
     # 残高                                                                #
@@ -130,25 +137,6 @@ class WalletRepo(ScopedRepo, IWalletRepo):
     # ------------------------------------------------------------------ #
     # デイリー                                                            #
     # ------------------------------------------------------------------ #
-    def _consume_buff(self, guild_id: int, user_id: int, buff: str) -> bool:
-        row = self._one(
-            "SELECT charges FROM user_buffs WHERE guild_id=? AND user_id=? AND buff=?",
-            (guild_id, user_id, buff),
-        )
-        if not row or row["charges"] <= 0:
-            return False
-        if row["charges"] > 1:
-            self._conn.execute(
-                "UPDATE user_buffs SET charges = charges - 1 WHERE guild_id=? AND user_id=? AND buff=?",
-                (guild_id, user_id, buff),
-            )
-        else:
-            self._conn.execute(
-                "DELETE FROM user_buffs WHERE guild_id=? AND user_id=? AND buff=?",
-                (guild_id, user_id, buff),
-            )
-        return True
-
     def claim_daily(self, user_id: int, today: datetime.date, slot: int | None = None) -> DailyResult:
         """時間帯（slot）ごとに1回のボーナス。slot が前回より進んでいれば受け取れる（省略時は1日1回）。
 
@@ -180,13 +168,11 @@ class WalletRepo(ScopedRepo, IWalletRepo):
                 missed = (today - last).days - 1 if last is not None else 0
                 streak, guarded = 1, 0
                 if missed > 0 and cur_streak > 0:
-                    cur = self._conn.execute(
-                        "UPDATE inventory SET qty = qty - ? WHERE guild_id=? AND user_id=? AND item_id=? AND qty>=?",
-                        (missed, gid, user_id, STREAK_GUARD, missed),
+                    streak, guarded = (
+                        (cur_streak + 1, missed) if self._inventory.consume(gid, user_id, STREAK_GUARD, missed) else (1, 0)
                     )
-                    streak, guarded = (cur_streak + 1, missed) if cur.rowcount else (1, 0)
             amount = self.DAILY_BASE + self.DAILY_STREAK_BONUS * min(streak - 1, self.DAILY_STREAK_CAP)
-            boosted = self._consume_buff(gid, user_id, "daily_boost")
+            boosted = self._profile.consume_buff(gid, user_id, "daily_boost")
             if boosted:
                 amount *= 2
             amount = round(

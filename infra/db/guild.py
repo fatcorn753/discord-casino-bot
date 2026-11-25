@@ -9,6 +9,7 @@ from domain.ports.bridges import WealthyReader, noop_wealthy_reader
 from domain.ports.contracts import GuildStatusRow, LeaderboardRow, ProfileRow
 from domain.ports.repos import IGuildRepo
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.profile import ProfileCore
 
 
 class GuildRepo(ScopedRepo, IGuildRepo):
@@ -20,9 +21,12 @@ class GuildRepo(ScopedRepo, IGuildRepo):
         wealthy_reader: WealthyReader | None = None,
         guild_id: int = 0,
         strict: bool = False,
+        *,
+        profile: ProfileCore | None = None,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._wealthy_reader: WealthyReader = wealthy_reader or noop_wealthy_reader
+        self._profile = profile or ProfileCore(db)
 
     # ------------------------------------------------------------------ #
     # 利用できるサーバーの承認                                            #
@@ -171,24 +175,17 @@ class GuildRepo(ScopedRepo, IGuildRepo):
             return {}
         with self._lock:
             gid = self._g()
-            marks = ",".join("?" * len(ids))
-            equip_rows = self._all(
-                f"SELECT user_id, slot, item_id FROM user_equipment WHERE guild_id=? AND user_id IN ({marks})",
-                [gid, *ids],
-            )
-            buff_rows = self._all(
-                f"SELECT user_id, buff, charges FROM user_buffs WHERE guild_id=? AND user_id IN ({marks})",
-                [gid, *ids],
-            )
+            equip_rows = self._profile.equipment_for_users(gid, ids)
+            buff_rows = self._profile.buffs_for_users(gid, ids)
         out: dict[int, ProfileRow] = {}
-        for r in equip_rows:
-            row = out.setdefault(r["user_id"], self._empty_profile_row(gid, r["user_id"]))
-            if r["slot"] in ("title", "card_color", "card_icon", "skin_dice", "skin_table"):
-                row[r["slot"]] = r["item_id"]
-        for r in buff_rows:
-            row = out.setdefault(r["user_id"], self._empty_profile_row(gid, r["user_id"]))
-            if r["buff"] in ("daily_boost", "insurance"):
-                row[r["buff"]] = r["charges"]
+        for user_id, slot, item_id in equip_rows:
+            row = out.setdefault(user_id, self._empty_profile_row(gid, user_id))
+            if slot in ("title", "card_color", "card_icon", "skin_dice", "skin_table"):
+                row[slot] = item_id
+        for user_id, buff, charges in buff_rows:
+            row = out.setdefault(user_id, self._empty_profile_row(gid, user_id))
+            if buff in ("daily_boost", "insurance"):
+                row[buff] = charges
         return out
 
     def _empty_profile_row(self, guild_id: int, user_id: int) -> ProfileRow:
