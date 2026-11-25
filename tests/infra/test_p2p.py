@@ -780,10 +780,14 @@ def test_teiai_relic_auction_pays_the_bank_and_skips_the_pair_limit(eco, daily):
     relic = eco.p2p.p2p_get(lid)["ref"]
     bid = p2p.PAIR_DAILY_LIMIT + 1_000  # 帝愛からなら、同じ2人の1日の上限を超えても買える
     assert eco.p2p.p2p_bid(B, lid, bid, NOW + 10)[0]
-    b0, cash0 = eco.wallet.balance(B), eco.bank.bank_status(time.time())["cash"]
+    b0, st0 = eco.wallet.balance(B), eco.bank.bank_status(time.time())
     assert [res for _r, res in eco.p2p.p2p_settle(NOW + 2 * 86400)] == ["sold"]
     assert eco.shop.inventory(B)[relic] == 1 and eco.wallet.balance(B) == b0  # 入札の時点で払っている
-    assert eco.bank.bank_status(time.time())["cash"] - cash0 == pytest.approx(bid, abs=1)  # 代金は全部、帝愛銀行へ
+    st = eco.bank.bank_status(time.time())
+    assert st["cash"] > st0["cash"]
+    assert (st["cash"] - st0["cash"]) + (
+        st["thermostat"]["burned"] - st0["thermostat"]["burned"]
+    ) == pytest.approx(bid, abs=1)  # 代金はサーモスタット経由で帝愛銀行へ
 
 
 def test_unsold_teiai_relic_auction_just_disappears(eco, daily):

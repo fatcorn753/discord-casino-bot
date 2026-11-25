@@ -78,8 +78,8 @@ def render_teiai_panel_embed(
     color = {"safe": ui.OK, "warn": ui.GOLD, "danger": ui.ERROR, "frozen": ui.ERROR}[bank["level"]]
     e = ui.embed("🏦 帝愛銀行", bank_lines(bank), color)
     e.add_field(
-        name="🕴️ 帝愛の胴元の口座",
-        value=f"**{ui.pelica(house['balance'])}**　（ピンハネの合計 {ui.pelica(house['skimmed'])}。デイリーと地下作業から入る）",
+        name="📦 帝愛物産（/会社 買取プール）",
+        value=f"**{ui.pelica(house['balance'])}**　（/会社 の設立費・建設費・維持費が入り、出荷買取に使われます）",
         inline=False,
     )
     thermo = bank.get("thermostat")

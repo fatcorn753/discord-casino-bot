@@ -770,9 +770,9 @@ def test_a_big_spot_gain_is_taxed_and_the_tax_goes_to_the_bank(eco):
     assert s.tax == market.capital_gains_tax(s.profit) > 0
     assert a.wallet.balance(U) == INITIAL_BALANCE + 500_000 - r.money + s.money  # 受け取りは、税を引いた額
     assert a.bank.deposit_of(2) == before_deposit  # 税は信託に配らない（#33。信託は決まった利息を受け取る）
-    assert a.bank.bank_status(time.time())["cash"] == pytest.approx(
-        cash0 + s.tax, abs=1.0
-    )  # 税は全額、帝愛銀行の手元へ
+    st = a.bank.bank_status(time.time())
+    assert st["cash"] == pytest.approx(cash0 + s.tax - st["thermostat"]["burned"], abs=1.0)
+    assert st["cash"] > cash0  # 税はサーモスタット経由で帝愛銀行の手元へ
     assert any(
         "キャピタルゲイン税" in x["reason"]
         for x in eco.db.conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))

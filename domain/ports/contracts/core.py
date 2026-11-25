@@ -51,10 +51,10 @@ WeeklyRankEntry = tuple[int, int, int, int]
 
 
 class HouseAccount(TypedDict):
-    """帝愛の胴元の口座。"""
+    """帝愛物産（`/会社` の生産・出荷買取専用プール）。"""
 
     balance: int
-    skimmed: int  # これまでのピンハネの合計
+    skimmed: int  # 後方互換用の累計列（現在は未使用）
 
 
 class BankThermostat(TypedDict):

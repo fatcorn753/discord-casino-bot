@@ -192,3 +192,25 @@ def test_stake_dividend_and_holdings_commands(setup):
     panel = views.CompanyPanel(cog._company, U, 0)
     fields = {f.name: f.value for f in panel.embed().fields}
     assert "🤝 出資" in fields and "出資者 1人" in must(fields["🤝 出資"])
+
+
+def test_company_ui_and_help_use_teiai_bussan_pool_wording(setup, monkeypatch):
+    from cogs.help import texts as help_texts
+    from cogs.shared.messages import format_failure
+    from domain.errors import fail
+
+    repos, _chan, _guild, cog, now = setup
+    monkeypatch.setattr(co, "DAILY_GRANT", 0)
+    repos.company.company_found(U, "帝愛商事", "mine", now[0])
+    with repos.db.tx():
+        repos.bank.house_pay_for(0, repos.bank.house_balance_for(0) - 100)
+    now[0] += DAY / 2
+    panel = views.CompanyPanel(cog._company, U, 0)
+    assert any(f.name == "📦 帝愛物産の買取予算" for f in panel.embed().fields)
+
+    it = _It(U)
+    asyncio.run(button(panel, "出荷").callback(as_interaction(it)))
+    assert "帝愛物産の買取予算が足りず" in it.edited[0]["embed"].description
+    assert "帝愛物産の買取予算（買取プールと、今日の買取枠）" in format_failure(fail("company_no_budget"))
+    company_help = "\n".join(help_texts.PAGES["company"][1])
+    assert "帝愛物産の買取プール" in company_help and "胴元の口座" not in company_help

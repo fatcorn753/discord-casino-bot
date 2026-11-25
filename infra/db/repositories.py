@@ -238,7 +238,7 @@ def open_repositories(
     races = RaceRepo(db, account, horses, relics, bank, strict=strict)
     labor = LaborRepo(db, account, relics, bank, strict=strict)
     arena = ArenaRepo(db, account, bank, strict=strict)
-    company = CompanyRepo(db, account, debt, bank, bank, notices, clock.offset_hours(), strict=strict)
+    company = CompanyRepo(db, account, debt, bank, notices, clock.offset_hours(), strict=strict)
     earnings = EarningsRepo(db, account, bank, strict=strict)
 
     crypto = CryptoRepo(

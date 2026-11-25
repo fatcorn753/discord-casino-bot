@@ -1,4 +1,4 @@
-"""銀行・猶予・CDS・通知・価格・胴元・破産実行のブリッジ契約。
+"""銀行・猶予・CDS・通知・価格・帝愛物産プール・破産実行のブリッジ契約。
 
 住み分け:
 - 単一メソッドの純粋コールバック契約は `Callable` 型エイリアス（形式的型付け）で表し、
@@ -112,7 +112,7 @@ class IBankCashFlow:
 
 
 class IHouseAccount:
-    """胴元口座（ピンハネの受け入れ・払い出し）と、日次支給枠の契約。"""
+    """帝愛物産（`/会社` の生産・出荷買取専用プール）と、日次買取枠の契約。"""
 
     def house_income_for(self, guild_id: int, amount: int) -> None:
         raise NotImplementedError

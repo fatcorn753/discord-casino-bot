@@ -6,8 +6,8 @@ import math
 from domain import teiai
 from domain.errors import fail
 from domain.ports.bridges import (
+    IBankCashFlow,
     IDebtOps,
-    IHouseAccount,
     IStatusReader,
     ValuationSource,
 )
@@ -31,7 +31,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
         self,
         db: EcoDb,
         account: AccountCore,
-        house: IHouseAccount,
+        bank: IBankCashFlow,
         debt: IDebtOps,
         status_reader: IStatusReader,
         relics: RelicRepo,
@@ -41,7 +41,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
-        self._house = house
+        self._bank = bank
         self._debt = debt
         self._status_reader = status_reader
         self._relics = relics
@@ -166,7 +166,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
                     self._account.raw_balance(gid, user_id),
                     f"帝愛のピンハネ（デイリー {skimmed:,}ペリカ）",
                 )
-                self._house.house_income_for(gid, skimmed)  # 帝愛の胴元の口座に入る
+                self._bank.bank_income_for(gid, skimmed, self._now())  # 帝愛銀行へ入る（サーモスタット経由）
             credit = amount - skimmed
             self._account.apply(
                 gid,

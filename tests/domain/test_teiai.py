@@ -767,10 +767,13 @@ def test_a_paid_off_debt_forgets_the_interest_clock(eco, monkeypatch):
 
 
 @pytest.mark.real_scope
-def test_daily_skim_goes_to_the_house_account_and_other_servers_have_their_own(eco):
+def test_daily_skim_goes_to_the_bank_and_other_servers_have_their_own(eco):
     indebt(eco, U, debt=5_000, balance=4_000)
     res = eco.wallet.claim_daily(U, datetime.date(2026, 11, 1))
     assert res.skimmed == 200
-    assert eco.bank.house_account() == {"balance": res.skimmed, "skimmed": res.skimmed}
+    s = eco.bank.bank_status(eco.db.now_ts())
+    assert s["cash"] + s["thermostat"]["burned"] == pytest.approx(res.skimmed)
+    assert eco.bank.house_account() == {"balance": 0, "skimmed": 0}  # 帝愛物産プールには入らない
     other = eco.for_guild(99)
-    assert other.bank.house_account() == {"balance": 0, "skimmed": 0}  # サーバーごとに別々
+    assert other.bank.bank_status(other.db.now_ts())["cash"] == 0  # サーバーごとに別々
+    assert other.bank.house_account() == {"balance": 0, "skimmed": 0}

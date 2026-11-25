@@ -639,19 +639,20 @@ def test_teiai_skims_the_labor_earnings_when_collected(eco, monkeypatch):
     )
 
 
-def test_labor_skim_goes_to_the_teiai_house_account(eco, monkeypatch):
+def test_labor_skim_goes_to_the_teiai_bank(eco, monkeypatch):
     monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.10)
     assert eco.bank.house_account() == {"balance": 0, "skimmed": 0}
     click(eco, 20)
     got = eco.labor.labor_collect(U, T0 + 100, DAY, detail=True)
     assert got["skimmed"] > 0
-    assert eco.bank.house_account() == {
-        "balance": got["skimmed"],
-        "skimmed": got["skimmed"],
-    }  # 全額が、胴元の口座に入る
+    assert eco.bank.house_account() == {"balance": 0, "skimmed": 0}  # 帝愛物産プールには入らない
+    s1 = eco.bank.bank_status(eco.db.now_ts())
+    assert s1["cash"] + s1["thermostat"]["burned"] == pytest.approx(got["skimmed"])  # サーモスタット経由で帝愛銀行へ
     click(eco, 20, start=T0 + 200)
     again = eco.labor.labor_collect(U, T0 + 400, DAY, detail=True)
-    assert eco.bank.house_account()["balance"] == got["skimmed"] + again["skimmed"]
+    s2 = eco.bank.bank_status(eco.db.now_ts())
+    assert s2["cash"] + s2["thermostat"]["burned"] == pytest.approx(got["skimmed"] + again["skimmed"])
+    assert eco.bank.house_account() == {"balance": 0, "skimmed": 0}
 
 
 def test_the_skim_applies_to_everyone_and_the_debt_withholding_takes_its_share_of_the_rest(eco, monkeypatch):

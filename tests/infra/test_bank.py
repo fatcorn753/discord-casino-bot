@@ -97,7 +97,9 @@ def test_income_goes_to_the_bank_cash_not_to_the_trust(eco):
     with eco.db.tx():
         eco.bank.bank_income_for(G, 3_000, NOW)
     assert eco.bank.deposit_of(A) == 20_000  # 信託は、収入の分配ではなく決まった利息を受け取る（#33）
-    assert eco.bank.bank_status(NOW)["cash"] == pytest.approx(cash0 + 3_000)
+    s = eco.bank.bank_status(NOW)
+    assert s["cash"] == pytest.approx(cash0 + 3_000 - s["thermostat"]["burned"])
+    assert 0 < s["thermostat"]["burned"] < 3_000
 
 
 def test_trust_interest_is_paid_hourly_by_size_at_the_trust_rate(eco):
@@ -117,7 +119,9 @@ def test_trust_interest_is_paid_hourly_by_size_at_the_trust_rate(eco):
     gain_a, gain_b = eco.wallet.balance(A) - a0, eco.wallet.balance(B) - b0
     assert gain_a + gain_b == paid and abs(gain_a - 2 * gain_b) <= 2  # 残高に応じて 2:1、手元へ払う
     s = eco.bank.bank_status(NOW + 86400)
-    assert s["cash"] == pytest.approx(cash0 - paid, abs=2) and s["trust_paid"] == paid  # 手元の現金から払う
+    assert (
+        s["cash"] == pytest.approx(cash0 - paid + s["thermostat"]["bailed"], abs=2) and s["trust_paid"] == paid
+    )  # 手元の現金と熱浴の肩代わりで払う
 
 
 def test_trust_interest_is_never_taken_from_the_trust_itself(eco):
@@ -134,15 +138,16 @@ def test_trust_interest_is_never_taken_from_the_trust_itself(eco):
     assert eco.bank.deposit_of(A) == 100_000  # 信託から利息を払うと、自分で自分に払うことになる
     assert eco.wallet.balance(A) == a0 + paid
     s = eco.bank.bank_status(NOW + 86400)
-    assert paid > 0 and s["excess_unpaid"] == 0  # 手元で払えない分は、帝愛共済の口の持ち主が負担する（#34）
+    assert paid > 0 and s["excess_unpaid"] == 0  # 手元で払えない分は、熱浴と帝愛共済の口の持ち主が負担する（#32・#34）
     charged = eco.db.conn.execute("SELECT kyosai_charged FROM teiai_bank WHERE guild_id=?", (G,)).fetchone()[0]
-    assert charged == paid
+    assert charged + s["thermostat"]["bailed"] == pytest.approx(paid, abs=1)
 
 
 def test_income_goes_to_the_bank_even_without_depositors(eco):
     with eco.db.tx():
         eco.bank.bank_income_for(G, 5_000, NOW)
-    assert eco.bank.bank_status(NOW)["cash"] == 5_000  # 社債の償還と共済の配当の原資になる（#33 のレビュー）
+    s = eco.bank.bank_status(NOW)
+    assert s["cash"] + s["thermostat"]["burned"] == pytest.approx(5_000) and s["cash"] > 0  # 社債の償還と共済の配当の原資になる（#33 のレビュー）
 
 
 def test_game_losses_feed_the_bank(eco):
@@ -381,14 +386,15 @@ def _thermo(eco):
     return eco.bank.bank_status(NOW)["thermostat"]
 
 
-def test_thermostat_only_observes_by_default_and_leaves_bank_cash_alone(eco):
+def test_thermostat_enforces_by_default_and_observes_when_disabled(eco, monkeypatch):
     from domain import thermostat
 
-    assert thermostat.ENFORCE is False
+    assert thermostat.ENFORCE is True
+    monkeypatch.setattr(thermostat, "ENFORCE", False)
     with eco.db.tx():
         eco.bank.bank_income_for(G, 5_000_000, NOW)
     s = eco.bank.bank_status(NOW)
-    assert s["cash"] == pytest.approx(5_000_000)  # 現金には全額入る
+    assert s["cash"] == pytest.approx(5_000_000)  # 観測モードでは現金に全額入る
     t = s["thermostat"]
     assert (
         t["enforce"] is False and t["burned"] > 4_000_000
@@ -397,7 +403,7 @@ def test_thermostat_only_observes_by_default_and_leaves_bank_cash_alone(eco):
     with eco.db.tx():
         assert eco.bank.bank_pay_for(G, 1_000_000, NOW) == 1_000_000
     s = eco.bank.bank_status(NOW)
-    assert s["cash"] == pytest.approx(4_000_000)  # 肩代わりは、現金に注入されない
+    assert s["cash"] == pytest.approx(4_000_000)  # 観測モードでは肩代わりは現金に注入されない
     assert 0 < s["thermostat"]["bailed"] < 1_000_000 and s["thermostat"]["load"] < 0  # 黒字帯を使い切ってから肩代わり
 
 
@@ -449,10 +455,11 @@ def test_shortfall_within_the_trust_is_shared_by_size_and_never_goes_negative(ec
     with eco.db.tx():
         paid = eco.bank.bank_pay_for(G, 1_000_000, NOW)  # 信託の総額を超える
     assert paid == 1_000_000 and eco.bank.deposit_of(A) == 0 and eco.bank.deposit_of(B) == 0
-    # 信託の総額を超えた 73万は、帝愛共済（#34）の口の持ち主が口数に応じて負担する
-    assert eco.bank.bank_status(NOW)["excess_unpaid"] == 0
+    # 信託の総額を超えた 73万は、熱浴の肩代わりと帝愛共済（#34）の口の持ち主が負担する
+    s = eco.bank.bank_status(NOW)
+    assert s["excess_unpaid"] == 0
     charged = eco.db.conn.execute("SELECT kyosai_charged FROM teiai_bank WHERE guild_id=?", (G,)).fetchone()[0]
-    assert charged == 730_000
+    assert s["thermostat"]["bailed"] + charged - s["cash"] == pytest.approx(730_000, abs=1)
 
 
 def test_thermostat_bank_bears_the_whole_loss_while_the_load_is_positive(eco, monkeypatch):
@@ -560,6 +567,7 @@ def test_thermostat_columns_are_added_to_an_existing_database(tmp_path):
     repos = open_repositories(path, strict=True).for_guild(G)
     with repos.db.tx():
         repos.bank.bank_income_for(G, 1_000, NOW)
+    cash_before = repos.bank.bank_status(NOW)["cash"]
     repos.db.conn.close()
     conn = sqlite3.connect(path)
     for col in ("thermo_load", "thermo_capacity", "thermo_ts", "bailout_debt", "thermo_burned", "thermo_bailed"):
@@ -568,16 +576,25 @@ def test_thermostat_columns_are_added_to_an_existing_database(tmp_path):
     conn.close()
     reopened = open_repositories(path, strict=True).for_guild(G)
     s = reopened.bank.bank_status(NOW)
-    assert s["cash"] == pytest.approx(1_000)  # 既存の現金はそのまま
+    assert s["cash"] == pytest.approx(cash_before)  # 既存の現金はそのまま
     assert s["thermostat"]["load"] == 0.0 and s["thermostat"]["capacity"] == pytest.approx(thermostat.E_MIN)
 
 
-def test_panel_shows_the_thermostat_and_that_it_is_only_observing(eco):
+def test_panel_shows_the_thermostat_and_teiai_bussan_pool(eco, monkeypatch):
     from cogs.teiai.panel import panel_embed
+    from domain import thermostat
 
     with eco.db.tx():
         eco.bank.bank_income_for(G, 50_000, NOW)
-    field = next(
-        f for f in panel_embed(make_test_bot(repos=eco).services.teiai, G, A).fields if "サーモスタット" in must(f.name)
-    )
-    assert "熱量" in must(field.value) and "観測だけ" in must(field.value)
+    embed = panel_embed(make_test_bot(repos=eco).services.teiai, G, A)
+    thermo_field = next(f for f in embed.fields if "サーモスタット" in must(f.name))
+    assert "熱量" in must(thermo_field.value) and "観測だけ" not in must(thermo_field.value)
+    pool_field = next(f for f in embed.fields if "帝愛物産" in must(f.name))
+    assert "/会社" in must(pool_field.value)
+    full_text = "\n".join(f"{f.name} {f.value}" for f in embed.fields)
+    assert "ピンハネ" not in full_text and "胴元の口座" not in full_text
+
+    monkeypatch.setattr(thermostat, "ENFORCE", False)
+    obs_embed = panel_embed(make_test_bot(repos=eco).services.teiai, G, A)
+    obs_field = next(f for f in obs_embed.fields if "サーモスタット" in must(f.name))
+    assert "観測だけ" in must(obs_field.value)
