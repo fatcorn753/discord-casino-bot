@@ -8,7 +8,7 @@ PACHINKO_SPINS_DDL = """
         ts       REAL    NOT NULL,
         omen     TEXT    NOT NULL,            -- 予告の色（'' は予告なし）
         tier     TEXT    NOT NULL,            -- リーチの格（'' はリーチなし）
-        hit      INTEGER NOT NULL             -- 当たったら 1
+        hit      INTEGER NOT NULL CHECK (hit IN (0, 1))             -- 当たったら 1
     )"""
 
 PACHINKO_SETS_DDL = """
@@ -17,13 +17,13 @@ PACHINKO_SETS_DDL = """
         guild_id  INTEGER NOT NULL,
         user_id   INTEGER NOT NULL,
         ts        REAL    NOT NULL,
-        bet       INTEGER NOT NULL,           -- そのセットの賭け金
-        balls     INTEGER NOT NULL,           -- 打った玉の数
-        starts    INTEGER NOT NULL,           -- スタートに入った玉の数（回転数）
-        hits      INTEGER NOT NULL,           -- 大当たりの始まりの数
-        chains    INTEGER NOT NULL,           -- 大当たりのラウンドの合計（連チャンを含む）
-        chain_max INTEGER NOT NULL,           -- 1回の大当たりでの最大連チャン
-        mult      INTEGER NOT NULL            -- 払い戻しの倍数（上限をかけたあと。還元率レベルをかける前）
+        bet       INTEGER NOT NULL CHECK (bet >= 0),           -- そのセットの賭け金
+        balls     INTEGER NOT NULL CHECK (balls >= 0),           -- 打った玉の数
+        starts    INTEGER NOT NULL CHECK (starts >= 0),           -- スタートに入った玉の数（回転数）
+        hits      INTEGER NOT NULL CHECK (hits >= 0),           -- 大当たりの始まりの数
+        chains    INTEGER NOT NULL CHECK (chains >= 0),           -- 大当たりのラウンドの合計（連チャンを含む）
+        chain_max INTEGER NOT NULL CHECK (chain_max >= 0),           -- 1回の大当たりでの最大連チャン
+        mult      INTEGER NOT NULL CHECK (mult >= 0)            -- 払い戻しの倍数（上限をかけたあと。還元率レベルをかける前）
     )"""
 
 PACHINKO_SPINS_INDEX_DDL = """

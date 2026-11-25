@@ -11,7 +11,7 @@ from infra.db.schema.ddl import (
 )
 from infra.db.schema.ddl.discord_ui import MANUAL_EVENT_DDL, STREAM_VOICE_CHANNELS_DDL
 from infra.db.schema.ddl.horse import HORSE_RACES_DDL, HORSE_RACES_INDEX_DDL
-from infra.db.schema.ddl.market import OPTION_PAIRS_DDL, OPTION_SHORT_MARGINS_DDL, OPTIONS_DDL
+from infra.db.schema.ddl.market import OPTION_PAIRS_DDL, OPTION_SHORT_MARGINS_DDL, OPTIONS_V6_DDL
 from infra.db.schema.ddl.social import (
     ARENA_BETS_DDL,
     ARENA_BETS_INDEX_DDL,
@@ -37,7 +37,7 @@ from infra.db.schema.ddl.social import (
 )
 from infra.db.schema.ddl.teiai import (
     BOND_DEFAULT_CHECKS_DDL,
-    BONDS_DDL,
+    BONDS_V6_DDL,
     KYOSAI_MOTIONS_DDL,
     KYOSAI_UNITS_DDL,
 )
@@ -173,7 +173,7 @@ def _migrate_kyosai(conn: sqlite3.Connection) -> None:
 
 def _migrate_bonds(conn: sqlite3.Connection) -> None:
     if not _table_exists(conn, "bonds"):
-        conn.execute(BONDS_DDL)
+        conn.execute(BONDS_V6_DDL)
         conn.execute(BOND_DEFAULT_CHECKS_DDL)
         return
     if "checked" not in _table_cols(conn, "bonds"):
@@ -186,7 +186,7 @@ def _migrate_bonds(conn: sqlite3.Connection) -> None:
     _replace_table(
         conn,
         "bonds",
-        BONDS_DDL,
+        BONDS_V6_DDL,
         "INSERT INTO bonds (id, guild_id, user_id, kind, principal, due, status, paid, ts, rate) "
         "SELECT id, guild_id, user_id, kind, MAX(1, principal), due, status, MAX(0, paid), ts, rate FROM bonds",
     )
@@ -199,7 +199,7 @@ def _migrate_bonds(conn: sqlite3.Connection) -> None:
 
 def _migrate_options(conn: sqlite3.Connection) -> None:
     if not _table_exists(conn, "options"):
-        conn.execute(OPTIONS_DDL)
+        conn.execute(OPTIONS_V6_DDL)
         conn.execute(OPTION_PAIRS_DDL)
         conn.execute(OPTION_SHORT_MARGINS_DDL)
         return
@@ -226,7 +226,7 @@ def _migrate_options(conn: sqlite3.Connection) -> None:
     _replace_table(
         conn,
         "options",
-        OPTIONS_DDL,
+        OPTIONS_V6_DDL,
         "INSERT INTO options (id, guild_id, user_id, kind, symbol, strike, units, premium, expiry, spot, ts, status, paid, final, side) "
         "SELECT id, guild_id, user_id, kind, symbol, strike, MAX(1, units), MAX(0, premium), expiry, spot, ts, "
         "status, MAX(0, paid), final, side FROM options",

@@ -5,7 +5,7 @@ domain/types.py は catalogs を読むため、ポート（domain/ports）から
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Generic, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Generic, NotRequired, TypedDict, TypeVar
 
 from .teiai import CdsRow
 
@@ -171,6 +171,8 @@ class LedgerEntry(TypedDict):
     balance_after: int
     reason: str
     ts: float
+    kind: NotRequired[str]
+    counterparty_id: NotRequired[int | None]
 
 
 class PlaySummary(TypedDict):

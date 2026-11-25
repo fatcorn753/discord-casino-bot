@@ -315,7 +315,8 @@ class WalletRepo(ScopedRepo, IWalletRepo):
     def history(self, user_id: int, limit: int = 10) -> list[LedgerEntry]:
         with self._lock:
             return self._all(
-                "SELECT delta, balance_after, reason, ts FROM ledger WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT ?",
+                "SELECT delta, balance_after, reason, ts, kind, counterparty_id FROM ledger "
+                "WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT ?",
                 (self._g(), user_id, limit),
             )
 
@@ -346,7 +347,7 @@ class WalletRepo(ScopedRepo, IWalletRepo):
             self._account.ensure(gid, receiver)
             sent_today = -(
                 self._scalar(
-                    "SELECT COALESCE(SUM(delta), 0) FROM ledger WHERE guild_id=? AND user_id=? AND reason LIKE '送金（送）%' AND ts>=?",
+                    "SELECT COALESCE(SUM(delta), 0) FROM ledger WHERE guild_id=? AND user_id=? AND kind='transfer_out' AND ts>=?",
                     (gid, sender, day_start_ts),
                 )
             )
@@ -365,9 +366,11 @@ class WalletRepo(ScopedRepo, IWalletRepo):
             if self._account.raw_balance(gid, sender) < amount + fee:
                 return TransferResult(False, fail("transfer_insufficient_balance", amount=amount, fee=fee))
             self._account.apply(
-                gid, sender, -amount, f"送金（送）→{receiver}"
+                gid, sender, -amount, f"送金（送）→{receiver}", kind="transfer_out", counterparty_id=receiver
             )  # 手数料は別の行にする（1日の上限は、送った額だけで数えるため）
             if fee:
-                self._account.apply(gid, sender, -fee, "送金手数料")
-            self._account.apply(gid, receiver, amount, f"送金（受）←{sender}", income=amount)
+                self._account.apply(gid, sender, -fee, "送金手数料", kind="transfer_fee", counterparty_id=receiver)
+            self._account.apply(
+                gid, receiver, amount, f"送金（受）←{sender}", income=amount, kind="transfer_in", counterparty_id=sender
+            )
             return TransferResult(True, received=amount, fee=fee, sender_balance=self._account.raw_balance(gid, sender))

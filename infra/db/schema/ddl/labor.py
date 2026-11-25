@@ -105,8 +105,8 @@ LABOR_FINDS_DDL = """
         at        REAL NOT NULL,
         kind      TEXT NOT NULL,                   -- 掘った作業員の種類
         ore       TEXT NOT NULL,
-        qty       INTEGER NOT NULL DEFAULT 1,
-        collected INTEGER NOT NULL DEFAULT 0        -- 受け取り（労働 collect）済みなら 1。画面には、まだのものだけ出す
+        qty       INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+        collected INTEGER NOT NULL DEFAULT 0 CHECK (collected IN (0, 1))        -- 受け取り（労働 collect）済みなら 1。画面には、まだのものだけ出す
     )"""
 
 LABOR_FINDS_INDEX_DDL = """
@@ -117,9 +117,9 @@ LABOR_CLICK_HOURS_DDL = """
         guild_id INTEGER NOT NULL,
         user_id  INTEGER NOT NULL,
         hour     INTEGER NOT NULL,                -- epoch秒 ÷ 3600
-        clicks   INTEGER NOT NULL DEFAULT 0,
+        clicks   INTEGER NOT NULL DEFAULT 0 CHECK (clicks >= 0),
         pay      INTEGER NOT NULL DEFAULT 0,
-        gaps     INTEGER NOT NULL DEFAULT 0,      -- 間隔を数えた回数（前の押下から10分以内のもの）
+        gaps     INTEGER NOT NULL DEFAULT 0 CHECK (gaps >= 0),      -- 間隔を数えた回数（前の押下から10分以内のもの）
         sum_gap  REAL NOT NULL DEFAULT 0,
         sum_gap2 REAL NOT NULL DEFAULT 0,         -- 間隔の2乗の合計（ばらつきを出す）
         min_gap  REAL,

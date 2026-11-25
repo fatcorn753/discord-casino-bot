@@ -335,6 +335,8 @@ _INVARIANT_SPECS: tuple[tuple[str, tuple[CandidateSpec, ...]], ...] = (
             ("arena_bets", ("amount",), "COALESCE(SUM(amount), 0)"),
         ),
     ),
+    ("ledger_count", (("ledger", (), "COUNT(*)"),)),
+    ("ledger_delta_sum", (("ledger", ("delta",), "COALESCE(SUM(delta), 0)"),)),
 )
 
 

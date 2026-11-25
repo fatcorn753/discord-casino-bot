@@ -77,7 +77,7 @@ class BankRepo(Base):
                 if gain:
                     credited += gain
                     self._account.ensure(gid, uid)
-                    self._account.apply(gid, uid, gain, "帝愛信託:利息", income=gain)
+                    self._account.apply(gid, uid, gain, "帝愛信託:利息", income=gain, kind="trust_interest")
 
             # 端数（按分の切り捨て）は手元へ戻し、未払いの小数は次回へ持ち越す
             if paid > credited:

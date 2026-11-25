@@ -3,7 +3,7 @@
 GUILD_STATUS_DDL = """
     CREATE TABLE IF NOT EXISTS guild_status (
         guild_id    INTEGER PRIMARY KEY,
-        status      TEXT NOT NULL,       -- pending / approved / denied
+        status      TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'denied')),       -- pending / approved / denied
         name        TEXT,
         decided_by  INTEGER,
         updated_at  REAL NOT NULL,
@@ -77,7 +77,7 @@ EVENT_STATE_DDL = """
     CREATE TABLE IF NOT EXISTS event_state (       -- 突発イベントの告知の進み具合（0=まだ 1=開始を告知 2=終了を告知）。再起動しても二重に告知しない
         guild_id INTEGER NOT NULL,
         day      TEXT NOT NULL,
-        phase    INTEGER NOT NULL DEFAULT 0,
+        phase    INTEGER NOT NULL DEFAULT 0 CHECK (phase >= 0),
         PRIMARY KEY (guild_id, day)
     )"""
 

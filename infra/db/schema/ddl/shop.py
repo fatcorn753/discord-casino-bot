@@ -5,7 +5,7 @@ INVENTORY_DDL = """
         guild_id INTEGER NOT NULL,
         user_id  INTEGER NOT NULL,
         item_id  TEXT    NOT NULL,
-        qty      INTEGER NOT NULL,
+        qty      INTEGER NOT NULL CHECK (qty >= 0),
         PRIMARY KEY (guild_id, user_id, item_id)
     )"""
 
@@ -14,7 +14,7 @@ SHOP_STOCK_DDL = """
         guild_id INTEGER NOT NULL,
         user_id  INTEGER NOT NULL,
         item_id  TEXT    NOT NULL,
-        stock    REAL    NOT NULL,                  -- updated の時点の在庫（小数）
+        stock    REAL    NOT NULL CHECK (stock >= 0),                  -- updated の時点の在庫（小数）
         updated  REAL    NOT NULL,
         PRIMARY KEY (guild_id, user_id, item_id)
     )"""
@@ -57,7 +57,7 @@ NICK_PREFS_DDL = """
         user_id       INTEGER NOT NULL,
         original_nick TEXT,          -- 称号を付ける前のニックネーム（NULL はニックネームなし）
         applied_nick  TEXT,          -- Bot が設定したニックネーム（NULL は未適用）
-        enabled       INTEGER NOT NULL DEFAULT 1,   -- 1: 称号の表示を、自分で選んだ人。0: 身分の【地下労働者】だけを、Bot が付けている人
+        enabled       INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),   -- 1: 称号の表示を、自分で選んだ人。0: 身分の【地下労働者】だけを、Bot が付けている人
         PRIMARY KEY (guild_id, user_id)
     )"""
 

@@ -7,19 +7,34 @@ import sqlite3
 import pytest
 
 import manage
-from domain import shop
+from domain import kyosai, shop
+from domain.errors import Failure
 from domain.types import INITIAL_BALANCE, PART_KEYS, asset_groups
 from infra.db import schema
 from infra.db.repositories import open_repositories
+from infra.db.schema.ddl import (
+    CDS_V1_DDL,
+    COMPANIES_V1_DDL,
+    COMPANY_STAKES_V1_DDL,
+    LEDGER_V1_DDL,
+    TEIAI_DEPOSITS_V1_DDL,
+)
+from infra.db.schema.ddl.market import OPTIONS_V6_DDL
+from infra.db.schema.ddl.teiai import BONDS_V6_DDL
+from tests.support import give_test_kyosai_units
 
 pytestmark = pytest.mark.real_scope
 
 G = 10
 U1 = 1
 U2 = 2
+U3 = 3
+G2 = 20
 NOW = 1_700_000_000.0
 EXPIRY_FUTURE = NOW + 7 * 86400.0
 DAY = "2026-11-10"
+MDAY = 1_800_000_000.0
+MDAY2 = MDAY + 86400.0
 
 # v1 以前（PR 直前）の主要テーブル＋死に列・死にテーブル・autoplay を含む v0 スナップショット DDL
 V0_SNAPSHOT_SQL = """
@@ -538,7 +553,7 @@ def test_fresh_db_initializes_directly_to_v1_without_backup(tmp_path):
     path = str(tmp_path / "fresh.db")
     eco = open_repositories(path, strict=True)
     try:
-        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION == 6
+        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION == 7
         assert eco.db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert eco.db.conn.execute("PRAGMA foreign_key_check").fetchall() == []
         tables = {r[0] for r in eco.db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
@@ -591,7 +606,7 @@ def test_fresh_db_initializes_directly_to_v1_without_backup(tmp_path):
         assert not os.path.exists(f"{path}.before-v3")
         assert not os.path.exists(f"{path}.before-v4")
         assert not os.path.exists(f"{path}.before-v5")
-        assert not os.path.exists(f"{path}.before-v6")
+        assert not os.path.exists(f"{path}.before-v7")
         assert eco.for_guild(G).wallet.balance(U1) == INITIAL_BALANCE
     finally:
         eco.close()
@@ -604,7 +619,7 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert os.path.exists(f"{path}.before-v1")
@@ -612,7 +627,7 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
         assert os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
         assert os.path.exists(f"{path}.before-v5")
-        assert os.path.exists(f"{path}.before-v6")
+        assert os.path.exists(f"{path}.before-v7")
 
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "guild_users" not in tables and "autoplay" not in tables and "users" not in tables
@@ -750,13 +765,13 @@ def test_failing_migration_step_rolls_back_atomically(tmp_path):
         conn.execute("UPDATE accounts SET balance = 0")
         raise RuntimeError("boom during migration")
 
-    steps = (*schema.MIGRATIONS, schema.MigrationStep(7, "broken_v7", broken_step))
+    steps = (*schema.MIGRATIONS, schema.MigrationStep(8, "broken_v8", broken_step))
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
         with pytest.raises(RuntimeError, match="boom"):
-            schema.initialize_db(conn, path, steps=steps, target_version=7)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+            schema.initialize_db(conn, path, steps=steps, target_version=8)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert (
             conn.execute("SELECT balance FROM accounts WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()[0]
             == INITIAL_BALANCE + 500
@@ -797,14 +812,14 @@ def test_v1_to_v2_splits_all_user_domains_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v1")
         assert os.path.exists(f"{path}.before-v2")
         assert os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
         assert os.path.exists(f"{path}.before-v5")
-        assert os.path.exists(f"{path}.before-v6")
+        assert os.path.exists(f"{path}.before-v7")
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").fetchone() is None
 
         st = eco.for_guild(G).wallet.stats(U1)
@@ -883,13 +898,13 @@ def test_v2_to_v3_splits_teiai_bank_and_house_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v2")
         assert os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
         assert os.path.exists(f"{path}.before-v5")
-        assert os.path.exists(f"{path}.before-v6")
+        assert os.path.exists(f"{path}.before-v7")
 
         tb_cols = {r[1] for r in conn.execute("PRAGMA table_info(teiai_bank)")}
         assert tb_cols == {"guild_id", "cash", "loaned", "ts"}
@@ -943,12 +958,12 @@ def test_v3_to_v4_splits_labor_and_profile_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v3")
         assert os.path.exists(f"{path}.before-v4")
         assert os.path.exists(f"{path}.before-v5")
-        assert os.path.exists(f"{path}.before-v6")
+        assert os.path.exists(f"{path}.before-v7")
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='labor'").fetchone() is None
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='profile'").fetchone() is None
 
@@ -1023,11 +1038,11 @@ def test_v4_to_v5_merges_margin_and_normalizes_horse_racing_losslessly(tmp_path)
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v4")
         assert os.path.exists(f"{path}.before-v5")
-        assert os.path.exists(f"{path}.before-v6")
+        assert os.path.exists(f"{path}.before-v7")
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='crypto_short'").fetchone() is None
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='horse_odds'").fetchone() is None
 
@@ -1156,11 +1171,11 @@ def test_v5_to_v6_normalizes_subtypes_sentinels_and_discord_ui_losslessly(tmp_pa
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v5")
-        assert os.path.exists(f"{path}.before-v6")
+        assert os.path.exists(f"{path}.before-v7")
 
         g = eco.for_guild(G)
         q1 = g.quiz.quiz_get(1)
@@ -1213,6 +1228,372 @@ def test_v5_to_v6_normalizes_subtypes_sentinels_and_discord_ui_losslessly(tmp_pa
         eco.close()
 
 
+# v6 時点の子テーブル定義（v7 で FK・CHECK が付与される前の形。v7 移行が旧形を検出して作り直すことを検証する）
+V6_LEGACY_CHILD_DDL: dict[str, str] = {
+    "ledger": LEDGER_V1_DDL,
+    "companies": COMPANIES_V1_DDL,
+    "company_stakes": COMPANY_STAKES_V1_DDL,
+    "teiai_house_grants": """
+        CREATE TABLE IF NOT EXISTS teiai_house_grants (
+            guild_id INTEGER NOT NULL,
+            day      TEXT NOT NULL,
+            used     INTEGER NOT NULL DEFAULT 0 CHECK (used >= 0),
+            PRIMARY KEY (guild_id, day)
+        )""",
+    "teiai_deposits": TEIAI_DEPOSITS_V1_DDL,
+    "cds": CDS_V1_DDL,
+    "bonds": BONDS_V6_DDL,
+    "options": OPTIONS_V6_DDL,
+    "kyosai_votes": """
+        CREATE TABLE IF NOT EXISTS kyosai_votes (
+            motion_id INTEGER NOT NULL,
+            user_id   INTEGER NOT NULL,
+            yes       INTEGER NOT NULL,
+            PRIMARY KEY (motion_id, user_id)
+        )""",
+    "teiai_market": """
+        CREATE TABLE IF NOT EXISTS teiai_market (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id    INTEGER NOT NULL,
+            day         REAL NOT NULL,
+            item_id     TEXT NOT NULL,
+            mode        TEXT NOT NULL,
+            qty         INTEGER NOT NULL,
+            start_price INTEGER NOT NULL,
+            end_price   INTEGER NOT NULL,
+            black       INTEGER NOT NULL,
+            listed_at   REAL NOT NULL,
+            expires_at  REAL NOT NULL
+        )""",
+    "quiz_answers": """
+        CREATE TABLE IF NOT EXISTS quiz_answers (
+            question_id INTEGER NOT NULL,
+            guild_id    INTEGER NOT NULL,
+            user_id     INTEGER NOT NULL,
+            correct     INTEGER NOT NULL,
+            ts          REAL    NOT NULL,
+            counted     INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (question_id, guild_id, user_id)
+        )""",
+    "raffle_entries": """
+        CREATE TABLE IF NOT EXISTS raffle_entries (
+            raffle_id INTEGER NOT NULL,
+            user_id   INTEGER NOT NULL,
+            PRIMARY KEY (raffle_id, user_id)
+        )""",
+    "poll_votes": """
+        CREATE TABLE IF NOT EXISTS poll_votes (
+            poll_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            yes     INTEGER NOT NULL,
+            PRIMARY KEY (poll_id, user_id)
+        )""",
+    "stream_rounds": """
+        CREATE TABLE IF NOT EXISTS stream_rounds (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            stream_id INTEGER NOT NULL,
+            guild_id  INTEGER NOT NULL,
+            label     TEXT    NOT NULL,
+            status    TEXT    NOT NULL DEFAULT 'open',
+            created   REAL    NOT NULL,
+            settled   REAL    NOT NULL DEFAULT 0
+        )""",
+    "stream_bets": """
+        CREATE TABLE IF NOT EXISTS stream_bets (
+            round_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            side     TEXT    NOT NULL,
+            amount   INTEGER NOT NULL,
+            PRIMARY KEY (round_id, user_id)
+        )""",
+    "arena_fighters": """
+        CREATE TABLE IF NOT EXISTS arena_fighters (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            tournament_id INTEGER NOT NULL,
+            name          TEXT    NOT NULL,
+            base_power    INTEGER NOT NULL,
+            group_no      INTEGER NOT NULL,
+            stage         TEXT    NOT NULL DEFAULT 'semi',
+            bet_total     INTEGER NOT NULL DEFAULT 0,
+            result        TEXT
+        )""",
+    "earnings_memos": """
+        CREATE TABLE IF NOT EXISTS earnings_memos (
+            event_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            hint     INTEGER NOT NULL,
+            PRIMARY KEY (event_id, guild_id, user_id)
+        )""",
+    "earnings_shop": """
+        CREATE TABLE IF NOT EXISTS earnings_shop (
+            event_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            hint     INTEGER NOT NULL,
+            price    INTEGER NOT NULL,
+            ts       REAL NOT NULL,
+            PRIMARY KEY (event_id, guild_id, user_id)
+        )""",
+}
+
+
+def build_v6_db(path: str) -> None:
+    """v6 状態の DB を構築する（v7 で FK・CHECK が付く 18 表だけ旧 FK なしの形のまま残す）。"""
+    old = NOW - (kyosai.DORMANT_DAYS + 1) * 86400.0  # 休眠判定より前の活動時刻
+    c = sqlite3.connect(path)
+    c.execute("PRAGMA foreign_keys = OFF")  # 旧形テーブルへの投入なので、親の有無は移行側で補完・検査する
+    schema.create_tables(c)
+    for table, ddl in V6_LEGACY_CHILD_DDL.items():
+        c.execute(f"DROP TABLE {table}")
+        c.execute(ddl)
+    c.execute("INSERT INTO accounts (guild_id, user_id, balance, created_at) VALUES (?, ?, 100000, ?)", (G, U1, old))
+    c.execute("INSERT INTO accounts (guild_id, user_id, balance, created_at) VALUES (?, ?, 50000, ?)", (G, U2, old))
+    c.execute("INSERT INTO accounts (guild_id, user_id, balance, created_at) VALUES (?, ?, 30000, ?)", (G, U3, old))
+    c.executemany(
+        "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            (G, U1, 100000, 100000, "初期支給", old),
+            (G, U1, -900, 99100, "送金（送）→2", NOW),
+            (G, U1, -10, 99090, "送金手数料", NOW),
+            (G, U2, 900, 50900, "送金（受）←1", NOW),
+            (G, U1, 100, 99190, "共済:配当", NOW),
+            (G, U1, -10, 99180, "共済:超過損失の負担（借金 10ペリカ）", old),
+            (G, U1, 5, 99185, "帝愛信託:利息", old),
+            (G, U1, -5000, 94185, "貸付→2（#1）", old),
+            (G, U2, 5000, 55900, "借入←1（#1）", old),
+            (G, U2, -1000, 54900, "貸付の返済→1（#1）", old),
+            (G, U1, 1000, 95185, "貸付の回収←2（#1）", old),
+            (G, U1, -100, 95085, "賭け:slot", old),
+            (G, U1, -50, 95035, "追加の賭け:blackjack", old),
+            (G, U1, 300, 95335, "払い戻し:slot", old),
+            (G, U1, 150, 95485, "保険券で半額返金:slot", old),
+            (G, U1, -20, 95465, "追加の支払い:chinchiro", old),
+            (G, U1, 100, 95565, "返金:slot", old),
+            (G, U3, 30000, 30000, "初期支給", old),
+            (G, U3, 100, 30100, "共済:配当", NOW),
+        ],
+    )
+    c.execute(
+        "INSERT INTO companies (guild_id, user_id, name, kind, level, funds, stock, stock_ts, upkeep_day, "
+        "unpaid_days, sold_total, created, dividend_rate) VALUES (?, ?, '帝愛商事', 'stand', 1, 40000, 0.0, ?, ?, 0, 0, ?, 0.0)",
+        (G, U1, NOW, DAY, NOW),
+    )
+    c.execute(
+        "INSERT INTO company_stakes (guild_id, owner_id, investor_id, amount, dividends) VALUES (?, ?, ?, 5000, 100)",
+        (G, U1, U2),
+    )
+    c.execute(
+        "INSERT INTO kyosai_motions (id, guild_id, proposer, premium, created, closes, status, yes, no) "
+        "VALUES (1, ?, ?, 0.01, ?, ?, 'open', 0, 0)",
+        (G, U1, NOW, EXPIRY_FUTURE),
+    )
+    c.execute("INSERT INTO kyosai_votes (motion_id, user_id, yes) VALUES (1, ?, 1), (1, ?, 0)", (U1, U2))
+    c.execute(
+        "INSERT INTO quiz_questions (id, question, explanation, creator_name, msg_right, msg_wrong, reward, expires, created) "
+        "VALUES (1, 'Q', 'ex', '', '', '', 100, NULL, ?)",
+        (NOW,),
+    )
+    c.execute("INSERT INTO quiz_choices (question_id, choice_idx, label, display_pos) VALUES (1, 0, 'A', 0), (1, 1, 'B', 1)")
+    c.execute(
+        "INSERT INTO quiz_answers (question_id, guild_id, user_id, correct, ts, counted) VALUES (1, ?, ?, 1, ?, 1)",
+        (G, U1, NOW),
+    )
+    c.execute(
+        "INSERT INTO raffle (id, guild_id, host_id, fee, closes, status) VALUES (1, ?, ?, 100, ?, 'open')",
+        (G, U1, EXPIRY_FUTURE),
+    )
+    c.execute("INSERT INTO raffle_entries (raffle_id, user_id) VALUES (1, ?), (1, ?)", (U1, U2))
+    c.execute(
+        "INSERT INTO polls (id, guild_id, creator, title, closes, adj_yes, adj_no, rigs, status) "
+        "VALUES (1, ?, ?, '賛否', ?, 0, 0, 0, 'open')",
+        (G, U1, EXPIRY_FUTURE),
+    )
+    c.execute("INSERT INTO poll_votes (poll_id, user_id, yes) VALUES (1, ?, 1), (1, ?, 0)", (U1, U2))
+    c.execute(
+        "INSERT INTO streams (id, guild_id, streamer, title, url, started, ends, tips, tip_count, status) "
+        "VALUES (1, ?, ?, '配信', '', ?, ?, 0, 0, 'live')",
+        (G, U1, NOW, EXPIRY_FUTURE),
+    )
+    c.execute(
+        "INSERT INTO stream_rounds (id, stream_id, guild_id, label, status, created, settled) VALUES (1, 1, ?, 'round1', 'open', ?, 0)",
+        (G, NOW),
+    )
+    c.execute("INSERT INTO stream_bets (round_id, user_id, side, amount) VALUES (1, ?, 'win', 500)", (U1,))
+    c.execute(
+        "INSERT INTO arena_tournaments (id, guild_id, day, format, status, created) VALUES (1, ?, ?, 'duel', 'semi_betting', ?)",
+        (G, DAY, NOW),
+    )
+    c.execute(
+        "INSERT INTO arena_fighters (id, tournament_id, name, base_power, group_no, stage, bet_total, result) "
+        "VALUES (1, 1, '剛腕', 60, 1, 'semi', 700, NULL), (2, 1, '鉄壁', 55, 1, 'semi', 250, NULL)"
+    )
+    c.execute(
+        "INSERT INTO arena_bets (id, tournament_id, stage, fighter_id, user_id, amount, payout, settled, created) "
+        "VALUES (1, 1, 'semi', 1, ?, 500, 0, 0, ?)",
+        (U1, NOW),
+    )
+    c.execute(
+        "INSERT INTO earnings (id, symbol, announce_at, release_at, direction, size, announced, released) "
+        "VALUES (1, 'cs', ?, ?, 1, 0.05, 0, 0)",
+        (NOW, NOW + 3600),
+    )
+    c.execute("INSERT INTO earnings_memos (event_id, guild_id, user_id, hint) VALUES (1, ?, ?, 1)", (G, U1))
+    c.execute("INSERT INTO earnings_shop (event_id, guild_id, user_id, hint, price, ts) VALUES (1, ?, ?, -1, 500, ?)", (G, U2, NOW))
+    c.execute("INSERT INTO teiai_house (guild_id, balance, skimmed) VALUES (?, 25000, 777)", (G,))
+    # G2 は親の teiai_house 行が無いまま grants を持つ（v7 移行で自動補完されること）
+    c.execute("INSERT INTO teiai_house_grants (guild_id, day, used) VALUES (?, ?, 4000), (?, ?, 1000)", (G, DAY, G2, DAY))
+    c.execute("INSERT INTO teiai_market_days (guild_id, day) VALUES (?, ?)", (G, MDAY))
+    # G2 の teiai_market は親の teiai_market_days 行が無い（v7 移行で自動補完されること）
+    c.execute(
+        "INSERT INTO teiai_market (id, guild_id, day, item_id, mode, qty, start_price, end_price, black, listed_at, expires_at) "
+        "VALUES (1, ?, ?, ?, 'fixed', 3, 100, 100, 0, ?, ?), (2, ?, ?, ?, 'auction', 1, 500, 300, 1, ?, ?)",
+        (G, MDAY, shop.INSURANCE, NOW, NOW + 3600, G2, MDAY2, shop.INSURANCE, NOW, NOW + 7200),
+    )
+    c.execute("INSERT INTO teiai_deposits (guild_id, user_id, amount) VALUES (?, ?, 10000)", (G, U1))
+    c.execute(
+        "INSERT INTO cds (id, guild_id, buyer_id, target_id, stake, odds, ts, expires, status, paid) "
+        "VALUES (1, ?, ?, ?, 1000, 2.5, ?, ?, 'active', 0)",
+        (G, U1, U2, NOW, EXPIRY_FUTURE),
+    )
+    c.execute(
+        "INSERT INTO bonds (id, guild_id, user_id, kind, principal, due, status, paid, ts, rate) "
+        "VALUES (1, ?, ?, 'junk', 1500, ?, 'active', 0, ?, 0.5)",
+        (G, U1, EXPIRY_FUTURE, NOW),
+    )
+    c.execute("INSERT INTO bond_default_checks (bond_id, checked_at) VALUES (1, ?)", (NOW + 60,))
+    c.execute(
+        "INSERT INTO options (id, guild_id, user_id, kind, symbol, strike, units, premium, expiry, spot, ts, status, paid, final, side) "
+        "VALUES (1, ?, ?, 'pair', 'cs', 10.0, 1000, 150, ?, 10.0, ?, 'active', 0, NULL, 'long'), "
+        "(2, ?, ?, 'call', 'cs', 11.0, 1000, 80, ?, 10.0, ?, 'active', 0, NULL, 'short')",
+        (G, U1, EXPIRY_FUTURE, NOW, G, U1, EXPIRY_FUTURE, NOW),
+    )
+    c.execute("INSERT INTO option_pairs (option_id, symbol2, spot2) VALUES (1, 'nv', 20.0)")
+    c.execute("INSERT INTO option_short_margins (option_id, margin) VALUES (2, 900)")
+    c.execute("PRAGMA user_version = 6")
+    c.commit()
+    c.close()
+
+
+def test_v6_to_v7_structures_ledger_and_enforces_integrity_fks(tmp_path):
+    path = str(tmp_path / "v6_only.db")
+    build_v6_db(path)
+
+    eco = open_repositories(path, strict=True)
+    try:
+        conn = eco.db.conn
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert os.path.exists(f"{path}.before-v7")
+        assert not os.path.exists(f"{path}.before-v8")
+
+        # 全 ledger 行の kind / counterparty_id / ref_id が reason から正しくバックフィルされている
+        expected_kinds: dict[str, tuple[str, int | None, int | None]] = {
+            "初期支給": ("initial_grant", None, None),
+            "送金（送）→2": ("transfer_out", 2, None),
+            "送金手数料": ("transfer_fee", None, None),
+            "送金（受）←1": ("transfer_in", 1, None),
+            "共済:配当": ("kyosai_dividend", None, None),
+            "共済:超過損失の負担（借金 10ペリカ）": ("kyosai_excess_charge", None, None),
+            "帝愛信託:利息": ("trust_interest", None, None),
+            "貸付→2（#1）": ("loan_lend", 2, 1),
+            "借入←1（#1）": ("loan_borrow", 1, 1),
+            "貸付の返済→1（#1）": ("loan_repay", 1, 1),
+            "貸付の回収←2（#1）": ("loan_collect", 2, 1),
+            "賭け:slot": ("game_bet", None, None),
+            "追加の賭け:blackjack": ("game_bet_add", None, None),
+            "払い戻し:slot": ("game_payout", None, None),
+            "保険券で半額返金:slot": ("game_insurance", None, None),
+            "追加の支払い:chinchiro": ("game_penalty", None, None),
+            "返金:slot": ("game_refund", None, None),
+        }
+        for reason, expected in expected_kinds.items():
+            row = conn.execute(
+                "SELECT kind, counterparty_id, ref_id FROM ledger WHERE guild_id=? AND reason=?", (G, reason)
+            ).fetchone()
+            assert row is not None and tuple(row) == expected, reason
+        assert conn.execute("SELECT COUNT(*) FROM ledger WHERE guild_id=? AND kind=''", (G,)).fetchone()[0] == 0
+
+        # 新規 FK を付与した 18 表と、既存子テーブルの FK が壊れていないこと
+        expected_fk_parents = {
+            "ledger": {"accounts"},
+            "companies": {"accounts"},
+            "company_stakes": {"companies", "accounts"},
+            "teiai_house_grants": {"teiai_house"},
+            "teiai_deposits": {"accounts"},
+            "cds": {"accounts"},
+            "bonds": {"accounts"},
+            "options": {"accounts"},
+            "kyosai_votes": {"kyosai_motions"},
+            "teiai_market": {"teiai_market_days"},
+            "quiz_answers": {"quiz_questions"},
+            "raffle_entries": {"raffle"},
+            "poll_votes": {"polls"},
+            "stream_rounds": {"streams"},
+            "stream_bets": {"stream_rounds"},
+            "arena_fighters": {"arena_tournaments"},
+            "earnings_memos": {"earnings"},
+            "earnings_shop": {"earnings"},
+            "bond_default_checks": {"bonds"},
+            "option_pairs": {"options"},
+            "option_short_margins": {"options"},
+            "arena_bets": {"arena_tournaments", "arena_fighters"},
+            "arena_npc_bets": {"arena_tournaments", "arena_fighters"},
+        }
+        for table, parents in expected_fk_parents.items():
+            fks = {str(r[2]) for r in conn.execute(f"PRAGMA foreign_key_list({table})")}
+            assert parents <= fks, f"{table}: 期待する親 {parents - fks} が FK に無い"
+
+        # 親行が無かった teiai_house / teiai_market_days が自動補完され、子の行も残っている
+        assert conn.execute("SELECT 1 FROM teiai_house WHERE guild_id=?", (G2,)).fetchone() is not None
+        assert conn.execute("SELECT used FROM teiai_house_grants WHERE guild_id=? AND day=?", (G2, DAY)).fetchone()[0] == 1000
+        assert conn.execute("SELECT 1 FROM teiai_market_days WHERE guild_id=? AND day=?", (G2, MDAY2)).fetchone() is not None
+        assert conn.execute("SELECT COUNT(*) FROM teiai_market WHERE guild_id=?", (G2,)).fetchone()[0] == 1
+        # 移行で消えていないことの代表的な確認
+        assert conn.execute("SELECT amount FROM teiai_deposits WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()[0] == 10000
+        assert conn.execute("SELECT COUNT(*) FROM company_stakes WHERE guild_id=?", (G,)).fetchone()[0] == 1
+        assert conn.execute("SELECT stake FROM cds WHERE id=1").fetchone()[0] == 1000
+        assert conn.execute("SELECT principal FROM bonds WHERE id=1").fetchone()[0] == 1500
+        assert conn.execute("SELECT COUNT(*) FROM option_pairs").fetchone()[0] == 1
+        assert conn.execute("SELECT margin FROM option_short_margins WHERE option_id=2").fetchone()[0] == 900
+        assert conn.execute("SELECT checked_at FROM bond_default_checks WHERE bond_id=1").fetchone()[0] == NOW + 60
+
+        g = eco.for_guild(G)
+        # 送金の日次上限が構造化 kind ベースで機能する（バックフィルされた「送金（送）」が当日分に数えられる）
+        blocked = g.wallet.transfer(U1, U2, 200, 0.0, 1000, NOW)
+        assert not blocked.ok and isinstance(blocked.reason, Failure)
+        assert blocked.reason.code == "transfer_daily_limit"
+        assert g.wallet.transfer(U1, U2, 200, 0.0, 1000, NOW + 1).ok  # 日付が変われば上限は戻る
+
+        # 共済の休眠回収が構造化 kind ベースで機能する（「共済:配当」は本人の活動に数えない）
+        with eco.db.tx():
+            give_test_kyosai_units(eco, U3, 100, guild_id=G, now=NOW)
+        assert g.kyosai.kyosai_daily(NOW) is None
+        res = g.kyosai.kyosai_daily(NOW + 86400.0)
+        assert res is not None and res["recovered"] == 100
+        assert g.kyosai.units_of_for(G, U3) == 0
+
+        snap1 = schema.capture_invariants(conn)
+        kinds1 = conn.execute("SELECT kind, COUNT(*) FROM ledger GROUP BY kind ORDER BY kind").fetchall()
+    finally:
+        eco.close()
+
+    # 2回目の open_repositories は冪等（何も変わらない）
+    eco2 = open_repositories(path, strict=True)
+    try:
+        conn2 = eco2.db.conn
+        assert conn2.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert conn2.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert conn2.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert schema.diff_invariants(snap1, schema.capture_invariants(conn2)) == []
+        assert conn2.execute("SELECT kind, COUNT(*) FROM ledger GROUP BY kind ORDER BY kind").fetchall() == kinds1
+        report = schema.initialize_db(conn2, path)
+        assert report.applied == () and report.end_version == 7
+    finally:
+        eco2.close()
+
+
 def test_manage_migrate_check_never_modifies_source_db(tmp_path, capsys):
     path = str(tmp_path / "prod_v0.db")
     build_legacy_v0_db(path)
@@ -1232,6 +1613,6 @@ def test_manage_migrate_check_never_modifies_source_db(tmp_path, capsys):
     assert os.path.exists(f"{path}.before-v1")
     check = sqlite3.connect(path)
     try:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 7
     finally:
         check.close()

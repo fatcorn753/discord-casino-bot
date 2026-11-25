@@ -21,13 +21,25 @@ class AccountCore:
             (guild_id, user_id, INITIAL_BALANCE, self._db.now_ts()),
         )
         if cur.rowcount:
-            self.ledger(guild_id, user_id, INITIAL_BALANCE, INITIAL_BALANCE, "初期支給")
+            self.ledger(guild_id, user_id, INITIAL_BALANCE, INITIAL_BALANCE, "初期支給", kind="initial_grant")
             # 帝愛共済の口は配らない（総口数は固定。新しい人は、譲渡か帝愛の競りで手に入れる。#93）
 
-    def ledger(self, guild_id: int, user_id: int, delta: int, balance_after: int, reason: str) -> None:
+    def ledger(
+        self,
+        guild_id: int,
+        user_id: int,
+        delta: int,
+        balance_after: int,
+        reason: str,
+        *,
+        kind: str = "",
+        counterparty_id: int | None = None,
+        ref_id: int | None = None,
+    ) -> None:
         self._conn.execute(
-            "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
-            (guild_id, user_id, delta, balance_after, reason, self._db.now_ts()),
+            "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts, kind, counterparty_id, ref_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (guild_id, user_id, delta, balance_after, reason, self._db.now_ts(), kind, counterparty_id, ref_id),
         )
 
     def raw_balance(self, guild_id: int, user_id: int) -> int:
@@ -102,13 +114,24 @@ class AccountCore:
         )
         self._conn.execute("DELETE FROM teiai_debts WHERE guild_id=? AND user_id=? AND debt <= 0", (guild_id, user_id))
 
-    def apply(self, guild_id: int, user_id: int, delta: int, reason: str, income: int = 0) -> int:
+    def apply(
+        self,
+        guild_id: int,
+        user_id: int,
+        delta: int,
+        reason: str,
+        income: int = 0,
+        *,
+        kind: str = "",
+        counterparty_id: int | None = None,
+        ref_id: int | None = None,
+    ) -> int:
         """残高に delta を足す（0 未満にはならない）。実際に変化した量を返す。"""
         before = self.raw_balance(guild_id, user_id)
         after = max(0, before + delta)
         self._conn.execute("UPDATE accounts SET balance=? WHERE guild_id=? AND user_id=?", (after, guild_id, user_id))
         if after != before:
-            self.ledger(guild_id, user_id, after - before, after, reason)
+            self.ledger(guild_id, user_id, after - before, after, reason, kind=kind, counterparty_id=counterparty_id, ref_id=ref_id)
         if delta > 0 and income > 0:
             self._debt_hook.withhold_income(guild_id, user_id, min(income, delta))
         return self.raw_balance(guild_id, user_id) - before

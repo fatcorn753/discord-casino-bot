@@ -14,7 +14,21 @@ from infra.db.schema.ddl import (
     teiai,
     telemetry,
 )
-from infra.db.schema.ddl.core import ACCOUNTS_DDL, USER_DAILY_DDL, USER_PLAY_STATS_DDL, USERS_DDL
+from infra.db.schema.ddl.company import (
+    COMPANIES_DDL,
+    COMPANIES_V1_DDL,
+    COMPANY_STAKES_DDL,
+    COMPANY_STAKES_V1_DDL,
+)
+from infra.db.schema.ddl.core import (
+    ACCOUNTS_DDL,
+    LEDGER_DDL,
+    LEDGER_KIND_INDEX_DDL,
+    LEDGER_V1_DDL,
+    USER_DAILY_DDL,
+    USER_PLAY_STATS_DDL,
+    USERS_DDL,
+)
 from infra.db.schema.ddl.discord_ui import (
     DISCORD_POSTS_DDL,
     MANUAL_EVENT_DDL,
@@ -61,6 +75,7 @@ from infra.db.schema.ddl.market import (
     MARGIN_POSITIONS_DDL,
     OPTION_PAIRS_DDL,
     OPTION_SHORT_MARGINS_DDL,
+    OPTIONS_ACTIVE_INDEX_DDL,
     OPTIONS_DDL,
     OPTIONS_V1_DDL,
 )
@@ -93,8 +108,12 @@ from infra.db.schema.ddl.social import (
 )
 from infra.db.schema.ddl.teiai import (
     BOND_DEFAULT_CHECKS_DDL,
+    BONDS_ACTIVE_INDEX_DDL,
     BONDS_DDL,
     BONDS_V1_DDL,
+    CDS_ACTIVE_INDEX_DDL,
+    CDS_DDL,
+    CDS_V1_DDL,
     KYOSAI_MOTIONS_DDL,
     KYOSAI_MOTIONS_V1_DDL,
     KYOSAI_STATE_DDL,
@@ -105,6 +124,8 @@ from infra.db.schema.ddl.teiai import (
     TEIAI_BANK_V1_DDL,
     TEIAI_BANKRUPTCIES_DDL,
     TEIAI_DEBTS_DDL,
+    TEIAI_DEPOSITS_DDL,
+    TEIAI_DEPOSITS_V1_DDL,
     TEIAI_ESCAPES_DDL,
     TEIAI_GRACE_ACTIVE_INDEX_DDL,
     TEIAI_GRACE_DDL,
@@ -171,6 +192,12 @@ V6_SPLIT_STATEMENTS: tuple[str, ...] = (
     ARENA_NPC_BETS_DDL,
     ARENA_NPC_BETS_INDEX_DDL,
 )
+V7_INTEGRITY_INDEX_STATEMENTS: tuple[str, ...] = (
+    LEDGER_KIND_INDEX_DDL,
+    CDS_ACTIVE_INDEX_DDL,
+    BONDS_ACTIVE_INDEX_DDL,
+    OPTIONS_ACTIVE_INDEX_DDL,
+)
 _V1_SKIP_SET = frozenset(
     (
         *V2_USER_SPLIT_STATEMENTS,
@@ -178,6 +205,12 @@ _V1_SKIP_SET = frozenset(
         *V4_LABOR_PROFILE_STATEMENTS,
         *V5_MARGIN_HORSE_STATEMENTS,
         *V6_SPLIT_STATEMENTS,
+        *V7_INTEGRITY_INDEX_STATEMENTS,
+        LEDGER_DDL,
+        COMPANIES_DDL,
+        COMPANY_STAKES_DDL,
+        TEIAI_DEPOSITS_DDL,
+        CDS_DDL,
         TEIAI_BANK_DDL,
         TEIAI_HOUSE_DDL,
         KYOSAI_STATE_DDL,
@@ -274,6 +307,12 @@ def create_v1_missing_tables(conn: sqlite3.Connection) -> None:
         conn.execute(STREAMS_V1_DDL)
     if not _has_table(conn, "arena_npc_bets"):
         conn.execute(ARENA_BETS_V1_DDL)
+    if not _has_col(conn, "ledger", "kind"):
+        conn.execute(LEDGER_V1_DDL)
+        conn.execute(COMPANIES_V1_DDL)
+        conn.execute(COMPANY_STAKES_V1_DDL)
+        conn.execute(TEIAI_DEPOSITS_V1_DDL)
+        conn.execute(CDS_V1_DDL)
     for stmt in ALL_STATEMENTS:
         if stmt not in _V1_SKIP_SET:
             conn.execute(stmt)
@@ -301,6 +340,7 @@ __all__ = [
     "V4_LABOR_PROFILE_STATEMENTS",
     "V5_MARGIN_HORSE_STATEMENTS",
     "V6_SPLIT_STATEMENTS",
+    "V7_INTEGRITY_INDEX_STATEMENTS",
     "create_all_tables",
     "create_v1_missing_tables",
     "new_quiz_order",

@@ -60,7 +60,7 @@ USER_PLAY_STATS_DDL = """
         FOREIGN KEY (guild_id, user_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
     )"""
 
-LEDGER_DDL = """
+LEDGER_V1_DDL = """
     CREATE TABLE IF NOT EXISTS ledger (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id      INTEGER NOT NULL DEFAULT 0,
@@ -71,15 +71,33 @@ LEDGER_DDL = """
         ts            REAL NOT NULL
     )"""
 
+LEDGER_DDL = """
+    CREATE TABLE IF NOT EXISTS ledger (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id        INTEGER NOT NULL DEFAULT 0,
+        user_id         INTEGER NOT NULL,
+        delta           INTEGER NOT NULL,
+        balance_after   INTEGER NOT NULL,
+        reason          TEXT    NOT NULL,
+        ts              REAL    NOT NULL,
+        kind            TEXT    NOT NULL DEFAULT '',
+        counterparty_id INTEGER,
+        ref_id          INTEGER,
+        FOREIGN KEY (guild_id, user_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
+    )"""
+
 LEDGER_INDEX_DDL = """
     CREATE INDEX IF NOT EXISTS ledger_user ON ledger (guild_id, user_id, id)"""
+
+LEDGER_KIND_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS idx_ledger_user_kind_ts ON ledger (guild_id, user_id, kind, ts)"""
 
 JACKPOT_DDL = """
     CREATE TABLE IF NOT EXISTS jackpot (          -- 共有ジャックポット（サーバーごと。domain/games/jackpot.py）
         guild_id    INTEGER PRIMARY KEY,
-        pool        INTEGER NOT NULL DEFAULT 0,  -- いまの積み立て
+        pool        INTEGER NOT NULL DEFAULT 0 CHECK (pool >= 0),  -- いまの積み立て
         last_user   INTEGER,                     -- 最後に当てた人
-        last_amount INTEGER NOT NULL DEFAULT 0,
+        last_amount INTEGER NOT NULL DEFAULT 0 CHECK (last_amount >= 0),
         last_at     REAL    NOT NULL DEFAULT 0
     )"""
 
@@ -88,7 +106,7 @@ ESCROW_DDL = """
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id   INTEGER NOT NULL DEFAULT 0,
         user_id    INTEGER NOT NULL,
-        amount     INTEGER NOT NULL,
+        amount     INTEGER NOT NULL CHECK (amount > 0),
         game       TEXT NOT NULL,
         created_at REAL NOT NULL
     )"""
@@ -97,12 +115,12 @@ PLAY_STATE_DDL = """
     CREATE TABLE IF NOT EXISTS play_state (
         guild_id    INTEGER NOT NULL,
         user_id     INTEGER NOT NULL,
-        win_streak  INTEGER NOT NULL DEFAULT 0,
-        best_streak INTEGER NOT NULL DEFAULT 0,
-        day_streak  INTEGER NOT NULL DEFAULT 0,      -- ミッション用: その日の、賭け金が最低額以上の連勝
+        win_streak  INTEGER NOT NULL DEFAULT 0 CHECK (win_streak >= 0),
+        best_streak INTEGER NOT NULL DEFAULT 0 CHECK (best_streak >= 0),
+        day_streak  INTEGER NOT NULL DEFAULT 0 CHECK (day_streak >= 0),      -- ミッション用: その日の、賭け金が最低額以上の連勝
         streak_day  TEXT,
-        plays       INTEGER NOT NULL DEFAULT 0,       -- 成績の集計（勝率・損益）は、この記録を付け始めてからの分
-        wins        INTEGER NOT NULL DEFAULT 0,
+        plays       INTEGER NOT NULL DEFAULT 0 CHECK (plays >= 0),       -- 成績の集計（勝率・損益）は、この記録を付け始めてからの分
+        wins        INTEGER NOT NULL DEFAULT 0 CHECK (wins >= 0),
         net_total   INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (guild_id, user_id)
     )"""
@@ -113,8 +131,8 @@ MISSIONS_DDL = """
         user_id    INTEGER NOT NULL,
         day        TEXT    NOT NULL,
         mission_id TEXT    NOT NULL,
-        progress   INTEGER NOT NULL DEFAULT 0,
-        done       INTEGER NOT NULL DEFAULT 0,
+        progress   INTEGER NOT NULL DEFAULT 0 CHECK (progress >= 0),
+        done       INTEGER NOT NULL DEFAULT 0 CHECK (done IN (0, 1)),
         PRIMARY KEY (guild_id, user_id, day, mission_id)
     )"""
 
@@ -122,7 +140,7 @@ RTP_LEVEL_DDL = """
     CREATE TABLE IF NOT EXISTS rtp_level (          -- ゲームごとの還元率レベル（1〜6。3は標準＝保存しない）
         guild_id INTEGER NOT NULL,
         game     TEXT    NOT NULL,
-        level    INTEGER NOT NULL,
+        level    INTEGER NOT NULL CHECK (level BETWEEN 1 AND 6),
         PRIMARY KEY (guild_id, game)
     )"""
 
@@ -132,6 +150,7 @@ STATEMENTS: tuple[str, ...] = (
     USER_PLAY_STATS_DDL,
     LEDGER_DDL,
     LEDGER_INDEX_DDL,
+    LEDGER_KIND_INDEX_DDL,
     JACKPOT_DDL,
     ESCROW_DDL,
     PLAY_STATE_DDL,

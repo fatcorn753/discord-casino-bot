@@ -183,10 +183,11 @@ QUIZ_ANSWERS_DDL = """
         question_id INTEGER NOT NULL,
         guild_id    INTEGER NOT NULL,
         user_id     INTEGER NOT NULL,
-        correct     INTEGER NOT NULL,
+        correct     INTEGER NOT NULL CHECK (correct IN (0, 1)),
         ts          REAL    NOT NULL,
-        counted     INTEGER NOT NULL DEFAULT 1,   -- 出題者の報酬に数えるか。ゲームを3回遊んでいない人の回答は 0（複数アカウントで稼ぐのを防ぐ）
-        PRIMARY KEY (question_id, guild_id, user_id)
+        counted     INTEGER NOT NULL DEFAULT 1 CHECK (counted IN (0, 1)),   -- 出題者の報酬に数えるか。ゲームを3回遊んでいない人の回答は 0（複数アカウントで稼ぐのを防ぐ）
+        PRIMARY KEY (question_id, guild_id, user_id),
+        FOREIGN KEY (question_id) REFERENCES quiz_questions (id) ON DELETE CASCADE
     )"""
 
 RAFFLE_V1_DDL = """
@@ -215,7 +216,8 @@ RAFFLE_ENTRIES_DDL = """
     CREATE TABLE IF NOT EXISTS raffle_entries (     -- 抽選の参加者。参加費は締切まで預かる
         raffle_id INTEGER NOT NULL,
         user_id   INTEGER NOT NULL,
-        PRIMARY KEY (raffle_id, user_id)
+        PRIMARY KEY (raffle_id, user_id),
+        FOREIGN KEY (raffle_id) REFERENCES raffle (id) ON DELETE CASCADE
     )"""
 
 POLLS_V1_DDL = """
@@ -250,8 +252,9 @@ POLL_VOTES_DDL = """
     CREATE TABLE IF NOT EXISTS poll_votes (        -- 投票の票（1人1票。あとから変えられる）
         poll_id INTEGER NOT NULL,
         user_id INTEGER NOT NULL,
-        yes     INTEGER NOT NULL,
-        PRIMARY KEY (poll_id, user_id)
+        yes     INTEGER NOT NULL CHECK (yes IN (0, 1)),
+        PRIMARY KEY (poll_id, user_id),
+        FOREIGN KEY (poll_id) REFERENCES polls (id) ON DELETE CASCADE
     )"""
 
 STREAMS_V1_DDL = """
@@ -292,18 +295,20 @@ STREAM_ROUNDS_DDL = """
         stream_id INTEGER NOT NULL,
         guild_id  INTEGER NOT NULL,
         label     TEXT    NOT NULL,
-        status    TEXT    NOT NULL DEFAULT 'open', -- open / locked / win / lose / void
+        status    TEXT    NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'locked', 'win', 'lose', 'void')), -- open / locked / win / lose / void
         created   REAL    NOT NULL,
-        settled   REAL    NOT NULL DEFAULT 0
+        settled   REAL    NOT NULL DEFAULT 0,
+        FOREIGN KEY (stream_id) REFERENCES streams (id) ON DELETE CASCADE
     )"""
 
 STREAM_BETS_DDL = """
     CREATE TABLE IF NOT EXISTS stream_bets (       -- 配信の勝負への賭け（1人1つの側。同じ側なら足せる）。賭け金は精算まで預かる
         round_id INTEGER NOT NULL,
         user_id  INTEGER NOT NULL,
-        side     TEXT    NOT NULL,             -- win / lose
-        amount   INTEGER NOT NULL,
-        PRIMARY KEY (round_id, user_id)
+        side     TEXT    NOT NULL CHECK (side IN ('win', 'lose')),             -- win / lose
+        amount   INTEGER NOT NULL CHECK (amount > 0),
+        PRIMARY KEY (round_id, user_id),
+        FOREIGN KEY (round_id) REFERENCES stream_rounds (id) ON DELETE CASCADE
     )"""
 
 ARENA_TOURNAMENTS_DDL = """
@@ -326,9 +331,10 @@ ARENA_FIGHTERS_DDL = """
         name          TEXT    NOT NULL,
         base_power    INTEGER NOT NULL,
         group_no      INTEGER NOT NULL,          -- 準決勝の組（1on1は1〜2・バトロワは1〜4）
-        stage         TEXT    NOT NULL DEFAULT 'semi',  -- semi / final / out（脱落）
-        bet_total     INTEGER NOT NULL DEFAULT 0, -- 大会を通じた、この戦士への賭け総額（武器の強さに使う）
-        result        TEXT                       -- いまの段の結果（NULL 未決着 / won / lost）
+        stage         TEXT    NOT NULL DEFAULT 'semi' CHECK (stage IN ('semi', 'final', 'out')),  -- semi / final / out（脱落）
+        bet_total     INTEGER NOT NULL DEFAULT 0 CHECK (bet_total >= 0), -- 大会を通じた、この戦士への賭け総額（武器の強さに使う）
+        result        TEXT CHECK (result IS NULL OR result IN ('won', 'lost')),                       -- いまの段の結果（NULL 未決着 / won / lost）
+        FOREIGN KEY (tournament_id) REFERENCES arena_tournaments (id) ON DELETE CASCADE
     )"""
 
 ARENA_FIGHTERS_INDEX_DDL = """

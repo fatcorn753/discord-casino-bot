@@ -38,7 +38,7 @@ class KyosaiRepo(Base):
                 payouts = [(uid, s) for uid, s in shares.items() if uid != kyosai.HOUSE and s > 0]
                 for user_id, share in payouts:  # 帝愛の持ち口の分は、銀行に残す
                     self._account.ensure(gid, user_id)
-                    self._account.apply(gid, user_id, share, "共済:配当", income=share)
+                    self._account.apply(gid, user_id, share, "共済:配当", income=share, kind="kyosai_dividend")
                     paid += share
                 self._conn.execute("UPDATE kyosai_state SET paid=paid+? WHERE guild_id=?", (paid, gid))
             result: KyosaiDaily = {"pool": pool, "paid": paid, "recovered": recovered}
@@ -55,7 +55,7 @@ class KyosaiRepo(Base):
         for user_id, _units in self._holdings_for(guild_id, with_house=False):
             last = self._scalar(
                 "SELECT MAX(ts) FROM ledger WHERE guild_id=? AND user_id=? "
-                "AND reason NOT IN ('共済:配当', '帝愛信託:利息') AND reason NOT LIKE '共済:超過損失の負担%'",
+                "AND kind NOT IN ('kyosai_dividend', 'trust_interest', 'kyosai_excess_charge')",
                 (guild_id, user_id),
             )
             if last is None:

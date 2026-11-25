@@ -78,9 +78,25 @@ class LoanRepo(ScopedRepo, ILoanRepo):
 
     def _loan_pay_for(self, guild_id: int, loan: LoanRow, amount: int) -> None:
         """借りた人 → 貸した人へ amount を動かす（借りた人の残高は、呼び出し側が確かめておく）。"""
-        self._account.apply(guild_id, loan["borrower_id"], -amount, f"貸付の返済→{loan['lender_id']}（#{loan['id']}）")
+        self._account.apply(
+            guild_id,
+            loan["borrower_id"],
+            -amount,
+            f"貸付の返済→{loan['lender_id']}（#{loan['id']}）",
+            kind="loan_repay",
+            counterparty_id=loan["lender_id"],
+            ref_id=loan["id"],
+        )
         self._account.ensure(guild_id, loan["lender_id"])
-        self._account.apply(guild_id, loan["lender_id"], amount, f"貸付の回収←{loan['borrower_id']}（#{loan['id']}）")
+        self._account.apply(
+            guild_id,
+            loan["lender_id"],
+            amount,
+            f"貸付の回収←{loan['borrower_id']}（#{loan['id']}）",
+            kind="loan_collect",
+            counterparty_id=loan["borrower_id"],
+            ref_id=loan["id"],
+        )
         loan["paid"] += amount
         self._conn.execute("UPDATE loan_terms SET paid=? WHERE loan_id=?", (loan["paid"], loan["id"]))
 
@@ -207,8 +223,24 @@ class LoanRepo(ScopedRepo, ILoanRepo):
             )
             if active >= loans_mod.MAX_LENDER_ACTIVE:
                 return False, fail("loan_max_lender_active", max_active=loans_mod.MAX_LENDER_ACTIVE)
-            self._account.apply(gid, lender_id, -loan["principal"], f"貸付→{loan['borrower_id']}（#{loan_id}）")
-            self._account.apply(gid, loan["borrower_id"], loan["principal"], f"借入←{lender_id}（#{loan_id}）")
+            self._account.apply(
+                gid,
+                lender_id,
+                -loan["principal"],
+                f"貸付→{loan['borrower_id']}（#{loan_id}）",
+                kind="loan_lend",
+                counterparty_id=loan["borrower_id"],
+                ref_id=loan_id,
+            )
+            self._account.apply(
+                gid,
+                loan["borrower_id"],
+                loan["principal"],
+                f"借入←{lender_id}（#{loan_id}）",
+                kind="loan_borrow",
+                counterparty_id=lender_id,
+                ref_id=loan_id,
+            )
             self._conn.execute("UPDATE loans SET status='active', lender_id=? WHERE id=?", (lender_id, loan_id))
             self._conn.execute(
                 "INSERT INTO loan_terms (loan_id, accepted_at, due, paid, reminded) VALUES (?, ?, ?, 0, 0)",
@@ -291,8 +323,24 @@ class LoanRepo(ScopedRepo, ILoanRepo):
             self._account.ensure(gid, loan["lender_id"])
             if self._account.raw_balance(gid, loan["lender_id"]) < loan["principal"]:
                 return False, fail("loan_lender_insufficient_balance")
-            self._account.apply(gid, loan["lender_id"], -loan["principal"], f"貸付→{user_id}（#{loan_id}）")
-            self._account.apply(gid, user_id, loan["principal"], f"借入←{loan['lender_id']}（#{loan_id}）")
+            self._account.apply(
+                gid,
+                loan["lender_id"],
+                -loan["principal"],
+                f"貸付→{user_id}（#{loan_id}）",
+                kind="loan_lend",
+                counterparty_id=user_id,
+                ref_id=loan_id,
+            )
+            self._account.apply(
+                gid,
+                user_id,
+                loan["principal"],
+                f"借入←{loan['lender_id']}（#{loan_id}）",
+                kind="loan_borrow",
+                counterparty_id=loan["lender_id"],
+                ref_id=loan_id,
+            )
             self._conn.execute("UPDATE loans SET status='active' WHERE id=?", (loan_id,))
             self._conn.execute(
                 "INSERT INTO loan_terms (loan_id, accepted_at, due, paid, reminded) VALUES (?, ?, ?, 0, 0)",

@@ -47,6 +47,9 @@ class BankRepo(Base):
         if amount <= 0:
             return
         self._conn.execute(
+            "INSERT OR IGNORE INTO teiai_house (guild_id) VALUES (?)", (guild_id,)
+        )  # teiai_house_grants の FK（guild_id → teiai_house.guild_id）を常に満たすため親行を先に作る
+        self._conn.execute(
             "INSERT INTO teiai_house_grants (guild_id, day, used) VALUES (?, ?, ?) "
             "ON CONFLICT(guild_id, day) DO UPDATE SET used=used+excluded.used",
             (guild_id, day, amount),

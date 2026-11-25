@@ -22,8 +22,8 @@ CRYPTO_DDL = """
         guild_id INTEGER NOT NULL,
         user_id  INTEGER NOT NULL,
         symbol   TEXT    NOT NULL DEFAULT 'cs',
-        units    INTEGER NOT NULL,        -- 保有する口数（1000口 = 1枚）
-        cost     INTEGER NOT NULL,        -- 買うのにかかった総額（損益の表示用）
+        units    INTEGER NOT NULL CHECK (units >= 0),        -- 保有する口数（1000口 = 1枚）
+        cost     INTEGER NOT NULL CHECK (cost >= 0),        -- 買うのにかかった総額（損益の表示用）
         PRIMARY KEY (guild_id, user_id, symbol)
     )"""
 
@@ -89,8 +89,8 @@ OPTIONS_V1_DDL = """
         margin   INTEGER NOT NULL DEFAULT 0  -- 裸売りで預けた証拠金（買いは 0）
     )"""
 
-OPTIONS_DDL = """
-    CREATE TABLE IF NOT EXISTS options (           -- オプション（爆騰コール・暴落プット・ペア・裸売りの共通ヘッダ）
+OPTIONS_V6_DDL = """
+    CREATE TABLE IF NOT EXISTS options (           -- オプション（v6 互換: v7 で accounts FK を追加）
         id       INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id INTEGER NOT NULL,
         user_id  INTEGER NOT NULL,
@@ -107,6 +107,29 @@ OPTIONS_DDL = """
         final    REAL,
         side     TEXT    NOT NULL DEFAULT 'long' CHECK (side IN ('long', 'short'))
     )"""
+
+OPTIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS options (           -- オプション（爆騰コール・暴落プット・ペア・裸売りの共通ヘッダ）
+        id       INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        kind     TEXT    NOT NULL,
+        symbol   TEXT    NOT NULL,
+        strike   REAL    NOT NULL,
+        units    INTEGER NOT NULL CHECK (units > 0),
+        premium  INTEGER NOT NULL CHECK (premium >= 0),
+        expiry   REAL    NOT NULL,
+        spot     REAL    NOT NULL,
+        ts       REAL    NOT NULL,
+        status   TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'exercised', 'expired', 'sold')),
+        paid     INTEGER NOT NULL DEFAULT 0 CHECK (paid >= 0),
+        final    REAL,
+        side     TEXT    NOT NULL DEFAULT 'long' CHECK (side IN ('long', 'short')),
+        FOREIGN KEY (guild_id, user_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
+    )"""
+
+OPTIONS_ACTIVE_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS idx_options_active ON options (guild_id, expiry) WHERE status = 'active'"""
 
 OPTION_PAIRS_DDL = """
     CREATE TABLE IF NOT EXISTS option_pairs (      -- ペア・ワラント用の対比銘柄・購入時点価格
@@ -139,10 +162,10 @@ EARNINGS_DDL = """
         symbol      TEXT NOT NULL,
         announce_at REAL NOT NULL,                -- 予告の時刻（月曜9:00）
         release_at  REAL NOT NULL,                -- 発表の時刻
-        direction   INTEGER NOT NULL,             -- 1 好決算 / -1 悪決算（発表まで、だれにも分からない）
+        direction   INTEGER NOT NULL CHECK (direction IN (-1, 1)),             -- 1 好決算 / -1 悪決算（発表まで、だれにも分からない）
         size        REAL NOT NULL,                -- 理論価格の動きの大きさ
-        announced   INTEGER NOT NULL DEFAULT 0,
-        released    INTEGER NOT NULL DEFAULT 0
+        announced   INTEGER NOT NULL DEFAULT 0 CHECK (announced IN (0, 1)),
+        released    INTEGER NOT NULL DEFAULT 0 CHECK (released IN (0, 1))
     )"""
 
 EARNINGS_MEMOS_DDL = """
@@ -150,8 +173,9 @@ EARNINGS_MEMOS_DDL = """
         event_id INTEGER NOT NULL,
         guild_id INTEGER NOT NULL,
         user_id  INTEGER NOT NULL,
-        hint     INTEGER NOT NULL,                -- 噂の方向（本当とは限らない）
-        PRIMARY KEY (event_id, guild_id, user_id)
+        hint     INTEGER NOT NULL CHECK (hint IN (-1, 1)),                -- 噂の方向（本当とは限らない）
+        PRIMARY KEY (event_id, guild_id, user_id),
+        FOREIGN KEY (event_id) REFERENCES earnings (id) ON DELETE CASCADE
     )"""
 
 EARNINGS_SHOP_DDL = """
@@ -159,10 +183,11 @@ EARNINGS_SHOP_DDL = """
         event_id INTEGER NOT NULL,
         guild_id INTEGER NOT NULL,
         user_id  INTEGER NOT NULL,
-        hint     INTEGER NOT NULL,
-        price    INTEGER NOT NULL,
+        hint     INTEGER NOT NULL CHECK (hint IN (-1, 1)),
+        price    INTEGER NOT NULL CHECK (price >= 0),
         ts       REAL NOT NULL,
-        PRIMARY KEY (event_id, guild_id, user_id)
+        PRIMARY KEY (event_id, guild_id, user_id),
+        FOREIGN KEY (event_id) REFERENCES earnings (id) ON DELETE CASCADE
     )"""
 
 STATEMENTS: tuple[str, ...] = (
@@ -171,6 +196,7 @@ STATEMENTS: tuple[str, ...] = (
     CRYPTO_DDL,
     MARGIN_POSITIONS_DDL,
     OPTIONS_DDL,
+    OPTIONS_ACTIVE_INDEX_DDL,
     OPTION_PAIRS_DDL,
     OPTION_SHORT_MARGINS_DDL,
     MARKET_EVENTS_DDL,

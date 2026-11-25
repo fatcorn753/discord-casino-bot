@@ -222,6 +222,10 @@ def test_market_listing_appears_on_the_teiai_shelf_and_can_be_bought(eco, monkey
     now = time_mod.time()
     monkeypatch.setattr(teiai, "MARKET_SLOTS_PER_DAY", 0)
     with eco.db.tx():
+        eco.db.conn.execute(
+            "INSERT OR IGNORE INTO teiai_market_days (guild_id, day) VALUES (?, ?)",
+            (eco.shop.guild_id, tm.day_start(now)),
+        )
         cur = eco.db.conn.execute(
             "INSERT INTO teiai_market (guild_id, day, item_id, mode, qty, start_price, end_price, black, "
             "listed_at, expires_at) VALUES (?, ?, ?, 'fixed', 2, 300, 300, 1, ?, ?)",

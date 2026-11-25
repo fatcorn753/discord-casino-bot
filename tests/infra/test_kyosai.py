@@ -142,10 +142,15 @@ def test_dormant_accounts_lose_their_units_to_the_house(eco):
     old = NOW - (kyosai.DORMANT_DAYS + 1) * DAY
     _age_ledger(eco, A, old)  # A は 31日前から動いていない
     with eco.db.tx():  # 本人が何もしなくても起きる動きは、動いたことに数えない
-        for reason in ("共済:配当", "共済:超過損失の負担（借金 10ペリカ）", "帝愛信託:利息"):
+        for reason, kind in (
+            ("共済:配当", "kyosai_dividend"),
+            ("共済:超過損失の負担（借金 10ペリカ）", "kyosai_excess_charge"),
+            ("帝愛信託:利息", "trust_interest"),
+        ):
             eco.db.conn.execute(
-                "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, 0, 0, ?, ?)",
-                (G, A, reason, NOW),
+                "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts, kind) "
+                "VALUES (?, ?, 0, 0, ?, ?, ?)",
+                (G, A, reason, NOW, kind),
             )
     eco.kyosai.kyosai_daily(NOW)
     res = eco.kyosai.kyosai_daily(NOW + DAY)

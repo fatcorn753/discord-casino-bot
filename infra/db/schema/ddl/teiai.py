@@ -93,15 +93,39 @@ TEIAI_HOUSE_GRANTS_DDL = """
         guild_id INTEGER NOT NULL,
         day      TEXT NOT NULL,
         used     INTEGER NOT NULL DEFAULT 0 CHECK (used >= 0),
-        PRIMARY KEY (guild_id, day)
+        PRIMARY KEY (guild_id, day),
+        FOREIGN KEY (guild_id) REFERENCES teiai_house (guild_id) ON DELETE CASCADE
+    )"""
+
+TEIAI_DEPOSITS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_deposits (    -- 帝愛への預金（v1 互換: v7 で accounts FK と CHECK を追加）
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        amount   INTEGER NOT NULL,
+        PRIMARY KEY (guild_id, user_id)
     )"""
 
 TEIAI_DEPOSITS_DDL = """
     CREATE TABLE IF NOT EXISTS teiai_deposits (    -- 帝愛への預金（人ごと）
         guild_id INTEGER NOT NULL,
         user_id  INTEGER NOT NULL,
-        amount   INTEGER NOT NULL,
-        PRIMARY KEY (guild_id, user_id)
+        amount   INTEGER NOT NULL CHECK (amount >= 0),
+        PRIMARY KEY (guild_id, user_id),
+        FOREIGN KEY (guild_id, user_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
+    )"""
+
+CDS_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS cds (               -- CDS（v1 互換: v7 で accounts FK と CHECK を追加）
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id  INTEGER NOT NULL,
+        buyer_id  INTEGER NOT NULL,
+        target_id INTEGER NOT NULL,
+        stake     INTEGER NOT NULL,
+        odds      REAL    NOT NULL,
+        ts        REAL    NOT NULL,
+        expires   REAL    NOT NULL,
+        status    TEXT    NOT NULL DEFAULT 'active',
+        paid      INTEGER NOT NULL DEFAULT 0
     )"""
 
 CDS_DDL = """
@@ -110,13 +134,18 @@ CDS_DDL = """
         guild_id  INTEGER NOT NULL,
         buyer_id  INTEGER NOT NULL,
         target_id INTEGER NOT NULL,
-        stake     INTEGER NOT NULL,               -- 掛け金
+        stake     INTEGER NOT NULL CHECK (stake > 0),               -- 掛け金
         odds      REAL    NOT NULL,               -- 買ったときのオッズ（配当の見込み = 掛け金 × オッズ）
         ts        REAL    NOT NULL,
         expires   REAL    NOT NULL,
-        status    TEXT    NOT NULL DEFAULT 'active',   -- active / paid / expired / void
-        paid      INTEGER NOT NULL DEFAULT 0
+        status    TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paid', 'expired', 'void')),   -- active / paid / expired / void
+        paid      INTEGER NOT NULL DEFAULT 0 CHECK (paid >= 0),
+        FOREIGN KEY (guild_id, buyer_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE,
+        FOREIGN KEY (guild_id, target_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
     )"""
+
+CDS_ACTIVE_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS idx_cds_active ON cds (guild_id, target_id, expires) WHERE status = 'active'"""
 
 BONDS_V1_DDL = """
     CREATE TABLE IF NOT EXISTS bonds (              -- 債券（v1 互換: v6 で bond_default_checks へ checked を分離）
@@ -133,8 +162,8 @@ BONDS_V1_DDL = """
         rate      REAL                        -- 買ったときに決まった利率（満期までの ％。#18。NULL は種類の基準の利率）
     )"""
 
-BONDS_DDL = """
-    CREATE TABLE IF NOT EXISTS bonds (              -- 債券（買った分ごとに1行）。元本は買った時点で残高から預かる
+BONDS_V6_DDL = """
+    CREATE TABLE IF NOT EXISTS bonds (              -- 債券（v6 互換: v7 で accounts FK を追加）
         id        INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id  INTEGER NOT NULL,
         user_id   INTEGER NOT NULL,
@@ -146,6 +175,24 @@ BONDS_DDL = """
         ts        REAL    NOT NULL,
         rate      REAL
     )"""
+
+BONDS_DDL = """
+    CREATE TABLE IF NOT EXISTS bonds (              -- 債券（買った分ごとに1行）。元本は買った時点で残高から預かる
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id  INTEGER NOT NULL,
+        user_id   INTEGER NOT NULL,
+        kind      TEXT    NOT NULL,
+        principal INTEGER NOT NULL CHECK (principal > 0),
+        due       REAL    NOT NULL,
+        status    TEXT    NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paid', 'defaulted', 'cancelled')),
+        paid      INTEGER NOT NULL DEFAULT 0 CHECK (paid >= 0),
+        ts        REAL    NOT NULL,
+        rate      REAL,
+        FOREIGN KEY (guild_id, user_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
+    )"""
+
+BONDS_ACTIVE_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS idx_bonds_active ON bonds (guild_id, user_id, due) WHERE status = 'active'"""
 
 BOND_DEFAULT_CHECKS_DDL = """
     CREATE TABLE IF NOT EXISTS bond_default_checks ( -- ジャンク債の最終倒産抽選時刻
@@ -174,11 +221,11 @@ KYOSAI_AUCTIONS_DDL = """
     CREATE TABLE IF NOT EXISTS kyosai_auctions (   -- 帝愛の持ち口の競り（入札で値段が決まる。#93）
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id   INTEGER NOT NULL,
-        units      INTEGER NOT NULL,                -- 出した口数（帝愛の持ち口から、落札のときに移す）
-        top_bid    INTEGER NOT NULL DEFAULT 0,      -- いまの最高値（入札した人の手元から預かっている）
+        units      INTEGER NOT NULL CHECK (units > 0),                -- 出した口数（帝愛の持ち口から、落札のときに移す）
+        top_bid    INTEGER NOT NULL DEFAULT 0 CHECK (top_bid >= 0),      -- いまの最高値（入札した人の手元から預かっている）
         top_bidder INTEGER,
         ends       REAL    NOT NULL,
-        status     TEXT    NOT NULL DEFAULT 'open'  -- open / sold / unsold
+        status     TEXT    NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'sold', 'unsold'))  -- open / sold / unsold
     )"""
 
 KYOSAI_OFFERS_DDL = """
@@ -187,10 +234,10 @@ KYOSAI_OFFERS_DDL = """
         guild_id INTEGER NOT NULL,
         seller   INTEGER NOT NULL,
         buyer    INTEGER NOT NULL,
-        units    INTEGER NOT NULL,
-        price    INTEGER NOT NULL,                  -- 全部でいくら
+        units    INTEGER NOT NULL CHECK (units > 0),
+        price    INTEGER NOT NULL CHECK (price >= 0),                  -- 全部でいくら
         expires  REAL    NOT NULL,
-        status   TEXT    NOT NULL DEFAULT 'open',   -- open / done / cancelled
+        status   TEXT    NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done', 'cancelled')),   -- open / done / cancelled
         done_at  REAL    NOT NULL DEFAULT 0         -- 成立した時刻（同じ2人の、24時間の取引額の上限に使う）
     )"""
 
@@ -226,8 +273,9 @@ KYOSAI_VOTES_DDL = """
     CREATE TABLE IF NOT EXISTS kyosai_votes (       -- 動議への投票（締めるときに、そのときの口数で数える）
         motion_id INTEGER NOT NULL,
         user_id   INTEGER NOT NULL,
-        yes       INTEGER NOT NULL,
-        PRIMARY KEY (motion_id, user_id)
+        yes       INTEGER NOT NULL CHECK (yes IN (0, 1)),
+        PRIMARY KEY (motion_id, user_id),
+        FOREIGN KEY (motion_id) REFERENCES kyosai_motions (id) ON DELETE CASCADE
     )"""
 
 SEIZED_ITEMS_DDL = """
@@ -235,7 +283,7 @@ SEIZED_ITEMS_DDL = """
         id        INTEGER PRIMARY KEY AUTOINCREMENT,
         guild_id  INTEGER NOT NULL,
         item_id   TEXT NOT NULL,
-        qty       INTEGER NOT NULL,
+        qty       INTEGER NOT NULL CHECK (qty >= 0),
         listed_at REAL NOT NULL
     )"""
 
@@ -249,12 +297,13 @@ TEIAI_MARKET_DDL = """
         day         REAL NOT NULL,
         item_id     TEXT NOT NULL,
         mode        TEXT NOT NULL,
-        qty         INTEGER NOT NULL,
-        start_price INTEGER NOT NULL,
-        end_price   INTEGER NOT NULL,
-        black       INTEGER NOT NULL,
+        qty         INTEGER NOT NULL CHECK (qty >= 0),
+        start_price INTEGER NOT NULL CHECK (start_price > 0),
+        end_price   INTEGER NOT NULL CHECK (end_price > 0),
+        black       INTEGER NOT NULL CHECK (black IN (0, 1)),
         listed_at   REAL NOT NULL,
-        expires_at  REAL NOT NULL
+        expires_at  REAL NOT NULL,
+        FOREIGN KEY (guild_id, day) REFERENCES teiai_market_days (guild_id, day) ON DELETE CASCADE
     )"""
 
 TEIAI_MARKET_INDEX_DDL = """
@@ -326,7 +375,9 @@ STATEMENTS: tuple[str, ...] = (
     TEIAI_HOUSE_GRANTS_DDL,
     TEIAI_DEPOSITS_DDL,
     CDS_DDL,
+    CDS_ACTIVE_INDEX_DDL,
     BONDS_DDL,
+    BONDS_ACTIVE_INDEX_DDL,
     BOND_DEFAULT_CHECKS_DDL,
     KYOSAI_UNITS_DDL,
     KYOSAI_AUCTIONS_DDL,
@@ -335,7 +386,7 @@ STATEMENTS: tuple[str, ...] = (
     KYOSAI_VOTES_DDL,
     SEIZED_ITEMS_DDL,
     SEIZED_ITEMS_INDEX_DDL,
+    TEIAI_MARKET_DAYS_DDL,
     TEIAI_MARKET_DDL,
     TEIAI_MARKET_INDEX_DDL,
-    TEIAI_MARKET_DAYS_DDL,
 )
