@@ -18,7 +18,15 @@ from infra.db.schema.runner import (
     backup_database,
     initialize_db,
 )
-from infra.db.schema.tables import INVENTORY_DDL, PROFILE_DDL, SHOP_STOCK_DDL, USERS_DDL, create_tables, new_quiz_order
+from infra.db.schema.tables import (
+    INVENTORY_DDL,
+    PROFILE_DDL,
+    SHOP_STOCK_DDL,
+    USERS_DDL,
+    create_tables,
+    create_v1_missing_tables,
+    new_quiz_order,
+)
 
 __all__ = [
     "ARCHAEOLOGIST_FEE",
@@ -37,6 +45,7 @@ __all__ = [
     "backup_database",
     "capture_invariants",
     "create_tables",
+    "create_v1_missing_tables",
     "diff_invariants",
     "initialize_db",
     "migrate_to_guild_scope",

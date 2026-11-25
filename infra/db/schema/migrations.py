@@ -98,17 +98,18 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     if "style" not in he:
         conn.execute("ALTER TABLE horse_entries ADD COLUMN style TEXT")
     us = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    if "last_slot" not in us:
-        conn.execute("ALTER TABLE users ADD COLUMN last_slot INTEGER")
-    if "debt" not in us:
-        conn.execute("ALTER TABLE users ADD COLUMN debt INTEGER NOT NULL DEFAULT 0")
-    if "debt_principal" not in us:
-        conn.execute("ALTER TABLE users ADD COLUMN debt_principal INTEGER NOT NULL DEFAULT 0")
-        conn.execute("UPDATE users SET debt_principal = debt WHERE debt > 0 AND debt_principal = 0")
-    if "grace_penalty" not in us:
-        conn.execute("ALTER TABLE users ADD COLUMN grace_penalty REAL NOT NULL DEFAULT 0")
-    if "grace_penalty_at" not in us:
-        conn.execute("ALTER TABLE users ADD COLUMN grace_penalty_at REAL NOT NULL DEFAULT 0")
+    if us:
+        if "last_slot" not in us:
+            conn.execute("ALTER TABLE users ADD COLUMN last_slot INTEGER")
+        if "debt" not in us:
+            conn.execute("ALTER TABLE users ADD COLUMN debt INTEGER NOT NULL DEFAULT 0")
+        if "debt_principal" not in us:
+            conn.execute("ALTER TABLE users ADD COLUMN debt_principal INTEGER NOT NULL DEFAULT 0")
+            conn.execute("UPDATE users SET debt_principal = debt WHERE debt > 0 AND debt_principal = 0")
+        if "grace_penalty" not in us:
+            conn.execute("ALTER TABLE users ADD COLUMN grace_penalty REAL NOT NULL DEFAULT 0")
+        if "grace_penalty_at" not in us:
+            conn.execute("ALTER TABLE users ADD COLUMN grace_penalty_at REAL NOT NULL DEFAULT 0")
     bc = {r["name"] for r in conn.execute("PRAGMA table_info(bonds)")}
     if "checked" not in bc:
         conn.execute("ALTER TABLE bonds ADD COLUMN checked REAL")
@@ -155,9 +156,9 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         if cols and "interest_at" not in cols:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN interest_at REAL NOT NULL DEFAULT 0")
             conn.execute(f"ALTER TABLE {table} ADD COLUMN accrued REAL NOT NULL DEFAULT 0")
-    if "debt_interest_at" not in us:
+    if us and "debt_interest_at" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN debt_interest_at REAL NOT NULL DEFAULT 0")
-    if "grace_until" not in us:
+    if us and "grace_until" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN grace_until REAL")
     ps = {r["name"] for r in conn.execute("PRAGMA table_info(play_state)")}
     for col, ddl in (
@@ -183,11 +184,12 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         if col not in profile_cols:
             conn.execute(f"ALTER TABLE profile ADD COLUMN {col} TEXT")
     users_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    for col in ("bankrupt_at", "blacklist_until", "escape_at"):
-        if col not in users_cols:
-            conn.execute(f"ALTER TABLE users ADD COLUMN {col} REAL")
-    if "escape_tries" not in users_cols:
-        conn.execute("ALTER TABLE users ADD COLUMN escape_tries INTEGER NOT NULL DEFAULT 0")
+    if users_cols:
+        for col in ("bankrupt_at", "blacklist_until", "escape_at"):
+            if col not in users_cols:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} REAL")
+        if "escape_tries" not in users_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN escape_tries INTEGER NOT NULL DEFAULT 0")
     for table, col, ddl in (
         ("horse_bets", "picks", "TEXT NOT NULL DEFAULT ''"),
         ("horses", "listed_at", "REAL"),
@@ -255,18 +257,24 @@ def _migrate_labor_counts(conn: sqlite3.Connection, now: float | None = None) ->
 ARCHAEOLOGIST_FEE = 2_400  # なくなった「発掘員」の、契約料（返金の額）
 
 
+def _account_table(conn: sqlite3.Connection) -> str:
+    has_accounts = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='accounts'").fetchone()
+    return "accounts" if has_accounts else "users"
+
+
 def _refund_archaeologists(conn: sqlite3.Connection, now: float | None = None) -> None:
     """専用の「発掘員」を雇っていた人の契約料を返して、契約を解約する（何度動かしても安全。いなければ何もしない）。"""
     now = time.time() if now is None else now
+    tbl = _account_table(conn)
     refunds: dict = {}
     for r in conn.execute("SELECT guild_id, user_id FROM labor_workers WHERE kind='archaeologist'").fetchall():
         key = (r["guild_id"], r["user_id"])
         refunds[key] = refunds.get(key, 0) + ARCHAEOLOGIST_FEE
     for (guild_id, user_id), amount in refunds.items():
-        row = conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id)).fetchone()
+        row = conn.execute(f"SELECT balance FROM {tbl} WHERE guild_id=? AND user_id=?", (guild_id, user_id)).fetchone()
         if row is not None:
             after = row["balance"] + amount
-            conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, guild_id, user_id))
+            conn.execute(f"UPDATE {tbl} SET balance=? WHERE guild_id=? AND user_id=?", (after, guild_id, user_id))
             conn.execute(
                 "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
                 (guild_id, user_id, amount, after, "地下作業:契約料の返金（発掘員の廃止）", now),
@@ -277,15 +285,16 @@ def _refund_archaeologists(conn: sqlite3.Connection, now: float | None = None) -
 def _refund_legacy_contracts(conn: sqlite3.Connection, now: float | None = None) -> None:
     """鉱石版より前に雇った作業員の契約料を、いまの値段で返して、契約を解約する（ルール変更の補償）。列を足したときに、1回だけ動く。"""
     now = time.time() if now is None else now
+    tbl = _account_table(conn)
     refunds: dict = {}
     for r in conn.execute("SELECT id, guild_id, user_id, kind FROM labor_workers WHERE legacy=1").fetchall():
         key = (r["guild_id"], r["user_id"])
         refunds[key] = refunds.get(key, 0) + labor.CONTRACT_FEE.get(r["kind"], 0)
     for (guild_id, user_id), amount in refunds.items():
-        row = conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id)).fetchone()
+        row = conn.execute(f"SELECT balance FROM {tbl} WHERE guild_id=? AND user_id=?", (guild_id, user_id)).fetchone()
         if row is not None and amount > 0:
             after = row["balance"] + amount
-            conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, guild_id, user_id))
+            conn.execute(f"UPDATE {tbl} SET balance=? WHERE guild_id=? AND user_id=?", (after, guild_id, user_id))
             conn.execute(
                 "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
                 (guild_id, user_id, amount, after, "地下作業:契約料の返金（ルール変更で解約）", now),
@@ -369,12 +378,13 @@ def retire_autoplay(conn: sqlite3.Connection, now: float | None = None) -> None:
     """廃止した自動プレイの表が残っていたら、預け中の分を残高に戻してから表を消す（預けた額を失わせない）。"""
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='autoplay'").fetchone():
         return
+    tbl = _account_table(conn)
     ts = time.time() if now is None else now
     for row in conn.execute("SELECT guild_id, user_id, pot FROM autoplay").fetchall():
         if row["pot"] > 0:
             gid, uid, pot = row["guild_id"], row["user_id"], row["pot"]
             cur = conn.execute(
-                "INSERT OR IGNORE INTO users (guild_id, user_id, balance, created_at) VALUES (?, ?, ?, ?)",
+                f"INSERT OR IGNORE INTO {tbl} (guild_id, user_id, balance, created_at) VALUES (?, ?, ?, ?)",
                 (gid, uid, INITIAL_BALANCE, ts),
             )
             if cur.rowcount:
@@ -382,11 +392,11 @@ def retire_autoplay(conn: sqlite3.Connection, now: float | None = None) -> None:
                     "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
                     (gid, uid, INITIAL_BALANCE, INITIAL_BALANCE, "初期支給", ts),
                 )
-            before = conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (gid, uid)).fetchone()[
+            before = conn.execute(f"SELECT balance FROM {tbl} WHERE guild_id=? AND user_id=?", (gid, uid)).fetchone()[
                 "balance"
             ]
             after = before + pot
-            conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, gid, uid))
+            conn.execute(f"UPDATE {tbl} SET balance=? WHERE guild_id=? AND user_id=?", (after, gid, uid))
             conn.execute(
                 "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
                 (gid, uid, pot, after, "自動プレイ精算", ts),

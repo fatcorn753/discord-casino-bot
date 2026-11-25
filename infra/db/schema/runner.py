@@ -5,12 +5,13 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from infra.db.schema.ddl import create_all_tables
+from infra.db.schema.ddl import create_all_tables, create_v1_missing_tables
 from infra.db.schema.invariants import capture_invariants, verify_invariants
 from infra.db.schema.migrations import add_missing_columns, migrate_to_guild_scope, retire_autoplay
 from infra.db.schema.migrations_v1 import migrate_v0_to_v1
+from infra.db.schema.migrations_v2 import migrate_v1_to_v2
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -37,7 +38,7 @@ class MigrationReport:
 
 def _prepare_v0(conn: sqlite3.Connection) -> None:
     """v0 DB の欠落表・欠落列・廃止テーブル（autoplay）を統合前に整合させる。"""
-    create_all_tables(conn)
+    create_v1_missing_tables(conn)
     add_missing_columns(conn)
     retire_autoplay(conn)
 
@@ -48,6 +49,11 @@ MIGRATIONS: tuple[MigrationStep, ...] = (
         name="v0_to_v1_clean_dead_schema",
         fn=migrate_v0_to_v1,
         prepare=_prepare_v0,
+    ),
+    MigrationStep(
+        version=2,
+        name="v1_to_v2_split_users",
+        fn=migrate_v1_to_v2,
     ),
 )
 
@@ -108,6 +114,9 @@ def _run_step(conn: sqlite3.Connection, db_path: str, step: MigrationStep) -> st
         step.fn(conn)
         after = capture_invariants(conn)
         verify_invariants(before, after)
+        fk_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if fk_errors:
+            raise RuntimeError(f"外部キー整合性チェックに失敗しました ({step.name}): {len(fk_errors)}件")
         conn.execute(f"PRAGMA user_version = {int(step.version)}")
         conn.execute("COMMIT")
     except Exception:

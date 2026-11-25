@@ -6,6 +6,7 @@ from infra.db.schema.ddl import (
     SHOP_STOCK_DDL,
     USERS_DDL,
     create_all_tables,
+    create_v1_missing_tables,
     new_quiz_order,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "SHOP_STOCK_DDL",
     "USERS_DDL",
     "create_tables",
+    "create_v1_missing_tables",
     "new_quiz_order",
 ]

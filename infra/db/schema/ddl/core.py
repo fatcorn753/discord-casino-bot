@@ -1,6 +1,6 @@
-"""ウォレット・元帳・エスクロー・ジャックポット・プレイ状態・ミッション・RTP の DDL。"""
+"""口座・デイリー・プレイ成績・元帳・エスクロー・ジャックポット・ミッション・RTP の DDL。"""
 
-USERS_DDL = """
+LEGACY_USERS_V1_DDL = """
     CREATE TABLE IF NOT EXISTS users (
         guild_id         INTEGER NOT NULL,
         user_id          INTEGER NOT NULL,
@@ -24,6 +24,40 @@ USERS_DDL = """
         escape_at        REAL,                         -- 最後に逃亡を試みた時刻
         escape_tries     INTEGER NOT NULL DEFAULT 0,   -- これまでの逃亡試行回数
         PRIMARY KEY (guild_id, user_id)
+    )"""
+
+USERS_DDL = LEGACY_USERS_V1_DDL
+
+ACCOUNTS_DDL = """
+    CREATE TABLE IF NOT EXISTS accounts (
+        guild_id   INTEGER NOT NULL,
+        user_id    INTEGER NOT NULL,
+        balance    INTEGER NOT NULL CHECK (balance >= 0),
+        created_at REAL NOT NULL,
+        PRIMARY KEY (guild_id, user_id)
+    )"""
+
+USER_DAILY_DDL = """
+    CREATE TABLE IF NOT EXISTS user_daily (
+        guild_id   INTEGER NOT NULL,
+        user_id    INTEGER NOT NULL,
+        streak     INTEGER NOT NULL DEFAULT 0 CHECK (streak >= 0),
+        last_daily TEXT,
+        last_slot  INTEGER,
+        PRIMARY KEY (guild_id, user_id),
+        FOREIGN KEY (guild_id, user_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
+    )"""
+
+USER_PLAY_STATS_DDL = """
+    CREATE TABLE IF NOT EXISTS user_play_stats (
+        guild_id      INTEGER NOT NULL,
+        user_id       INTEGER NOT NULL,
+        games_played  INTEGER NOT NULL DEFAULT 0 CHECK (games_played >= 0),
+        total_wagered INTEGER NOT NULL DEFAULT 0 CHECK (total_wagered >= 0),
+        total_won     INTEGER NOT NULL DEFAULT 0 CHECK (total_won >= 0),
+        biggest_win   INTEGER NOT NULL DEFAULT 0 CHECK (biggest_win >= 0),
+        PRIMARY KEY (guild_id, user_id),
+        FOREIGN KEY (guild_id, user_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
     )"""
 
 LEDGER_DDL = """
@@ -93,7 +127,9 @@ RTP_LEVEL_DDL = """
     )"""
 
 STATEMENTS: tuple[str, ...] = (
-    USERS_DDL,
+    ACCOUNTS_DDL,
+    USER_DAILY_DDL,
+    USER_PLAY_STATS_DDL,
     LEDGER_DDL,
     LEDGER_INDEX_DDL,
     JACKPOT_DDL,

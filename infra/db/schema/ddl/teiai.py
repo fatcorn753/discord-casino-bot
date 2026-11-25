@@ -154,6 +154,51 @@ TEIAI_MARKET_DDL = """
 TEIAI_MARKET_INDEX_DDL = """
     CREATE INDEX IF NOT EXISTS teiai_market_day ON teiai_market (guild_id, day)"""
 
+TEIAI_DEBTS_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_debts (       -- 帝愛からの借金（シニア債権）
+        guild_id    INTEGER NOT NULL,
+        user_id     INTEGER NOT NULL,
+        debt        INTEGER NOT NULL DEFAULT 0 CHECK (debt >= 0),
+        principal   INTEGER NOT NULL DEFAULT 0 CHECK (principal >= 0),
+        interest_at REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (guild_id, user_id),
+        FOREIGN KEY (guild_id, user_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
+    )"""
+
+TEIAI_GRACE_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_grace (       -- 破産猶予とペナルティ状態
+        guild_id    INTEGER NOT NULL,
+        user_id     INTEGER NOT NULL,
+        grace_until REAL,
+        penalty     REAL NOT NULL DEFAULT 0 CHECK (penalty >= 0),
+        penalty_at  REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (guild_id, user_id),
+        FOREIGN KEY (guild_id, user_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
+    )"""
+
+TEIAI_GRACE_ACTIVE_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS idx_teiai_grace_active ON teiai_grace (guild_id, grace_until) WHERE grace_until IS NOT NULL"""
+
+TEIAI_BANKRUPTCIES_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_bankruptcies (  -- 自己破産・ブラックリスト状態
+        guild_id        INTEGER NOT NULL,
+        user_id         INTEGER NOT NULL,
+        bankrupt_at     REAL NOT NULL,
+        blacklist_until REAL,
+        PRIMARY KEY (guild_id, user_id),
+        FOREIGN KEY (guild_id, user_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
+    )"""
+
+TEIAI_ESCAPES_DDL = """
+    CREATE TABLE IF NOT EXISTS teiai_escapes (     -- 海外逃亡の試行記録
+        guild_id        INTEGER NOT NULL,
+        user_id         INTEGER NOT NULL,
+        last_attempt_at REAL,
+        tries           INTEGER NOT NULL DEFAULT 0 CHECK (tries >= 0),
+        PRIMARY KEY (guild_id, user_id),
+        FOREIGN KEY (guild_id, user_id) REFERENCES accounts (guild_id, user_id) ON DELETE CASCADE
+    )"""
+
 TEIAI_MARKET_DAYS_DDL = """
     CREATE TABLE IF NOT EXISTS teiai_market_days (
         guild_id INTEGER NOT NULL,
@@ -162,6 +207,11 @@ TEIAI_MARKET_DAYS_DDL = """
     )"""
 
 STATEMENTS: tuple[str, ...] = (
+    TEIAI_DEBTS_DDL,
+    TEIAI_GRACE_DDL,
+    TEIAI_GRACE_ACTIVE_INDEX_DDL,
+    TEIAI_BANKRUPTCIES_DDL,
+    TEIAI_ESCAPES_DDL,
     TEIAI_BANK_DDL,
     TEIAI_HOUSE_DDL,
     TEIAI_DEPOSITS_DDL,

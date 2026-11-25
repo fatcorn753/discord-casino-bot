@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from infra.db.schema.ddl import create_all_tables
+from infra.db.schema.ddl import create_v1_missing_tables
 
 # v1 で廃止する列（テーブル名, 列名一覧）
 _DEAD_COLUMNS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -38,7 +38,7 @@ def _purge_dead_rows(conn: sqlite3.Connection) -> None:
 
 def migrate_v0_to_v1(conn: sqlite3.Connection) -> None:
     """v0 スキーマから v1（死に列・死にテーブル除去と組合せオッズ・在庫0行掃除）へ移行する。"""
-    create_all_tables(conn)
+    create_v1_missing_tables(conn)
     for table, cols in _DEAD_COLUMNS:
         _drop_columns_for_table(conn, table, cols)
     conn.execute("DROP TABLE IF EXISTS guild_users")
