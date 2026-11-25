@@ -8,9 +8,13 @@ import pytest
 from domain.yield_curve import (
     CirParams,
     LiquidityParams,
+    TrustBalance,
+    TrustParams,
+    bank_net_worth,
     cir_bond_price,
     cir_exact_step,
     cir_yield,
+    core_reserve_ratio,
     effective_short_rate,
     excess_reserve,
     indifference_buyback_price,
@@ -18,10 +22,16 @@ from domain.yield_curve import (
     indifference_value,
     margin_rates,
     marginal_bond_price,
+    marginal_trust_payout_rate,
     marginal_yield,
     maturity_weight,
+    required_reserve,
+    season_trust_balance,
     shadow_price,
     shortfall_potential,
+    solvency_capped_dividend_pool,
+    surplus_lending_step,
+    trust_withdraw_payout,
 )
 
 # 現実的デフォルトパラメータ（平時 0.3%/日、危機時逆イールド反転、Feller 条件充足）
@@ -513,3 +523,469 @@ def test_convexity_and_shadow_price_continuity_at_zero() -> None:
     assert shadow_price(1e-9, LIQ) == pytest.approx(LIQ.distress_cost, abs=1e-9)
     assert shortfall_potential(0.0, LIQ) == pytest.approx(LIQ.distress_cost * LIQ.capacity, abs=1e-12)
     assert shortfall_potential(-1e-9, LIQ) == pytest.approx(shortfall_potential(1e-9, LIQ), abs=1e-8)
+
+
+# ---------------------------------------------------------------------------
+# 8. 帝愛信託の 2 層熟成・HJB スイングプライシング・余剰貸出・純資産配当上限
+# ---------------------------------------------------------------------------
+
+TRUST = TrustParams(
+    seasoning_rate_per_day=1.0,
+    deploy_rate_per_day=2.0,
+    deploy_buffer=LIQ.capacity,
+)
+
+
+def _solve_face_for_payment(
+    cir: CirParams,
+    liq: LiquidityParams,
+    r: float,
+    surplus: float,
+    budget: float,
+    tau: float,
+) -> float:
+    """支払額 `budget` で銀行が新規発行する社債の額面 `face` を二分法で厳密に求める。"""
+    if budget <= 0.0:
+        return 0.0
+    lo = 0.0
+    hi = max(1.0, budget / cir_bond_price(cir, r, tau))
+    while indifference_issue_price(cir, liq, r, surplus, hi, tau) < budget:
+        hi *= 2.0
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if indifference_issue_price(cir, liq, r, surplus, mid, tau) < budget:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def test_trust_parameter_and_balance_validation() -> None:
+    with pytest.raises(ValueError):
+        TrustParams(seasoning_rate_per_day=0.0, deploy_rate_per_day=1.0)
+    with pytest.raises(ValueError):
+        TrustParams(seasoning_rate_per_day=1.0, deploy_rate_per_day=-0.1)
+    with pytest.raises(ValueError):
+        TrustParams(seasoning_rate_per_day=1.0, deploy_rate_per_day=1.0, deploy_buffer=-1.0)
+    with pytest.raises(ValueError):
+        TrustParams(seasoning_rate_per_day=float("nan"), deploy_rate_per_day=1.0)
+    with pytest.raises(ValueError):
+        TrustParams(seasoning_rate_per_day=1.0, deploy_rate_per_day=float("inf"))
+
+    with pytest.raises(ValueError):
+        TrustBalance(unseasoned=-1.0, core=0.0)
+    with pytest.raises(ValueError):
+        TrustBalance(unseasoned=0.0, core=-1.0)
+    with pytest.raises(ValueError):
+        TrustBalance(unseasoned=float("nan"), core=0.0)
+
+    with pytest.raises(ValueError):
+        excess_reserve(100_000.0, 0.0, 50_000.0, [], LIQ, unseasoned_deposits=60_000.0)
+    with pytest.raises(ValueError):
+        excess_reserve(100_000.0, 0.0, 50_000.0, [], LIQ, unseasoned_deposits=-1.0)
+
+    bal = TrustBalance(unseasoned=1_000.0, core=2_000.0)
+    with pytest.raises(ValueError):
+        trust_withdraw_payout(LIQ, 0.0, bal, 3_001.0)
+    with pytest.raises(ValueError):
+        trust_withdraw_payout(LIQ, 0.0, bal, -1.0)
+
+
+def test_deposit_withdraw_loop_leaves_state_invariant() -> None:
+    """預入 100% 現金受入 + 未熟成優先 LIFO 引出により 100 回ループでも全状態が不変・利益 0。"""
+    for s0 in (5.0 * LIQ.capacity, 0.0, -LIQ.capacity):
+        core0 = 100_000.0
+        unseasoned0 = 5_000.0
+        deposits0 = core0 + unseasoned0
+        locks = 2_000.0
+        loaned0 = 80_000.0
+        bonds: list[tuple[float, float]] = [(15_000.0, 3.0)]
+        cash0 = s0 + required_reserve(locks, deposits0, bonds, LIQ, unseasoned_deposits=unseasoned0)
+
+        bal = TrustBalance(unseasoned=unseasoned0, core=core0)
+        cash = cash0
+        loaned = loaned0
+        trader_cash = 0.0
+
+        v0 = indifference_value(CIR, LIQ, BASE_R, cash, locks, deposits0, bonds, unseasoned_deposits=bal.unseasoned)
+        ratio0 = core_reserve_ratio(cash, locks, bal.core, bal.unseasoned, 15_000.0)
+        nw0 = bank_net_worth(cash, loaned, locks, deposits0, 15_000.0)
+
+        for _ in range(100):
+            x = 25_000.0
+            # 預入: 全額 cash と unseasoned へ入る
+            cash += x
+            trader_cash -= x
+            bal = TrustBalance(unseasoned=bal.unseasoned + x, core=bal.core)
+
+            # 即時引出: dt=0 のまま LIFO で unseasoned から全額戻る
+            s_mid = excess_reserve(
+                cash, locks, bal.unseasoned + bal.core, bonds, LIQ, unseasoned_deposits=bal.unseasoned
+            )
+            quote = trust_withdraw_payout(LIQ, s_mid, bal, x)
+            assert quote.from_unseasoned == pytest.approx(x, abs=1e-12)
+            assert quote.from_core == 0.0
+            assert quote.exit_fee == 0.0
+            cash -= quote.payout
+            trader_cash += quote.payout
+            bal = TrustBalance(unseasoned=bal.unseasoned - quote.from_unseasoned, core=bal.core - quote.from_core)
+
+        deposits_end = bal.unseasoned + bal.core
+        assert cash == pytest.approx(cash0, abs=1e-9)
+        assert loaned == pytest.approx(loaned0, abs=1e-9)
+        assert deposits_end == pytest.approx(deposits0, abs=1e-9)
+        assert bal.unseasoned == pytest.approx(unseasoned0, abs=1e-9)
+        assert bal.core == pytest.approx(core0, abs=1e-9)
+        assert excess_reserve(
+            cash, locks, deposits_end, bonds, LIQ, unseasoned_deposits=bal.unseasoned
+        ) == pytest.approx(s0, abs=1e-9)
+        assert core_reserve_ratio(cash, locks, bal.core, bal.unseasoned, 15_000.0) == pytest.approx(ratio0, abs=1e-12)
+        assert bank_net_worth(cash, loaned, locks, deposits_end, 15_000.0) == pytest.approx(nw0, abs=1e-9)
+        assert indifference_value(
+            CIR, LIQ, BASE_R, cash, locks, deposits_end, bonds, unseasoned_deposits=bal.unseasoned
+        ) == pytest.approx(v0, abs=1e-9)
+        assert trader_cash == pytest.approx(0.0, abs=1e-9)
+
+
+def test_trust_seasoning_semigroup_and_conservation() -> None:
+    bal0 = TrustBalance(unseasoned=80_000.0, core=20_000.0)
+    assert season_trust_balance(bal0, 0.0, TRUST) == bal0
+    assert season_trust_balance(bal0, -1.0, TRUST) == bal0
+
+    dt1, dt2 = 0.37, 1.13
+    step1 = season_trust_balance(bal0, dt1, TRUST)
+    step12 = season_trust_balance(step1, dt2, TRUST)
+    direct = season_trust_balance(bal0, dt1 + dt2, TRUST)
+
+    assert step1.unseasoned < bal0.unseasoned
+    assert step1.core > bal0.core
+    assert step12.unseasoned == pytest.approx(direct.unseasoned, abs=1e-11)
+    assert step12.core == pytest.approx(direct.core, abs=1e-11)
+    assert step12.unseasoned + step12.core == pytest.approx(bal0.unseasoned + bal0.core, abs=1e-11)
+
+    long_horizon = season_trust_balance(bal0, 100.0, TRUST)
+    assert long_horizon.unseasoned < 1e-30
+    assert long_horizon.core == pytest.approx(bal0.unseasoned + bal0.core, abs=1e-11)
+
+
+def test_trust_swing_pricing_split_invariance_bounds_and_value_conservation() -> None:
+    x_total = 100_000.0
+    for s0 in (5.0 * LIQ.capacity, LIQ.capacity, 0.0, -LIQ.capacity):
+        one_shot = trust_withdraw_payout(LIQ, s0, TrustBalance(unseasoned=0.0, core=x_total), x_total)
+        assert one_shot.from_core == x_total
+        assert LIQ.reserve_ratio * x_total <= one_shot.payout <= x_total
+        assert one_shot.exit_fee == pytest.approx(x_total - one_shot.payout, abs=1e-9)
+
+        for chunks in ([x_total / 10] * 10, [x_total / 50] * 50, [37_000.0, 13_000.0, 50_000.0]):
+            s = s0
+            rem = x_total
+            total_payout = 0.0
+            for chunk in chunks:
+                q = trust_withdraw_payout(LIQ, s, TrustBalance(unseasoned=0.0, core=rem), chunk)
+                total_payout += q.payout
+                s = q.surplus_after
+                rem -= chunk
+            assert total_payout == pytest.approx(one_shot.payout, abs=1e-6)
+            assert s == pytest.approx(one_shot.surplus_after, abs=1e-6)
+
+        # 限界払戻率との連続接続
+        tiny = 1e-6
+        q_tiny = trust_withdraw_payout(LIQ, s0, TrustBalance(unseasoned=0.0, core=x_total), tiny)
+        assert q_tiny.payout / tiny == pytest.approx(marginal_trust_payout_rate(LIQ, s0), abs=1e-8)
+
+    # 危機時 (S <= 0) の閉形式解: exit_fee = c * (1 - theta_0) / (1 + c) * X
+    expected_crisis_rate = LIQ.distress_cost * (1.0 - LIQ.reserve_ratio) / (1.0 + LIQ.distress_cost)
+    for s_crisis in (0.0, -LIQ.capacity):
+        q_crisis = trust_withdraw_payout(LIQ, s_crisis, TrustBalance(unseasoned=0.0, core=x_total), x_total)
+        assert q_crisis.exit_fee == pytest.approx(expected_crisis_rate * x_total, abs=1e-9)
+
+    # 潤沢時 (S = 5E) で小口解約は実質無料 (< 0.1%)
+    q_abundant = trust_withdraw_payout(LIQ, 5.0 * LIQ.capacity, TrustBalance(unseasoned=0.0, core=x_total), 5_000.0)
+    assert q_abundant.exit_fee / 5_000.0 < 0.001
+
+    # 混合 LIFO 解約でも V と surplus_after が厳密保存される
+    bal_mix = TrustBalance(unseasoned=15_000.0, core=120_000.0)
+    locks = 3_000.0
+    bonds = [(20_000.0, 3.0)]
+    deposits = bal_mix.unseasoned + bal_mix.core
+    cash = LIQ.capacity + required_reserve(locks, deposits, bonds, LIQ, unseasoned_deposits=bal_mix.unseasoned)
+    s_before = excess_reserve(cash, locks, deposits, bonds, LIQ, unseasoned_deposits=bal_mix.unseasoned)
+    v_before = indifference_value(
+        CIR, LIQ, BASE_R, cash, locks, deposits, bonds, unseasoned_deposits=bal_mix.unseasoned
+    )
+
+    q_mix = trust_withdraw_payout(LIQ, s_before, bal_mix, 45_000.0)
+    assert q_mix.from_unseasoned == pytest.approx(15_000.0, abs=1e-12)
+    assert q_mix.from_core == pytest.approx(30_000.0, abs=1e-12)
+    cash_after = cash - q_mix.payout
+    unseasoned_after = bal_mix.unseasoned - q_mix.from_unseasoned
+    core_after = bal_mix.core - q_mix.from_core
+    deposits_after = unseasoned_after + core_after
+    s_check = excess_reserve(cash_after, locks, deposits_after, bonds, LIQ, unseasoned_deposits=unseasoned_after)
+    v_after = indifference_value(
+        CIR, LIQ, BASE_R, cash_after, locks, deposits_after, bonds, unseasoned_deposits=unseasoned_after
+    )
+    assert q_mix.surplus_after == pytest.approx(s_check, abs=1e-9)
+    assert v_after == pytest.approx(v_before, abs=1e-6)
+
+
+def test_hold_to_maturity_self_induced_crisis_yields_no_excess_return() -> None:
+    """コア信託を一斉引出して危機割引社債を満期保有しても、無リスク割引現在価値は元の元本 X 未満。"""
+    for s0 in (5.0 * LIQ.capacity, LIQ.capacity, 0.0, -LIQ.capacity):
+        for x in (1_000.0, 20_000.0, 100_000.0):
+            for tau in (0.5, 1.0, 3.0, 7.0):
+                for r in (0.003, 0.02):
+                    bal = TrustBalance(unseasoned=0.0, core=x + 50_000.0)
+                    quote = trust_withdraw_payout(LIQ, s0, bal, x)
+                    face = _solve_face_for_payment(CIR, LIQ, r, quote.surplus_after, quote.payout, tau)
+                    assert cir_bond_price(CIR, r, tau) * face < x
+
+
+def test_lyapunov_no_arbitrage_across_mixed_trust_and_bond_sequences() -> None:
+    """ポンプ&ダンプ（熟成前後）およびランダム 30 手混合列で V 単調非減少・純利益 <= 0 を検証する。"""
+    # 1. 明示的ポンプ&ダンプ（社債買 -> 預入 -> [熟成] -> 社債売 -> 引出）
+    for season_days in (0.0, 1.0):
+        for s0 in (LIQ.capacity, 0.0, -LIQ.capacity):
+            bal = TrustBalance(unseasoned=0.0, core=100_000.0)
+            bonds: list[tuple[float, float]] = []
+            cash = s0 + required_reserve(0.0, bal.core, bonds, LIQ, unseasoned_deposits=bal.unseasoned)
+            trader_cash = 0.0
+            v_prev = indifference_value(
+                CIR, LIQ, BASE_R, cash, 0.0, bal.unseasoned + bal.core, bonds, unseasoned_deposits=bal.unseasoned
+            )
+
+            # 社債購入
+            s_cur = excess_reserve(cash, 0.0, bal.unseasoned + bal.core, bonds, LIQ, unseasoned_deposits=bal.unseasoned)
+            p_buy = indifference_issue_price(CIR, LIQ, BASE_R, s_cur, 50_000.0, 3.0)
+            bonds.append((50_000.0, 3.0))
+            cash += p_buy
+            trader_cash -= p_buy
+            v_cur = indifference_value(
+                CIR, LIQ, BASE_R, cash, 0.0, bal.unseasoned + bal.core, bonds, unseasoned_deposits=bal.unseasoned
+            )
+            assert v_cur >= v_prev - 1e-6
+            v_prev = v_cur
+
+            # 大口預入
+            dep = 200_000.0
+            bal = TrustBalance(unseasoned=bal.unseasoned + dep, core=bal.core)
+            cash += dep
+            trader_cash -= dep
+            v_cur = indifference_value(
+                CIR, LIQ, BASE_R, cash, 0.0, bal.unseasoned + bal.core, bonds, unseasoned_deposits=bal.unseasoned
+            )
+            assert v_cur >= v_prev - 1e-6
+            v_prev = v_cur
+
+            # 熟成
+            if season_days > 0.0:
+                bal = season_trust_balance(bal, season_days, TRUST)
+                v_cur = indifference_value(
+                    CIR, LIQ, BASE_R, cash, 0.0, bal.unseasoned + bal.core, bonds, unseasoned_deposits=bal.unseasoned
+                )
+                assert v_cur >= v_prev - 1e-6
+                v_prev = v_cur
+
+            # 社債売却
+            face, tau = bonds[0]
+            s_before_sell = excess_reserve(
+                cash, 0.0, bal.unseasoned + bal.core, bonds, LIQ, unseasoned_deposits=bal.unseasoned
+            )
+            p_sell = indifference_buyback_price(CIR, LIQ, BASE_R, s_before_sell, face, tau)
+            bonds.pop(0)
+            cash -= p_sell
+            trader_cash += p_sell
+            v_cur = indifference_value(
+                CIR, LIQ, BASE_R, cash, 0.0, bal.unseasoned + bal.core, bonds, unseasoned_deposits=bal.unseasoned
+            )
+            assert v_cur >= v_prev - 1e-6
+            v_prev = v_cur
+
+            # 追加した預金を全額引出
+            s_before_wd = excess_reserve(
+                cash, 0.0, bal.unseasoned + bal.core, bonds, LIQ, unseasoned_deposits=bal.unseasoned
+            )
+            quote = trust_withdraw_payout(LIQ, s_before_wd, bal, dep)
+            cash -= quote.payout
+            trader_cash += quote.payout
+            bal = TrustBalance(unseasoned=bal.unseasoned - quote.from_unseasoned, core=bal.core - quote.from_core)
+            v_cur = indifference_value(
+                CIR, LIQ, BASE_R, cash, 0.0, bal.unseasoned + bal.core, bonds, unseasoned_deposits=bal.unseasoned
+            )
+            assert v_cur >= v_prev - 1e-6
+            assert trader_cash <= 1e-6
+
+    # 2. ランダム 30 手混合操作列
+    rng = random.Random(31415)
+    bal = TrustBalance(unseasoned=0.0, core=150_000.0)
+    trader_trust = 0.0
+    bonds = []
+    cash = 0.5 * LIQ.capacity + required_reserve(0.0, bal.core, bonds, LIQ)
+    trader_cash = 0.0
+    v_prev = indifference_value(CIR, LIQ, BASE_R, cash, 0.0, bal.core, bonds)
+
+    for _ in range(30):
+        move = rng.choice(("deposit", "season", "withdraw", "buy_bond", "sell_bond"))
+        if move == "deposit":
+            x = rng.uniform(1_000.0, 40_000.0)
+            bal = TrustBalance(unseasoned=bal.unseasoned + x, core=bal.core)
+            cash += x
+            trader_trust += x
+            trader_cash -= x
+        elif move == "season":
+            bal = season_trust_balance(bal, rng.uniform(0.05, 0.5), TRUST)
+        elif move == "withdraw" and trader_trust > 1.0:
+            x = rng.uniform(1.0, trader_trust)
+            s_cur = excess_reserve(cash, 0.0, bal.unseasoned + bal.core, bonds, LIQ, unseasoned_deposits=bal.unseasoned)
+            q = trust_withdraw_payout(LIQ, s_cur, bal, x)
+            cash -= q.payout
+            trader_cash += q.payout
+            trader_trust -= x
+            bal = TrustBalance(unseasoned=bal.unseasoned - q.from_unseasoned, core=bal.core - q.from_core)
+        elif move == "buy_bond":
+            face = rng.uniform(1_000.0, 30_000.0)
+            tau = rng.choice((0.5, 1.0, 3.0, 7.0))
+            s_cur = excess_reserve(cash, 0.0, bal.unseasoned + bal.core, bonds, LIQ, unseasoned_deposits=bal.unseasoned)
+            paid = indifference_issue_price(CIR, LIQ, BASE_R, s_cur, face, tau)
+            bonds.append((face, tau))
+            cash += paid
+            trader_cash -= paid
+        elif move == "sell_bond" and bonds:
+            idx = rng.randrange(len(bonds))
+            face, tau = bonds[idx]
+            s_cur = excess_reserve(cash, 0.0, bal.unseasoned + bal.core, bonds, LIQ, unseasoned_deposits=bal.unseasoned)
+            recv = indifference_buyback_price(CIR, LIQ, BASE_R, s_cur, face, tau)
+            bonds.pop(idx)
+            cash -= recv
+            trader_cash += recv
+
+        v_cur = indifference_value(
+            CIR, LIQ, BASE_R, cash, 0.0, bal.unseasoned + bal.core, bonds, unseasoned_deposits=bal.unseasoned
+        )
+        assert v_cur >= v_prev - 1e-6
+        v_prev = v_cur
+
+    while bonds:
+        face, tau = bonds[0]
+        s_cur = excess_reserve(cash, 0.0, bal.unseasoned + bal.core, bonds, LIQ, unseasoned_deposits=bal.unseasoned)
+        recv = indifference_buyback_price(CIR, LIQ, BASE_R, s_cur, face, tau)
+        bonds.pop(0)
+        cash -= recv
+        trader_cash += recv
+    if trader_trust > 0.0:
+        s_cur = excess_reserve(cash, 0.0, bal.unseasoned + bal.core, bonds, LIQ, unseasoned_deposits=bal.unseasoned)
+        q = trust_withdraw_payout(LIQ, s_cur, bal, trader_trust)
+        cash -= q.payout
+        trader_cash += q.payout
+    assert trader_cash <= 1e-6
+
+
+def test_surplus_lending_step_buffer_floor_semigroup_and_conservation() -> None:
+    req = 50_000.0
+    s_buf = TRUST.deploy_buffer
+
+    # 1. 領域 1 (S < S_buf): 回収のみ進み loaned は単調減少、C + L 保存
+    cash1, loaned1 = req + s_buf - 10_000.0, 100_000.0
+    c_next, l_next = surplus_lending_step(cash1, loaned1, req, 0.1, LIQ, TRUST)
+    assert l_next < loaned1
+    assert c_next + l_next == pytest.approx(cash1 + loaned1, abs=1e-9)
+
+    # 2. 領域 1 -> 領域 2 の境界跨ぎを含む半群不変性
+    cash_cross, loaned_cross = req + s_buf - 10_000.0, 120_000.0
+    dt1, dt2 = 0.25, 0.75
+    c_step1, l_step1 = surplus_lending_step(cash_cross, loaned_cross, req, dt1, LIQ, TRUST)
+    c_step12, l_step12 = surplus_lending_step(c_step1, l_step1, req, dt2, LIQ, TRUST)
+    c_direct, l_direct = surplus_lending_step(cash_cross, loaned_cross, req, dt1 + dt2, LIQ, TRUST)
+    assert c_step12 == pytest.approx(c_direct, abs=1e-9)
+    assert l_step12 == pytest.approx(l_direct, abs=1e-9)
+    assert c_direct + l_direct == pytest.approx(cash_cross + loaned_cross, abs=1e-9)
+    assert c_direct - req >= s_buf - 1e-9
+
+    # 3. 領域 2 (S >= S_buf): 任意の dt で S >= S_buf を維持し、長時間で定常比 alpha / (rho + alpha) に収束
+    cash2, loaned2 = req + s_buf + 80_000.0, 40_000.0
+    pool = (cash2 - req - s_buf) + loaned2
+    for dt in (0.01, 0.5, 5.0):
+        c2, l2 = surplus_lending_step(cash2, loaned2, req, dt, LIQ, TRUST)
+        assert c2 - req >= s_buf - 1e-9
+        assert c2 + l2 == pytest.approx(cash2 + loaned2, abs=1e-9)
+    c_inf, l_inf = surplus_lending_step(cash2, loaned2, req, 200.0, LIQ, TRUST)
+    expected_share = TRUST.deploy_rate_per_day / (LIQ.loan_recovery_per_day + TRUST.deploy_rate_per_day)
+    assert l_inf / pool == pytest.approx(expected_share, abs=1e-9)
+    assert c_inf - req >= s_buf - 1e-9
+
+    # 4. deploy_rate_per_day == 0 のときは純粋な指数回収に一致
+    no_lend = TrustParams(seasoning_rate_per_day=1.0, deploy_rate_per_day=0.0, deploy_buffer=s_buf)
+    c_rec, l_rec = surplus_lending_step(cash2, loaned2, req, 1.5, LIQ, no_lend)
+    expected_l = loaned2 * math.exp(-LIQ.loan_recovery_per_day * 1.5)
+    assert l_rec == pytest.approx(expected_l, abs=1e-9)
+    assert c_rec + l_rec == pytest.approx(cash2 + loaned2, abs=1e-9)
+
+
+def test_kyosai_solvency_cap_and_core_ratio_block_deposit_gaming() -> None:
+    # 1. 純資産 NW <= 0 のとき、大口預入しても融資回収しても共済配当は 0
+    core_dep = 100_000.0
+    loaned = 80_000.0
+    cash = 20_000.0
+    locks = 0.0
+    bonds_p = 0.0
+    nw0 = bank_net_worth(cash, loaned, locks, core_dep, bonds_p)
+    assert nw0 == pytest.approx(0.0, abs=1e-9)
+
+    dep_big = 2_000_000.0
+    cash_after = cash + dep_big
+    nw_after = bank_net_worth(cash_after, loaned, locks, core_dep + dep_big, bonds_p)
+    assert nw_after == pytest.approx(0.0, abs=1e-9)
+    assert (
+        solvency_capped_dividend_pool(
+            cash_after - locks,
+            core_dep + bonds_p,
+            nw_after,
+            target_ratio=0.30,
+            dividend_share=0.05,
+            dividend_cap=50_000.0,
+            unseasoned_deposits=dep_big,
+        )
+        == 0.0
+    )
+    # 融資回収が進んでも NW <= 0 なら偽配当は出ない
+    assert (
+        solvency_capped_dividend_pool(
+            cash + 60_000.0 - locks,
+            core_dep + bonds_p,
+            nw0,
+            target_ratio=0.30,
+            dividend_share=0.05,
+            dividend_cap=50_000.0,
+        )
+        == 0.0
+    )
+
+    # 2. コア準備率が 0.10 (< 0.20) の危機時に未熟成枠へ 100 万預入しても θ_core は 0.10 のまま
+    cash_tight = 10_000.0
+    ratio_before = core_reserve_ratio(cash_tight, locks, core_dep, 0.0, bonds_p)
+    assert ratio_before == pytest.approx(0.10, abs=1e-12)
+    ratio_after = core_reserve_ratio(cash_tight + 1_000_000.0, locks, core_dep, 1_000_000.0, bonds_p)
+    assert ratio_after == pytest.approx(0.10, abs=1e-12)
+
+    # 3. 健全時 (NW > 0) でも未熟成預入は配当原資を水増ししない
+    cash_rich = 80_000.0
+    loaned_rich = 60_000.0
+    nw_rich = bank_net_worth(cash_rich, loaned_rich, locks, core_dep, bonds_p)
+    pool_before = solvency_capped_dividend_pool(
+        cash_rich - locks,
+        core_dep + bonds_p,
+        nw_rich,
+        target_ratio=0.30,
+        dividend_share=0.05,
+        dividend_cap=50_000.0,
+    )
+    pool_after = solvency_capped_dividend_pool(
+        cash_rich + 500_000.0 - locks,
+        core_dep + bonds_p,
+        bank_net_worth(cash_rich + 500_000.0, loaned_rich, locks, core_dep + 500_000.0, bonds_p),
+        target_ratio=0.30,
+        dividend_share=0.05,
+        dividend_cap=50_000.0,
+        unseasoned_deposits=500_000.0,
+    )
+    assert pool_after == pytest.approx(pool_before, abs=1e-9)
