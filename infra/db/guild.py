@@ -172,7 +172,34 @@ class GuildRepo(ScopedRepo, IGuildRepo):
         with self._lock:
             gid = self._g()
             marks = ",".join("?" * len(ids))
-            return {
-                r["user_id"]: r
-                for r in self._all(f"SELECT * FROM profile WHERE guild_id=? AND user_id IN ({marks})", [gid, *ids])
-            }
+            equip_rows = self._all(
+                f"SELECT user_id, slot, item_id FROM user_equipment WHERE guild_id=? AND user_id IN ({marks})",
+                [gid, *ids],
+            )
+            buff_rows = self._all(
+                f"SELECT user_id, buff, charges FROM user_buffs WHERE guild_id=? AND user_id IN ({marks})",
+                [gid, *ids],
+            )
+        out: dict[int, ProfileRow] = {}
+        for r in equip_rows:
+            row = out.setdefault(r["user_id"], self._empty_profile_row(gid, r["user_id"]))
+            if r["slot"] in ("title", "card_color", "card_icon", "skin_dice", "skin_table"):
+                row[r["slot"]] = r["item_id"]
+        for r in buff_rows:
+            row = out.setdefault(r["user_id"], self._empty_profile_row(gid, r["user_id"]))
+            if r["buff"] in ("daily_boost", "insurance"):
+                row[r["buff"]] = r["charges"]
+        return out
+
+    def _empty_profile_row(self, guild_id: int, user_id: int) -> ProfileRow:
+        return {
+            "guild_id": guild_id,
+            "user_id": user_id,
+            "title": None,
+            "card_color": None,
+            "card_icon": None,
+            "skin_dice": None,
+            "skin_table": None,
+            "daily_boost": 0,
+            "insurance": 0,
+        }

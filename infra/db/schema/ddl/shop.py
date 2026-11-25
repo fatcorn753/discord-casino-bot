@@ -20,7 +20,7 @@ SHOP_STOCK_DDL = """
     )"""
 
 PROFILE_DDL = """
-    CREATE TABLE IF NOT EXISTS profile (
+    CREATE TABLE IF NOT EXISTS profile (         -- v1 互換定義（v4 で user_equipment・user_buffs へ縦持ち分離）
         guild_id    INTEGER NOT NULL,
         user_id     INTEGER NOT NULL,
         title       TEXT,
@@ -31,6 +31,24 @@ PROFILE_DDL = """
         daily_boost INTEGER NOT NULL DEFAULT 0,
         insurance   INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (guild_id, user_id)
+    )"""
+
+USER_EQUIPMENT_DDL = """
+    CREATE TABLE IF NOT EXISTS user_equipment (  -- 装備中の装飾・演出（スロットごとに縦持ち 5NF）
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        slot     TEXT NOT NULL CHECK (slot IN ('title', 'card_color', 'card_icon', 'skin_dice', 'skin_table')),
+        item_id  TEXT NOT NULL,
+        PRIMARY KEY (guild_id, user_id, slot)
+    )"""
+
+USER_BUFFS_DDL = """
+    CREATE TABLE IF NOT EXISTS user_buffs (      -- 消耗品の使用回数ストック（効果名ごとに縦持ち 5NF）
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        buff     TEXT NOT NULL CHECK (buff IN ('daily_boost', 'insurance')),
+        charges  INTEGER NOT NULL CHECK (charges > 0),
+        PRIMARY KEY (guild_id, user_id, buff)
     )"""
 
 NICK_PREFS_DDL = """
@@ -46,6 +64,7 @@ NICK_PREFS_DDL = """
 STATEMENTS: tuple[str, ...] = (
     INVENTORY_DDL,
     SHOP_STOCK_DDL,
-    PROFILE_DDL,
+    USER_EQUIPMENT_DDL,
+    USER_BUFFS_DDL,
     NICK_PREFS_DDL,
 )

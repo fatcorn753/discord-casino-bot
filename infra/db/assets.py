@@ -6,7 +6,6 @@
 `compose_asset_collectors` で合成する（OCP）。
 """
 
-import json
 from collections.abc import Callable
 
 from domain import horse as horse_mod
@@ -94,10 +93,11 @@ def labor_asset_collector(db: EcoDb) -> AssetCollector:
     conn = db.conn
 
     def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in fetch_all(
-            conn, "SELECT user_id, relics, pot, pick, glove, dorm FROM labor WHERE guild_id=?", (guild_id,)
-        ):
+        for r in fetch_all(conn, "SELECT user_id, pot FROM labor_pot WHERE guild_id=? AND pot>0", (guild_id,)):
             add(r["user_id"], "pot", r["pot"])
+        for r in fetch_all(
+            conn, "SELECT user_id, pick, glove, dorm FROM labor_upgrades WHERE guild_id=?", (guild_id,)
+        ):
             add(
                 r["user_id"],
                 "tools",
@@ -105,12 +105,12 @@ def labor_asset_collector(db: EcoDb) -> AssetCollector:
                 + labor_mod.upgrade_spent(r["glove"])
                 + labor_mod.dorm_spent(r["dorm"]),
             )
-            try:
-                waiting = json.loads(r["relics"] or "{}")
-            except ValueError:
-                waiting = {}
-            for item_id, qty in waiting.items():
-                _add_item_value(add, r["user_id"], item_id, int(qty))
+        for r in fetch_all(
+            conn,
+            "SELECT user_id, item_id, qty FROM labor_pending_relics WHERE guild_id=? AND qty>0",
+            (guild_id,),
+        ):
+            _add_item_value(add, r["user_id"], r["item_id"], r["qty"])
 
     return collect
 

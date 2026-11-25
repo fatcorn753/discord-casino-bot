@@ -387,7 +387,19 @@ def test_debt_repo_does_not_touch_other_domains_tables():
     assert not (ROOT / "infra/db/debt.py").exists(), "debt.py は debt/ パッケージへ分割済みのはず"
     sources = sorted(pkg_dir.rglob("*.py"))
     assert sources, "infra/db/debt/ パッケージが空です"
-    foreign = ("options", "bonds", "inventory", "profile", "horses", "seized_items", "crypto", "companies", "loans")
+    foreign = (
+        "options",
+        "bonds",
+        "inventory",
+        "profile",
+        "user_equipment",
+        "user_buffs",
+        "horses",
+        "seized_items",
+        "crypto",
+        "companies",
+        "loans",
+    )
     found = [
         f"{path.relative_to(ROOT)}:{m.group(0)}"
         for path in sources

@@ -155,7 +155,88 @@ _INVARIANT_SPECS: tuple[tuple[str, tuple[CandidateSpec, ...]], ...] = (
     ("options_margin_sum", (("options", ("margin",), "COALESCE(SUM(margin), 0)"),)),
     ("loans_principal_sum", (("loans", ("principal",), "COALESCE(SUM(principal), 0)"),)),
     ("jackpot_pool_sum", (("jackpot", ("pool",), "COALESCE(SUM(pool), 0)"),)),
-    ("labor_pot_sum", (("labor", ("pot",), "COALESCE(SUM(pot), 0)"),)),
+    (
+        "labor_pot_sum",
+        (
+            ("labor_pot", ("pot",), "COALESCE(SUM(pot), 0)"),
+            ("labor", ("pot",), "COALESCE(SUM(pot), 0)"),
+        ),
+    ),
+    (
+        "labor_pot_workers_sum",
+        (
+            ("labor_pot", ("pot_workers",), "COALESCE(SUM(pot_workers), 0)"),
+            ("labor", ("pot_workers",), "COALESCE(SUM(pot_workers), 0)"),
+        ),
+    ),
+    (
+        "labor_upgrades_sum",
+        (
+            ("labor_upgrades", ("pick", "glove", "dorm"), "COALESCE(SUM(pick + glove + dorm), 0)"),
+            ("labor", ("pick", "glove", "dorm"), "COALESCE(SUM(pick + glove + dorm), 0)"),
+        ),
+    ),
+    (
+        "labor_totals_clicks_sum",
+        (
+            ("labor_totals", ("clicks",), "COALESCE(SUM(clicks), 0)"),
+            ("labor", ("clicks",), "COALESCE(SUM(clicks), 0)"),
+        ),
+    ),
+    (
+        "labor_totals_earned_sum",
+        (
+            ("labor_totals", ("earned_total",), "COALESCE(SUM(earned_total), 0)"),
+            ("labor", ("earned_total",), "COALESCE(SUM(earned_total), 0)"),
+        ),
+    ),
+    (
+        "labor_totals_donated_sum",
+        (
+            ("labor_totals", ("donated",), "COALESCE(SUM(donated), 0)"),
+            ("labor", ("donated",), "COALESCE(SUM(donated), 0)"),
+        ),
+    ),
+    (
+        "labor_daily_earned_sum",
+        (
+            ("labor_daily", ("earned",), "COALESCE(SUM(earned), 0)"),
+            ("labor", ("day_earned",), "COALESCE(SUM(day_earned), 0)"),
+        ),
+    ),
+    (
+        "profile_buffs_sum",
+        (
+            ("user_buffs", ("charges",), "COALESCE(SUM(charges), 0)"),
+            ("profile", ("daily_boost", "insurance"), "COALESCE(SUM(MAX(0, daily_boost) + MAX(0, insurance)), 0)"),
+        ),
+    ),
+    (
+        "profile_equipment_count",
+        (
+            ("user_equipment", (), "COUNT(*)"),
+            (
+                "profile",
+                ("title", "card_color", "card_icon", "skin_dice", "skin_table"),
+                "COALESCE(SUM("
+                "(CASE WHEN title IS NOT NULL AND title != '' THEN 1 ELSE 0 END) + "
+                "(CASE WHEN card_color IS NOT NULL AND card_color != '' THEN 1 ELSE 0 END) + "
+                "(CASE WHEN card_icon IS NOT NULL AND card_icon != '' THEN 1 ELSE 0 END) + "
+                "(CASE WHEN skin_dice IS NOT NULL AND skin_dice != '' THEN 1 ELSE 0 END) + "
+                "(CASE WHEN skin_table IS NOT NULL AND skin_table != '' THEN 1 ELSE 0 END)"
+                "), 0)",
+            ),
+            (
+                "profile",
+                ("title", "card_color", "card_icon"),
+                "COALESCE(SUM("
+                "(CASE WHEN title IS NOT NULL AND title != '' THEN 1 ELSE 0 END) + "
+                "(CASE WHEN card_color IS NOT NULL AND card_color != '' THEN 1 ELSE 0 END) + "
+                "(CASE WHEN card_icon IS NOT NULL AND card_icon != '' THEN 1 ELSE 0 END)"
+                "), 0)",
+            ),
+        ),
+    ),
     (
         "seized_items_positive_qty_sum",
         (("seized_items", ("qty",), "COALESCE(SUM(CASE WHEN qty > 0 THEN qty ELSE 0 END), 0)"),),

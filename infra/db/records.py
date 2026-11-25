@@ -163,7 +163,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
                 for r in self._all("SELECT user_id FROM inventory WHERE guild_id=? AND item_id=?", (g, king))
             ]
             self._conn.execute("DELETE FROM inventory WHERE guild_id=? AND item_id=?", (g, king))
-            self._conn.execute("UPDATE profile SET title=NULL WHERE guild_id=? AND title=?", (g, king))
+            self._conn.execute("DELETE FROM user_equipment WHERE guild_id=? AND slot='title' AND item_id=?", (g, king))
             top = self._one(
                 "SELECT user_id, net, plays FROM weekly_stats WHERE guild_id=? AND week=? AND net>0 AND plays>=? "
                 "ORDER BY net DESC, plays ASC, user_id LIMIT 1",

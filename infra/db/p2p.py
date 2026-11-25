@@ -166,8 +166,8 @@ class P2PRepo(ScopedRepo, IP2PRepo):
                 slot = p2p.SLOT_OF_KIND.get(item.kind)
                 if slot and have["qty"] - qty <= 0:  # 装備中の品は、外れる
                     self._conn.execute(
-                        f"UPDATE profile SET {slot}=NULL WHERE guild_id=? AND user_id=? AND {slot}=?",
-                        (gid, user_id, ref),
+                        "DELETE FROM user_equipment WHERE guild_id=? AND user_id=? AND slot=? AND item_id=?",
+                        (gid, user_id, slot, ref),
                     )
             else:
                 assert horse is not None

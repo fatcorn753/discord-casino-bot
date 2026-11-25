@@ -45,6 +45,39 @@ def _add_teiai_legacy_columns(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE teiai_house ADD COLUMN grant_used INTEGER NOT NULL DEFAULT 0")
 
 
+def _add_labor_legacy_columns(conn: sqlite3.Connection) -> None:
+    ls = {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}
+    if not ls:
+        return
+    for col, ddl in (
+        ("dorm", "INTEGER NOT NULL DEFAULT 0"),
+        ("idle_at", "REAL NOT NULL DEFAULT 0"),
+        ("renew", "INTEGER NOT NULL DEFAULT 1"),
+        ("ores", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if col not in ls:
+            conn.execute(f"ALTER TABLE labor ADD COLUMN {col} {ddl}")
+    _migrate_labor_counts(conn)
+    ls = {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}
+    for col, ddl in (
+        ("pot_workers", "INTEGER NOT NULL DEFAULT 0"),
+        ("donated", "INTEGER NOT NULL DEFAULT 0"),
+        ("day_click", "INTEGER NOT NULL DEFAULT 0"),
+        ("relics", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if col not in ls:
+            conn.execute(f"ALTER TABLE labor ADD COLUMN {col} {ddl}")
+
+
+def _add_profile_legacy_columns(conn: sqlite3.Connection) -> None:
+    profile_cols = {r["name"] for r in conn.execute("PRAGMA table_info(profile)")}
+    if not profile_cols:
+        return
+    for col in ("skin_dice", "skin_table"):
+        if col not in profile_cols:
+            conn.execute(f"ALTER TABLE profile ADD COLUMN {col} TEXT")
+
+
 def add_missing_columns(conn: sqlite3.Connection) -> None:
     """作成済みの古い表に、あとから増えた列を足す。"""
     # 作成済みの古い表に、列を足す（初回の版には元のニックネームの記録がなかった）
@@ -133,24 +166,7 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     ):
         if opt_cols and col not in opt_cols:
             conn.execute(f"ALTER TABLE options ADD COLUMN {col} {ddl}")
-    ls = {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}
-    for col, ddl in (
-        ("dorm", "INTEGER NOT NULL DEFAULT 0"),
-        ("idle_at", "REAL NOT NULL DEFAULT 0"),
-        ("renew", "INTEGER NOT NULL DEFAULT 1"),
-        ("ores", "TEXT NOT NULL DEFAULT ''"),
-    ):
-        if col not in ls:
-            conn.execute(f"ALTER TABLE labor ADD COLUMN {col} {ddl}")
-    _migrate_labor_counts(conn)
-    if "pot_workers" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
-        conn.execute("ALTER TABLE labor ADD COLUMN pot_workers INTEGER NOT NULL DEFAULT 0")
-    if "donated" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
-        conn.execute("ALTER TABLE labor ADD COLUMN donated INTEGER NOT NULL DEFAULT 0")
-    if "day_click" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
-        conn.execute("ALTER TABLE labor ADD COLUMN day_click INTEGER NOT NULL DEFAULT 0")
-    if "relics" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
-        conn.execute("ALTER TABLE labor ADD COLUMN relics TEXT NOT NULL DEFAULT ''")
+    _add_labor_legacy_columns(conn)
     ml = {r["name"] for r in conn.execute("PRAGMA table_info(market_listings)")}
     for col in ("channel_id", "message_id", "post_done"):
         if col not in ml:
@@ -188,10 +204,7 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     answers = {r["name"] for r in conn.execute("PRAGMA table_info(quiz_answers)")}
     if "counted" not in answers:
         conn.execute("ALTER TABLE quiz_answers ADD COLUMN counted INTEGER NOT NULL DEFAULT 1")
-    profile_cols = {r["name"] for r in conn.execute("PRAGMA table_info(profile)")}
-    for col in ("skin_dice", "skin_table"):
-        if col not in profile_cols:
-            conn.execute(f"ALTER TABLE profile ADD COLUMN {col} TEXT")
+    _add_profile_legacy_columns(conn)
     users_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
     if users_cols:
         for col in ("bankrupt_at", "blacklist_until", "escape_at"):

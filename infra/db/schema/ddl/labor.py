@@ -1,7 +1,7 @@
 """地下作業（クリッカー）・掘り出し履歴・作業員契約の DDL。"""
 
-LABOR_DDL = """
-    CREATE TABLE IF NOT EXISTS labor (           -- 地下作業（クリッカー）。工具・疲労・まだ受け取っていない稼ぎ
+LABOR_V1_DDL = """
+    CREATE TABLE IF NOT EXISTS labor (           -- 地下作業（v1 互換: v4 で 7 表へ 1NF/5NF 分離）
         guild_id     INTEGER NOT NULL,
         user_id      INTEGER NOT NULL,
         pick         INTEGER NOT NULL DEFAULT 0,
@@ -23,6 +23,78 @@ LABOR_DDL = """
         renew        INTEGER NOT NULL DEFAULT 1,   -- 作業員の契約の自動更新（1=オン）
         ores         TEXT NOT NULL DEFAULT '',     -- 受け取る前の稼ぎに含まれる鉱石（JSON {鉱石: 個数}）
         PRIMARY KEY (guild_id, user_id)
+    )"""
+
+LABOR_UPGRADES_DDL = """
+    CREATE TABLE IF NOT EXISTS labor_upgrades (  -- 地下作業の工具・寮・契約更新設定
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        pick     INTEGER NOT NULL DEFAULT 0 CHECK (pick >= 0),
+        glove    INTEGER NOT NULL DEFAULT 0 CHECK (glove >= 0),
+        dorm     INTEGER NOT NULL DEFAULT 0 CHECK (dorm >= 0),
+        renew    INTEGER NOT NULL DEFAULT 1 CHECK (renew IN (0, 1)),
+        PRIMARY KEY (guild_id, user_id)
+    )"""
+
+LABOR_FATIGUE_DDL = """
+    CREATE TABLE IF NOT EXISTS labor_fatigue (   -- 地下作業の疲労・最終クリック時刻
+        guild_id   INTEGER NOT NULL,
+        user_id    INTEGER NOT NULL,
+        fatigue    REAL NOT NULL DEFAULT 0 CHECK (fatigue >= 0),
+        fatigue_at REAL NOT NULL DEFAULT 0,
+        last_click REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (guild_id, user_id)
+    )"""
+
+LABOR_POT_DDL = """
+    CREATE TABLE IF NOT EXISTS labor_pot (       -- 受け取り前の稼ぎ・作業員精算時刻
+        guild_id    INTEGER NOT NULL,
+        user_id     INTEGER NOT NULL,
+        pot         INTEGER NOT NULL DEFAULT 0 CHECK (pot >= 0),
+        pot_workers INTEGER NOT NULL DEFAULT 0 CHECK (pot_workers >= 0),
+        idle_at     REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (guild_id, user_id)
+    )"""
+
+LABOR_DAILY_DDL = """
+    CREATE TABLE IF NOT EXISTS labor_daily (     -- 日別の稼ぎ・押下数
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        day      TEXT NOT NULL,
+        earned   INTEGER NOT NULL DEFAULT 0 CHECK (earned >= 0),
+        clicks   INTEGER NOT NULL DEFAULT 0 CHECK (clicks >= 0),
+        PRIMARY KEY (guild_id, user_id, day)
+    )"""
+
+LABOR_DAILY_RANK_INDEX_DDL = """
+    CREATE INDEX IF NOT EXISTS idx_labor_daily_rank ON labor_daily (guild_id, day, earned DESC)"""
+
+LABOR_TOTALS_DDL = """
+    CREATE TABLE IF NOT EXISTS labor_totals (    -- 通算の押下数・総稼ぎ・慈善寄付累計
+        guild_id     INTEGER NOT NULL,
+        user_id      INTEGER NOT NULL,
+        clicks       INTEGER NOT NULL DEFAULT 0 CHECK (clicks >= 0),
+        earned_total INTEGER NOT NULL DEFAULT 0 CHECK (earned_total >= 0),
+        donated      INTEGER NOT NULL DEFAULT 0 CHECK (donated >= 0),
+        PRIMARY KEY (guild_id, user_id)
+    )"""
+
+LABOR_PENDING_ORES_DDL = """
+    CREATE TABLE IF NOT EXISTS labor_pending_ores (   -- 受け取り待ちの鉱石（1NF）
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        ore      TEXT NOT NULL,
+        qty      INTEGER NOT NULL CHECK (qty > 0),
+        PRIMARY KEY (guild_id, user_id, ore)
+    )"""
+
+LABOR_PENDING_RELICS_DDL = """
+    CREATE TABLE IF NOT EXISTS labor_pending_relics ( -- 受け取り待ちの発掘品（1NF）
+        guild_id INTEGER NOT NULL,
+        user_id  INTEGER NOT NULL,
+        item_id  TEXT NOT NULL,
+        qty      INTEGER NOT NULL CHECK (qty > 0),
+        PRIMARY KEY (guild_id, user_id, item_id)
     )"""
 
 LABOR_FINDS_DDL = """
@@ -67,7 +139,14 @@ LABOR_WORKERS_INDEX_DDL = """
     CREATE INDEX IF NOT EXISTS labor_workers_owner ON labor_workers (guild_id, user_id)"""
 
 STATEMENTS: tuple[str, ...] = (
-    LABOR_DDL,
+    LABOR_UPGRADES_DDL,
+    LABOR_FATIGUE_DDL,
+    LABOR_POT_DDL,
+    LABOR_DAILY_DDL,
+    LABOR_DAILY_RANK_INDEX_DDL,
+    LABOR_TOTALS_DDL,
+    LABOR_PENDING_ORES_DDL,
+    LABOR_PENDING_RELICS_DDL,
     LABOR_FINDS_DDL,
     LABOR_FINDS_INDEX_DDL,
     LABOR_CLICK_HOURS_DDL,

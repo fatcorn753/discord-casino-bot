@@ -11,8 +11,9 @@ from infra.db.schema.migrations import add_missing_columns, migrate_to_guild_sco
 from infra.db.schema.migrations_v1 import migrate_v0_to_v1
 from infra.db.schema.migrations_v2 import migrate_v1_to_v2
 from infra.db.schema.migrations_v3 import migrate_v2_to_v3
+from infra.db.schema.migrations_v4 import migrate_v3_to_v4
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,11 @@ MIGRATIONS: tuple[MigrationStep, ...] = (
         version=3,
         name="v2_to_v3_split_teiai_bank_house",
         fn=migrate_v2_to_v3,
+    ),
+    MigrationStep(
+        version=4,
+        name="v3_to_v4_split_labor_profile",
+        fn=migrate_v3_to_v4,
     ),
 )
 

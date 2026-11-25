@@ -84,7 +84,7 @@ class QuizRow(TypedDict):
 
 
 class LaborRow(TypedDict):
-    """地下作業の状態（labor 表の行）。"""
+    """地下作業の状態（v4 で labor_* 7 表へ分離された内部結合ビューの型）。"""
 
     guild_id: int
     user_id: int
@@ -154,7 +154,7 @@ class ShopStockRow(TypedDict):
 
 
 class ProfileRow(TypedDict):
-    """プロフィール（profile 表の行）。"""
+    """プロフィール（v4 で user_equipment・user_buffs へ分離された集約ビューの型）。"""
 
     guild_id: int
     user_id: int

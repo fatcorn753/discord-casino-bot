@@ -419,7 +419,11 @@ def build_legacy_v0_db(path: str) -> None:
     )
     c.execute("INSERT INTO escrow (guild_id, user_id, amount, game, created_at) VALUES (?, ?, 300, 'slot', ?)", (G, U1, NOW))
     c.execute("INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, 3)", (G, U1, shop.INSURANCE))
-    c.execute("INSERT INTO profile (guild_id, user_id, title) VALUES (?, ?, 'title_rookie')", (G, U1))
+    c.execute(
+        "INSERT INTO profile (guild_id, user_id, title, skin_dice, daily_boost, insurance) "
+        "VALUES (?, ?, 'title_rookie', 'skin_kuro', 2, 1)",
+        (G, U1),
+    )
     c.execute("INSERT INTO jackpot (guild_id, pool) VALUES (?, 8000)", (G,))
     c.execute(
         "INSERT INTO teiai_bank (guild_id, cash, loaned, ts, thermo_load, thermo_capacity, thermo_ts, "
@@ -454,8 +458,10 @@ def build_legacy_v0_db(path: str) -> None:
     )
     c.execute("INSERT INTO horse_odds (race_id, kind, key, odds) VALUES (1, 'quinella', '1-2', 5.0), (2, 'quinella', '1-2', 4.5)")
     c.execute(
-        "INSERT INTO labor (guild_id, user_id, pick, helmet, pot, pot_workers, relics, day, last_click, rest_until, "
-        "apprentice, miner, dorm, idle_at, ores, wage) VALUES (?, ?, 1, 2, 650, 100, '{\"relic_fossil\": 1}', ?, ?, 99.0, 2, 1, 1, ?, '{\"copper\": 2}', 'high')",
+        "INSERT INTO labor (guild_id, user_id, pick, glove, helmet, pot, pot_workers, donated, relics, day, "
+        "day_earned, day_click, last_click, rest_until, clicks, earned_total, apprentice, miner, dorm, idle_at, ores, wage) "
+        "VALUES (?, ?, 1, 1, 2, 650, 100, 300, '{\"relic_fossil\": 1}', ?, 450, 5, ?, 99.0, 20, 1200, 2, 1, 1, ?, "
+        "'{\"copper\": 2}', 'high')",
         (G, U1, DAY, NOW, NOW),
     )
     c.execute(
@@ -500,11 +506,12 @@ def test_fresh_db_initializes_directly_to_v1_without_backup(tmp_path):
     path = str(tmp_path / "fresh.db")
     eco = open_repositories(path, strict=True)
     try:
-        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION == 3
+        assert eco.db.conn.execute("PRAGMA user_version").fetchone()[0] == schema.CURRENT_SCHEMA_VERSION == 4
         assert eco.db.conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert eco.db.conn.execute("PRAGMA foreign_key_check").fetchall() == []
         tables = {r[0] for r in eco.db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "guild_users" not in tables and "users" not in tables
+        assert "labor" not in tables and "profile" not in tables
         assert {
             "accounts",
             "user_daily",
@@ -517,10 +524,20 @@ def test_fresh_db_initializes_directly_to_v1_without_backup(tmp_path):
             "teiai_trust",
             "kyosai_state",
             "teiai_house_grants",
+            "labor_upgrades",
+            "labor_fatigue",
+            "labor_pot",
+            "labor_daily",
+            "labor_totals",
+            "labor_pending_ores",
+            "labor_pending_relics",
+            "user_equipment",
+            "user_buffs",
         } <= tables
         assert not os.path.exists(f"{path}.before-v1")
         assert not os.path.exists(f"{path}.before-v2")
         assert not os.path.exists(f"{path}.before-v3")
+        assert not os.path.exists(f"{path}.before-v4")
         assert eco.for_guild(G).wallet.balance(U1) == INITIAL_BALANCE
     finally:
         eco.close()
@@ -533,22 +550,23 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert os.path.exists(f"{path}.before-v1")
         assert os.path.exists(f"{path}.before-v2")
         assert os.path.exists(f"{path}.before-v3")
+        assert os.path.exists(f"{path}.before-v4")
 
         tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert "guild_users" not in tables and "autoplay" not in tables and "users" not in tables
+        assert "labor" not in tables and "profile" not in tables
 
         removed = {
             "teiai_bank": {"bailout_debt", "kyosai_house_ts"},
             "horses": {"rented_day"},
             "horse_races": {"grade"},
             "horse_entries": {"tactic"},
-            "labor": {"helmet", "rest_until", "apprentice", "miner", "craftsman", "foreman", "wage"},
             "labor_workers": {"legacy"},
         }
         for table, dead_cols in removed.items():
@@ -570,7 +588,12 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
 
         state = g.labor.labor_state(U1, NOW, DAY)
         assert (state["apprentice"], state["miner"], state["craftsman"]) == (2, 1, 1)
+        assert state["pick"] == 1 and state["glove"] == 1 and state["dorm"] == 1
         assert state["pot"] == 650 and state["ores"] == {"copper": 2} and state["relics"] == {"relic_fossil": 1}
+        assert state["donated"] == 300 and state["day_earned"] == 450 and state["clicks"] == 20
+        prof = g.shop.get_profile(U1, raw=True)
+        assert prof["title"] == "title_rookie" and prof["skin_dice"] == "skin_kuro"
+        assert prof["daily_boost"] == 2 and prof["insurance"] == 1
 
         # B/S（asset_parts / asset_groups）および escrow テーブルの整合性確認
         assert conn.execute("SELECT COALESCE(SUM(amount), 0) FROM escrow").fetchone()[0] == 300
@@ -586,7 +609,7 @@ def test_v0_to_v1_lossless_migration_drops_dead_schema_and_preserves_assets(tmp_
         assert parts["items"] == 8_000
         assert parts["relics"] == 1_500
         assert parts["horses"] == 30_000
-        assert parts["tools"] == 2_150
+        assert parts["tools"] == 2_300
         assert parts["company"] > 40_000
         assert parts["loans_lent"] == 5_050
         assert parts["debt"] == -2_000
@@ -647,13 +670,13 @@ def test_failing_migration_step_rolls_back_atomically(tmp_path):
         conn.execute("UPDATE accounts SET balance = 0")
         raise RuntimeError("boom during migration")
 
-    steps = (*schema.MIGRATIONS, schema.MigrationStep(4, "broken_v4", broken_step))
+    steps = (*schema.MIGRATIONS, schema.MigrationStep(5, "broken_v5", broken_step))
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     try:
         with pytest.raises(RuntimeError, match="boom"):
-            schema.initialize_db(conn, path, steps=steps, target_version=4)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+            schema.initialize_db(conn, path, steps=steps, target_version=5)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
         assert (
             conn.execute("SELECT balance FROM accounts WHERE guild_id=? AND user_id=?", (G, U1)).fetchone()[0]
             == INITIAL_BALANCE + 500
@@ -694,11 +717,12 @@ def test_v1_to_v2_splits_all_user_domains_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v1")
         assert os.path.exists(f"{path}.before-v2")
         assert os.path.exists(f"{path}.before-v3")
+        assert os.path.exists(f"{path}.before-v4")
         assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").fetchone() is None
 
         st = eco.for_guild(G).wallet.stats(U1)
@@ -774,10 +798,11 @@ def test_v2_to_v3_splits_teiai_bank_and_house_losslessly(tmp_path):
     eco = open_repositories(path, strict=True)
     try:
         conn = eco.db.conn
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert not os.path.exists(f"{path}.before-v2")
         assert os.path.exists(f"{path}.before-v3")
+        assert os.path.exists(f"{path}.before-v4")
 
         tb_cols = {r[1] for r in conn.execute("PRAGMA table_info(teiai_bank)")}
         assert tb_cols == {"guild_id", "cash", "loaned", "ts"}
@@ -796,6 +821,61 @@ def test_v2_to_v3_splits_teiai_bank_and_house_losslessly(tmp_path):
         assert ks["paid"] == pytest.approx(777.0) and ks["charged"] == pytest.approx(888.0)
         assert g.bank.house_account() == {"balance": 19_000, "skimmed": 500}
         assert g.bank.house_grant_left_for(G, DAY, 10_000) == 6_800
+    finally:
+        eco.close()
+
+
+def test_v3_to_v4_splits_labor_and_profile_losslessly(tmp_path):
+    path = str(tmp_path / "v3_only.db")
+    c = sqlite3.connect(path)
+    schema.create_v1_missing_tables(c)
+    from infra.db.schema.migrations_v2 import migrate_v1_to_v2
+    from infra.db.schema.migrations_v3 import migrate_v2_to_v3
+
+    migrate_v1_to_v2(c)
+    migrate_v2_to_v3(c)
+    c.execute(
+        "INSERT INTO accounts (guild_id, user_id, balance, created_at) VALUES (?, ?, 10000, ?)",
+        (G, U1, NOW),
+    )
+    c.execute(
+        "INSERT INTO labor (guild_id, user_id, pick, glove, fatigue, fatigue_at, pot, pot_workers, "
+        "donated, relics, day, day_earned, day_click, last_click, clicks, earned_total, dorm, idle_at, renew, ores) "
+        "VALUES (?, ?, 2, 1, 15.0, ?, 900, 300, 120, '{\"relic_fossil\": 2}', ?, 500, 8, ?, 40, 2500, 1, ?, 0, '{\"copper\": 3}')",
+        (G, U1, NOW, DAY, NOW - 5, NOW),
+    )
+    c.execute(
+        "INSERT INTO profile (guild_id, user_id, title, card_color, card_icon, skin_dice, skin_table, daily_boost, insurance) "
+        "VALUES (?, ?, 'title_rookie', 'card_gold', NULL, 'skin_kuro', 'skin_vip', 3, 2)",
+        (G, U1),
+    )
+    c.execute("PRAGMA user_version = 3")
+    c.commit()
+    c.close()
+
+    eco = open_repositories(path, strict=True)
+    try:
+        conn = eco.db.conn
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert not os.path.exists(f"{path}.before-v3")
+        assert os.path.exists(f"{path}.before-v4")
+        assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='labor'").fetchone() is None
+        assert conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='profile'").fetchone() is None
+
+        g = eco.for_guild(G)
+        st = g.labor.labor_state(U1, NOW, DAY)
+        assert (st["pick"], st["glove"], st["dorm"], st["renew"]) == (2, 1, 1, 0)
+        assert st["pot"] == 900 and st["pot_workers"] == 300 and st["donated"] == 120
+        assert st["day_earned"] == 500 and st["day_click"] == 8
+        assert st["clicks"] == 40 and st["earned_total"] == 2500
+        assert st["ores"] == {"copper": 3} and st["relics"] == {"relic_fossil": 2}
+        assert g.labor.labor_top(day=DAY)["rows"] == [(1, U1, 500, 40)]
+
+        prof = g.shop.get_profile(U1, raw=True)
+        assert prof["title"] == "title_rookie" and prof["card_color"] == "card_gold"
+        assert prof["card_icon"] is None and prof["skin_dice"] == "skin_kuro" and prof["skin_table"] == "skin_vip"
+        assert prof["daily_boost"] == 3 and prof["insurance"] == 2
     finally:
         eco.close()
 
@@ -819,6 +899,6 @@ def test_manage_migrate_check_never_modifies_source_db(tmp_path, capsys):
     assert os.path.exists(f"{path}.before-v1")
     check = sqlite3.connect(path)
     try:
-        assert check.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 4
     finally:
         check.close()

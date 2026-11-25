@@ -124,8 +124,11 @@ def test_ranking_view_can_switch_back_and_forth(eco):
 def test_labor_tool_upgrades_count_toward_assets(eco):
     from domain import labor as lab
 
-    eco.db.conn.execute("INSERT OR IGNORE INTO labor (guild_id, user_id) VALUES (?, ?)", (G, A))
-    eco.db.conn.execute("UPDATE labor SET pick=2, glove=1, dorm=1 WHERE guild_id=? AND user_id=?", (G, A))
+    eco.db.conn.execute(
+        "INSERT INTO labor_upgrades (guild_id, user_id, pick, glove, dorm) VALUES (?, ?, 2, 1, 1) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET pick=excluded.pick, glove=excluded.glove, dorm=excluded.dorm",
+        (G, A),
+    )
     eco.db.conn.commit()
     want = lab.upgrade_spent(2) + lab.upgrade_spent(1) + lab.dorm_spent(1)
     assert want > 0

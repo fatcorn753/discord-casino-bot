@@ -88,6 +88,25 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
         result = self.settle_with_penalty(escrow_id, payout, game, 0)
         return None if result is None else result[0]
 
+    def _consume_insurance(self, guild_id: int, user_id: int) -> bool:
+        row = self._one(
+            "SELECT charges FROM user_buffs WHERE guild_id=? AND user_id=? AND buff='insurance'",
+            (guild_id, user_id),
+        )
+        if not row or row["charges"] <= 0:
+            return False
+        if row["charges"] > 1:
+            self._conn.execute(
+                "UPDATE user_buffs SET charges = charges - 1 WHERE guild_id=? AND user_id=? AND buff='insurance'",
+                (guild_id, user_id),
+            )
+        else:
+            self._conn.execute(
+                "DELETE FROM user_buffs WHERE guild_id=? AND user_id=? AND buff='insurance'",
+                (guild_id, user_id),
+            )
+        return True
+
     def settle_with_penalty(self, escrow_id: int, payout: int, game: str, penalty: int) -> tuple[int, int, int] | None:
         """精算と、倍払いなどの追加の支払いを、1回のトランザクションで行う。
 
@@ -102,15 +121,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                 return None
             user_id, amount = row["user_id"], row["amount"]
             payout = max(0, int(payout))
-            insured = 0
-            if payout == 0:
-                prof = self._one("SELECT insurance FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id))
-                if prof and prof["insurance"] > 0:
-                    insured = min(amount // 2, INSURANCE_CAP)
-                    self._conn.execute(
-                        "UPDATE profile SET insurance = insurance - 1 WHERE guild_id=? AND user_id=?",
-                        (gid, user_id),
-                    )
+            insured = min(amount // 2, INSURANCE_CAP) if payout == 0 and self._consume_insurance(gid, user_id) else 0
             total = payout + insured
             if total:
                 # 払い戻しのうち、賭け金を超えた分（純利益）だけが収入。賭け金の返金や、保険券の返金からは天引きしない

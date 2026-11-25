@@ -15,7 +15,18 @@ from infra.db.schema.ddl import (
     telemetry,
 )
 from infra.db.schema.ddl.core import ACCOUNTS_DDL, USER_DAILY_DDL, USER_PLAY_STATS_DDL, USERS_DDL
-from infra.db.schema.ddl.shop import INVENTORY_DDL, PROFILE_DDL, SHOP_STOCK_DDL
+from infra.db.schema.ddl.labor import (
+    LABOR_DAILY_DDL,
+    LABOR_DAILY_RANK_INDEX_DDL,
+    LABOR_FATIGUE_DDL,
+    LABOR_PENDING_ORES_DDL,
+    LABOR_PENDING_RELICS_DDL,
+    LABOR_POT_DDL,
+    LABOR_TOTALS_DDL,
+    LABOR_UPGRADES_DDL,
+    LABOR_V1_DDL,
+)
+from infra.db.schema.ddl.shop import INVENTORY_DDL, PROFILE_DDL, SHOP_STOCK_DDL, USER_BUFFS_DDL, USER_EQUIPMENT_DDL
 from infra.db.schema.ddl.social import new_quiz_order
 from infra.db.schema.ddl.teiai import (
     KYOSAI_STATE_DDL,
@@ -49,7 +60,27 @@ V3_TEIAI_SPLIT_STATEMENTS: tuple[str, ...] = (
     KYOSAI_STATE_DDL,
     TEIAI_HOUSE_GRANTS_DDL,
 )
-_V1_SKIP_SET = frozenset((*V2_USER_SPLIT_STATEMENTS, *V3_TEIAI_SPLIT_STATEMENTS, TEIAI_BANK_DDL, TEIAI_HOUSE_DDL))
+V4_LABOR_PROFILE_STATEMENTS: tuple[str, ...] = (
+    LABOR_UPGRADES_DDL,
+    LABOR_FATIGUE_DDL,
+    LABOR_POT_DDL,
+    LABOR_DAILY_DDL,
+    LABOR_DAILY_RANK_INDEX_DDL,
+    LABOR_TOTALS_DDL,
+    LABOR_PENDING_ORES_DDL,
+    LABOR_PENDING_RELICS_DDL,
+    USER_EQUIPMENT_DDL,
+    USER_BUFFS_DDL,
+)
+_V1_SKIP_SET = frozenset(
+    (
+        *V2_USER_SPLIT_STATEMENTS,
+        *V3_TEIAI_SPLIT_STATEMENTS,
+        *V4_LABOR_PROFILE_STATEMENTS,
+        TEIAI_BANK_DDL,
+        TEIAI_HOUSE_DDL,
+    )
+)
 
 ALL_STATEMENTS: tuple[str, ...] = (
     *core.STATEMENTS,
@@ -83,6 +114,10 @@ def create_v1_missing_tables(conn: sqlite3.Connection) -> None:
         conn.execute(TEIAI_BANK_V1_DDL)
     if not _has_table(conn, "teiai_house_grants"):
         conn.execute(TEIAI_HOUSE_V1_DDL)
+    if not _has_table(conn, "labor_upgrades"):
+        conn.execute(LABOR_V1_DDL)
+    if not _has_table(conn, "user_equipment"):
+        conn.execute(PROFILE_DDL)
     for stmt in ALL_STATEMENTS:
         if stmt not in _V1_SKIP_SET:
             conn.execute(stmt)
@@ -98,6 +133,7 @@ __all__ = [
     "USERS_DDL",
     "V2_USER_SPLIT_STATEMENTS",
     "V3_TEIAI_SPLIT_STATEMENTS",
+    "V4_LABOR_PROFILE_STATEMENTS",
     "create_all_tables",
     "create_v1_missing_tables",
     "new_quiz_order",
