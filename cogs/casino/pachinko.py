@@ -153,21 +153,22 @@ class Staging:
     tier: str  # リーチの格（なしなら ""）
 
 
-_CAP_OMEN = {"gold": "red"}  # 外れるリーチ（ガセ）では、金の予告とプレミアムリーチを出さない（出玉の大きい当たり専用）
+# 外れるリーチ（ガセ）では、プレミアムリーチを出さない（実機の全回転と同じ確定演出）
 _CAP_TIER = {pachinko.PREMIUM: pachinko.SUPER}
-REVIVE_MIN = 10  # 復活演出を見せる、出玉の合計の下限
+REVIVE_MIN = 10  # 復活演出を見せる、今回の当たり（1ラウンド目）の出玉の下限
 
 
-def grade_of(raw: int) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """出玉の合計に合う、予告の色とリーチの格の候補。"""
-    return next((omens, tiers) for floor, omens, tiers in GRADES if raw >= floor)
+def grade_of(mult: int) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """今回の当たりの出玉に合う、予告の色とリーチの格の候補。"""
+    return next((omens, tiers) for floor, omens, tiers in GRADES if mult >= floor)
 
 
 def staging_for(rng: random.Random, spin: pachinko.SpinInfo) -> Staging:
-    """当たりは出玉の合計に比例した格で、外れるリーチは抽選どおりの格（ただし金とプレミアムは使わない）で見せる。"""
+    """当たりは今回の当たり（1ラウンド目）の出玉に比例した格で、外れるリーチは抽選どおりの格（プレミアムは使わない）で見せる。
+    連チャンの継続はこのあとの抽選として見せるので、リーチの時点の演出には混ぜない（まだ起きていないことを先に匂わせない）。"""
     if not spin.hit:
-        return Staging(_CAP_OMEN.get(spin.omen, spin.omen), _CAP_TIER.get(spin.tier, spin.tier))
-    omens, tiers = grade_of(spin.raw)
+        return Staging(spin.omen, _CAP_TIER.get(spin.tier, spin.tier))
+    omens, tiers = grade_of(spin.rounds[0])
     return Staging(rng.choice(omens), rng.choice(tiers))
 
 
@@ -229,8 +230,8 @@ def spin_frames(rng: random.Random, spin: pachinko.SpinInfo, label: str = "", st
     frames.append(
         _text_frame("", (sym, sym, SPINNING), "**リーチ！**", "blue")
     )  # ④ リーチ。ここから出目が決まるまで、左右は変えない
-    # 復活は派手なので、出玉が大当たり（10倍）以上の当たりだけ
-    revive = spin.hit and spin.raw >= REVIVE_MIN and rng.random() < pachinko.REVIVE_CHANCE[tier]
+    # 復活は派手なので、今回の当たりが大当たり（10倍）以上のときだけ
+    revive = spin.hit and spin.rounds[0] >= REVIVE_MIN and rng.random() < pachinko.REVIVE_CHANCE[tier]
     title, sub = rng.choice(STORIES[tier])
     if tier == pachinko.NORMAL:
         frames.append(_text_frame(f"{title}\n", (sym, sym, SPINNING), sub, mood))
@@ -269,11 +270,11 @@ def reveal_frames(
     spin: pachinko.SpinInfo, limit: int = SHOWN_ROUNDS, skin=None, rng: random.Random | None = None
 ) -> list:
     """演出が終わったあとに出す、当たりの宣言 → 連チャン → 終了のまとめ。
-    連チャンの数は先に出さない。1ラウンドごとに「継続…？」を挟み、続いたか終わったかを、そのあとで見せる。"""
+    見ている人はいまのコマしか知らない前提で作る: 続くかどうか・何連になるかは、そのときが来るまで出さない。1ラウンドごとに「継続…？」を挟み、続いたか終わったかを、そのあとで見せる。"""
     rng = rng or RNG
     rounds = spin.rounds
     n, first = len(rounds), rounds[0]
-    frames = [Frame(f"{banner_for(first, skin) or '# 🎉 当たり！！ 🎉'}\n連チャン スタート！", _size_mood(first))]
+    frames = [Frame(banner_for(first, skin) or "# 🎉 当たり！！ 🎉", _size_mood(first))]
     total = 0
     for k, r in enumerate(rounds[:limit], start=1):
         total += r

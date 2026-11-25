@@ -218,9 +218,7 @@ def test_a_set_with_no_hit_shows_the_missed_reach_as_a_fake_out():
     assert (
         stop is not None and "ハズレ" in frames[-2].text and stop[0] == stop[1] != stop[2]
     )  # 外れたリーチは「あと一歩」
-    assert not any(
-        "プレミアムリーチ" in f.text or "全回転" in f.text or f.mood == "gold" for f in frames
-    )  # 金とプレミアムは当たり専用
+    assert not any("プレミアムリーチ" in f.text or "全回転" in f.text for f in frames)  # 金とプレミアムは当たり専用
     assert "すべてハズレ" in frames[-1].text and "リーチが **1回**" in frames[-1].text
     assert not any("当たり" in f.text or "🎉" in f.text for f in frames)
 
@@ -280,7 +278,7 @@ def test_reveal_frames_hide_the_chain_count_until_it_ends():
     spin = pachinko.SpinInfo("", "", True, (2,) * 8, 0.1)
     frames = play_pa.reveal_frames(spin, rng=random.Random(1))
     texts = [f.text for f in frames]
-    assert "8連" not in texts[0] and "連チャン スタート" in texts[0]  # 連チャンの数は、先に出さない
+    assert "連" not in texts[0]  # 宣言では、続くかどうかも、何連になるかも、まだ出さない
     assert "# 🔥 1連目" in texts[1] and "継続！ 2連目" in texts[3]
     assert any("5連 達成" in t for t in texts)  # 5連は節目
     assert any("8連チャン" in t for t in texts[-2:])  # 表示しきれない分は、終わりにまとめて出す
@@ -306,7 +304,7 @@ def test_reveal_colors_follow_the_size_of_the_win():
     assert big[0].mood == "gold" and big[-1].mood == "gold"
 
 
-def test_staging_grows_with_the_payout_and_gold_is_only_for_big_wins():
+def test_staging_grows_with_this_hit_and_ignores_the_chain_yet_to_come():
     rng = random.Random(11)
     rank = {"": 0, "blue": 1, "red": 2, "gold": 3, pachinko.NORMAL: 1, pachinko.SUPER: 2, pachinko.PREMIUM: 3}
 
@@ -317,12 +315,18 @@ def test_staging_grows_with_the_payout_and_gold_is_only_for_big_wins():
         return sum(rank[getattr(s, key)] for s in spins) / len(spins)
 
     for key in ("omen", "tier"):
-        assert mean(2, key) < mean(10, key) < mean(30, key) < mean(60, key)  # 抽選の演出が派手でも、出玉に合わせる
+        assert mean(2, key) < mean(10, key) < mean(30, key)  # 抽選の演出が派手でも、今回の当たりの出玉に合わせる
     for _ in range(300):
         small = play_pa.staging_for(rng, pachinko.SpinInfo("gold", pachinko.PREMIUM, True, (2,), 0.5))
         assert small.omen != "gold" and small.tier != pachinko.PREMIUM  # 2倍に、金予告やプレミアムは出ない
     miss = play_pa.staging_for(rng, pachinko.SpinInfo("gold", pachinko.PREMIUM, False, (), 0.5))
-    assert miss == play_pa.Staging("red", pachinko.SUPER)  # ガセは、金とプレミアムを使わない
+    assert miss == play_pa.Staging(
+        "gold", pachinko.SUPER
+    )  # ガセにも金は出る（金で当たりを確定させない）。プレミアムは当たり専用
+    # 同じ当たりなら、あとの連チャンが何連になっても、リーチの時点の演出は同じ
+    for rounds in ((10,), (10, 30, 30, 30)):
+        seen = {play_pa.staging_for(random.Random(3), pachinko.SpinInfo("", "", True, rounds, 0.5))}
+        assert seen == {play_pa.staging_for(random.Random(3), pachinko.SpinInfo("", "", True, (10,), 0.5))}
 
 
 def test_pseudo_chain_never_shows_the_total_in_advance():
