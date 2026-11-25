@@ -17,6 +17,9 @@ USERS_DDL = """
         created_at   REAL NOT NULL,
         last_slot    INTEGER,                 -- 最後にボーナスを受け取った「時間帯」の番号（6時間ごとの受け取り用）
         debt         INTEGER NOT NULL DEFAULT 0,   -- 帝愛からの借金（シニア債権）。収入から天引きで返済する（domain/teiai.py）
+        debt_principal INTEGER NOT NULL DEFAULT 0, -- 借金の元本（利息の上限計算用。元本の2倍が上限）
+        grace_penalty REAL NOT NULL DEFAULT 0,     -- 破産猶予ペナルティ（入るたび +1、時間経過で減衰）
+        grace_penalty_at REAL NOT NULL DEFAULT 0,  -- 最後に破産猶予に入った時刻（ペナルティ減衰の起点）
         bankrupt_at  REAL,                         -- 自己破産した時刻（NULL なら破産者ではない）
         blacklist_until REAL,                      -- 破産者の身分が終わる時刻（完済のときに、完済から7日後を入れる）
         PRIMARY KEY (guild_id, user_id)

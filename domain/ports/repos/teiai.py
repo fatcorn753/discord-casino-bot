@@ -184,6 +184,9 @@ class IDebtRepo(
     def bankrupt(self, user_id: int, forced: bool = False, escape: bool = False) -> Outcome[BankruptResult]:
         raise NotImplementedError
 
+    def accrue_all_debt_interest(self, now: float) -> int:
+        raise NotImplementedError
+
 
 class IKyosaiRepo(IGuildScopedRepo):
     """帝愛共済（#34）: 口・配当・回収と帝愛の持ち口の競り・譲渡・動議。"""

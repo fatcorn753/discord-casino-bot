@@ -343,7 +343,7 @@ def test_self_bankruptcy_pulls_the_bid_back_into_the_estate_and_leaves_no_escape
     auction = _open_auction_row(eco)
     assert auction["top_bid"] == 0 and auction["top_bidder"] is None
     assert result["seized"] == a0  # 戻った預かり金も現金ごと破産財団へ
-    assert eco.wallet.balance(A) == teiai.SEED and units(eco, A) == 0
+    assert eco.wallet.balance(A) == 0 and result["seed"] == 0 and units(eco, A) == 0
     events = eco.kyosai.kyosai_auction_tick(row["ends"] + 1)
     assert [e["event"] for e in events] == ["unsold"]  # 締めても A には口が渡らない（出し直しは告知しない）
     assert units(eco, A) == 0 and _open_auction_row(eco)["top_bidder"] is None

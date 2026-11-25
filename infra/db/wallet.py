@@ -80,7 +80,10 @@ class WalletRepo(ScopedRepo, IWalletRepo):
             if target != before:
                 self._account.apply(gid, user_id, target - before, reason)
             if amount < 0 and -amount != debt_before:
-                self._conn.execute("UPDATE users SET debt=? WHERE guild_id=? AND user_id=?", (-amount, gid, user_id))
+                self._conn.execute(
+                    "UPDATE users SET debt=?, debt_principal=?, debt_interest_at=0 WHERE guild_id=? AND user_id=?",
+                    (-amount, -amount, gid, user_id),
+                )
                 self._account.ledger(
                     gid,
                     user_id,

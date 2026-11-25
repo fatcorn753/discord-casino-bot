@@ -157,6 +157,9 @@ class UserRow(TypedDict):
     created_at: float
     last_slot: int | None
     debt: int  # 帝愛からの借金（シニア債権）
+    debt_principal: int  # 借金の元本（利息の上限計算用）
+    grace_penalty: float  # 破産猶予ペナルティ
+    grace_penalty_at: float  # 最後に破産猶予に入った時刻
     bankrupt_at: float | None
     blacklist_until: float | None
 

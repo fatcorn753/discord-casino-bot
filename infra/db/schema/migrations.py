@@ -111,6 +111,13 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN last_slot INTEGER")
     if "debt" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN debt INTEGER NOT NULL DEFAULT 0")
+    if "debt_principal" not in us:
+        conn.execute("ALTER TABLE users ADD COLUMN debt_principal INTEGER NOT NULL DEFAULT 0")
+        conn.execute("UPDATE users SET debt_principal = debt WHERE debt > 0 AND debt_principal = 0")
+    if "grace_penalty" not in us:
+        conn.execute("ALTER TABLE users ADD COLUMN grace_penalty REAL NOT NULL DEFAULT 0")
+    if "grace_penalty_at" not in us:
+        conn.execute("ALTER TABLE users ADD COLUMN grace_penalty_at REAL NOT NULL DEFAULT 0")
     bc = {r["name"] for r in conn.execute("PRAGMA table_info(bonds)")}
     if "checked" not in bc:
         conn.execute("ALTER TABLE bonds ADD COLUMN checked REAL")

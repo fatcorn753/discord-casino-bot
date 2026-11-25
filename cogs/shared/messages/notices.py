@@ -17,6 +17,9 @@ NOTICE_FORMATTERS: dict[str, NoticeFormatter] = {
         f"💀 CDS が的中しました。<@{p['target_id']}> の強制破産で、{p['pay']:,}ペリカ を受け取りました。"
     ),
     "debt_interest": lambda p: f"🕴️ 帝愛の利息が付きました（+{p['add']:,}ペリカ。日利{p['rate']:.0%}）。",
+    "debt_auto_seized": lambda p: (
+        f"⚖️ 帝愛の利息超過により流動資産から {p['seized']:,}ペリカ を強制回収しました（残りの借金 {p['debt']:,}ペリカ）。"
+    ),
     "seize_deposit": lambda p: f"💥 帝愛信託が差し押さえられました（{p['taken']:,}ペリカ）。",
     "seize_company": lambda p: f"💥 会社資金が差し押さえられました（{p['taken']:,}ペリカ）。",
     "company_bankrupt": lambda p: (

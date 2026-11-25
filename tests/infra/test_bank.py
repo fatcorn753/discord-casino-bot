@@ -193,6 +193,33 @@ def test_no_new_borrowing_during_grace(eco):
     assert not eco.debt.can_borrow_for_bet(A, 100)[0]
 
 
+def test_grace_penalty_and_a1_work_together_in_strict_guild_scope(eco):
+    eco.wallet.credit(A, 10_000, "テスト")
+    eco.bank.bank_deposit(A, 4_000, NOW)
+    with eco.db.tx():
+        eco.db.conn.execute(
+            "UPDATE users SET balance=1_000, debt=14_900, debt_principal=14_900, debt_interest_at=? WHERE guild_id=? AND user_id=?",
+            (NOW, G, A),
+        )
+    # 2日後の定期更新: 利息 +298 (15,198) → A-1 で現金 1,000 + 預金 4,000 を回収し 10,198 → 猶予回避
+    eco.debt.accrue_all_debt_interest(NOW + 2 * 86400 + 1)
+    assert eco.debt.debt_for(G, A) == 10_198
+    assert eco.bank.grace_until(A) is None
+    # 再び借金して猶予へ入ると初回 24時間、抜けてすぐ再突入すると 12時間に短縮
+    with eco.db.tx():
+        eco.debt.owe_for(G, A, 6_000, "追加")
+    until1 = must(eco.bank.grace_until(A))
+    assert until1 > NOW + 23 * HOUR
+    with eco.db.tx():
+        eco.db.conn.execute("UPDATE users SET debt=1_000, debt_principal=1_000 WHERE guild_id=? AND user_id=?", (G, A))
+        eco.debt.after_debt_change(G, A)
+    assert eco.bank.grace_until(A) is None
+    with eco.db.tx():
+        eco.debt.owe_for(G, A, 16_000, "再突入")
+    until2 = must(eco.bank.grace_until(A))
+    assert until2 - time.time() < 13 * HOUR
+
+
 # ----------------------------- CDS ----------------------------- #
 def test_odds_follow_the_targets_risk_and_stay_in_range():
     assert teiai.cds_odds(teiai.KATAGI, 0) == teiai.CDS_MAX_ODDS

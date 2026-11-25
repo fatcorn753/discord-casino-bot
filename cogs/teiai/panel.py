@@ -99,7 +99,7 @@ def render_teiai_panel_embed(
     me = [f"身分: {teiai.STATUS_LABEL[shown_status]}　帝愛信託: **{ui.pelica(deposit)}**"]
     if debt:
         me.append(
-            f"帝愛への借金: **{ui.pelica(debt)}**（利息: 1日 {teiai.DEBT_RATE_PER_DAY:.0%}・{teiai.DEBT_INTEREST_CEILING:,}ペリカまで）"
+            f"帝愛への借金: **{ui.pelica(debt)}**（利息: 1日 {teiai.DEBT_RATE_PER_DAY:.0%}・元本の{teiai.DEBT_INTEREST_CAP_MULT:g}倍まで）"
         )
     if grace_until is not None:
         me.append(
