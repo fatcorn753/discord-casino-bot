@@ -235,7 +235,9 @@ def test_order_call_shows_condition_returns_and_holdings_and_settle_sells_it(cog
     assert "爆騰コール" in embed.title and "最大損失はこの掛け金のみ" in embed.description
     assert "勝利条件" in embed.description and "想定リターン" in embed.description
     eco = cog.bot.repos.for_guild(G)
-    oid = eco.options.option_list(U)["active"][0]["id"]
+    row = eco.options.option_list(U)["active"][0]
+    assert f"{market.fmt(row['strike'])}**（現在 {market.fmt(row['spot'])} の" in embed.description
+    oid = row["id"]
     it = It()
     asyncio.run(invoke(MarketCog.holdings, cog, it))
     text = it.sent[-1]["embed"].description
