@@ -371,23 +371,21 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
             inflow = sum(g for r, _, g in due if r["side"] == "short")
             longs = [(r, g) for r, _, g in due if r["side"] != "short"]
             paid_of: dict[int, int] = {}
+            shortfalls: list[tuple[int, int, str]] = []
             for r, final, gross in sorted(due, key=lambda d: d[0]["side"] != "short"):  # 売り手（入金）が先
                 if r["side"] != "short" and not paid_of:
                     pays = self._bank.bank_pay_batch_for(gid, [g for _, g in longs], now, offset=inflow)
                     paid_of = {lr["id"]: p for (lr, _), p in zip(longs, pays, strict=True)}
                 self._account.ensure(gid, r["user_id"])
+                status = "exercised" if gross > 0 else "expired"
                 match r["side"]:
                     case "short":
                         paid = max(0, r["margin"] - gross)  # 証拠金の戻り
                         self._bank.bank_income_for(gid, gross, now, thermo=False)
-                        self._conn.execute(  # 先に決済済みにする（損失の支払いで差し押さえが走っても、同じ建玉を、もう一度決済しない）
-                            "UPDATE options SET status=?, paid=?, final=? WHERE id=?",
-                            ("exercised" if gross > 0 else "expired", paid, final, r["id"]),
-                        )
                         if paid:
                             self._account.apply(gid, r["user_id"], paid, f"{name_of(r)}の満期（証拠金の戻り）")
-                        if gross > r["margin"]:  # 損失が証拠金を超えた分は、強制執行と借金で払う
-                            self._debt.owe_for(gid, r["user_id"], gross - r["margin"], f"{name_of(r)}の損失")
+                        if gross > r["margin"]:  # 損失が証拠金を超えた分は、全建玉の確定後に強制執行と借金で払う
+                            shortfalls.append((r["user_id"], gross - r["margin"], f"{name_of(r)}の損失"))
                     case _:
                         paid = paid_of[r["id"]]
                         if paid:
@@ -398,11 +396,13 @@ class OptionRepo(ScopedRepo, IOptionRepo, IOptionHoldings):
                                 f"{name_of(r)}の配当:{market_mod.BY_KEY[r['symbol']].name}",
                                 income=max(0, paid - r["premium"]),
                             )
-                status = "exercised" if gross > 0 else "expired"
                 self._conn.execute(
                     "UPDATE options SET status=?, paid=?, final=? WHERE id=?", (status, paid, final, r["id"])
                 )
                 out.append({**r, "status": status, "paid": paid, "final": final, "gross": gross})
             if not longs and inflow:
                 self._bank.bank_thermo_batch_for(gid, inflow, now)
+            # 同一バッチの満期建玉をすべて確定させてから強制執行する（処理中の建玉が差し押さえで二重決済されるのを防ぐ）
+            for uid, shortage, reason in shortfalls:
+                self._debt.owe_for(gid, uid, shortage, reason)
         return sorted(out, key=lambda o: o["id"])
