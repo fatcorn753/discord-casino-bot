@@ -135,8 +135,9 @@ async def option_write(
                 interaction, "その証拠金では 1口も売れません。証拠金を増やしてください。", title=f"{label}できません"
             )
             return
-        loss10 = opt.intrinsic(kind, units, price * (1 + sign * 0.10), strike)
-        loss20 = opt.intrinsic(kind, units, price * (1 + sign * 0.20), strike)
+        m1, m2 = (0.10, 0.20) if strike_pct < 0.20 else (round(strike_pct + 0.05, 2), round(strike_pct + 0.15, 2))
+        loss1 = opt.intrinsic(kind, units, price * (1 + sign * m1), strike)
+        loss2 = opt.intrinsic(kind, units, price * (1 + sign * m2), strike)
         cond = "上がる" if kind == opt.CALL else "下がる"
         reply = await fn(
             interaction,
@@ -145,7 +146,7 @@ async def option_write(
             f"**{sym.name}** の{'コール' if kind == opt.CALL else 'プット'}を、帝愛に売ります（{opt.OPTION_HOURS}時間満期）。\n"
             f"今すぐ受け取る **プレミアム {ui.pelica(premium)}**　預ける **証拠金 {ui.pelica(margin)}**\n"
             f"**{market.fmt(strike)}**（現在の{sign * strike_pct * 100:+.1f}%）を超えて{cond}と、その差が**あなたの損失**です。"
-            f"価格が{sign * 10:+d}%で損失 約{loss10:,}ペリカ、{sign * 20:+d}%で約{loss20:,}ペリカ。"
+            f"価格が{sign * round(m1 * 100):+d}%で損失 約{loss1:,}ペリカ、{sign * round(m2 * 100):+d}%で約{loss2:,}ペリカ。"
             "**証拠金を超えた分は、帝愛の借金になります。**相場が動かなければ、プレミアムが丸ごと利益です。"
             "途中で買い戻して閉じることもできます。",
             f"{label}する",

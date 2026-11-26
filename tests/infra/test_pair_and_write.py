@@ -12,7 +12,7 @@ from domain import market, market_events, teiai
 from domain import options as opt
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
-from tests.fakes import invoke
+from tests.fakes import as_interaction, invoke
 from tests.support import make_market_cog, make_test_bot
 
 pytestmark = pytest.mark.real_scope
@@ -297,6 +297,32 @@ def test_order_naked_sell_asks_for_confirmation_and_creates_the_position(cog, mo
     assert "コール裸売り" in it.sent[-1]["embed"].title
     row = cog.bot.repos.for_guild(G).options.option_list(U)["active"][0]
     assert row["side"] == "short" and row["kind"] == "call"
+
+
+def test_order_write_confirmation_scales_loss_examples_for_far_targets(cog):
+    """目標割合20%以上の裸売り確認ダイアログでは、目標割合に応じた変動幅で損失試算を出す（約0ペリカにならない）。"""
+    from cogs.market import orders
+    from tests.domain.test_market import It
+
+    asked = []
+
+    async def agree(interaction, needed, title, text, label):
+        asked.append(text)
+        return interaction.response.send_message
+
+    for target, m1, m2 in ((20, 25, 35), (25, 30, 40), (50, 55, 65)):
+        asyncio.run(
+            orders.option_write(cog, as_interaction(It()), opt.CALL, "cs", 2_000, target=target, confirm_fn=agree)
+        )
+        assert f"+{m1}%で損失 約" in asked[-1] and f"+{m2}%で約" in asked[-1]
+        assert "約0ペリカ" not in asked[-1]
+        asyncio.run(
+            orders.option_write(cog, as_interaction(It()), opt.PUT, "cs", 2_000, target=target, confirm_fn=agree)
+        )
+        assert f"-{m1}%で損失 約" in asked[-1] and f"-{m2}%で約" in asked[-1]
+        assert "約0ペリカ" not in asked[-1]
+    asyncio.run(orders.option_write(cog, as_interaction(It()), opt.CALL, "cs", 2_000, target=10, confirm_fn=agree))
+    assert "+10%で損失 約" in asked[-1] and "+20%で約" in asked[-1]
 
 
 def test_holdings_and_settle_for_a_naked_sell_and_a_pair(cog, monkeypatch):
