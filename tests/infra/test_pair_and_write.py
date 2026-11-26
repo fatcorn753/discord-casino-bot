@@ -12,7 +12,7 @@ from domain import market, market_events, teiai
 from domain import options as opt
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
-from tests.fakes import invoke
+from tests.fakes import as_interaction, invoke
 from tests.support import make_market_cog, make_test_bot
 
 pytestmark = pytest.mark.real_scope
@@ -322,6 +322,41 @@ def test_holdings_and_settle_for_a_naked_sell_and_a_pair(cog, monkeypatch):
     it = It()
     asyncio.run(invoke(MarketCog.settle, cog, it, pair_code, None))
     assert "売りました" in it.sent[-1]["embed"].title
+
+
+def test_option_sell_and_bond_orders_respect_active_session(cog):
+    """他の取引・ゲーム中（セッション有効時）は、オプション売却・債券購入・債券売却もブロックされる。"""
+    from cogs.market import orders
+    from tests.domain.test_market import It
+
+    eco = cog.bot.repos.for_guild(G)
+    ok_opt, opt_res = eco.options.option_buy(U, opt.CALL, "cs", 1_000, time.time())
+    ok_bond, _ = eco.bonds.bond_buy(U, "normal", 1_000, time.time())
+    assert ok_opt and ok_bond
+    bond_id = eco.bonds.bond_list(U)["active"][0]["id"]
+
+    assert cog._sessions.try_start(U) is None
+    try:
+        for fn in (
+            lambda it: orders.option_sell(cog, as_interaction(it), opt_res["id"]),
+            lambda it: orders.bond_buy(cog, as_interaction(it), "normal", 1_000),
+            lambda it: orders.bond_cancel(cog, as_interaction(it), bond_id),
+        ):
+            it = It()
+            asyncio.run(fn(it))
+            assert it.sent[-1]["ephemeral"] and "いまは取引できません" in it.sent[-1]["embed"].title
+        assert len(eco.options.option_list(U)["active"]) == 1
+        assert len(eco.bonds.bond_list(U)["active"]) == 1
+    finally:
+        cog._sessions.end(U)
+
+    it = It()
+    asyncio.run(orders.option_sell(cog, as_interaction(it), opt_res["id"]))
+    assert "売りました" in it.sent[-1]["embed"].title
+    it = It()
+    asyncio.run(orders.bond_cancel(cog, as_interaction(it), bond_id))
+    assert "売りました" in it.sent[-1]["embed"].title
+    assert not cog._sessions.is_active(U)
 
 
 def test_order_subcommands_have_only_the_fields_they_need():
