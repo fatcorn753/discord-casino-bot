@@ -12,7 +12,7 @@ from domain import market, market_events, teiai
 from domain import options as opt
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
-from tests.fakes import invoke
+from tests.fakes import as_interaction, invoke
 from tests.support import make_market_cog, make_test_bot
 
 pytestmark = pytest.mark.real_scope
@@ -297,6 +297,23 @@ def test_order_naked_sell_asks_for_confirmation_and_creates_the_position(cog, mo
     assert "コール裸売り" in it.sent[-1]["embed"].title
     row = cog.bot.repos.for_guild(G).options.option_list(U)["active"][0]
     assert row["side"] == "short" and row["kind"] == "call"
+
+
+def test_order_write_confirmation_states_the_loss_condition_naturally_for_call_and_put(cog):
+    """確認ダイアログの損失条件は、コールなら「を超えて上がると」、プットなら「を下回ると」（「を超えて下がる」にはならない）。"""
+    from cogs.market import orders
+    from tests.domain.test_market import It
+
+    asked = []
+
+    async def agree(interaction, needed, title, text, label):
+        asked.append(text)
+        return interaction.response.send_message
+
+    asyncio.run(orders.option_write(cog, as_interaction(It()), opt.CALL, "cs", 2_000, confirm_fn=agree))
+    assert "を超えて上がると" in asked[-1] and "を超えて下がる" not in asked[-1] and "を下回る" not in asked[-1]
+    asyncio.run(orders.option_write(cog, as_interaction(It()), opt.PUT, "cs", 2_000, confirm_fn=agree))
+    assert "を下回ると" in asked[-1] and "を超えて下がる" not in asked[-1] and "を超えて上がる" not in asked[-1]
 
 
 def test_holdings_and_settle_for_a_naked_sell_and_a_pair(cog, monkeypatch):
