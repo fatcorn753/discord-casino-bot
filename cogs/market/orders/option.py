@@ -93,7 +93,7 @@ async def option_buy(
             embed=ui.ok_embed(
                 f"{emoji} 【{name}】{title_sym}（{opt.OPTION_HOURS}時間満期）",
                 f"掛け金: **{ui.pelica(res['cost'])}**（★途中ロスカットなし・最大損失はこの掛け金のみ）\n"
-                + target_text(res["strike"] if not pair else res["spot"], res["strike"], res["units"], res["cost"])
+                + target_text(res["spot"], res["strike"], res["units"], res["cost"])
                 + f"\n満期: {due_text(res['expiry'])}（満期の価格で自動で決済されます）\n"
                 "満期の前でも、`/証券 保有` のパネルか `/証券 決済` で、いまの値段で売れます。",
             )
