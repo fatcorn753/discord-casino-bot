@@ -15,6 +15,7 @@ from domain.ports.contracts import (
     ChartPostRow,
     EarningsAnnouncement,
     EarningsAnnounceRow,
+    EarningsJump,
     EarningsRow,
     HoldingsSnapshot,
     MarginPosition,
@@ -200,6 +201,12 @@ class MarketService:
 
     def market_events(self, now: float) -> list[MarketEventRow]:
         return self._market_events.market_events(now)
+
+    def option_events(self, now: float) -> list[MarketEventRow | EarningsJump]:
+        """オプションの値付けに含める出来事（ボラティリティ予告 + 満期までの決算ジャンプ）。"""
+        return list(self._market_events.market_events(now)) + list(
+            self._earnings.earnings_jumps(now, opt.OPTION_HOURS * 3600)
+        )
 
     def earnings_upcoming(self, now: float) -> EarningsAnnouncement | None:
         return self._earnings.earnings_upcoming(now)
