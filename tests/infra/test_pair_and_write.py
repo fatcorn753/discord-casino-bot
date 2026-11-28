@@ -348,6 +348,19 @@ def test_order_write_confirmation_scales_loss_examples_for_far_targets(cog):
         asked.append(text)
         return interaction.response.send_message
 
+    for target, m1, m2 in ((20, 25, 35), (25, 30, 40), (50, 55, 65)):
+        asyncio.run(
+            orders.option_write(cog, as_interaction(It()), opt.CALL, "cs", 2_000, target=target, confirm_fn=agree)
+        )
+        assert f"+{m1}%で損失 約" in asked[-1] and f"+{m2}%で約" in asked[-1]
+        assert "約0ペリカ" not in asked[-1]
+        asyncio.run(
+            orders.option_write(cog, as_interaction(It()), opt.PUT, "cs", 2_000, target=target, confirm_fn=agree)
+        )
+        assert f"-{m1}%で損失 約" in asked[-1] and f"-{m2}%で約" in asked[-1]
+        assert "約0ペリカ" not in asked[-1]
+    asyncio.run(orders.option_write(cog, as_interaction(It()), opt.CALL, "cs", 2_000, target=10, confirm_fn=agree))
+    assert "+10%で損失 約" in asked[-1] and "+20%で約" in asked[-1]
 
 
 def test_holdings_and_settle_for_a_naked_sell_and_a_pair(cog, monkeypatch):
@@ -461,7 +474,9 @@ def test_describe_option_done_uses_the_slot_icon_for_a_naked_short():
     assert text.startswith("🎰 コール裸売り") and "満期・無事" in text and f"（損益 {net:+,}）" in text
     row = done_row(side="short", kind=opt.PUT, status="exercised", premium=500, paid=500, margin=2_000)
     text = describe_option_done(row)
-    net = row["premium"] + row["paid"] - row["margin"]
+    # 行使された裸売りの損益は、証拠金の精算ではなく満期価格の本質的価値から出す（#150）
+    assert row["final"] is not None
+    net = row["premium"] - opt.intrinsic(row["kind"], row["units"], row["final"], row["strike"])
     assert text.startswith("🎰 プット裸売り") and "満期・損失" in text and f"（損益 {net:+,}）" in text
     row = done_row(side="short", status="sold", premium=500, paid=300, margin=2_000)
     text = describe_option_done(row)
