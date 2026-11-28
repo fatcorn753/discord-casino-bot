@@ -12,7 +12,7 @@ from domain import bonds
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, must
-from tests.support import make_bond_cog, make_market_cog, make_ranking_repos, make_test_bot
+from tests.support import make_bond_cog, make_market_cog, make_ranking_repos, make_test_bot, set_test_debt
 
 NOW = 1_000_000.0
 DAY = 86400
@@ -144,7 +144,7 @@ def test_buy_guards(eco):
     assert not eco.bonds.bond_buy(1, "normal", INITIAL_BALANCE + 1, NOW)[0]  # 残高不足
     eco.wallet.stats(2)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=500 WHERE user_id=2")
+        set_test_debt(eco, 2, 500)
     assert not eco.bonds.bond_buy(2, "normal", 1000, NOW)[0]  # 借金中
     eco.wallet.credit(3, 20_000, "テスト")
     assert eco.bonds.bond_buy(3, "junk", 6000, NOW)[0] is True
@@ -235,7 +235,8 @@ def test_interest_is_paid_in_full_even_when_the_house_cash_runs_short(eco):
     assert done[0]["status"] == "paid" and paid > 2000 + 30  # 手元の 30 で打ち切らない
     assert eco.wallet.balance(1) == INITIAL_BALANCE - 2000 + paid
     s = eco.bank.bank_status(NOW + 3 * DAY)
-    assert s["cash"] == 0 and s["excess_unpaid"] == paid - 2000 - 30  # 共済の口の持ち主がいなければ、未払いとして残る
+    # 共済の口の持ち主がいなければ、熱浴の肩代わりを除いた分が未払いとして残る
+    assert s["cash"] == 0 and s["excess_unpaid"] + s["thermostat"]["bailed"] == pytest.approx(paid - 2000 - 30, abs=1)
 
 
 def test_interest_is_still_paid_when_the_house_has_no_cash(eco):
@@ -288,8 +289,9 @@ def test_a_late_sale_above_the_principal_is_paid_by_the_bank(eco):
 def test_a_default_leaves_the_principal_with_the_bank(eco):
     eco.bonds.bond_buy(1, "junk", 1000, NOW)
     eco.bonds.bond_settle(NOW + 3600, Always(0.0))
-    assert _cash(eco, NOW + 3600) == pytest.approx(1_001_000)
-    assert eco.bank.bank_status(NOW + 3600)["bonds"] == 0
+    s = eco.bank.bank_status(NOW + 3600)
+    assert _cash(eco, NOW + 3600) == pytest.approx(1_001_000 - s["thermostat"]["burned"])
+    assert s["bonds"] == 0
 
 
 def test_the_bankruptcy_write_off_pays_the_seize_rate_from_the_bank(eco):
@@ -297,7 +299,8 @@ def test_the_bankruptcy_write_off_pays_the_seize_rate_from_the_bank(eco):
     bond_id = eco.bonds.bond_list(1)["active"][0]["id"]
     with eco.db.tx():
         eco.bonds.bond_write_off_for(0, 1, bond_id, 500, NOW)
-    assert _cash(eco) == pytest.approx(1_000_500)
+    s = eco.bank.bank_status(NOW)
+    assert _cash(eco) == pytest.approx(1_000_500 - s["thermostat"]["burned"])
     assert eco.wallet.balance(1) == INITIAL_BALANCE - 1000 + 500
     row = eco.db.conn.execute("SELECT status, paid FROM bonds WHERE id=?", (bond_id,)).fetchone()
     assert tuple(row) == ("cancelled", 500)

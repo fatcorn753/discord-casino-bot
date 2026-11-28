@@ -1,10 +1,9 @@
-"""地下作業（クリッカー）。数字と計算は domain/labor.py、表は infra/db/schema/tables.py の labor。
+"""地下作業（クリッカー）。数字と計算は domain/labor.py、表は infra/db/schema/ddl/labor.py。
 
 稼ぎは、まず「受け取る前の稼ぎ（pot）」に貯まる。受け取りを押すと、まとめて残高に移る（収入なので、借金があれば天引き）。
 「働く」クリックには、1日に押せる回数の上限がある（MAX_CLICKS_PER_DAY。day_click で数える。超えたら1回 OVER_CAP_PAY）。day_earned は、画面に出す「今日の稼ぎ」。
 """
 
-import json
 import random
 from typing import Any, Literal, cast, overload
 
@@ -13,7 +12,7 @@ from domain import relics as relics_mod
 from domain import shop as shop_mod
 from domain import teiai
 from domain.errors import Outcome, fail
-from domain.ports.bridges import IHouseAccount
+from domain.ports.bridges import IBankCashFlow
 from domain.ports.contracts import (
     LaborClick,
     LaborClickFail,
@@ -27,6 +26,7 @@ from domain.ports.contracts import (
 from domain.ports.repos import ILaborRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.inventory import InventoryCore
 from infra.db.relics import RelicRepo
 
 
@@ -37,22 +37,6 @@ def _set_counts(row: dict[str, Any], workers: list[dict[str, Any]]) -> None:
 
 def _counts(row: dict[str, Any]) -> dict[str, int]:
     return {k: row[k] for k in labor_mod.WORKERS}
-
-
-def _ores_of(row: dict[str, Any]) -> dict[str, int]:
-    """受け取る前の稼ぎに含まれる鉱石 {鉱石: 個数}。"""
-    try:
-        return {k: int(n) for k, n in json.loads(row.get("ores") or "{}").items() if k in labor_mod.ORE_VALUE}
-    except (ValueError, AttributeError):
-        return {}
-
-
-def _relics_of(row: dict[str, Any]) -> dict[str, int]:
-    """受け取る前の発掘品 {品のID: 個数}。"""
-    try:
-        return {k: int(n) for k, n in json.loads(row.get("relics") or "{}").items() if k in shop_mod.BY_ID}
-    except (ValueError, AttributeError):
-        return {}
 
 
 class _NoRoll(random.Random):
@@ -76,45 +60,97 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         db: EcoDb,
         account: AccountCore,
         relics: RelicRepo,
-        house: IHouseAccount,
+        bank: IBankCashFlow,
         guild_id: int = 0,
         strict: bool = False,
+        *,
+        inventory: InventoryCore | None = None,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
         self._relics = relics
-        self._house = house
+        self._bank = bank
+        self._inventory = inventory or InventoryCore(db)
 
     def _consume_drink(self, guild_id: int, user_id: int) -> bool:
-        cur = self._conn.execute(
-            "UPDATE inventory SET qty = qty - 1 WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
-            (guild_id, user_id, shop_mod.LABOR_DRINK),
+        return self._inventory.consume(guild_id, user_id, shop_mod.LABOR_DRINK, 1)
+
+    def _load_labor_row(self, guild_id: int, user_id: int, day: str) -> tuple[dict[str, Any], bool, bool]:
+        upgrades = self._one(
+            "SELECT pick, glove, dorm, renew FROM labor_upgrades WHERE guild_id=? AND user_id=?", (guild_id, user_id)
         )
-        return bool(cur.rowcount)
+        fatigue = self._one(
+            "SELECT fatigue, fatigue_at, last_click FROM labor_fatigue WHERE guild_id=? AND user_id=?",
+            (guild_id, user_id),
+        )
+        pot = self._one(
+            "SELECT pot, pot_workers, idle_at FROM labor_pot WHERE guild_id=? AND user_id=?", (guild_id, user_id)
+        )
+        daily = self._one(
+            "SELECT earned, clicks FROM labor_daily WHERE guild_id=? AND user_id=? AND day=?",
+            (guild_id, user_id, day),
+        )
+        totals = self._one(
+            "SELECT clicks, earned_total, donated FROM labor_totals WHERE guild_id=? AND user_id=?",
+            (guild_id, user_id),
+        )
+        ores = {
+            r["ore"]: r["qty"]
+            for r in self._all(
+                "SELECT ore, qty FROM labor_pending_ores WHERE guild_id=? AND user_id=? AND qty>0",
+                (guild_id, user_id),
+            )
+            if r["ore"] in labor_mod.ORE_VALUE
+        }
+        relics = {
+            r["item_id"]: r["qty"]
+            for r in self._all(
+                "SELECT item_id, qty FROM labor_pending_relics WHERE guild_id=? AND user_id=? AND qty>0",
+                (guild_id, user_id),
+            )
+            if r["item_id"] in shop_mod.BY_ID
+        }
+        row: dict[str, Any] = {
+            "pick": upgrades["pick"] if upgrades else 0,
+            "glove": upgrades["glove"] if upgrades else 0,
+            "dorm": upgrades["dorm"] if upgrades else 0,
+            "renew": upgrades["renew"] if upgrades else 1,
+            "fatigue": fatigue["fatigue"] if fatigue else 0.0,
+            "fatigue_at": fatigue["fatigue_at"] if fatigue else 0.0,
+            "last_click": fatigue["last_click"] if fatigue else 0.0,
+            "pot": pot["pot"] if pot else 0,
+            "pot_workers": pot["pot_workers"] if pot else 0,
+            "idle_at": pot["idle_at"] if pot else 0.0,
+            "day": day,
+            "day_earned": daily["earned"] if daily else 0,
+            "day_click": daily["clicks"] if daily else 0,
+            "clicks": totals["clicks"] if totals else 0,
+            "earned_total": totals["earned_total"] if totals else 0,
+            "donated": totals["donated"] if totals else 0,
+            "ores": ores,
+            "relics": relics,
+        }
+        has_any = any((upgrades, fatigue, pot, daily, totals, ores, relics))
+        return row, has_any, upgrades is not None
 
     def _labor_row(
         self, guild_id: int, user_id: int, now: float, day: str, rng: random.Random | None = None
     ) -> dict[str, Any]:
-        """行を読む（無ければ作る）。日が変わっていたら、今日の稼ぎを 0 に戻し、疲労は時間で回復させる。呼び出し側のトランザクション内で使う。
-
-        作業員の稼ぎと契約も、ここで決算する（稼ぎは pot に足し、契約が切れた人は、更新か退職）。
-        """
-        self._conn.execute("INSERT OR IGNORE INTO labor (guild_id, user_id) VALUES (?, ?)", (guild_id, user_id))
-        row = self._one("SELECT * FROM labor WHERE guild_id=? AND user_id=?", (guild_id, user_id))
-        assert row is not None  # 直前の INSERT OR IGNORE で行がある
+        """行を読む（無ければ既定値で組み立てる）。疲労は時間で回復させ、作業員の稼ぎと契約も決算する。呼び出し側のトランザクション内で使う。"""
+        row, has_any, has_upgrades = self._load_labor_row(guild_id, user_id, day)
+        row["_existed"] = has_any
+        row["_has_upgrades"] = has_upgrades
         buffs = self._relics.relic_buffs_for(guild_id, user_id)
         row["_buffs"] = buffs
         row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now, buffs.get("recovery", 0.0))
         row["fatigue_at"] = now
-        if row["day"] != day:
-            row["day"], row["day_earned"], row["day_click"] = day, 0, 0
         self._idle_settle(guild_id, user_id, row, now, buffs, rng)
         return row
 
     def labor_donated_total(self) -> int:
         """このサーバーの全員の、慈善団体への寄付（帝愛のピンハネ）の合計。"""
         with self._lock:
-            return self._scalar("SELECT COALESCE(SUM(donated), 0) FROM labor WHERE guild_id=?", (self._g(),))
+            return self._scalar("SELECT COALESCE(SUM(donated), 0) FROM labor_totals WHERE guild_id=?", (self._g(),))
 
     def _labor_log_finds(self, guild_id: int, user_id: int, finds: list[Any]) -> None:
         """掘り出しの履歴を書く（古いものは、FINDS_KEEP 件まで残して消す）。"""
@@ -157,7 +193,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         """作業員の稼ぎを pot に足し、切れた契約を決算する（更新なら契約料を払い、払えなければ退職）。"""
         workers = self._workers_of(guild_id, user_id)
         if workers:
-            bal = self._one("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+            bal = self._one("SELECT balance FROM accounts WHERE guild_id=? AND user_id=?", (guild_id, user_id))
             plan = labor_mod.settle_plan(
                 workers,
                 bool(row["renew"]),
@@ -177,16 +213,12 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 self._conn.execute("DELETE FROM labor_workers WHERE id=?", (wid,))
             row["pot"] += plan["gain"] - plan["pot_spent"]
             row["pot_workers"] = min(row["pot"], max(0, row["pot_workers"] + plan["gain"] - plan["pot_spent"]))
-            if plan["relics"]:
-                held = _relics_of(row)
-                for k, n in plan["relics"].items():
-                    held[k] = held.get(k, 0) + n
-                row["relics"] = json.dumps(held)
-            if plan["ores"]:
-                found = _ores_of(row)
-                for k, n in plan["ores"].items():
-                    found[k] = found.get(k, 0) + n
-                row["ores"] = json.dumps(found)
+            for k, n in plan["relics"].items():
+                if k in shop_mod.BY_ID and n > 0:
+                    row["relics"][k] = row["relics"].get(k, 0) + n
+            for k, n in plan["ores"].items():
+                if k in labor_mod.ORE_VALUE and n > 0:
+                    row["ores"][k] = row["ores"].get(k, 0) + n
             self._labor_log_finds(guild_id, user_id, plan["finds"])
             row["day_earned"] += plan["gain"]
             row["earned_total"] += plan["gain"]
@@ -194,34 +226,52 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         _set_counts(row, workers)
         row["idle_at"] = now
 
+    def _sync_pending_map(self, table: str, key_col: str, guild_id: int, user_id: int, counts: dict[str, int]) -> None:
+        self._conn.execute(f"DELETE FROM {table} WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+        items = [(guild_id, user_id, k, int(v)) for k, v in counts.items() if int(v) > 0]
+        if items:
+            self._conn.executemany(
+                f"INSERT INTO {table} (guild_id, user_id, {key_col}, qty) VALUES (?, ?, ?, ?)",
+                items,
+            )
+
     def _labor_save(self, guild_id: int, user_id: int, row: dict[str, Any]) -> None:
-        self._conn.execute(
-            "UPDATE labor SET pick=?, glove=?, fatigue=?, fatigue_at=?, pot=?, day=?, day_earned=?, day_click=?, "
-            "last_click=?, clicks=?, earned_total=?, dorm=?, idle_at=?, renew=?, ores=?, pot_workers=?, relics=?, donated=? "
-            "WHERE guild_id=? AND user_id=?",
-            (
-                row["pick"],
-                row["glove"],
-                row["fatigue"],
-                row["fatigue_at"],
-                row["pot"],
-                row["day"],
-                row["day_earned"],
-                row["day_click"],
-                row["last_click"],
-                row["clicks"],
-                row["earned_total"],
-                row["dorm"],
-                row["idle_at"],
-                row["renew"],
-                row.get("ores", ""),
-                row["pot_workers"],
-                row.get("relics", ""),
-                row.get("donated", 0),
-                guild_id,
-                user_id,
-            ),
-        )
+        if row.get("_has_upgrades") or row["pick"] > 0 or row["glove"] > 0 or row["dorm"] > 0 or row["renew"] != 1:
+            self._conn.execute(
+                "INSERT INTO labor_upgrades (guild_id, user_id, pick, glove, dorm, renew) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "pick=excluded.pick, glove=excluded.glove, dorm=excluded.dorm, renew=excluded.renew",
+                (guild_id, user_id, row["pick"], row["glove"], row["dorm"], row["renew"]),
+            )
+        if row["fatigue"] > 0 or row["fatigue_at"] > 0 or row["last_click"] > 0:
+            self._conn.execute(
+                "INSERT INTO labor_fatigue (guild_id, user_id, fatigue, fatigue_at, last_click) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "fatigue=excluded.fatigue, fatigue_at=excluded.fatigue_at, last_click=excluded.last_click",
+                (guild_id, user_id, row["fatigue"], row["fatigue_at"], row["last_click"]),
+            )
+        if row["pot"] > 0 or row["pot_workers"] > 0 or row["idle_at"] > 0:
+            self._conn.execute(
+                "INSERT INTO labor_pot (guild_id, user_id, pot, pot_workers, idle_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "pot=excluded.pot, pot_workers=excluded.pot_workers, idle_at=excluded.idle_at",
+                (guild_id, user_id, row["pot"], row["pot_workers"], row["idle_at"]),
+            )
+        if row["day_earned"] > 0 or row["day_click"] > 0:
+            self._conn.execute(
+                "INSERT INTO labor_daily (guild_id, user_id, day, earned, clicks) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id, day) DO UPDATE SET earned=excluded.earned, clicks=excluded.clicks",
+                (guild_id, user_id, row["day"], row["day_earned"], row["day_click"]),
+            )
+        if row["clicks"] > 0 or row["earned_total"] > 0 or row["donated"] > 0:
+            self._conn.execute(
+                "INSERT INTO labor_totals (guild_id, user_id, clicks, earned_total, donated) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "clicks=excluded.clicks, earned_total=excluded.earned_total, donated=excluded.donated",
+                (guild_id, user_id, row["clicks"], row["earned_total"], row["donated"]),
+            )
+        self._sync_pending_map("labor_pending_ores", "ore", guild_id, user_id, row["ores"])
+        self._sync_pending_map("labor_pending_relics", "item_id", guild_id, user_id, row["relics"])
 
     def _labor_flush(self, guild_id: int, user_id: int, row: dict[str, Any]) -> int:
         """受け取る前の稼ぎを、残高に移す（収入）。残高に入った額（天引きの前）を返す。"""
@@ -239,55 +289,23 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 self._account.raw_balance(guild_id, user_id),
                 f"慈善団体への寄付（地下作業のピンハネ {skimmed:,}ペリカ）",
             )
-            self._house.house_income_for(guild_id, skimmed)  # 帝愛の胴元の口座に入る
+            self._bank.bank_income_for(guild_id, skimmed, self._now())  # 帝愛銀行へ入る（サーモスタット経由）
         self._account.apply(guild_id, user_id, net, "地下作業:稼ぎ", income=net)
         row["pot"] = 0
         row["pot_workers"] = 0
-        row["ores"] = ""
+        row["ores"] = {}
         row["skimmed"] = skimmed
         row["donated"] = row.get("donated", 0) + skimmed
         return net
 
     def labor_state(self, user_id: int, now: float, day: str = "") -> LaborState:
         """いまの状態（画面用）。口座や行は、まだ無ければ作らない（読むだけ）。契約の決算は、したことにして見せる（書き込まない）。"""
-
         with self._lock:
             gid = self._g()
-            r = self._one("SELECT * FROM labor WHERE guild_id=? AND user_id=?", (gid, user_id))
-            row: dict[str, Any] = (
-                r
-                if r
-                else dict.fromkeys(
-                    (
-                        "pick",
-                        "glove",
-                        "pot",
-                        "pot_workers",
-                        "day_earned",
-                        "day_click",
-                        "clicks",
-                        "earned_total",
-                        "dorm",
-                        "idle_at",
-                    ),
-                    0,
-                )
-                | {
-                    "fatigue": 0.0,
-                    "fatigue_at": now,
-                    "last_click": 0.0,
-                    "day": day,
-                    "renew": 1,
-                    "ores": "",
-                    "relics": "",
-                    "donated": 0,
-                }
-            )
+            row, _, _ = self._load_labor_row(gid, user_id, day)
             buffs = self._relics.relic_buffs_for(gid, user_id)
             row["fatigue"] = labor_mod.fatigue_now(row["fatigue"], row["fatigue_at"], now, buffs.get("recovery", 0.0))
-            if row["day"] != day:
-                row["day_earned"] = row["day_click"] = 0
-            bal = self._scalar("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (gid, user_id))
+            bal = self._scalar("SELECT balance FROM accounts WHERE guild_id=? AND user_id=?", (gid, user_id))
             row["balance"] = bal if bal is not None else 0
             workers = self._workers_of(gid, user_id)
             plan = labor_mod.settle_plan(
@@ -308,23 +326,16 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             row["workers"] = len(stay)
             row["slots"] = labor_mod.slots(row["dorm"])
             row["rate"] = labor_mod.idle_rate(_counts(row))
-            row["relics"] = _relics_of(row)  # 決算ずみの発掘品
-            row["ores"] = _ores_of(row)  # 決算ずみの鉱石（見込みの分は、掘るまで分からない）
             row["idle_pending"] = plan["gain"]  # まだ数えていない、作業員の稼ぎ（見込み）
             row["pot_total"] = row["pot"] + plan["gain"] - plan["pot_spent"]
             row["pot_workers_total"] = min(
                 row["pot_total"], max(0, row["pot_workers"] + plan["gain"] - plan["pot_spent"])
             )  # 未受け取りのうち、作業員の分（まだ数えていない見込みも含む）
             row["renew_fee"] = plan["pot_spent"] + plan["balance_spent"]  # 切れていた契約の更新に、いま払う額
-            # 種類ごとの、いちばん早く切れる契約の期限（画面用）
             row["expires"] = {}
             for w in stay:
                 row["expires"][w["kind"]] = min(row["expires"].get(w["kind"], w["expires_at"]), w["expires_at"])
-            inv = self._scalar(
-                "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=?",
-                (gid, user_id, shop_mod.LABOR_DRINK),
-            )
-            row["drinks"] = inv if inv is not None else 0
+            row["drinks"] = self._inventory.qty(gid, user_id, shop_mod.LABOR_DRINK)
             row["finds"] = self.labor_finds(user_id)
             row["held_relics"] = self._relics.relic_stock_for(gid, user_id)
             row["donated_all"] = self.labor_donated_total()  # このサーバーの全員の寄付の合計
@@ -333,21 +344,25 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             return cast("LaborState", row)
 
     def labor_top(self, limit: int = 10, day: str | None = None, user_id: int | None = None) -> LaborTop:
-        """採掘ランキング。day を渡すと、その日の稼ぎ。渡さなければ、通算の稼ぎ。{rows, me}。
-
-        rows は [(順位, ユーザーID, 稼ぎ, 押した回数)]、me は user_id の (順位, 稼ぎ, 押した回数, 人数)（まだ稼いでいなければ None）。
-        同額のときは、押した回数が少ない（効率のよい）人が上、それでも同じならユーザーID順。
-        """
-        col = "day_earned" if day else "earned_total"
-        where = "AND day=?" if day else ""
+        """採掘ランキング。day を渡すと、その日の稼ぎ。渡さなければ、通算の稼ぎ。{rows, me}。"""
         with self._lock:
             gid = self._g()
-            args: tuple[object, ...] = (gid, day) if day else (gid,)
-            ranked = self._all(
-                f"SELECT user_id, {col} AS earned, clicks FROM labor WHERE guild_id=? {where} AND {col}>0 "
-                f"ORDER BY {col} DESC, clicks ASC, user_id ASC",
-                args,
-            )
+            if day is not None:
+                ranked = self._all(
+                    "SELECT d.user_id, d.earned, COALESCE(t.clicks, 0) AS clicks "
+                    "FROM labor_daily d "
+                    "LEFT JOIN labor_totals t ON t.guild_id=d.guild_id AND t.user_id=d.user_id "
+                    "WHERE d.guild_id=? AND d.day=? AND d.earned>0 "
+                    "ORDER BY d.earned DESC, clicks ASC, d.user_id ASC",
+                    (gid, day),
+                )
+            else:
+                ranked = self._all(
+                    "SELECT user_id, earned_total AS earned, clicks "
+                    "FROM labor_totals WHERE guild_id=? AND earned_total>0 "
+                    "ORDER BY earned_total DESC, clicks ASC, user_id ASC",
+                    (gid,),
+                )
         rows = [(i + 1, r["user_id"], r["earned"], r["clicks"]) for i, r in enumerate(ranked[:limit])]
         me = next(
             ((i + 1, r["earned"], r["clicks"], len(ranked)) for i, r in enumerate(ranked) if r["user_id"] == user_id),
@@ -357,7 +372,7 @@ class LaborRepo(ScopedRepo, ILaborRepo):
         return result
 
     def labor_click(self, user_id: int, now: float, day: str = "", rng: random.Random | None = None) -> LaborClick:
-        """「働く」を1回押す。{ok, reason, pay, crit（鉱脈ヒットか）, ore（手掘りの鉱石。無ければ None）, combo（コンボ達成か）, terrain（今日の地層）}。"""
+        """「働く」を1回押す。{ok, reason, pay, crit, ore, combo, terrain}。"""
         rng = rng or cast("random.Random", random)
         with self._db.tx():
             gid = self._g()
@@ -375,13 +390,11 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 "fatigue": min(labor_mod.FATIGUE_MAX, row["fatigue"] + gain),
             }
             pay = max(1, relics_mod.chance_round(out["pay"] * (1 + row["_buffs"].get("click", 0.0))))
-            room = labor_mod.MAX_CLICKS_PER_DAY - row["day_click"]  # 今日、あと何回、「働く」を押せるか
-            capped = room <= 0
+            room = labor_mod.MAX_CLICKS_PER_DAY - row["day_click"]
             hour = int(now // 3600)
             since = now - labor_mod.SUSPECT_HOURS * 3600
             suspected = labor_mod.auto_click_suspected(self.labor_click_hours(user_id, since), hour)
-            if suspected:  # 自動操作の疑い: BANではなく、その日はそこで打ち止め（翌日には戻る）
-                capped = True
+            capped = room <= 0 or suspected
             crit, ore, combo = False, None, False
             if not capped:
                 workers = len(self._workers_of(gid, user_id))
@@ -390,14 +403,14 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                     pay *= labor_mod.CRIT_MULT
                 if crit and rng.random() < labor_mod.CRIT_ORE_CHANCE:
                     ore = labor_mod.roll_crit_ore(rng, terrain)
-                    pay += labor_mod.ORE_VALUE[ore]  # 手掘りの鉱石の売値も、稼ぎに加える
-                combo = (row["clicks"] + 1) % labor_mod.COMBO_SIZE == 0  # 10回ごとのコンボ
+                    pay += labor_mod.ORE_VALUE[ore]
+                combo = (row["clicks"] + 1) % labor_mod.COMBO_SIZE == 0
                 if combo:
                     pay = round(pay * (1 + labor_mod.COMBO_BONUS))
             pay = labor_mod.OVER_CAP_PAY if capped else pay
             if capped:
                 crit, ore, combo = False, None, False
-            row["last_click_before"] = row["last_click"]
+            gap = now - row["last_click"]
             row.update(
                 fatigue=out["fatigue"],
                 last_click=now,
@@ -408,10 +421,8 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 earned_total=row["earned_total"] + pay,
             )
             if ore:
-                found = _ores_of(row)
-                found[ore] = found.get(ore, 0) + 1
-                row["ores"] = json.dumps(found)
-            self._labor_log_click(gid, user_id, now, pay, now - row["last_click_before"])
+                row["ores"][ore] = row["ores"].get(ore, 0) + 1
+            self._labor_log_click(gid, user_id, now, pay, gap)
             self._labor_save(gid, user_id, row)
             clicked: LaborClickOk = {
                 "ok": True,
@@ -461,16 +472,12 @@ class LaborRepo(ScopedRepo, ILaborRepo):
     @overload
     def labor_collect(self, user_id: int, now: float, day: str, detail: Literal[True]) -> LaborCollectDetail: ...
     def labor_collect(self, user_id: int, now: float, day: str = "", detail: bool = False) -> int | LaborCollectDetail:
-        """受け取る前の稼ぎから、帝愛のピンハネを引いて、残高に移す。移した額（借金の天引きの前）を返す。
-
-        detail=True なら {amount（移した額）, skimmed（帝愛のピンハネ）, donated（これまでの寄付の合計）, ores（掘った鉱石）, relics（見つけた発掘品）}。
-        発掘品は、ペリカにならず、持ち物に入る（稼ぎが 0 でも、受け取れる）。
-        """
+        """受け取る前の稼ぎから、帝愛のピンハネを引いて、残高に移す。移した額（借金の天引きの前）を返す。"""
         with self._db.tx():
             gid = self._g()
             row = self._labor_row(gid, user_id, now, day)
-            ores = _ores_of(row)
-            relics = _relics_of(row)
+            ores = dict(row["ores"])
+            relics = dict(row["relics"])
             row["skimmed"] = 0
             amount = self._labor_flush(gid, user_id, row)
             self._conn.execute(
@@ -478,20 +485,17 @@ class LaborRepo(ScopedRepo, ILaborRepo):
                 (gid, user_id),
             )
             for item_id, n in relics.items():
-                self._conn.execute(
-                    "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
-                    "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty",
-                    (gid, user_id, item_id, n),
-                )
-            row["relics"] = ""
-            self._labor_save(gid, user_id, row)
+                self._inventory.add(gid, user_id, item_id, n)
+            row["relics"] = {}
+            if row["_existed"] or amount > 0 or relics or self._workers_of(gid, user_id):
+                self._labor_save(gid, user_id, row)
             if not detail:
                 return amount
             detail_result: LaborCollectDetail = {
                 "amount": amount,
                 "skimmed": row["skimmed"],
-                "donated": row["donated"],  # この人のこれまでの寄付の合計
-                "donated_all": self.labor_donated_total(),  # このサーバーの全員の寄付の合計
+                "donated": row["donated"],
+                "donated_all": self.labor_donated_total(),
                 "ores": ores,
                 "relics": relics,
             }
@@ -503,10 +507,12 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             gid = self._g()
             row = self._labor_row(gid, user_id, now, day)
             if row["fatigue"] < 1:
-                self._labor_save(gid, user_id, row)
+                if row["_existed"] or self._workers_of(gid, user_id):
+                    self._labor_save(gid, user_id, row)
                 return False, fail("labor_not_tired")
             if not self._consume_drink(gid, user_id):
-                self._labor_save(gid, user_id, row)
+                if row["_existed"] or self._workers_of(gid, user_id):
+                    self._labor_save(gid, user_id, row)
                 return False, fail("labor_no_drink")
             row["fatigue"] = max(0.0, row["fatigue"] - labor_mod.DRINK_RECOVER)
             self._labor_save(gid, user_id, row)
@@ -561,7 +567,8 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             gid = self._g()
             row = self._labor_row(gid, user_id, now, day)
             target = next((w for w in self._workers_of(gid, user_id) if w["kind"] == kind), None)
-            self._labor_save(gid, user_id, row)
+            if row["_existed"] or target is not None or self._workers_of(gid, user_id):
+                self._labor_save(gid, user_id, row)
             if target is None:
                 return False, fail("labor_worker_absent", worker_name=labor_mod.WORKER_NAME[kind])
             self._conn.execute("DELETE FROM labor_workers WHERE id=?", (target["id"],))
@@ -575,10 +582,12 @@ class LaborRepo(ScopedRepo, ILaborRepo):
             row = self._labor_row(gid, user_id, now, day)
             cost = labor_mod.dorm_cost(row["dorm"])
             if cost is None:
-                self._labor_save(gid, user_id, row)
+                if row["_existed"] or self._workers_of(gid, user_id):
+                    self._labor_save(gid, user_id, row)
                 return False, fail("labor_dorm_max")
             if self._account.raw_balance(gid, user_id) < cost:
-                self._labor_save(gid, user_id, row)
+                if row["_existed"] or self._workers_of(gid, user_id):
+                    self._labor_save(gid, user_id, row)
                 return False, fail("labor_insufficient_balance", cost=cost)
             self._account.apply(gid, user_id, -cost, "地下作業:寮の強化")
             row["dorm"] += 1

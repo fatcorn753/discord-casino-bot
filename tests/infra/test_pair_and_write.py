@@ -15,7 +15,7 @@ from domain.ports.contracts import OptionRow
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, invoke
-from tests.support import make_market_cog, make_test_bot
+from tests.support import make_market_cog, make_test_bot, set_test_debt
 
 pytestmark = pytest.mark.real_scope
 
@@ -159,7 +159,7 @@ def test_write_rules(eco):
     assert not eco.options.option_write(U, opt.CALL, "cs", 50, time.time())[0]  # 最低額
     assert not eco.options.option_write(U, opt.CALL, "cs", INITIAL_BALANCE + 1, time.time())[0]  # 残高不足
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=100 WHERE user_id=?", (U,))
+        set_test_debt(eco, U, 100, guild_id=G)
     assert eco.options.option_write(U, opt.CALL, "cs", 1_000, time.time())[1].code == "debt_blocks"
 
 
@@ -279,7 +279,8 @@ def test_the_loss_flows_to_the_bank(eco):
     set_price(eco, "cs", res["strike"] * 1.05, res["expiry"] - 10)
     loss = opt.intrinsic("call", res["units"], res["strike"] * 1.05, res["strike"])
     eco.options.option_settle(res["expiry"] + 1)
-    assert eco.bank.bank_status(res["expiry"])["cash"] >= before + loss - 1  # 損失が、銀行の収入になる
+    s = eco.bank.bank_status(res["expiry"] + 1)
+    assert s["cash"] == pytest.approx(before + loss - s["thermostat"]["burned"], abs=2)  # 損失が、銀行の収入になる
 
 
 def test_write_can_be_bought_back_at_the_ask(eco):

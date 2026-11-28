@@ -82,7 +82,7 @@ def test_rig_guards(eco):
     assert eco.polls.poll_rig(OWNER, pid, poll.MAX_COUNT + 1, 0, NOW)[1].code == "poll_bad_count"
     eco.wallet.balance(OWNER)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=? WHERE user_id=?", (poll.RIG_COST - 1, OWNER))
+        eco.db.conn.execute("UPDATE accounts SET balance=? WHERE user_id=?", (poll.RIG_COST - 1, OWNER))
     assert eco.polls.poll_rig(OWNER, pid, 1, 0, NOW)[1].code == "insufficient_balance"
 
 

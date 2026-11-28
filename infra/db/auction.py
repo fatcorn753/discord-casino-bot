@@ -18,6 +18,7 @@ from domain.ports.repos import IAuctionRepo
 from domain.types import MarketPurchase, PurchaseResult
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.inventory import InventoryCore
 
 
 def listable(item_id: str) -> bool:
@@ -42,11 +43,14 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
         bank: IBankCashFlow,
         guild_id: int = 0,
         strict: bool = False,
+        *,
+        inventory: InventoryCore | None = None,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
         self._status_reader = status_reader
         self._bank = bank
+        self._inventory = inventory or InventoryCore(db)
 
     def auction_list_locked_for(self, guild_id: int, item_id: str, qty: int, now: float) -> None:
         if qty > 0 and listable(item_id):
@@ -101,10 +105,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
             self._account.ensure(gid, user_id)
             if self._status_reader.status_for(gid, user_id, now) != teiai.KATAGI:
                 return PurchaseResult(False, fail("auction_katagi_only"), self._account.raw_balance(gid, user_id))
-            have = self._one(
-                "SELECT qty FROM inventory WHERE guild_id=? AND user_id=? AND item_id=? AND qty>0",
-                (gid, user_id, item_id),
-            )
+            have = self._inventory.has(gid, user_id, item_id)
             if item.unique and have:
                 return PurchaseResult(False, fail("already_owned"), self._account.raw_balance(gid, user_id))
             if item.unique:
@@ -134,11 +135,8 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
             self._account.apply(gid, user_id, -total, f"競売:{shop_mod.label(item)}" + (f"×{qty}" if qty > 1 else ""))
             for row_id, n in take:
                 self._conn.execute("UPDATE seized_items SET qty = qty - ? WHERE id=?", (n, row_id))
-            self._conn.execute(
-                "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty",
-                (gid, user_id, item_id, qty),
-            )
+                self._conn.execute("DELETE FROM seized_items WHERE id=? AND qty<=0", (row_id,))
+            self._inventory.add(gid, user_id, item_id, qty)
             self._bank.bank_income_for(gid, total, now)
             return PurchaseResult(True, balance=self._account.raw_balance(gid, user_id))
 
@@ -224,12 +222,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
                 qty = 1
             if r["qty"] < qty:
                 return MarketPurchase(False, fail("auction_insufficient_qty"), bal)
-            owned = {
-                x["item_id"]
-                for x in self._all(
-                    "SELECT item_id FROM inventory WHERE guild_id=? AND user_id=? AND qty>0", (gid, user_id)
-                )
-            }
+            owned = self._inventory.item_ids(gid, user_id)
             if item.unique and item.id in owned:
                 return MarketPurchase(False, fail("already_owned"), bal)
             price = tm.price_at(r["start_price"], r["end_price"], r["listed_at"], r["expires_at"], now)
@@ -246,11 +239,7 @@ class AuctionRepo(ScopedRepo, IAuctionRepo):
                 gid, user_id, -total, f"帝愛の出品:{shop_mod.label(item)}" + (f"×{qty}" if qty > 1 else "")
             )
             self._conn.execute("UPDATE teiai_market SET qty = qty - ? WHERE id=?", (qty, listing_id))
-            self._conn.execute(
-                "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty = qty + excluded.qty",
-                (gid, user_id, got, qty),
-            )
+            self._inventory.add(gid, user_id, got, qty)
             self._bank.bank_income_for(gid, total, now)
             return MarketPurchase(
                 True,

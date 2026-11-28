@@ -2,6 +2,7 @@
 
 import ast
 import dataclasses
+import re
 import subprocess
 import sys
 import typing
@@ -387,7 +388,19 @@ def test_debt_repo_does_not_touch_other_domains_tables():
     assert not (ROOT / "infra/db/debt.py").exists(), "debt.py は debt/ パッケージへ分割済みのはず"
     sources = sorted(pkg_dir.rglob("*.py"))
     assert sources, "infra/db/debt/ パッケージが空です"
-    foreign = ("options", "bonds", "inventory", "profile", "horses", "seized_items", "crypto", "companies", "loans")
+    foreign = (
+        "options",
+        "bonds",
+        "inventory",
+        "profile",
+        "user_equipment",
+        "user_buffs",
+        "horses",
+        "seized_items",
+        "crypto",
+        "companies",
+        "loans",
+    )
     found = [
         f"{path.relative_to(ROOT)}:{m.group(0)}"
         for path in sources
@@ -535,3 +548,140 @@ def test_production_if_for_while_nesting_at_most_3():
                 if d > 3:
                     violations.append(f"{rel}:{node.lineno} {node.name} (depth={d})")
     assert not violations, "if/for/while のネストが 4 以上:\n" + "\n".join(violations)
+
+
+_DB_DIR = ROOT / "infra" / "db"
+_WRITE_TABLE_RE = re.compile(
+    r"(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|UPDATE|DELETE\s+FROM)\s+([a-z_][a-z0-9_]*)", re.IGNORECASE
+)
+_SHARED_TABLE_REF_RE = re.compile(
+    r"\b(?:FROM|JOIN|UPDATE|INTO)\s+(inventory|user_equipment|user_buffs)\b", re.IGNORECASE
+)
+
+
+def _db_source_files() -> list[Path]:
+    """infra/db/ 配下の全 .py（schema/ 配下は除外）。"""
+    return [p for p in sorted(_DB_DIR.rglob("*.py")) if "schema" not in p.relative_to(_DB_DIR).parts]
+
+
+def _repo_owner_name(path: Path) -> str:
+    """テーブル所有者名。サブパッケージのファイルは f"{親ディレクトリ名}/"、直下のファイルはファイル名。"""
+    if len(path.relative_to(_DB_DIR).parts) == 1:
+        return path.name
+    return f"{path.parent.name}/"
+
+
+def _write_table_owners() -> dict[str, set[str]]:
+    """書き込み先テーブル -> {所有者名} の対応表（ON CONFLICT ... DO UPDATE SET の set は除外）。"""
+    owners: dict[str, set[str]] = {}
+    for path in _db_source_files():
+        owner = _repo_owner_name(path)
+        for m in _WRITE_TABLE_RE.finditer(path.read_text(encoding="utf-8")):
+            table = m.group(1).lower()
+            if table != "set":
+                owners.setdefault(table, set()).add(owner)
+    return owners
+
+
+def test_all_repositories_enforce_single_table_write_ownership():
+    """infra/db/ 全リポジトリのテーブル書き込み単一所有権ガードレール。
+
+    共有プリミティブが所有するテーブルは単一ファイルのみが書き込み、競馬ドメインの明示ペア
+    （horse.py / race.py）を除く全書き込み対象テーブルで所有者が 1 つだけであることを検証する。
+    """
+    owners = _write_table_owners()
+    assert owners, "infra/db/ から書き込み対象テーブルが検出できません"
+
+    primitive_owners = {
+        "inventory": {"inventory.py"},
+        "user_equipment": {"profile.py"},
+        "user_buffs": {"profile.py"},
+        "accounts": {"account.py"},
+        "ledger": {"account.py"},
+        "teiai_debts": {"account.py"},
+        "user_play_stats": {"account.py"},
+        "discord_posts": {"discord_posts.py"},
+    }
+    wrong_primitives = [
+        f"{table}: {sorted(owners.get(table, set()))} (期待: {sorted(expected)})"
+        for table, expected in primitive_owners.items()
+        if owners.get(table) != expected
+    ]
+    assert not wrong_primitives, "共有プリミティブ所有テーブルの単一所有に違反:\n" + "\n".join(wrong_primitives)
+
+    cohesive_pairs = {
+        "horses": frozenset({"horse.py", "race.py"}),
+        "horse_entries": frozenset({"horse.py", "race.py"}),
+        "horse_race_registrations": frozenset({"horse.py", "race.py"}),
+    }
+    wrong_pairs = [
+        f"{table}: {sorted(owners.get(table, set()))} (期待: {sorted(expected)})"
+        for table, expected in cohesive_pairs.items()
+        if frozenset(owners.get(table, set())) != expected
+    ]
+    assert not wrong_pairs, "競馬ペアの共有ホワイトリストに違反:\n" + "\n".join(wrong_pairs)
+
+    shared = {
+        table: sorted(owners[table]) for table in owners if len(owners[table]) > 1 and table not in cohesive_pairs
+    }
+    assert not shared, "複数リポジトリが書き込むテーブル:\n" + "\n".join(f"{t}: {o}" for t, o in shared.items())
+
+    allowed_refs = {
+        "inventory.py": {"inventory", "user_equipment", "user_buffs"},
+        "profile.py": {"inventory", "user_equipment", "user_buffs"},
+        "assets.py": {"inventory"},  # inventory の読み取り専用参照のみ許可
+    }
+    violations = []
+    for path in _db_source_files():
+        allowed = allowed_refs.get(_repo_owner_name(path), set())
+        for m in _SHARED_TABLE_REF_RE.finditer(path.read_text(encoding="utf-8")):
+            if m.group(1).lower() not in allowed:
+                violations.append(f"{path.relative_to(ROOT)}: {m.group(0)}")
+    assert not violations, "共有プリミティブのテーブルへの生 SQL 参照（許可ファイル以外に存在）:\n" + "\n".join(violations)
+
+
+@pytest.mark.real_scope
+def test_repository_bundle_shares_core_primitives():
+    """open_repositories() の InventoryCore / ProfileCore が全リポジトリと for_guild ビューで同一インスタンス共有される。"""
+    bundle = open_repositories(":memory:", strict=True)
+    try:
+        inventory_holders = (
+            bundle.relics,
+            bundle.records,
+            bundle.shop,
+            bundle.auction,
+            bundle.horses,
+            bundle.labor,
+            bundle.p2p,
+            bundle.wallet,
+        )
+        profile_holders = (bundle.records, bundle.guild, bundle.shop, bundle.escrow, bundle.p2p, bundle.wallet)
+        for repo in inventory_holders:
+            assert repo._inventory is bundle.inventory, f"{type(repo).__name__} が inventory を共有していない"
+        for repo in profile_holders:
+            assert repo._profile is bundle.profile, f"{type(repo).__name__} が profile を共有していない"
+
+        scoped = bundle.for_guild(1)
+        assert scoped.inventory is bundle.inventory
+        assert scoped.profile is bundle.profile
+        scoped_inventory_holders = (
+            scoped.relics,
+            scoped.records,
+            scoped.shop,
+            scoped.auction,
+            scoped.horses,
+            scoped.labor,
+            scoped.p2p,
+            scoped.wallet,
+        )
+        scoped_profile_holders = (scoped.records, scoped.guild, scoped.shop, scoped.escrow, scoped.p2p, scoped.wallet)
+        for repo in scoped_inventory_holders:
+            assert repo._inventory is bundle.inventory, (
+                f"for_guild(1) の {type(repo).__name__} が inventory を共有していない"
+            )
+        for repo in scoped_profile_holders:
+            assert repo._profile is bundle.profile, (
+                f"for_guild(1) の {type(repo).__name__} が profile を共有していない"
+            )
+    finally:
+        bundle.close()

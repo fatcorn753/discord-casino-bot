@@ -34,7 +34,7 @@ ECONOMY_FAILURES: dict[str, FailureFormatter] = {
     "company_no_funds": "会社資金がありません。",
     "company_funds_short": lambda p: f"会社資金が足りません（{p['need']:,}ペリカ 必要・いま {p['funds']:,}ペリカ）。",
     "company_nothing_to_ship": "出荷できる在庫が、まだありません。",
-    "company_no_budget": "帝愛の買取予算（胴元の口座と、今日の買取枠）が尽きていて、いまは買い取ってもらえません。日付が変わると、買取枠が戻ります。",
+    "company_no_budget": "帝愛物産の買取予算（買取プールと、今日の買取枠）が尽きていて、いまは買い取ってもらえません。日付が変わると、買取枠が戻ります。",
     "company_max_level": lambda p: f"事業所は、もう最大（Lv{p['max']}）です。",
     "company_same_kind": "いまと同じ種類です。",
     "company_funds_locked": lambda p: (
@@ -141,11 +141,13 @@ ECONOMY_FAILURES: dict[str, FailureFormatter] = {
         f"（いま {p['have']:,}ペリカ分。あと掛けられるのは {p['room']:,}ペリカ）。"
     ),
     "seed_bankrupt_blocked": "破産者は、完済するまで、帝愛から借りられません。",
+    "seed_blacklisted": "破産・海外逃亡のブラックリスト期間中（完済から7日）は、種銭を借りられません。",
     "seed_grace_blocked": "破産猶予の間は、新しく借りられません。",
     "seed_not_needed": lambda p: (
         f"手元が {p['seed']:,}ペリカ 以上あるので、借りられません（借りられるのは、枠の {p['seed']:,}ペリカ に足りない分まで）。"
     ),
     "credit_bankrupt_blocked": "破産者は、帝愛の信用を使えません。",
+    "credit_blacklisted": "破産・海外逃亡のブラックリスト期間中（完済から7日）は、帝愛の信用を使えません。",
     "credit_grace_blocked": "破産猶予の間は、帝愛の信用を使えません。",
     "credit_limit_exceeded": lambda p: (
         f"帝愛の信用で借りられるのは、1回 {p['seed']:,}ペリカ までです（足りない額: {p['need']:,}ペリカ）。"

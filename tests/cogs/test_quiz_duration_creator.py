@@ -220,8 +220,18 @@ def test_bulk_and_old_schema_keep_the_creator(tmp_path):
     eco.db.close()
     c = sqlite3.connect(str(tmp_path / "t.db"))
     c.executescript(
-        "ALTER TABLE quiz_questions RENAME TO old_q; CREATE TABLE quiz_questions AS SELECT id, question, choices, explanation, shown_order, reward, expires, created, author_id, guild_id, channel_id, message_id, settled, earned FROM old_q; DROP TABLE old_q;"
+        "DROP TABLE quiz_choices; DROP TABLE quiz_user_submissions; DROP TABLE quiz_questions; "
+        "CREATE TABLE quiz_questions (id INTEGER PRIMARY KEY AUTOINCREMENT, question TEXT NOT NULL, "
+        "choices TEXT NOT NULL, explanation TEXT NOT NULL DEFAULT '', shown_order TEXT NOT NULL DEFAULT '', "
+        "reward INTEGER NOT NULL, expires REAL, created REAL NOT NULL, author_id INTEGER NOT NULL DEFAULT 0, "
+        "guild_id INTEGER NOT NULL DEFAULT 0, channel_id INTEGER NOT NULL DEFAULT 0, "
+        "message_id INTEGER NOT NULL DEFAULT 0, settled INTEGER NOT NULL DEFAULT 0, earned INTEGER NOT NULL DEFAULT 0);"
     )
+    c.execute(
+        "INSERT INTO quiz_questions (id, question, choices, reward, created) VALUES (?, '問', '[\"a\",\"b\",\"c\",\"d\"]', 100, ?)",
+        (ids[0], NOW),
+    )
+    c.execute("PRAGMA user_version = 0")
     c.commit()
     c.close()
     assert (

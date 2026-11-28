@@ -23,7 +23,7 @@ from domain.types import INITIAL_BALANCE
 from infra.db.quiz import QuizRepo
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, invoke, must
-from tests.support import make_quiz_cog, make_test_bot
+from tests.support import make_quiz_cog, make_test_bot, set_test_balance, set_test_debt, set_test_games_played
 
 NOW = 1_000_000.0
 REAL_GAMES_PLAYED = QuizRepo._games_played
@@ -105,11 +105,9 @@ def test_reward_repays_debt(eco):
     qid = add(eco, reward=300)
     eco.wallet.stats(1)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=200 WHERE user_id=1")
+        set_test_debt(eco, 1, 200)
     eco.quiz.quiz_answer(1, qid, "東京", NOW)
-    assert (
-        eco.db.conn.execute("SELECT debt FROM users WHERE user_id=1").fetchone()[0] == 110
-    )  # 報酬300の3割（90）が、天引きされる
+    assert eco.db.conn.execute("SELECT debt FROM teiai_debts WHERE user_id=1").fetchone()[0] == 110  # 報酬300の3割（90）が、天引きされる
 
 
 def test_parse_choices_rules():
@@ -234,6 +232,7 @@ def test_old_questions_without_a_saved_order_get_one_on_upgrade(tmp_path):
     c.executescript("""DROP TABLE quiz_questions; CREATE TABLE quiz_questions (id INTEGER PRIMARY KEY AUTOINCREMENT, question TEXT NOT NULL,
         choices TEXT NOT NULL, explanation TEXT NOT NULL DEFAULT '', reward INTEGER NOT NULL, expires REAL, created REAL NOT NULL);
         INSERT INTO quiz_questions (question, choices, reward, created) VALUES ('q', '["a","b","c","d"]', 100, 1);""")
+    c.execute("PRAGMA user_version = 0")
     c.commit()
     c.close()
     first = must(open_repositories(path).quiz.quiz_get(1))["order"]
@@ -354,7 +353,7 @@ def test_author_without_balance_pays_winners_by_going_into_debt(eco):
         quizpay.author_payout(2, 2, 1000)
     )
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=300 WHERE user_id=?", (AUTHOR,))
+        set_test_balance(eco, AUTHOR, 300)
     ok, result = eco.quiz.quiz_answer(3, qid, "東京", NOW)
     assert ok and result["correct"] and result["reward"] == 1000  # 回答者には、報酬を全額払う
     assert result["author_debt_added"] == 700  # 残高 300 を払い、足りない 700 は借金になる
@@ -375,7 +374,7 @@ def test_author_without_balance_pays_winners_by_going_into_debt(eco):
 def test_debt_from_a_quiz_is_withheld_from_the_authors_income_and_blocks_new_questions(eco):
     ok, qid = post(eco, reward=1000)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (AUTHOR,))
+        set_test_balance(eco, AUTHOR, 0)
     assert eco.quiz.quiz_answer(1, qid, "東京", NOW)[1]["author_debt_added"] == 1000
     assert eco.debt.debt(AUTHOR) == 1000 + teiai.SEED
     eco.wallet.credit(AUTHOR, 400, "付与")  # 収入ではない入金は、天引きされない
@@ -392,7 +391,7 @@ def test_debt_from_a_quiz_is_withheld_from_the_authors_income_and_blocks_new_que
 def test_wrong_answers_never_create_debt(eco):
     ok, qid = post(eco, reward=1000)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (AUTHOR,))
+        set_test_balance(eco, AUTHOR, 0)
     ok, result = eco.quiz.quiz_answer(1, qid, "大阪", NOW)
     assert ok and not result["correct"] and result["author_debt_added"] == 0 and eco.debt.debt(AUTHOR) == 0
 
@@ -404,7 +403,7 @@ def test_post_limits(eco):
     assert not ok and reason.code == "quiz_open_limit" and reason.params["limit"] == 2
     eco.wallet.stats(7)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=100 WHERE user_id=7")
+        set_test_debt(eco, 7, 100)
     assert not post(eco, author=7)[0]  # 借金中
     # 24時間に3問: 古い2問を取り下げても、3問目まで
     other = 600
@@ -490,6 +489,7 @@ def test_old_schema_gets_author_columns(tmp_path):
     c.executescript("""DROP TABLE quiz_questions; CREATE TABLE quiz_questions (id INTEGER PRIMARY KEY AUTOINCREMENT, question TEXT NOT NULL,
         choices TEXT NOT NULL, explanation TEXT NOT NULL DEFAULT '', shown_order TEXT NOT NULL DEFAULT '', reward INTEGER NOT NULL, expires REAL, created REAL NOT NULL);
         INSERT INTO quiz_questions (question, choices, reward, created) VALUES ('q', '["a","b","c","d"]', 100, 1);""")
+    c.execute("PRAGMA user_version = 0")
     c.commit()
     c.close()
     q = open_repositories(path).quiz.quiz_get(1)
@@ -672,7 +672,7 @@ def test_clawback_is_limited_to_the_authors_balance(eco):
     eco.quiz.quiz_answer(1, qid, "東京", NOW)
     eco.quiz.quiz_answer(2, qid, "大阪", NOW)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (AUTHOR,))  # 稼いだ分を使い切った
+        set_test_balance(eco, AUTHOR, 0)  # 稼いだ分を使い切った
     for uid in (3, 4, 5, 6, 7, 8):
         eco.quiz.quiz_answer(uid, qid, "京都", NOW)  # 正答率が下がり、本来は受け取りが減る
     assert eco.wallet.balance(AUTHOR) >= 0  # マイナスにはならない
@@ -704,7 +704,7 @@ def test_public_line_tells_that_the_authors_shortfall_became_debt(eco):
     cog = make_cog(eco)
     ok, qid = post(eco, reward=100, days=3, now=time.time())
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0 WHERE user_id=?", (AUTHOR,))
+        set_test_balance(eco, AUTHOR, 0)
     right = eco.quiz.quiz_get(qid)["order"].index("東京")
     public, log = [], []
 
@@ -851,7 +851,7 @@ def test_players_with_few_games_get_no_reward_but_the_answer_counts_as_correct(e
     ok, qid = post(eco, reward=500)
     eco.wallet.balance(1)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET games_played=2 WHERE user_id=1")  # ゲームを2回だけ遊んだ人
+        set_test_games_played(eco, 1, 2)  # ゲームを2回だけ遊んだ人
     ok, result = eco.quiz.quiz_answer(1, qid, "東京", NOW)
     assert ok and result["correct"] and result["reward_blocked"] and result["reward"] == 0  # 正解扱い。報酬はなし
     assert eco.wallet.balance(1) == INITIAL_BALANCE
@@ -864,7 +864,7 @@ def test_players_with_three_games_get_the_reward(eco):
     ok, qid = post(eco, reward=500)
     eco.wallet.balance(1)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET games_played=3 WHERE user_id=1")
+        set_test_games_played(eco, 1, 3)
     ok, result = eco.quiz.quiz_answer(1, qid, "東京", NOW)
     assert (
         ok

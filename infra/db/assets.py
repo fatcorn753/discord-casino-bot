@@ -6,7 +6,6 @@
 `compose_asset_collectors` で合成する（OCP）。
 """
 
-import json
 from collections.abc import Callable
 
 from domain import horse as horse_mod
@@ -55,7 +54,13 @@ def cash_and_debt_collector(db: EcoDb) -> AssetCollector:
     conn = db.conn
 
     def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in fetch_all(conn, "SELECT user_id, balance, debt FROM users WHERE guild_id=?", (guild_id,)):
+        for r in fetch_all(
+            conn,
+            "SELECT a.user_id, a.balance, COALESCE(d.debt, 0) AS debt "
+            "FROM accounts a LEFT JOIN teiai_debts d ON d.guild_id=a.guild_id AND d.user_id=a.user_id "
+            "WHERE a.guild_id=?",
+            (guild_id,),
+        ):
             add(r["user_id"], "cash", r["balance"])
             add(r["user_id"], "debt", -r["debt"])
 
@@ -88,10 +93,11 @@ def labor_asset_collector(db: EcoDb) -> AssetCollector:
     conn = db.conn
 
     def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in fetch_all(
-            conn, "SELECT user_id, relics, pot, pick, glove, dorm FROM labor WHERE guild_id=?", (guild_id,)
-        ):
+        for r in fetch_all(conn, "SELECT user_id, pot FROM labor_pot WHERE guild_id=? AND pot>0", (guild_id,)):
             add(r["user_id"], "pot", r["pot"])
+        for r in fetch_all(
+            conn, "SELECT user_id, pick, glove, dorm FROM labor_upgrades WHERE guild_id=?", (guild_id,)
+        ):
             add(
                 r["user_id"],
                 "tools",
@@ -99,12 +105,12 @@ def labor_asset_collector(db: EcoDb) -> AssetCollector:
                 + labor_mod.upgrade_spent(r["glove"])
                 + labor_mod.dorm_spent(r["dorm"]),
             )
-            try:
-                waiting = json.loads(r["relics"] or "{}")
-            except ValueError:
-                waiting = {}
-            for item_id, qty in waiting.items():
-                _add_item_value(add, r["user_id"], item_id, int(qty))
+        for r in fetch_all(
+            conn,
+            "SELECT user_id, item_id, qty FROM labor_pending_relics WHERE guild_id=? AND qty>0",
+            (guild_id,),
+        ):
+            _add_item_value(add, r["user_id"], r["item_id"], r["qty"])
 
     return collect
 
@@ -115,7 +121,8 @@ def horse_asset_collector(db: EcoDb, horse_worth_fn: Callable[[int, int, int], i
     def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
         for r in fetch_all(
             conn,
-            "SELECT owner_id, races, wins, places FROM horses WHERE guild_id=? AND owner_id>0",
+            "SELECT o.owner_id, h.races, h.wins, h.places "
+            "FROM horse_ownership o JOIN horses h ON h.id=o.horse_id WHERE o.guild_id=?",
             (guild_id,),
         ):
             add(r["owner_id"], "horses", horse_worth_fn(r["races"], r["wins"], r["places"]))
@@ -128,10 +135,17 @@ def p2p_asset_collector(db: EcoDb, horse_worth_fn: Callable[[int, int, int], int
     conn = db.conn
 
     def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
-        for r in fetch_all(conn, "SELECT * FROM market_listings WHERE guild_id=? AND status='active'", (guild_id,)):
-            if r["kind"] == "item":
+        for r in fetch_all(
+            conn,
+            "SELECT l.seller_id, l.kind, l.ref, l.qty, COALESCE(b.bidder_id, 0) AS bidder_id, "
+            "COALESCE(b.amount, 0) AS bid "
+            "FROM market_listings l LEFT JOIN market_auction_bids b ON b.listing_id = l.id "
+            "WHERE l.guild_id=? AND l.status='active'",
+            (guild_id,),
+        ):
+            if r["seller_id"] is not None and r["kind"] == "item":
                 _add_item_value(add, r["seller_id"], r["ref"], r["qty"])
-            else:
+            elif r["seller_id"] is not None:
                 h = fetch_one(conn, "SELECT races, wins, places FROM horses WHERE id=?", (int(r["ref"]),))
                 if h:
                     add(r["seller_id"], "horses", horse_worth_fn(h["races"], h["wins"], h["places"]))
@@ -146,7 +160,13 @@ def loan_asset_collector(db: EcoDb, loans: IOverdueLoanCollector) -> AssetCollec
 
     def collect(guild_id: int, add: AddAssetPart, now: float) -> None:
         for r in fetch_all(
-            conn, "SELECT * FROM loans WHERE guild_id=? AND status IN ('active','overdue')", (guild_id,)
+            conn,
+            "SELECT l.id, l.guild_id, COALESCE(l.lender_id, 0) AS lender_id, l.borrower_id, "
+            "l.principal, l.rate_tenths, l.term_days, l.status, l.created, l.offer_expires, "
+            "t.accepted_at, t.due, COALESCE(t.paid, 0) AS paid, COALESCE(t.reminded, 0) AS reminded "
+            "FROM loans l LEFT JOIN loan_terms t ON t.loan_id = l.id "
+            "WHERE l.guild_id=? AND l.status IN ('active','overdue')",
+            (guild_id,),
         ):
             left = loans.loan_remaining(dict(r), now)
             add(r["lender_id"], "loans_lent", left)
@@ -180,7 +200,7 @@ class AssetRepo(ScopedRepo, IAssetRepo):
             g = self._g()
             parts: dict[int, dict[str, int]] = {
                 r["user_id"]: dict.fromkeys(PART_KEYS, 0)
-                for r in self._all("SELECT user_id FROM users WHERE guild_id=?", (g,))
+                for r in self._all("SELECT user_id FROM accounts WHERE guild_id=?", (g,))
             }
 
             def add(uid: int, key: str, value: int) -> None:

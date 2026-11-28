@@ -185,12 +185,6 @@ class IWalletBalanceRepo(IGuildScopedRepo):
 class IWalletRankingReader(IGuildScopedRepo):
     """サーバーの参加者・身分表示・金融純資産の順位（読み取り）。"""
 
-    def touch_guild_user(self, guild_id: int, user_id: int) -> None:
-        raise NotImplementedError
-
-    def guild_user_ids(self, guild_id: int) -> set[int]:
-        raise NotImplementedError
-
     def wealthy_ids(self) -> set[int]:
         raise NotImplementedError
 

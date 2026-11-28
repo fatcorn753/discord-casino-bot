@@ -14,7 +14,7 @@ from domain import horse as h
 from domain import shop
 from domain.ports.contracts import RaceBetResult, RaceRow, RaceRunResult
 from tests.fakes import as_interaction, freeze_time, invoke, must
-from tests.support import make_horse_cog, make_shop_cog, make_test_bot
+from tests.support import make_horse_cog, make_shop_cog, make_test_bot, set_test_balance, set_test_debt
 
 U, V = 1, 2
 
@@ -230,7 +230,8 @@ def test_auction_screen_lists_seized_horses_with_a_horse_select(setup):
         )
     eco.horses.horse_create(U, "競売の馬", "鹿毛", "🟦")
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0, debt=20000 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
+        set_test_debt(eco, U, 20000)
     assert eco.debt.bankrupt(U)[0]
     cog_shop = make_shop_cog(bot)
     view = shop_cog.ShopView(cog_shop, V, 0, screen="auction")

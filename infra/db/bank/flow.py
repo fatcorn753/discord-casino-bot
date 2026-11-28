@@ -95,8 +95,9 @@ class BankRepo(Base):
             charged = min(left, max(0, self._excess_sink(guild_id, left, now)))
             if left > charged:
                 self._conn.execute(
-                    "UPDATE teiai_bank SET excess_unpaid=excess_unpaid+? WHERE guild_id=?",
-                    (left - charged, guild_id),
+                    "INSERT INTO teiai_trust (guild_id, excess_unpaid) VALUES (?, ?) "
+                    "ON CONFLICT(guild_id) DO UPDATE SET excess_unpaid=excess_unpaid+excluded.excess_unpaid",
+                    (guild_id, left - charged),
                 )
         self.bank_set_for(guild_id, cash, state["loaned"])
         return min(amount, int(round(cash_pay + trust_take + cover + charged)))

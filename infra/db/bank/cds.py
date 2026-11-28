@@ -28,7 +28,7 @@ class BankRepo(Base):
             self._account.ensure(gid, buyer_id)
             if stake < teiai.CDS_MIN_STAKE:
                 return False, fail("cds_min_stake", min_stake=teiai.CDS_MIN_STAKE)
-            if self._one("SELECT 1 FROM users WHERE guild_id=? AND user_id=?", (gid, target_id)) is None:
+            if self._one("SELECT 1 FROM accounts WHERE guild_id=? AND user_id=?", (gid, target_id)) is None:
                 return False, fail("user_not_registered")
             bal = self._account.raw_balance(gid, buyer_id)
             if bal < stake:

@@ -25,7 +25,7 @@ UPKEEP_RATE = _CFG.upkeep_rate
 PINHANE_RATE = _CFG.pinhane_rate
 STORAGE_DAYS = _CFG.storage_days
 BANKRUPT_DAYS = _CFG.bankrupt_days
-DAILY_GRANT = _CFG.daily_grant  # 胴元の口座が足りないとき、帝愛が新しく出す買取代金の、1日の上限
+DAILY_GRANT = _CFG.daily_grant  # 帝愛物産の買取プールが足りないとき、帝愛が新しく出す買取代金の、1日の上限
 STAKE_MIN = _CFG.stake_min  # 1回の出資の最低額
 STAKE_CAP_RATIO = _CFG.stake_cap_ratio  # 1社への出資の合計の上限（建設費の累計に対して）
 DIVIDEND_MAX = _CFG.dividend_max  # 配当率の上限
@@ -123,7 +123,7 @@ def produce(kind: str, level: int, guild_id: int, stock: float, since: float, no
 def sale(stock: float, price: float, budget: int) -> tuple[int, int, float]:
     """在庫を price で出荷する。(会社に入る額, ピンハネ, 残る在庫)。
 
-    帝愛の買取予算 budget（胴元の口座の残高と、今日の買取枠の残り）を超えては払わない。足りないときは、払える分だけを出荷して、残りは在庫に残す。
+    帝愛物産の買取予算 budget（買取プールの残高と、今日の買取枠の残り）を超えては払わない。足りないときは、払える分だけを出荷して、残りは在庫に残す。
     """
     gross = int(stock * price)
     net = gross - int(gross * PINHANE_RATE)

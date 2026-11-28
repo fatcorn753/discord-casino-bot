@@ -9,7 +9,7 @@ from cogs.teiai import escape as esc
 from domain import teiai
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction
-from tests.support import make_test_bot
+from tests.support import make_test_bot, set_test_balance, set_test_debt
 
 U = 1
 
@@ -42,7 +42,8 @@ def eco(tmp_path):
     e = open_repositories(str(tmp_path / "t.db"))
     e.wallet.credit(U, 10_000, "テスト")
     with e.db.tx():
-        e.db.conn.execute("UPDATE users SET balance=1_000, debt=20_000 WHERE user_id=?", (U,))
+        set_test_balance(e, U, 1_000)
+        set_test_debt(e, U, 20_000)
     return e
 
 
@@ -85,6 +86,6 @@ def test_failure_shows_caught_art_and_adds_the_fine(eco):
 
 def test_not_allowed_shows_an_ephemeral_error(eco):
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=100 WHERE user_id=?", (U,))
+        set_test_debt(eco, U, 100)
     it, _ = play(eco, True)
     assert "逃亡できません" in it.sent[0].title and teiai.ESCAPE_MIN_DEBT > 100

@@ -3,8 +3,7 @@
 表の定義と移行は infra/db/schema/tables.py・migrations.py にある。
 """
 
-import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, cast
 
 from domain import quizpay as quizpay_mod
@@ -14,20 +13,29 @@ from domain.ports.contracts import QuizAdminView, QuizAnswerResult, QuizImportIt
 from domain.ports.repos import IQuizRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.discord_posts import delete_discord_post, init_discord_post, set_discord_message
 from infra.db.schema import new_quiz_order
 
+_SELECT_QUIZ = (
+    "SELECT q.id, q.question, q.explanation, q.creator_name, q.msg_right, q.msg_wrong, "
+    "q.reward, q.expires, q.created, "
+    "COALESCE(s.author_id, 0) AS author_id, COALESCE(s.guild_id, 0) AS guild_id, "
+    "COALESCE(s.settled, 0) AS settled, COALESCE(s.earned, 0) AS earned, "
+    "COALESCE(p.channel_id, 0) AS channel_id, COALESCE(p.message_id, 0) AS message_id "
+    "FROM quiz_questions q "
+    "LEFT JOIN quiz_user_submissions s ON s.question_id = q.id "
+    "LEFT JOIN discord_posts p ON p.entity_type = 'quiz' AND p.entity_id = q.id"
+)
 
-def _quiz_dict(row: Any) -> QuizView:
+
+def _quiz_dict(row: Mapping[str, Any], choice_rows: list[dict[str, Any]]) -> QuizView:
     d = dict(row)
-    d["choices"] = json.loads(d["choices"])
-    d["order"] = (
-        [d["choices"][i] for i in json.loads(d["shown_order"])] if d.get("shown_order") else d["choices"][:]
-    )  # 表示する選択肢の並び
+    by_idx = sorted(choice_rows, key=lambda r: r["choice_idx"])
+    by_pos = sorted(choice_rows, key=lambda r: r["display_pos"])
+    d["choices"] = [r["label"] for r in by_idx]
+    d["order"] = [r["label"] for r in by_pos]
+    d["shown_order"] = f"[{','.join(str(r['choice_idx']) for r in by_pos)}]"
     return cast("QuizView", d)
-
-
-def _quiz_row(row: Any) -> QuizView | None:
-    return None if row is None else _quiz_dict(row)
 
 
 class QuizRepo(ScopedRepo, IQuizRepo):
@@ -45,6 +53,32 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         self._account = account
         self._debt = debt
 
+    def _choices_for(self, question_ids: Iterable[int]) -> dict[int, list[dict[str, Any]]]:
+        ids = list(question_ids)
+        if not ids:
+            return {}
+        marks = ",".join("?" * len(ids))
+        grouped: dict[int, list[dict[str, Any]]] = {qid: [] for qid in ids}
+        for r in self._all(
+            f"SELECT question_id, choice_idx, label, display_pos FROM quiz_choices WHERE question_id IN ({marks}) ORDER BY question_id, choice_idx",
+            ids,
+        ):
+            grouped.setdefault(r["question_id"], []).append(r)
+        return grouped
+
+    def _quiz_row(self, row: Mapping[str, Any] | None) -> QuizView | None:
+        if row is None:
+            return None
+        return _quiz_dict(row, self._choices_for((row["id"],)).get(row["id"], []))
+
+    def _insert_choices(self, question_id: int, choices: list[str]) -> None:
+        order = new_quiz_order(len(choices))
+        pos_of = {choice_idx: pos for pos, choice_idx in enumerate(order)}
+        self._conn.executemany(
+            "INSERT INTO quiz_choices (question_id, choice_idx, label, display_pos) VALUES (?, ?, ?, ?)",
+            [(question_id, idx, lbl, pos_of[idx]) for idx, lbl in enumerate(choices)],
+        )
+
     def quiz_add(
         self,
         question: str,
@@ -60,22 +94,13 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         """問題を登録する（choices の先頭が正解）。登録した問題の番号を返す。creator_name は問題に出す制作者の名前。msg_right / msg_wrong は、正解・不正解の見出しの文言（空なら既定）。"""
         with self._db.tx():
             cur = self._conn.execute(
-                "INSERT INTO quiz_questions (question, choices, explanation, shown_order, reward, expires, created, creator_name, msg_right, msg_wrong) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    question,
-                    json.dumps(choices, ensure_ascii=False),
-                    explanation,
-                    json.dumps(new_quiz_order()),
-                    reward,
-                    expires,
-                    now,
-                    creator_name,
-                    msg_right,
-                    msg_wrong,
-                ),
+                "INSERT INTO quiz_questions (question, explanation, reward, expires, created, creator_name, msg_right, msg_wrong) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (question, explanation, reward, expires, now, creator_name, msg_right, msg_wrong),
             )
-            assert cur.lastrowid is not None
-            return cur.lastrowid
+            qid = cur.lastrowid
+            assert qid is not None
+            self._insert_choices(qid, choices)
+            return qid
 
     def quiz_add_many(self, items: list[QuizImportItem], now: float, creator_name: str = "") -> list[int]:
         """まとめて登録する（全部成功するか、全部なしか）。items は {question, choices, explanation, reward, minutes} の並び（minutes が None なら無期限）。番号のリストを返す。"""
@@ -100,20 +125,30 @@ class QuizRepo(ScopedRepo, IQuizRepo):
 
     def quiz_get(self, quiz_id: int) -> QuizView | None:
         with self._lock:
-            return _quiz_row(self._one("SELECT * FROM quiz_questions WHERE id=?", (quiz_id,)))
+            return self._quiz_row(self._one(f"{_SELECT_QUIZ} WHERE q.id=?", (quiz_id,)))
 
     def quiz_list(self) -> list[QuizAdminView]:
         """全問題（新しい順）。回答数と正解数つき。"""
         with self._lock:
             rows = self._all(
-                "SELECT q.*, COUNT(a.user_id) AS answered, COALESCE(SUM(a.correct), 0) AS right_count "
-                "FROM quiz_questions q LEFT JOIN quiz_answers a ON a.question_id = q.id GROUP BY q.id ORDER BY q.id DESC"
+                "SELECT q.id, q.question, q.explanation, q.creator_name, q.msg_right, q.msg_wrong, "
+                "q.reward, q.expires, q.created, "
+                "COALESCE(s.author_id, 0) AS author_id, COALESCE(s.guild_id, 0) AS guild_id, "
+                "COALESCE(s.settled, 0) AS settled, COALESCE(s.earned, 0) AS earned, "
+                "COALESCE(p.channel_id, 0) AS channel_id, COALESCE(p.message_id, 0) AS message_id, "
+                "COUNT(a.user_id) AS answered, COALESCE(SUM(a.correct), 0) AS right_count "
+                "FROM quiz_questions q "
+                "LEFT JOIN quiz_user_submissions s ON s.question_id = q.id "
+                "LEFT JOIN discord_posts p ON p.entity_type = 'quiz' AND p.entity_id = q.id "
+                "LEFT JOIN quiz_answers a ON a.question_id = q.id GROUP BY q.id ORDER BY q.id DESC"
             )
-        return [cast("QuizAdminView", _quiz_dict(r)) for r in rows]
+            by_qid = self._choices_for(r["id"] for r in rows)
+        return [cast("QuizAdminView", _quiz_dict(r, by_qid.get(r["id"], []))) for r in rows]
 
     def quiz_delete(self, quiz_id: int) -> bool:
         with self._db.tx():
             self._conn.execute("DELETE FROM quiz_answers WHERE question_id=?", (quiz_id,))
+            delete_discord_post(self._conn, "quiz", quiz_id)
             return self._conn.execute("DELETE FROM quiz_questions WHERE id=?", (quiz_id,)).rowcount > 0
 
     def quiz_next(self, user_id: int, now: float) -> tuple[QuizView | None, int]:
@@ -124,12 +159,15 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         with self._lock:
             gid = self._g()
             rows = self._all(
-                "SELECT * FROM quiz_questions q WHERE (q.expires IS NULL OR q.expires > ?) "
-                "AND (q.author_id=0 OR (q.guild_id=? AND q.author_id!=?)) "
+                f"{_SELECT_QUIZ} WHERE (q.expires IS NULL OR q.expires > ?) "
+                "AND (s.question_id IS NULL OR (s.guild_id=? AND s.author_id!=?)) "
                 "AND NOT EXISTS (SELECT 1 FROM quiz_answers a WHERE a.question_id=q.id AND a.guild_id=? AND a.user_id=?) ORDER BY q.id",
                 (now, gid, user_id, gid, user_id),
             )
-        return (_quiz_dict(rows[0]), len(rows)) if rows else (None, 0)
+            if not rows:
+                return None, 0
+            first = self._quiz_row(rows[0])
+            return first, len(rows)
 
     def quiz_answer(self, user_id: int, quiz_id: int, chosen: str, now: float) -> Outcome[QuizAnswerResult]:
         """答えを記録する。(成功か, 理由か結果) を返す。結果は correct / reward（実際に入った額）/ answer / explanation。
@@ -139,7 +177,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         """
         with self._db.tx():
             gid = self._g()
-            q = _quiz_row(self._one("SELECT * FROM quiz_questions WHERE id=?", (quiz_id,)))
+            q = self._quiz_row(self._one(f"{_SELECT_QUIZ} WHERE q.id=?", (quiz_id,)))
             if q is None or (q["expires"] is not None and now >= q["expires"]):
                 return False, fail("quiz_ended")
             author = q["author_id"]
@@ -187,7 +225,9 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             return True, result
 
     def _games_played(self, guild_id: int, user_id: int) -> int:
-        v = self._scalar("SELECT games_played FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+        v = self._scalar(
+            "SELECT games_played FROM user_play_stats WHERE guild_id=? AND user_id=?", (guild_id, user_id)
+        )
         return v if v is not None else 0
 
     def _quiz_pay_author(self, guild_id: int, q: Mapping[str, Any]) -> tuple[int, int]:
@@ -202,7 +242,8 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         assert row is not None  # 集計なので必ず1行返る
         n, c = row["n"], row["c"]
         entitled = sum(quizpay_mod.author_payout(n, c, q["reward"]))
-        earned = self._scalar("SELECT earned FROM quiz_questions WHERE id=?", (q["id"],))
+        earned = self._scalar("SELECT earned FROM quiz_user_submissions WHERE question_id=?", (q["id"],))
+        assert earned is not None
         diff = entitled - earned
         if diff > 0:
             self._account.apply(guild_id, q["author_id"], diff, "クイズ出題報酬", income=diff)
@@ -212,7 +253,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             moved = self._account.apply(guild_id, q["author_id"], diff, "クイズ出題報酬（調整）")
         else:
             moved = 0
-        self._conn.execute("UPDATE quiz_questions SET earned=? WHERE id=?", (earned + moved, q["id"]))
+        self._conn.execute("UPDATE quiz_user_submissions SET earned=? WHERE question_id=?", (earned + moved, q["id"]))
         return moved, earned + moved
 
     def quiz_post(
@@ -237,7 +278,9 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             if debt > 0:
                 return False, fail("debt_blocks", debt=debt, verb="出題できません")
             mine = self._all(
-                "SELECT created, expires, settled FROM quiz_questions WHERE author_id=? AND guild_id=?",
+                "SELECT q.created, q.expires, s.settled "
+                "FROM quiz_user_submissions s JOIN quiz_questions q ON q.id = s.question_id "
+                "WHERE s.author_id=? AND s.guild_id=?",
                 (author_id, gid),
             )
             if sum(1 for r in mine if not r["settled"] and r["expires"] > now) >= quizpay_mod.OPEN_LIMIT:
@@ -247,51 +290,45 @@ class QuizRepo(ScopedRepo, IQuizRepo):
             if self._account.raw_balance(gid, author_id) < reward:
                 return False, fail("quiz_insufficient_balance", reward=reward)
             cur = self._conn.execute(
-                "INSERT INTO quiz_questions (question, choices, explanation, shown_order, reward, expires, created, author_id, guild_id, channel_id, creator_name, msg_right, msg_wrong) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    question,
-                    json.dumps(choices, ensure_ascii=False),
-                    explanation,
-                    json.dumps(new_quiz_order()),
-                    reward,
-                    now + minutes * 60,
-                    now,
-                    author_id,
-                    gid,
-                    channel_id,
-                    creator_name,
-                    msg_right,
-                    msg_wrong,
-                ),
+                "INSERT INTO quiz_questions (question, explanation, reward, expires, created, creator_name, msg_right, msg_wrong) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (question, explanation, reward, now + minutes * 60, now, creator_name, msg_right, msg_wrong),
             )
-            lastrowid = cur.lastrowid
-            assert lastrowid is not None
-            return True, lastrowid
+            qid = cur.lastrowid
+            assert qid is not None
+            self._insert_choices(qid, choices)
+            self._conn.execute(
+                "INSERT INTO quiz_user_submissions (question_id, guild_id, author_id, settled, earned) VALUES (?, ?, ?, 0, 0)",
+                (qid, gid, author_id),
+            )
+            init_discord_post(self._conn, "quiz", qid, channel_id)
+            return True, qid
 
     def quiz_own_open(self, user_id: int, now: float) -> list[QuizView]:
         """このサーバーで自分が出した、終了前の問題（古い順）。取り下げの候補に使う。"""
         with self._lock:
-            return [
-                _quiz_dict(r)
-                for r in self._all(
-                    "SELECT * FROM quiz_questions WHERE author_id=? AND guild_id=? AND settled=0 AND expires>? ORDER BY id",
-                    (user_id, self._g(), now),
-                )
-            ]
+            rows = self._all(
+                f"{_SELECT_QUIZ} WHERE s.author_id=? AND s.guild_id=? AND s.settled=0 AND q.expires>? ORDER BY q.id",
+                (user_id, self._g(), now),
+            )
+            by_qid = self._choices_for(r["id"] for r in rows)
+        return [_quiz_dict(r, by_qid.get(r["id"], [])) for r in rows]
 
     def quiz_set_message(self, quiz_id: int, message_id: int) -> None:
         with self._db.tx():
-            self._conn.execute("UPDATE quiz_questions SET message_id=? WHERE id=?", (message_id, quiz_id))
+            set_discord_message(self._conn, "quiz", quiz_id, message_id)
 
     def quiz_settle(self, now: float) -> list[QuizSettleRow]:
         """期限を過ぎたユーザーの問題の、出題者への報酬を決着させる（このサーバーの分）。決着した問題を、成績つきで返す。"""
-        out = []
+        out: list[QuizSettleRow] = []
         with self._db.tx():
             gid = self._g()
-            for row in self._all(
-                "SELECT * FROM quiz_questions WHERE author_id!=0 AND guild_id=? AND settled=0 AND expires<=? ORDER BY id",
+            rows = self._all(
+                f"{_SELECT_QUIZ} WHERE s.author_id > 0 AND s.guild_id=? AND s.settled=0 AND q.expires<=? ORDER BY q.id",
                 (gid, now),
-            ):
+            )
+            by_qid = self._choices_for(r["id"] for r in rows)
+            for row in rows:
                 tally = self._one(
                     "SELECT COUNT(*) AS n, COALESCE(SUM(correct), 0) AS c FROM quiz_answers WHERE question_id=? AND guild_id=? AND counted=1",
                     (row["id"], gid),
@@ -299,9 +336,9 @@ class QuizRepo(ScopedRepo, IQuizRepo):
                 assert tally is not None  # 集計なので必ず1行返る
                 n, c = tally["n"], tally["c"]
                 base, bonus, part = quizpay_mod.author_payout(n, c, row["reward"])
-                q = _quiz_dict(row)
+                q = _quiz_dict(row, by_qid.get(row["id"], []))
                 self._quiz_pay_author(gid, q)  # 回答のたびに払っているので、通常は差がない（念のための最終調整）
-                self._conn.execute("UPDATE quiz_questions SET settled=1 WHERE id=?", (row["id"],))
+                self._conn.execute("UPDATE quiz_user_submissions SET settled=1 WHERE question_id=?", (row["id"],))
                 who = self._all(
                     "SELECT user_id, correct FROM quiz_answers WHERE question_id=? AND guild_id=? ORDER BY ts, rowid",
                     (row["id"], gid),
@@ -325,7 +362,7 @@ class QuizRepo(ScopedRepo, IQuizRepo):
         with self._db.tx():
             gid = self._g()
             row = self._one(
-                "SELECT 1 FROM quiz_questions WHERE id=? AND author_id=? AND guild_id=? AND settled=0",
+                "SELECT 1 FROM quiz_user_submissions WHERE question_id=? AND author_id=? AND guild_id=? AND settled=0",
                 (quiz_id, user_id, gid),
             )
             if row is None:

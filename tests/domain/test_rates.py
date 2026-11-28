@@ -70,7 +70,7 @@ def eco(tmp_path):
 
 
 def set_rf(eco, rf):
-    eco.db.conn.execute("UPDATE teiai_bank SET rf=?, rf_ts=? WHERE guild_id=0", (rf, NOW))
+    eco.db.conn.execute("UPDATE teiai_trust SET rf=?, rf_ts=? WHERE guild_id=0", (rf, NOW))
 
 
 def test_the_bank_tick_starts_at_the_base_rate_and_climbs_when_cash_is_short(eco):

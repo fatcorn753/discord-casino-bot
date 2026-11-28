@@ -11,6 +11,14 @@ from domain.ports.contracts import RaffleResult, RaffleRow, RaffleView
 from domain.ports.repos import IRaffleRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.discord_posts import init_discord_post, set_discord_message
+
+_SELECT_RAFFLE = (
+    "SELECT r.id, r.guild_id, r.host_id, r.fee, r.closes, "
+    "COALESCE(p.channel_id, 0) AS channel_id, COALESCE(p.message_id, 0) AS message_id, r.status "
+    "FROM raffle r "
+    "LEFT JOIN discord_posts p ON p.entity_type = 'raffle' AND p.entity_id = r.id"
+)
 
 
 class RaffleRepo(ScopedRepo, IRaffleRepo):
@@ -22,7 +30,7 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
 
     def _raffle_open_row(self, guild_id: int) -> RaffleRow | None:
         return self._one(
-            "SELECT * FROM raffle WHERE guild_id=? AND status='open' ORDER BY id DESC LIMIT 1", (guild_id,)
+            f"{_SELECT_RAFFLE} WHERE r.guild_id=? AND r.status='open' ORDER BY r.id DESC LIMIT 1", (guild_id,)
         )
 
     def _raffle_view(self, row: RaffleRow | None) -> RaffleView | None:
@@ -43,10 +51,12 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
             gid = self._g()
             if self._raffle_open_row(gid) is not None:
                 return False, fail("raffle_already_open")
-            self._conn.execute(
-                "INSERT INTO raffle (guild_id, host_id, fee, closes, channel_id) VALUES (?, ?, ?, ?, ?)",
-                (gid, host_id, fee, closes, channel_id),
+            cur = self._conn.execute(
+                "INSERT INTO raffle (guild_id, host_id, fee, closes) VALUES (?, ?, ?, ?)",
+                (gid, host_id, fee, closes),
             )
+            assert cur.lastrowid is not None
+            init_discord_post(self._conn, "raffle", cur.lastrowid, channel_id)
             return True, ""
 
     def raffle_get(self) -> RaffleView | None:
@@ -57,9 +67,7 @@ class RaffleRepo(ScopedRepo, IRaffleRepo):
     def raffle_set_message(self, raffle_id: int, message_id: int, channel_id: int | None = None) -> None:
         """募集の投稿を記録する。再掲示で別のチャンネルに移したときは channel_id も渡す。"""
         with self._db.tx():
-            self._conn.execute("UPDATE raffle SET message_id=? WHERE id=?", (message_id, raffle_id))
-            if channel_id is not None:
-                self._conn.execute("UPDATE raffle SET channel_id=? WHERE id=?", (channel_id, raffle_id))
+            set_discord_message(self._conn, "raffle", raffle_id, message_id, channel_id)
 
     def raffle_join(self, user_id: int, now: float) -> Outcome[str]:
         """参加する。参加費を先に引く。(成功か, 理由) を返す。"""

@@ -10,7 +10,7 @@ import pytest
 from cogs.kyosai.cog import KyosaiCog, motion_embed
 from infra.db.repositories import open_repositories
 from tests.fakes import as_bot, as_choice, as_guild, as_interaction, invoke, must
-from tests.support import make_test_bot
+from tests.support import give_test_kyosai_units, make_test_bot
 
 G, A, B = 10, 1, 2
 CH, MSG = 555, 4242
@@ -92,13 +92,7 @@ def give(bot, uid, n):
     eco = bot.repos.for_guild(G)
     eco.wallet.balance(uid)
     with eco.db.tx():
-        eco.kyosai.bank_sync(G, 0.0)
-        eco.db.conn.execute("UPDATE kyosai_units SET units=units-? WHERE guild_id=? AND user_id=0", (n, G))
-        eco.db.conn.execute(
-            "INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, ?) "
-            "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units",
-            (G, uid, n),
-        )
+        give_test_kyosai_units(eco, uid, n, guild_id=G, now=0.0)
 
 
 def close_now(bot, motion_id):

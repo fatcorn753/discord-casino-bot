@@ -3,26 +3,18 @@
 from domain import teiai
 from domain.errors import Outcome, fail
 
-from .base import _take_cash
 from .lifecycle import DebtRepo as Base
 
 
 class DebtRepo(Base):
     # 強制執行と、借金の発生（IDebtOps）
 
-    def _seize_assets_for(self, guild_id: int, user_id: int, need: int, reason: str) -> int:
-        now = self._now()
-        covered = _take_cash(self._account, guild_id, user_id, need, reason)
-        if covered >= need:
-            return covered
-        return covered + self._seizure_step(guild_id, user_id, need - covered, reason, now)
-
     def seed_for(self, guild_id: int, user_id: int, amount: int) -> None:
         """帝愛が種銭を貸し付ける。手元に入り、同じ額が借金に加わる（天引きの対象にはならない）。"""
+        if self.loan_blacklisted_for(guild_id, user_id, self._now()):
+            return
         self._account.apply(guild_id, user_id, amount, "帝愛の種銭貸付")
-        self._conn.execute(
-            "UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (amount, guild_id, user_id)
-        )
+        self._account.add_debt_principal(guild_id, user_id, amount)
         self._bank.grace_update_for(guild_id, user_id, self._now())
         self._notices.note_for(guild_id, user_id, "seed_loan", amount=amount)
 
@@ -30,8 +22,11 @@ class DebtRepo(Base):
         """（いつでも）手元が種銭の枠に満たなければ、枠まで帝愛から借りる。(成功か, 理由か借りた額)。"""
         with self._db.tx():
             self._account.ensure(guild_id, user_id)
-            if self.status_for(guild_id, user_id, self._now()) == teiai.BANKRUPT:
+            now = self._now()
+            if self.status_for(guild_id, user_id, now) == teiai.BANKRUPT:
                 return False, fail("seed_bankrupt_blocked")
+            if self.loan_blacklisted_for(guild_id, user_id, now):
+                return False, fail("seed_blacklisted")
             if self._bank.grace_until_for(guild_id, user_id) is not None:
                 return False, fail("seed_grace_blocked")
             short = teiai.SEED - self._account.raw_balance(guild_id, user_id)
@@ -48,8 +43,11 @@ class DebtRepo(Base):
         with self._lock:
             if need <= 0:
                 return True, ""
-            if self.status_for(guild_id, user_id, self._now()) == teiai.BANKRUPT:
+            now = self._now()
+            if self.status_for(guild_id, user_id, now) == teiai.BANKRUPT:
                 return False, fail("credit_bankrupt_blocked")
+            if self.loan_blacklisted_for(guild_id, user_id, now):
+                return False, fail("credit_blacklisted")
             if self._bank.grace_until_for(guild_id, user_id) is not None:
                 return False, fail("credit_grace_blocked")
             if need > teiai.SEED:
@@ -60,12 +58,16 @@ class DebtRepo(Base):
         return self.can_borrow_for_bet_for(self._g(), user_id, need)
 
     def _seed_if_empty_for(self, guild_id: int, user_id: int) -> int:
+        if self.loan_blacklisted_for(guild_id, user_id, self._now()):
+            return 0
         if self._account.debt(guild_id, user_id) > 0 and self._account.raw_balance(guild_id, user_id) == 0:
             self.seed_for(guild_id, user_id, teiai.SEED)
             return teiai.SEED
         return 0
 
     def topup_seed_for(self, guild_id: int, user_id: int) -> int:
+        if self.loan_blacklisted_for(guild_id, user_id, self._now()):
+            return 0
         short = teiai.SEED - self._account.raw_balance(guild_id, user_id)
         if self._account.debt(guild_id, user_id) > 0 and short > 0:
             self.seed_for(guild_id, user_id, short)
@@ -82,7 +84,7 @@ class DebtRepo(Base):
         need -= self._bank.cds_cover_self_for(guild_id, user_id, need, self._now())
         if need <= 0:
             return 0
-        self._conn.execute("UPDATE users SET debt = debt + ? WHERE guild_id=? AND user_id=?", (need, guild_id, user_id))
+        self._account.add_debt_principal(guild_id, user_id, need)
         self._account.ledger(
             guild_id, user_id, 0, self._account.raw_balance(guild_id, user_id), f"借金:{reason}（{need:,}ペリカ）"
         )

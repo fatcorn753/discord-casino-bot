@@ -316,7 +316,7 @@ def test_engine_sit_needs_enough_balance(bot):
         eco = bot.repos.for_guild(G)
         eco.wallet.balance(2)
         with eco.db.tx():
-            eco.db.conn.execute("UPDATE users SET balance = 10 WHERE user_id = 2")
+            eco.db.conn.execute("UPDATE accounts SET balance = 10 WHERE user_id = 2")
         got = await table.sit(2, "u2")
         table.close()
         return got

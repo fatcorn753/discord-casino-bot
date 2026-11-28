@@ -276,7 +276,7 @@ def test_commands_and_games_use_the_servers_own_account(tmp_path):
 def test_for_guild_rejects_invalid_ids(eco, bad):
     with pytest.raises(ValueError):
         eco.for_guild(bad)
-    assert eco.db.conn.execute("SELECT COUNT(*) FROM users WHERE guild_id=0").fetchone()[0] == 0
+    assert eco.db.conn.execute("SELECT COUNT(*) FROM accounts WHERE guild_id=0").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("bad", [0, -1])

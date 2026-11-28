@@ -13,6 +13,7 @@ from domain.types import INITIAL_BALANCE
 from infra.db.race import race_slots
 from infra.db.repositories import open_repositories
 from tests.fakes import must
+from tests.support import set_test_balance, set_test_debt
 
 U, V, W = 1, 2, 3
 NOW = 1_000_000.0
@@ -297,7 +298,7 @@ def test_retire_is_refused_for_other_owners_scheduled_horses_and_when_the_fee_ca
     eco.races.race_withdraw(U, hid, rid, NOW + 2)
     with eco.db.tx():
         eco.db.conn.execute("UPDATE horses SET races=20, wins=0, places=0 WHERE id=?", (hid,))
-        eco.db.conn.execute("UPDATE users SET balance=100 WHERE guild_id=? AND user_id=?", (eco.horses.guild_id, U))
+        set_test_balance(eco, U, 100, guild_id=eco.horses.guild_id)
     ok, why = eco.horses.horse_retire(U, hid)
     assert not ok and why.code == "horse_retire_fee_short" and eco.horses.horse_get(hid)["owner_id"] == U
 
@@ -522,7 +523,8 @@ def test_bankruptcy_seizes_horses_and_lists_them_at_the_auction(eco):
     rid = open_race(eco)
     assert eco.races.race_register(U, hid, rid, NOW + 1)[0]
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0, debt=20000 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
+        set_test_debt(eco, U, 20000)
     ok, result = eco.debt.bankrupt(U)
     assert ok and result["shop_value"] >= int(eco.horses.HORSE_PRICE * 0.5)  # 馬は、購入券の値段の50%で換金
     horse = eco.horses.horse_get(hid)
@@ -539,7 +541,8 @@ def test_a_horse_already_in_the_field_is_replaced_by_a_house_horse(eco):
     eco.races.race_close_entries(rid, random.Random(1))
     assert any(e["owner_id"] == U for e in eco.races.race_entries(rid))
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0, debt=20000 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
+        set_test_debt(eco, U, 20000)
     assert eco.debt.bankrupt(U)[0]
     assert not any(e["owner_id"] == U for e in eco.races.race_entries(rid))  # 賞金は、破産した馬主には入らない
 
@@ -547,7 +550,8 @@ def test_a_horse_already_in_the_field_is_replaced_by_a_house_horse(eco):
 def test_auction_horse_price_falls_and_only_katagi_with_room_can_buy(eco):
     hid = make_horse(eco, U, "競売馬")
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0, debt=20000 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
+        set_test_debt(eco, U, 20000)
     assert eco.debt.bankrupt(U)[0]
     listed_at = eco.horses.horse_get(hid)["listed_at"]
     day = 86400
@@ -563,7 +567,8 @@ def test_auction_horse_price_falls_and_only_katagi_with_room_can_buy(eco):
         make_horse(eco, V, f"馬{i}")
     other = make_horse(eco, W, "別の馬")
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0, debt=20000 WHERE user_id=?", (W,))
+        set_test_balance(eco, W, 0)
+        set_test_debt(eco, W, 20000)
     assert eco.debt.bankrupt(W)[0]
     assert eco.horses.auction_buy_horse(V, other, time.time()).reason.code == "horse_max_owned"  # すでに3頭
 
@@ -696,8 +701,8 @@ def test_major_race_at_21_doubles_prizes_and_tops_up_from_house_cash(eco):
     start = NOW - (NOW % 86400) + 21 * 3600  # 適当な日の21時（まだ先）
     with eco.db.tx():
         eco.db.conn.execute(
-            "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, channel_id, created) "
-            "VALUES (?, 'regular', ?, ?, ?, 'entry', 0, ?)",
+            "INSERT INTO horse_races (guild_id, kind, start_at, entry_close, bet_close, status, created) "
+            "VALUES (?, 'regular', ?, ?, ?, 'entry', ?)",
             (eco.horses.guild_id, start, start - 3600, start - 60, NOW),
         )
     rid = eco.db.conn.execute("SELECT id FROM horse_races WHERE start_at=?", (start,)).fetchone()["id"]

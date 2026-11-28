@@ -7,6 +7,7 @@ from domain.ports.repos import IEscrowRepo
 from domain.types import INSURANCE_CAP
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.profile import ProfileCore
 
 
 class EscrowRepo(ScopedRepo, IEscrowRepo):
@@ -20,11 +21,14 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
         debt: IDebtOps,
         guild_id: int = 0,
         strict: bool = False,
+        *,
+        profile: ProfileCore | None = None,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
         self._bank = bank
         self._debt = debt
+        self._profile = profile or ProfileCore(db)
 
     def place_bet(self, user_id: int, amount: int, game: str) -> int | None:
         """賭け金を残高から預かり、預かり金IDを返す。残高不足なら None。"""
@@ -35,15 +39,12 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
             self._account.ensure(gid, user_id)
             if self._account.raw_balance(gid, user_id) < amount:
                 return None
-            self._account.apply(gid, user_id, -amount, f"賭け:{game}")
+            self._account.apply(gid, user_id, -amount, f"賭け:{game}", kind="game_bet")
             cur = self._conn.execute(
                 "INSERT INTO escrow (guild_id, user_id, amount, game, created_at) VALUES (?, ?, ?, ?, ?)",
                 (gid, user_id, amount, game, self._now()),
             )
-            self._conn.execute(
-                "UPDATE users SET total_wagered = total_wagered + ? WHERE guild_id=? AND user_id=?",
-                (amount, gid, user_id),
-            )
+            self._account.record_wager(gid, user_id, amount)
             return cur.lastrowid
 
     def add_to_escrow(self, escrow_id: int, extra: int, credit: bool = False) -> bool:
@@ -61,14 +62,11 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                 if not credit or not self._debt.can_borrow_for_bet_for(gid, row["user_id"], short)[0]:
                     return False
                 self._debt.seed_for(gid, row["user_id"], short)  # 手元に足りない分だけ、帝愛が貸す
-            self._account.apply(gid, row["user_id"], -extra, f"追加の賭け:{row['game']}")
+            self._account.apply(gid, row["user_id"], -extra, f"追加の賭け:{row['game']}", kind="game_bet_add")
             self._conn.execute(
                 "UPDATE escrow SET amount = amount + ? WHERE id=? AND guild_id=?", (extra, escrow_id, gid)
             )
-            self._conn.execute(
-                "UPDATE users SET total_wagered = total_wagered + ? WHERE guild_id=? AND user_id=?",
-                (extra, gid, row["user_id"]),
-            )
+            self._account.record_wager(gid, row["user_id"], extra)
             return True
 
     def escrow_amount(self, escrow_id: int) -> int:
@@ -98,15 +96,9 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                 return None
             user_id, amount = row["user_id"], row["amount"]
             payout = max(0, int(payout))
-            insured = 0
-            if payout == 0:
-                prof = self._one("SELECT insurance FROM profile WHERE guild_id=? AND user_id=?", (gid, user_id))
-                if prof and prof["insurance"] > 0:
-                    insured = min(amount // 2, INSURANCE_CAP)
-                    self._conn.execute(
-                        "UPDATE profile SET insurance = insurance - 1 WHERE guild_id=? AND user_id=?",
-                        (gid, user_id),
-                    )
+            insured = (
+                min(amount // 2, INSURANCE_CAP) if payout == 0 and self._profile.consume_buff(gid, user_id, "insurance") else 0
+            )
             total = payout + insured
             if total:
                 # 払い戻しのうち、賭け金を超えた分（純利益）だけが収入。賭け金の返金や、保険券の返金からは天引きしない
@@ -116,6 +108,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                     total,
                     f"払い戻し:{game}" if payout else f"保険券で半額返金:{game}",
                     income=max(0, payout - amount),
+                    kind="game_payout" if payout else "game_insurance",
                 )
             self._conn.execute("DELETE FROM escrow WHERE id=? AND guild_id=?", (escrow_id, gid))
             lost = max(0, amount - total)
@@ -128,16 +121,16 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                     "ON CONFLICT(guild_id) DO UPDATE SET pool = pool + excluded.pool",
                     (gid, jackpot.contribution(lost)),
                 )
-            taken = -self._account.apply(gid, user_id, -penalty, f"追加の支払い:{game}") if penalty > 0 else 0
+            taken = (
+                -self._account.apply(gid, user_id, -penalty, f"追加の支払い:{game}", kind="game_penalty")
+                if penalty > 0
+                else 0
+            )
             if penalty > taken:  # 残高で足りない分は、強制執行したうえで、残りを帝愛の借金にする
                 self._debt.owe_for(gid, user_id, penalty - taken, f"{game}の倍払い")
             taken = max(penalty, 0)
             net = total - amount - taken
-            self._conn.execute(
-                "UPDATE users SET games_played = games_played + 1, total_won = total_won + ?, "
-                "biggest_win = MAX(biggest_win, ?) WHERE guild_id=? AND user_id=?",
-                (total, net, gid, user_id),
-            )
+            self._account.record_game_result(gid, user_id, total, net)
             return net, taken, insured
 
     def jackpot_pool(self) -> int:
@@ -169,7 +162,7 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
             row = self._one("SELECT user_id, amount, game FROM escrow WHERE id=? AND guild_id=?", (escrow_id, gid))
             if row is None:
                 return False
-            self._account.apply(gid, row["user_id"], row["amount"], f"返金:{row['game']}")
+            self._account.apply(gid, row["user_id"], row["amount"], f"返金:{row['game']}", kind="game_refund")
             self._conn.execute("DELETE FROM escrow WHERE id=? AND guild_id=?", (escrow_id, gid))
             return True
 
@@ -188,6 +181,8 @@ class EscrowRepo(ScopedRepo, IEscrowRepo):
                     self._conn.execute("DELETE FROM escrow WHERE id=?", (r["id"],))
                     continue
                 self._account.ensure(gid, r["user_id"])
-                self._account.apply(gid, r["user_id"], r["amount"], f"返金（中断したゲーム）:{r['game']}")
+                self._account.apply(
+                    gid, r["user_id"], r["amount"], f"返金（中断したゲーム）:{r['game']}", kind="game_refund"
+                )
                 self._conn.execute("DELETE FROM escrow WHERE id=?", (r["id"],))
             return len(rows)

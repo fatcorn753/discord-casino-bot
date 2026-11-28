@@ -18,10 +18,159 @@ from cogs.shared.bridges import (
     IShopTitleBridge,
 )
 from domain.ports.session import ISessionGuard
+from domain.types import INITIAL_BALANCE
 from infra.clock import ConfigClock
 from infra.db.repositories import RepositoryBundle, open_repositories
 from services import ServiceRegistry, build_services
 from services.session import Sessions
+
+
+def _resolve_guild_id(repos: RepositoryBundle, guild_id: int | None) -> int:
+    return repos.wallet.guild_id if guild_id is None else guild_id
+
+
+def _ensure_account_row(repos: RepositoryBundle, gid: int, user_id: int) -> None:
+    repos.db.conn.execute(
+        "INSERT OR IGNORE INTO accounts (guild_id, user_id, balance, created_at) VALUES (?, ?, ?, 0.0)",
+        (gid, user_id, INITIAL_BALANCE),
+    )
+
+
+def set_test_balance(repos: RepositoryBundle, user_id: int, balance: int, *, guild_id: int | None = None) -> None:
+    """テスト用: accounts.balance を直接書き換える（既存 tx の有無を問わず利用可）。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    repos.db.conn.execute("UPDATE accounts SET balance=? WHERE guild_id=? AND user_id=?", (balance, gid, user_id))
+
+
+def set_test_debt(
+    repos: RepositoryBundle,
+    user_id: int,
+    debt: int,
+    *,
+    principal: int | None = None,
+    interest_at: float = 0.0,
+    guild_id: int | None = None,
+) -> None:
+    """テスト用: teiai_debts の借金を設定する（0 以下なら行削除）。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    if debt <= 0:
+        repos.db.conn.execute("DELETE FROM teiai_debts WHERE guild_id=? AND user_id=?", (gid, user_id))
+        return
+    _ensure_account_row(repos, gid, user_id)
+    eff_principal = debt if principal is None else principal
+    repos.db.conn.execute(
+        "INSERT INTO teiai_debts (guild_id, user_id, debt, principal, interest_at) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+        "debt=excluded.debt, principal=excluded.principal, interest_at=excluded.interest_at",
+        (gid, user_id, debt, eff_principal, interest_at),
+    )
+
+
+def set_test_grace(
+    repos: RepositoryBundle,
+    user_id: int,
+    grace_until: float | None,
+    *,
+    penalty: float = 0.0,
+    penalty_at: float = 0.0,
+    guild_id: int | None = None,
+) -> None:
+    """テスト用: teiai_grace の猶予・ペナルティを設定する。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    _ensure_account_row(repos, gid, user_id)
+    repos.db.conn.execute(
+        "INSERT INTO teiai_grace (guild_id, user_id, grace_until, penalty, penalty_at) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+        "grace_until=excluded.grace_until, penalty=excluded.penalty, penalty_at=excluded.penalty_at",
+        (gid, user_id, grace_until, penalty, penalty_at),
+    )
+
+
+def set_test_bankrupt(
+    repos: RepositoryBundle,
+    user_id: int,
+    bankrupt_at: float | None,
+    blacklist_until: float | None = None,
+    *,
+    guild_id: int | None = None,
+) -> None:
+    """テスト用: teiai_bankruptcies の破産・ブラックリスト時刻を設定する（None で削除）。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    if bankrupt_at is None:
+        repos.db.conn.execute("DELETE FROM teiai_bankruptcies WHERE guild_id=? AND user_id=?", (gid, user_id))
+        return
+    _ensure_account_row(repos, gid, user_id)
+    repos.db.conn.execute(
+        "INSERT INTO teiai_bankruptcies (guild_id, user_id, bankrupt_at, blacklist_until) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+        "bankrupt_at=excluded.bankrupt_at, blacklist_until=excluded.blacklist_until",
+        (gid, user_id, bankrupt_at, blacklist_until),
+    )
+
+
+def set_test_games_played(
+    repos: RepositoryBundle, user_id: int, games_played: int, *, guild_id: int | None = None
+) -> None:
+    """テスト用: user_play_stats.games_played を直接設定する。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    _ensure_account_row(repos, gid, user_id)
+    repos.db.conn.execute(
+        "INSERT INTO user_play_stats (guild_id, user_id, games_played) VALUES (?, ?, ?) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET games_played=excluded.games_played",
+        (gid, user_id, games_played),
+    )
+
+
+def give_test_kyosai_units(
+    repos: RepositoryBundle, user_id: int, units: int, *, guild_id: int | None = None, now: float = 0.0
+) -> None:
+    """テスト用: 帝愛持ち口（kyosai_state.house_units）から user_id へ共済の口を移す。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    repos.kyosai.bank_sync(gid, now)
+    repos.db.conn.execute(
+        "UPDATE kyosai_state SET house_units=house_units-? WHERE guild_id=?", (units, gid)
+    )
+    repos.db.conn.execute(
+        "INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, ?) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units",
+        (gid, user_id, units),
+    )
+
+
+def insert_test_loan(
+    repos: RepositoryBundle,
+    lender_id: int | None,
+    borrower_id: int,
+    principal: int,
+    *,
+    status: str = "active",
+    guild_id: int | None = None,
+    rate_tenths: int = 0,
+    term_days: int = 5,
+    created: float = 0.0,
+    offer_expires: float = 0.0,
+    accepted_at: float | None = None,
+    due: float | None = None,
+    paid: int = 0,
+    reminded: int = 0,
+) -> int:
+    """テスト用: 正規化された loans + loan_terms 行を直接挿入する。"""
+    gid = _resolve_guild_id(repos, guild_id)
+    cur = repos.db.conn.execute(
+        "INSERT INTO loans (guild_id, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (gid, lender_id, borrower_id, principal, rate_tenths, term_days, status, created, offer_expires),
+    )
+    loan_id = cur.lastrowid
+    assert loan_id is not None
+    if accepted_at is not None or due is not None:
+        eff_acc = created if accepted_at is None else accepted_at
+        eff_due = (eff_acc + term_days * 86400.0) if due is None else due
+        repos.db.conn.execute(
+            "INSERT INTO loan_terms (loan_id, accepted_at, due, paid, reminded) VALUES (?, ?, ?, ?, ?)",
+            (loan_id, eff_acc, eff_due, paid, reminded),
+        )
+    return loan_id
 
 
 def make_test_bot(

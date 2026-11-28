@@ -57,6 +57,7 @@ from infra.db.escrow import EscrowRepo
 from infra.db.events import EventRepo
 from infra.db.guild import GuildRepo
 from infra.db.horse import HorseRepo
+from infra.db.inventory import InventoryCore
 from infra.db.kyosai import KyosaiRepo
 from infra.db.labor import LaborRepo
 from infra.db.lazy_bridges import (
@@ -83,6 +84,7 @@ from infra.db.options import OptionRepo
 from infra.db.p2p import P2PRepo
 from infra.db.pachinko import PachinkoRepo
 from infra.db.poll import PollRepo
+from infra.db.profile import ProfileCore
 from infra.db.quiz import QuizRepo
 from infra.db.race import RaceRepo
 from infra.db.raffle import RaffleRepo
@@ -133,12 +135,16 @@ class RepositoryBundle(IRepositoryBundle):
     assets: AssetRepo
     db: EcoDb
     account: AccountCore
+    inventory: InventoryCore
+    profile: ProfileCore
 
     def for_guild(self, guild_id: int) -> "RepositoryBundle":
         """指定サーバー（guild_id）にスコープされた各リポジトリのビュー束を返す（接続は共有）。"""
         return RepositoryBundle(
             db=self.db,
             account=self.account,
+            inventory=self.inventory,
+            profile=self.profile,
             notices=self.notices.for_guild(guild_id),
             rtp=self.rtp.for_guild(guild_id),
             events=self.events.for_guild(guild_id),
@@ -187,19 +193,28 @@ def open_repositories(
     """
     clock = clock if clock is not None else ConfigClock({})
     db = EcoDb(db_path, clock)
-    schema.migrate_to_guild_scope(db.conn, db.db_path, legacy_guild_id)
+    try:
+        with db.lock:
+            schema.initialize_db(db.conn, db.db_path, legacy_guild_id)
+    except Exception:
+        db.close()
+        raise
 
     account = AccountCore(db, debt_hook=LazyDebtLifecycleHook(lambda: debt))
+    inventory = InventoryCore(db)
+    profile = ProfileCore(db)
     notices = NoticeRepo(db, strict=strict)
     rtp = RtpRepo(db, strict=strict)
     events = EventRepo(db, strict=strict)
     pachinko = PachinkoRepo(db, strict=strict)
-    relics = RelicRepo(db, account, strict=strict)
+    relics = RelicRepo(db, account, strict=strict, inventory=inventory)
     market = MarketDataRepo(db, strict=strict)
     market_events = MarketEventRepo(db, strict=strict)
-    records = RecordRepo(db, account, strict=strict)
+    records = RecordRepo(db, account, strict=strict, inventory=inventory, profile=profile)
     raffle = RaffleRepo(db, account, strict=strict)
-    guild = GuildRepo(db, wealthy_reader=lazy_wealthy_reader(lambda: wallet.wealthy_ids_for), strict=strict)
+    guild = GuildRepo(
+        db, wealthy_reader=lazy_wealthy_reader(lambda: wallet.wealthy_ids_for), strict=strict, profile=profile
+    )
 
     bank = BankRepo(
         db,
@@ -230,15 +245,15 @@ def open_repositories(
     streams = StreamRepo(db, account, bank, strict=strict)
 
     loans = LoanRepo(db, account, debt, bank.grace_until_for, strict=strict)
-    shop = ShopRepo(db, account, debt, strict=strict)
-    auction = AuctionRepo(db, account, debt, bank, strict=strict)
-    escrow = EscrowRepo(db, account, bank, debt, strict=strict)
+    shop = ShopRepo(db, account, debt, strict=strict, inventory=inventory, profile=profile)
+    auction = AuctionRepo(db, account, debt, bank, strict=strict, inventory=inventory)
+    escrow = EscrowRepo(db, account, bank, debt, strict=strict, profile=profile)
     quiz = QuizRepo(db, account, debt, strict=strict)
-    horses = HorseRepo(db, account, debt, bank, strict=strict)
+    horses = HorseRepo(db, account, debt, bank, strict=strict, inventory=inventory)
     races = RaceRepo(db, account, horses, relics, bank, strict=strict)
-    labor = LaborRepo(db, account, relics, bank, strict=strict)
+    labor = LaborRepo(db, account, relics, bank, strict=strict, inventory=inventory)
     arena = ArenaRepo(db, account, bank, strict=strict)
-    company = CompanyRepo(db, account, debt, bank, bank, notices, clock.offset_hours(), strict=strict)
+    company = CompanyRepo(db, account, debt, bank, notices, clock.offset_hours(), strict=strict)
     earnings = EarningsRepo(db, account, bank, strict=strict)
 
     crypto = CryptoRepo(
@@ -253,7 +268,18 @@ def open_repositories(
 
     bonds = BondRepo(db, account, bank, debt_repay=debt.repay_all_of_for, collateral_guard=margin, strict=strict)
     options = OptionRepo(db, account, market, market_events, earnings, bank, debt, strict=strict)
-    p2p = P2PRepo(db, account, horses, debt, bank, bank.grace_until_for, notices, strict=strict)
+    p2p = P2PRepo(
+        db,
+        account,
+        horses,
+        debt,
+        bank,
+        bank.grace_until_for,
+        notices,
+        strict=strict,
+        inventory=inventory,
+        profile=profile,
+    )
     kyosai = KyosaiRepo(db, account, bank, notices, strict=strict)
 
     seizure_step = compose_asset_seizure_steps(
@@ -292,7 +318,18 @@ def open_repositories(
             company.collect_values,
         )
     )
-    wallet = WalletRepo(db, account, bank, debt, debt, relics, valuation_source, strict=strict)
+    wallet = WalletRepo(
+        db,
+        account,
+        bank,
+        debt,
+        debt,
+        relics,
+        valuation_source,
+        strict=strict,
+        inventory=inventory,
+        profile=profile,
+    )
 
     asset_collector = compose_asset_collectors(
         (
@@ -314,15 +351,13 @@ def open_repositories(
     assets = AssetRepo(db, asset_collector, horse_worth_fn=horses.horse_worth, strict=strict)
 
     with db.tx():
-        schema.create_tables(db.conn)
-        schema.add_missing_columns(db.conn)
         auction.purge_unlistable_auctions()
-    with db.tx():
-        schema.retire_autoplay(db.conn)
 
     return RepositoryBundle(
         db=db,
         account=account,
+        inventory=inventory,
+        profile=profile,
         notices=notices,
         rtp=rtp,
         events=events,

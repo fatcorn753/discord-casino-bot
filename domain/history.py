@@ -24,8 +24,33 @@ class HistoryEntry:
     reason: str = ""
 
 
+def _transfer_of(r: dict[str, Any]) -> tuple[str, int | None] | None:
+    """送金の行なら (direction, target_user_id) を返す。構造化列 kind を優先し、未設定なら reason の正規表現へフォールバック。"""
+    kind = r.get("kind") or ""
+    if kind == "transfer_out":
+        direction = "送"
+    elif kind == "transfer_in":
+        direction = "受"
+    else:
+        m = _TRANSFER.match(r["reason"])
+        if m is None:
+            return None
+        return m.group(1), int(m.group(2))
+    target: int | None = r.get("counterparty_id")
+    if target is None:
+        m = _TRANSFER.match(r["reason"])
+        target = int(m.group(2)) if m else None
+    return direction, target
+
+
+def _is_transfer_fee_row(r: dict[str, Any]) -> bool:
+    """送金手数料の行か（構造化列 kind 優先、旧 reason 形式へフォールバック）。"""
+    return r.get("kind") == "transfer_fee" or r["reason"] == "送金手数料"
+
+
 def _entries_oldest_first(rows: list[dict[str, Any]]) -> list[HistoryEntry]:
     """台帳の行（古い順）を HistoryEntry の並びにする。"""
+    rows = [dict(r) for r in rows]  # sqlite3.Row なども dict にそろえ、.get で構造化列を読めるようにする
     out: list[HistoryEntry] = []
     i = 0
     while i < len(rows):
@@ -55,10 +80,11 @@ def _entries_oldest_first(rows: list[dict[str, Any]]) -> list[HistoryEntry]:
             )
             i = j
             continue
-        m = _TRANSFER.match(reason)
-        if m:
+        t = _transfer_of(r)
+        if t is not None:
+            direction, target = t
             delta, bal = r["delta"], r["balance_after"]
-            if m.group(1) == "送" and i + 1 < len(rows) and rows[i + 1]["reason"] == "送金手数料":
+            if direction == "送" and i + 1 < len(rows) and _is_transfer_fee_row(rows[i + 1]):
                 delta, bal = delta + rows[i + 1]["delta"], rows[i + 1]["balance_after"]
                 i += 1
             out.append(
@@ -67,8 +93,8 @@ def _entries_oldest_first(rows: list[dict[str, Any]]) -> list[HistoryEntry]:
                     kind="transfer",
                     delta=delta,
                     balance_after=bal,
-                    direction=m.group(1),
-                    target_user_id=int(m.group(2)),
+                    direction=direction,
+                    target_user_id=target,
                 )
             )
         else:

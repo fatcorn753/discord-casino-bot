@@ -13,13 +13,17 @@ class KyosaiRepo(Base):
         with self._db.tx():
             gid = self._g()
             self.bank_sync(gid, now)
-            last = self._scalar("SELECT kyosai_div_ts FROM teiai_bank WHERE guild_id=?", (gid,))
-            if last == 0:
-                self._conn.execute("UPDATE teiai_bank SET kyosai_div_ts=? WHERE guild_id=?", (now, gid))
+            last = self._scalar("SELECT div_ts FROM kyosai_state WHERE guild_id=?", (gid,))
+            if not last:
+                self._conn.execute(
+                    "INSERT INTO kyosai_state (guild_id, div_ts) VALUES (?, ?) "
+                    "ON CONFLICT(guild_id) DO UPDATE SET div_ts=excluded.div_ts",
+                    (gid, now),
+                )
                 return None
             if now - last < DAY:
                 return None
-            self._conn.execute("UPDATE teiai_bank SET kyosai_div_ts=? WHERE guild_id=?", (now, gid))
+            self._conn.execute("UPDATE kyosai_state SET div_ts=? WHERE guild_id=?", (now, gid))
             recovered = self._recover_dormant_for(gid, now)
             available, liabilities, _ = self._bank.bank_reserve_for(gid, now)
             holdings = self._holdings_for(gid)
@@ -34,9 +38,9 @@ class KyosaiRepo(Base):
                 payouts = [(uid, s) for uid, s in shares.items() if uid != kyosai.HOUSE and s > 0]
                 for user_id, share in payouts:  # 帝愛の持ち口の分は、銀行に残す
                     self._account.ensure(gid, user_id)
-                    self._account.apply(gid, user_id, share, "共済:配当", income=share)
+                    self._account.apply(gid, user_id, share, "共済:配当", income=share, kind="kyosai_dividend")
                     paid += share
-                self._conn.execute("UPDATE teiai_bank SET kyosai_paid=kyosai_paid+? WHERE guild_id=?", (paid, gid))
+                self._conn.execute("UPDATE kyosai_state SET paid=paid+? WHERE guild_id=?", (paid, gid))
             result: KyosaiDaily = {"pool": pool, "paid": paid, "recovered": recovered}
             return result
 
@@ -51,11 +55,11 @@ class KyosaiRepo(Base):
         for user_id, _units in self._holdings_for(guild_id, with_house=False):
             last = self._scalar(
                 "SELECT MAX(ts) FROM ledger WHERE guild_id=? AND user_id=? "
-                "AND reason NOT IN ('共済:配当', '帝愛信託:利息') AND reason NOT LIKE '共済:超過損失の負担%'",
+                "AND kind NOT IN ('kyosai_dividend', 'trust_interest', 'kyosai_excess_charge')",
                 (guild_id, user_id),
             )
             if last is None:
-                row = self._one("SELECT created_at FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+                row = self._one("SELECT created_at FROM accounts WHERE guild_id=? AND user_id=?", (guild_id, user_id))
                 last = row["created_at"] if row and row["created_at"] else None
             if last is not None and last < since:
                 recovered += self.recover_units_for(guild_id, user_id, now)

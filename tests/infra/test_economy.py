@@ -7,6 +7,7 @@ from domain.types import DAILY_BASE, DAILY_STREAK_BONUS, DAILY_STREAK_CAP, INITI
 from infra.db.repositories import open_repositories
 from services.session import Sessions
 from tests.fakes import must
+from tests.support import set_test_debt
 
 
 @pytest.fixture
@@ -94,9 +95,7 @@ def test_ranking_global_and_per_guild(eco):
     for uid, extra in ((1, 5000), (2, 100), (3, 9000)):
         eco.wallet.credit(uid, extra, "テスト")
     assert [uid for _, uid, _ in eco.wallet.top(10)] == [3, 1, 2]
-    eco.wallet.touch_guild_user(10, 1)
-    eco.wallet.touch_guild_user(10, 2)
-    ids = eco.wallet.guild_user_ids(10)
+    ids = {1, 2}
     assert [uid for _, uid, _ in eco.wallet.top(10, ids)] == [1, 2]  # サーバー内だけで並べる
     assert eco.wallet.rank_of(2, ids) == (2, INITIAL_BALANCE + 100, 2)
     assert eco.wallet.rank_of(99) is None
@@ -166,7 +165,7 @@ def test_refund_is_not_taken_for_debt_and_ranking_subtracts_debt(eco):
     eco.wallet.balance(1)
     eco.wallet.balance(2)
     eid = eco.escrow.place_bet(1, 1000, "コイン")
-    eco.db.conn.execute("UPDATE users SET debt=500 WHERE user_id=1")
+    set_test_debt(eco, 1, 500)
     eco.escrow.refund(eid)
     assert eco.wallet.balance(1) == INITIAL_BALANCE and eco.debt.debt(1) == 500  # 返金は徴収しない
     assert {u: a for _, u, a in eco.wallet.top(5)} == {1: INITIAL_BALANCE - 500, 2: INITIAL_BALANCE}

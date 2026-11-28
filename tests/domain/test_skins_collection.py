@@ -206,24 +206,30 @@ def test_balance_card_lists_the_collection_with_its_value(tmp_path):
 
 
 def test_old_profile_table_without_skin_columns_is_upgraded(tmp_path):
+    import sqlite3
+
     path = str(tmp_path / "old.db")
-    e = open_repositories(path, strict=True)
-    with e.db.tx():
-        e.db.conn.execute("DROP TABLE profile")
-        e.db.conn.execute(
-            "CREATE TABLE profile (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, title TEXT, card_color TEXT, "
-            "card_icon TEXT, daily_boost INTEGER NOT NULL DEFAULT 0, insurance INTEGER NOT NULL DEFAULT 0, "
-            "PRIMARY KEY (guild_id, user_id))"
-        )
-        e.db.conn.execute("INSERT INTO profile (guild_id, user_id, title) VALUES (10, 7, 'title_rookie')")
-    e.db.close()
+    c = sqlite3.connect(path)
+    c.execute(
+        "CREATE TABLE profile (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, title TEXT, card_color TEXT, "
+        "card_icon TEXT, daily_boost INTEGER NOT NULL DEFAULT 0, insurance INTEGER NOT NULL DEFAULT 0, "
+        "PRIMARY KEY (guild_id, user_id))"
+    )
+    c.execute("INSERT INTO profile (guild_id, user_id, title) VALUES (10, 7, 'title_rookie')")
+    c.execute("PRAGMA user_version = 0")
+    c.commit()
+    c.close()
     again = open_repositories(path, strict=True).for_guild(G)
     prof = again.shop.get_profile(U)
     assert (
         prof["title"] == "title_rookie" and prof["skin_dice"] is None and prof["skin_table"] is None
     )  # 既存の装備は残る
     with again.db.tx():
-        again.db.conn.execute("UPDATE profile SET skin_dice='skin_kuro' WHERE user_id=7")  # 新しい列に書ける
+        again.db.conn.execute(
+            "INSERT INTO user_equipment (guild_id, user_id, slot, item_id) VALUES (?, ?, 'skin_dice', 'skin_kuro')",
+            (G, U),
+        )  # 分離後の装備テーブルへ書ける
+    assert again.shop.get_profile(U)["skin_dice"] == "skin_kuro"
 
 
 def test_pachinko_banner_comes_from_the_skin_only_for_big_hits():

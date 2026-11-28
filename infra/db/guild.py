@@ -9,6 +9,7 @@ from domain.ports.bridges import WealthyReader, noop_wealthy_reader
 from domain.ports.contracts import GuildStatusRow, LeaderboardRow, ProfileRow
 from domain.ports.repos import IGuildRepo
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.profile import ProfileCore
 
 
 class GuildRepo(ScopedRepo, IGuildRepo):
@@ -20,9 +21,12 @@ class GuildRepo(ScopedRepo, IGuildRepo):
         wealthy_reader: WealthyReader | None = None,
         guild_id: int = 0,
         strict: bool = False,
+        *,
+        profile: ProfileCore | None = None,
     ) -> None:
         super().__init__(db, guild_id, strict)
         self._wealthy_reader: WealthyReader = wealthy_reader or noop_wealthy_reader
+        self._profile = profile or ProfileCore(db)
 
     # ------------------------------------------------------------------ #
     # 利用できるサーバーの承認                                            #
@@ -126,10 +130,10 @@ class GuildRepo(ScopedRepo, IGuildRepo):
             rows = [
                 r["user_id"]
                 for r in self._all(
-                    "SELECT user_id FROM users WHERE guild_id=? AND (debt > 0 OR EXISTS (SELECT 1 FROM loans l WHERE "
-                    "l.guild_id=users.guild_id AND l.borrower_id=users.user_id AND l.status='overdue')) "
+                    "SELECT user_id FROM teiai_debts WHERE guild_id=? AND debt > 0 "
+                    "UNION SELECT borrower_id AS user_id FROM loans WHERE guild_id=? AND status='overdue' "
                     "UNION SELECT user_id FROM nick_prefs WHERE guild_id=? AND enabled=0",
-                    (gid, gid),
+                    (gid, gid, gid),
                 )
             ]
         return rows + sorted(self._wealthy_reader(gid))
@@ -171,8 +175,28 @@ class GuildRepo(ScopedRepo, IGuildRepo):
             return {}
         with self._lock:
             gid = self._g()
-            marks = ",".join("?" * len(ids))
-            return {
-                r["user_id"]: r
-                for r in self._all(f"SELECT * FROM profile WHERE guild_id=? AND user_id IN ({marks})", [gid, *ids])
-            }
+            equip_rows = self._profile.equipment_for_users(gid, ids)
+            buff_rows = self._profile.buffs_for_users(gid, ids)
+        out: dict[int, ProfileRow] = {}
+        for user_id, slot, item_id in equip_rows:
+            row = out.setdefault(user_id, self._empty_profile_row(gid, user_id))
+            if slot in ("title", "card_color", "card_icon", "skin_dice", "skin_table"):
+                row[slot] = item_id
+        for user_id, buff, charges in buff_rows:
+            row = out.setdefault(user_id, self._empty_profile_row(gid, user_id))
+            if buff in ("daily_boost", "insurance"):
+                row[buff] = charges
+        return out
+
+    def _empty_profile_row(self, guild_id: int, user_id: int) -> ProfileRow:
+        return {
+            "guild_id": guild_id,
+            "user_id": user_id,
+            "title": None,
+            "card_color": None,
+            "card_icon": None,
+            "skin_dice": None,
+            "skin_table": None,
+            "daily_boost": 0,
+            "insurance": 0,
+        }

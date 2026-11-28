@@ -47,6 +47,10 @@ class BankRepo(ScopedRepo, IBankRepo):
 
     # 銀行の手元・預金・課税（IBankCashFlow / IHouseAccount / GainsTaxCollector / ValuationSource）
 
+    def _ensure_bank_children(self, guild_id: int) -> None:
+        self._conn.execute("INSERT OR IGNORE INTO teiai_thermostat (guild_id) VALUES (?)", (guild_id,))
+        self._conn.execute("INSERT OR IGNORE INTO teiai_trust (guild_id) VALUES (?)", (guild_id,))
+
     def bank_sync_for(self, guild_id: int, now: float) -> dict[str, float]:
         """銀行の手元を取り出す（なければ作る）。地下融資の回収を、いまの時刻まで反映する。"""
         row = self._one("SELECT cash, loaned, ts FROM teiai_bank WHERE guild_id=?", (guild_id,))
@@ -54,7 +58,9 @@ class BankRepo(ScopedRepo, IBankRepo):
             self._conn.execute(
                 "INSERT INTO teiai_bank (guild_id, cash, loaned, ts) VALUES (?, 0, 0, ?)", (guild_id, now)
             )
+            self._ensure_bank_children(guild_id)
             return {"cash": 0.0, "loaned": 0.0}
+        self._ensure_bank_children(guild_id)
         cash, loaned, hours = row["cash"], row["loaned"], (now - row["ts"]) / 3600
         if hours > 0:
             if loaned > 0:

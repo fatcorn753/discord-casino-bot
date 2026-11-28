@@ -11,7 +11,7 @@ from domain import labor as lab
 from domain import teiai
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, button, buttons, freeze_time, invoke, must
-from tests.support import make_labor_cog, make_test_bot
+from tests.support import make_labor_cog, make_test_bot, set_test_balance, set_test_debt
 
 U = 1
 DAY = "2026-11-10"
@@ -141,7 +141,16 @@ def test_upgrade_costs_pelica_and_changes_numbers(eco):
 def test_state_does_not_create_rows(eco):
     s = eco.labor.labor_state(999, T0, DAY)
     assert s["balance"] == 0 and s["day_earned"] == 0
-    assert eco.db.conn.execute("SELECT COUNT(*) c FROM labor WHERE user_id=999").fetchone()["c"] == 0
+    for tbl in (
+        "labor_upgrades",
+        "labor_fatigue",
+        "labor_pot",
+        "labor_daily",
+        "labor_totals",
+        "labor_pending_ores",
+        "labor_pending_relics",
+    ):
+        assert eco.db.conn.execute(f"SELECT COUNT(*) c FROM {tbl} WHERE user_id=999").fetchone()["c"] == 0
 
 
 # ------------------------------ 画面 ------------------------------ #
@@ -200,8 +209,10 @@ def test_ranking_total_today_and_my_rank(eco):
     assert [r[1] for r in top["rows"]] == [2, 3] and top["rows"][0][0] == 1
     assert top["me"][0] == 2 and top["me"][3] == 3  # 3 番目の人が、2位
     assert eco.labor.labor_top(10, None, 1)["me"][0] == 3 and eco.labor.labor_top(10, None, 99)["me"] is None
-    eco.labor.labor_click(1, T0 + 100, "2026-11-11")  # 別の日に稼いだ人は、今日の順位に出ない
-    assert [r[1] for r in eco.labor.labor_top(10, DAY)["rows"]] == [2, 3]  # その日の稼ぎは、日が変わると数えない
+    day_before = {r[1]: r[2] for r in eco.labor.labor_top(10, DAY)["rows"]}
+    eco.labor.labor_click(1, T0 + 100, "2026-11-11")  # 別の日の稼ぎは、元の日の稼ぎとは別に記録される
+    day_after = {r[1]: r[2] for r in eco.labor.labor_top(10, DAY)["rows"]}
+    assert [r[1] for r in eco.labor.labor_top(10, DAY)["rows"]] == [2, 3, 1] and day_after[1] == day_before[1]
     assert [r[1] for r in eco.labor.labor_top(10, "2026-11-11")["rows"]] == [1]
     assert eco.labor.labor_top(10, "2030-01-01")["rows"] == []
 
@@ -504,18 +515,31 @@ def test_dismiss_removes_the_earliest_expiring_worker(eco):
     )  # 古い契約から消える
 
 
-def test_old_count_columns_migrate_to_contracts(eco):
+@pytest.mark.real_scope
+def test_old_count_columns_migrate_to_contracts(tmp_path):
+    import sqlite3
+
     from infra.db import schema
 
-    eco.db.conn.execute("INSERT OR IGNORE INTO labor (guild_id, user_id) VALUES (?, ?)", (eco.labor.guild_id, U))
-    eco.db.conn.execute(
-        "UPDATE labor SET apprentice=2, miner=1 WHERE guild_id=? AND user_id=?", (eco.labor.guild_id, U)
-    )
-    schema._migrate_labor_counts(eco.db.conn, T0)
-    schema._migrate_labor_counts(eco.db.conn, T0)  # 二度動かしても、増えない
-    s = eco.labor.labor_state(U, T0, DAY)
+    path = str(tmp_path / "v0_counts.db")
+    c = sqlite3.connect(path)
+    c.row_factory = sqlite3.Row
+    schema.create_v1_missing_tables(c)
+    for col in ("apprentice", "miner", "craftsman", "foreman"):
+        c.execute(f"ALTER TABLE labor ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+    c.execute("ALTER TABLE labor_workers ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0")
+    c.execute("INSERT INTO users (guild_id, user_id, balance, created_at) VALUES (10, ?, 1000, ?)", (U, T0))
+    c.execute("INSERT INTO labor (guild_id, user_id, apprentice, miner) VALUES (10, ?, 2, 1)", (U,))
+    schema._migrate_labor_counts(c, T0)
+    schema._migrate_labor_counts(c, T0)  # 二度動かしても、増えない
+    assert c.execute("SELECT apprentice+miner FROM labor WHERE user_id=?", (U,)).fetchone()[0] == 0
+    c.commit()
+    c.close()
+
+    reopened = open_repositories(path).for_guild(10)
+    s = reopened.labor.labor_state(U, T0, DAY)
     assert s["apprentice"] == 2 and s["miner"] == 1 and s["expires"]["miner"] == T0 + 7 * 86400  # 移行は、7日の契約
-    assert eco.db.conn.execute("SELECT apprentice+miner c FROM labor WHERE user_id=?", (U,)).fetchone()["c"] == 0
+    assert reopened.db.conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='labor'").fetchone() is None
 
 
 # ------------------------------ 鉱石 ------------------------------ #
@@ -606,7 +630,7 @@ def test_old_contracts_are_refunded_and_cancelled_once_when_the_legacy_column_is
         assert e.labor.labor_hire(U, kind, T0, DAY)[0]
     balance_after_hiring = e.wallet.balance(U)
     assert balance_after_hiring == 10_000 - 2 * FEE["craftsman"] - FEE["apprentice"] - FEE["foreman"]
-    e.db.conn.execute("ALTER TABLE labor_workers DROP COLUMN legacy")  # この列が無かった頃の記録にする
+    e.db.conn.execute("PRAGMA user_version = 0")  # 旧版（legacy 列が無かった頃）として再マイグレーションさせる
     e.db.conn.commit()
     e.db.conn.close()
 
@@ -639,25 +663,27 @@ def test_teiai_skims_the_labor_earnings_when_collected(eco, monkeypatch):
     )
 
 
-def test_labor_skim_goes_to_the_teiai_house_account(eco, monkeypatch):
+def test_labor_skim_goes_to_the_teiai_bank(eco, monkeypatch):
     monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.10)
     assert eco.bank.house_account() == {"balance": 0, "skimmed": 0}
     click(eco, 20)
     got = eco.labor.labor_collect(U, T0 + 100, DAY, detail=True)
     assert got["skimmed"] > 0
-    assert eco.bank.house_account() == {
-        "balance": got["skimmed"],
-        "skimmed": got["skimmed"],
-    }  # 全額が、胴元の口座に入る
+    assert eco.bank.house_account() == {"balance": 0, "skimmed": 0}  # 帝愛物産プールには入らない
+    s1 = eco.bank.bank_status(eco.db.now_ts())
+    assert s1["cash"] + s1["thermostat"]["burned"] == pytest.approx(got["skimmed"])  # サーモスタット経由で帝愛銀行へ
     click(eco, 20, start=T0 + 200)
     again = eco.labor.labor_collect(U, T0 + 400, DAY, detail=True)
-    assert eco.bank.house_account()["balance"] == got["skimmed"] + again["skimmed"]
+    s2 = eco.bank.bank_status(eco.db.now_ts())
+    assert s2["cash"] + s2["thermostat"]["burned"] == pytest.approx(got["skimmed"] + again["skimmed"])
+    assert eco.bank.house_account() == {"balance": 0, "skimmed": 0}
 
 
 def test_the_skim_applies_to_everyone_and_the_debt_withholding_takes_its_share_of_the_rest(eco, monkeypatch):
     monkeypatch.setattr(teiai, "LABOR_SKIM_RATE", 0.10)
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET balance=0, debt=1000 WHERE user_id=?", (U,))
+        set_test_balance(eco, U, 0)
+        set_test_debt(eco, U, 1000)
     click(eco, 20)
     pot = eco.labor.labor_state(U, T0 + 100, DAY)["pot_total"]
     debt_before = eco.debt.debt(U)
@@ -924,7 +950,7 @@ def test_collect_button_works_when_only_relics_are_waiting(eco, monkeypatch):
     eco.labor.labor_click(U, T0 + 3 * H, DAY)  # 触れると、次の分が決済される（発掘品が入る）
     with eco.db.tx():
         eco.db.conn.execute(
-            "UPDATE labor SET pot=0, pot_workers=0 WHERE guild_id=? AND user_id=?", (eco.labor.guild_id, U)
+            "UPDATE labor_pot SET pot=0, pot_workers=0 WHERE guild_id=? AND user_id=?", (eco.labor.guild_id, U)
         )
     view = make_view(eco, monkeypatch, T0 + 3 * H)
     assert view.state["pot_total"] == 0 and view.state["relics"]  # お金はなく、発掘品だけがある

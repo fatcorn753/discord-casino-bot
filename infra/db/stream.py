@@ -13,8 +13,19 @@ from domain.ports.repos import IStreamRepo
 from infra.db.account import AccountCore
 from infra.db.bank import BankRepo
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.discord_posts import init_discord_post, set_discord_message
 
 ACTIVE = ("open", "locked")  # 決まっていない勝負の状態
+
+_SELECT_STREAM = (
+    "SELECT s.id, s.guild_id, s.streamer, s.title, s.url, "
+    "COALESCE(p.channel_id, 0) AS channel_id, COALESCE(p.message_id, 0) AS message_id, "
+    "s.started, s.ends, s.tips, s.tip_count, s.status, "
+    "COALESCE(vc.voice_channel_id, 0) AS voice_channel_id, COALESCE(vc.created_vc, 0) AS created_vc "
+    "FROM streams s "
+    "LEFT JOIN discord_posts p ON p.entity_type = 'stream' AND p.entity_id = s.id "
+    "LEFT JOIN stream_voice_channels vc ON vc.stream_id = s.id"
+)
 
 
 class StreamRepo(ScopedRepo, IStreamRepo):
@@ -48,7 +59,7 @@ class StreamRepo(ScopedRepo, IStreamRepo):
         return cast("StreamRoundView", r)
 
     def _view(self, guild_id: int, stream_id: int) -> StreamView | None:
-        row = self._one("SELECT * FROM streams WHERE guild_id=? AND id=?", (guild_id, stream_id))
+        row = self._one(f"{_SELECT_STREAM} WHERE s.guild_id=? AND s.id=?", (guild_id, stream_id))
         if row is None:
             return None
         view = cast("StreamView", row)
@@ -58,7 +69,7 @@ class StreamRepo(ScopedRepo, IStreamRepo):
     def _live_of(self, guild_id: int, streamer: int, stream_id: int) -> StreamRow | None:
         """配信者本人の、配信中のパネル。違う人・終わった配信なら None。"""
         return self._one(
-            "SELECT * FROM streams WHERE guild_id=? AND id=? AND streamer=? AND status='live'",
+            f"{_SELECT_STREAM} WHERE s.guild_id=? AND s.id=? AND s.streamer=? AND s.status='live'",
             (guild_id, stream_id, streamer),
         )
 
@@ -81,26 +92,32 @@ class StreamRepo(ScopedRepo, IStreamRepo):
             if self._one("SELECT 1 FROM streams WHERE guild_id=? AND streamer=? AND status='live'", (gid, streamer)):
                 return False, fail("stream_already_live")
             cur = self._conn.execute(
-                "INSERT INTO streams (guild_id, streamer, title, url, channel_id, started, ends) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (gid, streamer, title, url, channel_id, now, now + stream.MAX_HOURS * 3600),
+                "INSERT INTO streams (guild_id, streamer, title, url, started, ends) VALUES (?, ?, ?, ?, ?, ?)",
+                (gid, streamer, title, url, now, now + stream.MAX_HOURS * 3600),
             )
             assert cur.lastrowid is not None
+            init_discord_post(self._conn, "stream", cur.lastrowid, channel_id)
             return True, cur.lastrowid
 
     def stream_set_message(self, stream_id: int, channel_id: int, message_id: int) -> None:
         with self._db.tx():
-            self._conn.execute(
-                "UPDATE streams SET channel_id=?, message_id=? WHERE guild_id=? AND id=?",
-                (channel_id, message_id, self._g(), stream_id),
-            )
+            if self._one("SELECT 1 FROM streams WHERE id=? AND guild_id=?", (stream_id, self._g())) is None:
+                return
+            set_discord_message(self._conn, "stream", stream_id, message_id, channel_id)
 
     def stream_set_voice(self, stream_id: int, voice_channel_id: int, created: bool) -> None:
         """配信している場所（ボイスチャンネル）を記録する。created は Bot が作った VC か（閉じたら消す）。"""
         with self._db.tx():
+            if self._one("SELECT 1 FROM streams WHERE id=? AND guild_id=?", (stream_id, self._g())) is None:
+                return
+            if voice_channel_id <= 0:
+                self._conn.execute("DELETE FROM stream_voice_channels WHERE stream_id=?", (stream_id,))
+                return
             self._conn.execute(
-                "UPDATE streams SET voice_channel_id=?, created_vc=? WHERE guild_id=? AND id=?",
-                (voice_channel_id, int(created), self._g(), stream_id),
+                "INSERT INTO stream_voice_channels (stream_id, voice_channel_id, created_vc) VALUES (?, ?, ?) "
+                "ON CONFLICT(stream_id) DO UPDATE SET "
+                "voice_channel_id=excluded.voice_channel_id, created_vc=excluded.created_vc",
+                (stream_id, voice_channel_id, int(created)),
             )
 
     def stream_add_tip(self, stream_id: int, amount: int) -> None:

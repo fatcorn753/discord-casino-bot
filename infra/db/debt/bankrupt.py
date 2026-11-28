@@ -42,9 +42,8 @@ class DebtRepo(Base):
             pool += shop_value
             total_pool = pool
             to_senior = min(pool, self._account.debt(guild_id, user_id))
-            self._conn.execute(
-                "UPDATE users SET debt=debt-? WHERE guild_id=? AND user_id=?", (to_senior, guild_id, user_id)
-            )
+            if to_senior > 0:
+                self._account.reduce_debt(guild_id, user_id, to_senior)
             pool -= to_senior
             junior_paid, forgiven = 0, 0
             for loan in loans:
@@ -66,14 +65,19 @@ class DebtRepo(Base):
                 self._loans.finalize_bankrupt_loan_for(loan["id"], left <= 0)
             if pool > 0:
                 self._account.apply(guild_id, user_id, pool, "破産の整理のあまり")
-            compressed = max(0, self._account.debt(guild_id, user_id) - (0 if escape else teiai.BANKRUPT_FLOOR))
+            debt_now = self._account.debt(guild_id, user_id)
+            compressed = max(0, debt_now - (0 if escape else teiai.BANKRUPT_FLOOR))
+            final_debt = max(0, debt_now - compressed)
+            self._account.set_debt(guild_id, user_id, final_debt, final_debt, 0.0)
             self._conn.execute(
-                "UPDATE users SET debt=debt-?, bankrupt_at=?, blacklist_until=NULL WHERE guild_id=? AND user_id=?",
-                (compressed, now, guild_id, user_id),
+                "INSERT INTO teiai_bankruptcies (guild_id, user_id, bankrupt_at, blacklist_until) "
+                "VALUES (?, ?, ?, NULL) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET bankrupt_at=excluded.bankrupt_at, blacklist_until=NULL",
+                (guild_id, user_id, now),
             )
             self.after_debt_change(guild_id, user_id)
-            seed = self._seed_if_empty_for(guild_id, user_id)
-            self._conn.execute("UPDATE users SET grace_until=NULL WHERE guild_id=? AND user_id=?", (guild_id, user_id))
+            seed = 0  # 破産・逃亡直後の自動種銭付与は行わない（B-2）
+            self._bank.grace_clear_for(guild_id, user_id)
             payable = forced or in_grace
             cds_paid = self._bank.cds_settle_default_for(guild_id, user_id, debt_before, now) if payable else 0
             if not payable:

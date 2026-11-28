@@ -100,7 +100,7 @@ class CompanyPanel(ui.OwnerView):
         if result.get("dividends"):
             note += f"\n出資者へ配当 {ui.pelica(result['dividends'])} を配りました（会社資金から）"
         if result["left"]:
-            note += f"。帝愛の買取予算が足りず、{ui.pelica(result['left'])} 分は在庫に残りました"
+            note += f"。帝愛物産の買取予算が足りず、{ui.pelica(result['left'])} 分は在庫に残りました"
         await self.redraw(interaction, note)
 
     async def _on_invest(self, interaction: discord.Interaction) -> None:

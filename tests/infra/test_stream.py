@@ -12,7 +12,7 @@ from domain import stream
 from domain.errors import Failure
 from infra.db.repositories import open_repositories
 from tests.fakes import as_bot, must
-from tests.support import make_test_bot
+from tests.support import make_test_bot, set_test_debt, set_test_games_played
 
 pytestmark = pytest.mark.real_scope
 
@@ -121,7 +121,7 @@ def test_bet_rules_block_the_streamer_switching_sides_limits_and_debt(eco):
     assert eco.streams.stream_bet(A, sid, stream.WIN, stream.BET_MIN, NOW)[1].code == "stream_bet_max"
     assert eco.streams.stream_bet(A, sid, stream.LOSE, stream.BET_MIN, NOW)[1].code == "stream_other_side"
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=5000 WHERE guild_id=? AND user_id=?", (G, B))
+        set_test_debt(eco, B, 5000, guild_id=G)
     assert eco.streams.stream_bet(B, sid, stream.LOSE, 1000, NOW)[1].code == "debt_blocks"
     assert eco.streams.stream_round_settle(A, sid, stream.WIN, NOW)[1].code == "stream_not_streamer"
 
@@ -163,7 +163,7 @@ def test_streams_are_separate_per_server(tmp_path):
 # ----------------------------- スパチャ（サービス） ----------------------------- #
 def _played(eco, uid, games=3):
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET games_played=? WHERE guild_id=? AND user_id=?", (games, G, uid))
+        set_test_games_played(eco, uid, games, guild_id=G)
 
 
 def test_tip_is_a_transfer_with_the_same_fee_and_daily_limit(eco, tmp_path):

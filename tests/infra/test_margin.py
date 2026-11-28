@@ -238,7 +238,8 @@ def test_long_interest_is_taken_from_the_margin_after_a_day_and_goes_to_the_bank
     assert [(d[0], d[1], d[3], d[4]) for d in done] == [(G, U, "long", expected)]
     assert a.margin.margin_position(U, "cs", "long")[2] == margin0 - expected
     assert a.bank.deposit_of(2) == deposit0  # 信託には配らない（#33）
-    assert a.bank.bank_status(T0 + DAY_S)["cash"] == pytest.approx(cash0 + expected)  # 帝愛銀行の手元へ
+    s = a.bank.bank_status(T0 + DAY_S)
+    assert s["cash"] == pytest.approx(cash0 + expected - s["thermostat"]["burned"])  # サーモスタット経由で帝愛銀行の手元へ
     assert any(
         "信用金利" in x["reason"] for x in eco.db.conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))
     )
@@ -268,14 +269,23 @@ def test_interest_never_takes_more_than_the_margin_and_no_double_charge(eco):
 
 
 def test_old_positions_without_the_interest_columns_get_them_on_startup(tmp_path):
+    import sqlite3
+
     path = str(tmp_path / "old.db")
-    e = open_repositories(path, strict=True)
-    e.db.conn.execute("ALTER TABLE crypto_long DROP COLUMN interest_at")
-    e.db.conn.execute("ALTER TABLE crypto_long DROP COLUMN accrued")
-    e.db.conn.commit()
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE crypto_long (guild_id INTEGER NOT NULL, user_id INTEGER NOT NULL, symbol TEXT NOT NULL, "
+        "units INTEGER NOT NULL, entry_value REAL NOT NULL, margin INTEGER NOT NULL, "
+        "PRIMARY KEY (guild_id, user_id, symbol))"
+    )
+    conn.execute("INSERT INTO crypto_long VALUES (?, ?, 'cs', 5000, 5000.0, 2500)", (G, U))
+    conn.execute("PRAGMA user_version = 0")
+    conn.commit()
+    conn.close()
     again = open_repositories(path, strict=True)
-    cols = {r["name"] for r in again.db.conn.execute("PRAGMA table_info(crypto_long)")}
+    cols = {r["name"] for r in again.db.conn.execute("PRAGMA table_info(margin_positions)")}
     assert {"interest_at", "accrued"} <= cols
+    assert again.for_guild(G).margin.long_position(U, "cs") == (5000, 5000.0, 2500)
 
 
 # ----------------------------- 最低担保の案内(#69・#75・#78) ----------------------------- #

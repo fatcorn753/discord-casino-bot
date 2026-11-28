@@ -78,8 +78,8 @@ def render_teiai_panel_embed(
     color = {"safe": ui.OK, "warn": ui.GOLD, "danger": ui.ERROR, "frozen": ui.ERROR}[bank["level"]]
     e = ui.embed("🏦 帝愛銀行", bank_lines(bank), color)
     e.add_field(
-        name="🕴️ 帝愛の胴元の口座",
-        value=f"**{ui.pelica(house['balance'])}**　（ピンハネの合計 {ui.pelica(house['skimmed'])}。デイリーと地下作業から入る）",
+        name="📦 帝愛物産（/会社 買取プール）",
+        value=f"**{ui.pelica(house['balance'])}**　（/会社 の設立費・建設費・維持費が入り、出荷買取に使われます）",
         inline=False,
     )
     thermo = bank.get("thermostat")
@@ -99,7 +99,7 @@ def render_teiai_panel_embed(
     me = [f"身分: {teiai.STATUS_LABEL[shown_status]}　帝愛信託: **{ui.pelica(deposit)}**"]
     if debt:
         me.append(
-            f"帝愛への借金: **{ui.pelica(debt)}**（利息: 1日 {teiai.DEBT_RATE_PER_DAY:.0%}・{teiai.DEBT_INTEREST_CEILING:,}ペリカまで）"
+            f"帝愛への借金: **{ui.pelica(debt)}**（利息: 1日 {teiai.DEBT_RATE_PER_DAY:.0%}・元本の{teiai.DEBT_INTEREST_CAP_MULT:g}倍まで）"
         )
     if grace_until is not None:
         me.append(

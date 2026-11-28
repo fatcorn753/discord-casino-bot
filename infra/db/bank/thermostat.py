@@ -9,21 +9,22 @@ class BankRepo(Base):
     def _thermo_state_for(self, guild_id: int, now: float) -> thermostat.State:
         """いまの時刻まで冷ました状態（銀行の行がある前提。bank_sync_for のあとで呼ぶ）。"""
         row = self._one(
-            "SELECT thermo_load, thermo_capacity, thermo_ts FROM teiai_bank WHERE guild_id=?",
+            "SELECT load, capacity, ts FROM teiai_thermostat WHERE guild_id=?",
             (guild_id,),
         )
-        assert row is not None  # bank_sync_for のあとで呼ぶので、銀行の行はある
-        state = thermostat.State(load=row["thermo_load"], capacity=max(row["thermo_capacity"], thermostat.E_MIN))
-        return thermostat.decay(state, (now - row["thermo_ts"]) / 86400)
+        if row is None:
+            return thermostat.State(load=0.0, capacity=thermostat.E_MIN)
+        state = thermostat.State(load=row["load"], capacity=max(row["capacity"], thermostat.E_MIN))
+        return thermostat.decay(state, (now - row["ts"]) / 86400)
 
     def _thermo_save_for(
         self, guild_id: int, state: thermostat.State, now: float, burned: float = 0.0, bailed: float = 0.0
     ) -> None:
-        # bailout_debt 列は #32 の見直しで使わなくなった（列だけ残している）
         self._conn.execute(
-            "UPDATE teiai_bank SET thermo_load=?, thermo_capacity=?, thermo_ts=?, "
-            "thermo_burned=thermo_burned+?, thermo_bailed=thermo_bailed+? WHERE guild_id=?",
-            (state.load, state.capacity, now, burned, bailed, guild_id),
+            "INSERT INTO teiai_thermostat (guild_id, load, capacity, ts, burned, bailed) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(guild_id) DO UPDATE SET load=excluded.load, capacity=excluded.capacity, ts=excluded.ts, "
+            "burned=burned+excluded.burned, bailed=bailed+excluded.bailed",
+            (guild_id, state.load, state.capacity, now, burned, bailed),
         )
 
     def _thermo_inflow_for(self, guild_id: int, amount: int, now: float) -> float:

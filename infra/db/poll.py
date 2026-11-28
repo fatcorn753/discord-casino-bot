@@ -10,6 +10,15 @@ from domain.ports.repos import IPollRepo
 from infra.db.account import AccountCore
 from infra.db.bank import BankRepo
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.discord_posts import init_discord_post, set_discord_message
+
+_SELECT_POLL = (
+    "SELECT pl.id, pl.guild_id, pl.creator, pl.title, pl.closes, "
+    "COALESCE(p.channel_id, 0) AS channel_id, COALESCE(p.message_id, 0) AS message_id, "
+    "pl.adj_yes, pl.adj_no, pl.rigs, pl.status "
+    "FROM polls pl "
+    "LEFT JOIN discord_posts p ON p.entity_type = 'poll' AND p.entity_id = pl.id"
+)
 
 
 class PollRepo(ScopedRepo, IPollRepo):
@@ -30,7 +39,7 @@ class PollRepo(ScopedRepo, IPollRepo):
         return row["yes"], row["n"] - row["yes"]
 
     def _view_for(self, guild_id: int, poll_id: int) -> PollView | None:
-        d = self._one("SELECT * FROM polls WHERE guild_id=? AND id=?", (guild_id, poll_id))
+        d = self._one(f"{_SELECT_POLL} WHERE pl.guild_id=? AND pl.id=?", (guild_id, poll_id))
         if d is None:
             return None
         real_yes, real_no = self._real_for(poll_id)
@@ -42,7 +51,7 @@ class PollRepo(ScopedRepo, IPollRepo):
     def _open_for(self, guild_id: int, poll_id: int, now: float) -> PollRow | None:
         """受付中の投票の行。締切を過ぎていれば（見回りの前でも）None。"""
         return self._one(
-            "SELECT * FROM polls WHERE guild_id=? AND id=? AND status='open' AND closes>?", (guild_id, poll_id, now)
+            f"{_SELECT_POLL} WHERE pl.guild_id=? AND pl.id=? AND pl.status='open' AND pl.closes>?", (guild_id, poll_id, now)
         )
 
     def poll_create(self, creator: int, title: str, closes: float, channel_id: int, now: float) -> Outcome[int]:
@@ -60,19 +69,19 @@ class PollRepo(ScopedRepo, IPollRepo):
             if mine >= poll.MAX_OPEN_PER_USER:
                 return False, fail("poll_too_many", max=poll.MAX_OPEN_PER_USER)
             cur = self._conn.execute(
-                "INSERT INTO polls (guild_id, creator, title, closes, channel_id) VALUES (?, ?, ?, ?, ?)",
-                (gid, creator, title, closes, channel_id),
+                "INSERT INTO polls (guild_id, creator, title, closes) VALUES (?, ?, ?, ?)",
+                (gid, creator, title, closes),
             )
             lastrowid = cur.lastrowid
             assert lastrowid is not None
+            init_discord_post(self._conn, "poll", lastrowid, channel_id)
             return True, lastrowid
 
     def poll_set_message(self, poll_id: int, channel_id: int, message_id: int) -> None:
         with self._db.tx():
-            self._conn.execute(
-                "UPDATE polls SET channel_id=?, message_id=? WHERE guild_id=? AND id=?",
-                (channel_id, message_id, self._g(), poll_id),
-            )
+            if self._one("SELECT 1 FROM polls WHERE id=? AND guild_id=?", (poll_id, self._g())) is None:
+                return
+            set_discord_message(self._conn, "poll", poll_id, message_id, channel_id)
 
     def poll_get(self, poll_id: int) -> PollView | None:
         with self._lock:

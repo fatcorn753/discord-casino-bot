@@ -14,7 +14,7 @@ from domain import teiai_market as tm
 from infra.db.auction import listable
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, must
-from tests.support import make_shop_cog, make_test_bot
+from tests.support import make_shop_cog, make_test_bot, set_test_debt
 
 pytestmark = pytest.mark.real_market
 
@@ -164,7 +164,7 @@ def test_buying_is_for_katagi_only_and_refuses_after_expiry(eco):
     lid = _insert(eco, shop.LABOR_DRINK)
     a.wallet.credit(1, 10_000, "テスト")
     with eco.db.tx():
-        eco.db.conn.execute("UPDATE users SET debt=5000 WHERE guild_id=? AND user_id=1", (eco.shop.guild_id,))
+        set_test_debt(eco, 1, 5000, guild_id=eco.shop.guild_id)
     res = a.auction.market_buy(1, lid, 1, DAY + 60, Rng())
     assert not res.ok and res.reason.code == "auction_katagi_only"
     a.wallet.credit(2, 10_000, "テスト")
@@ -222,6 +222,10 @@ def test_market_listing_appears_on_the_teiai_shelf_and_can_be_bought(eco, monkey
     now = time_mod.time()
     monkeypatch.setattr(teiai, "MARKET_SLOTS_PER_DAY", 0)
     with eco.db.tx():
+        eco.db.conn.execute(
+            "INSERT OR IGNORE INTO teiai_market_days (guild_id, day) VALUES (?, ?)",
+            (eco.shop.guild_id, tm.day_start(now)),
+        )
         cur = eco.db.conn.execute(
             "INSERT INTO teiai_market (guild_id, day, item_id, mode, qty, start_price, end_price, black, "
             "listed_at, expires_at) VALUES (?, ?, ?, 'fixed', 2, 300, 300, 1, ?, ?)",

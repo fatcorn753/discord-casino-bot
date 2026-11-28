@@ -15,14 +15,27 @@ from domain.ports.contracts import PlayRecord, PlaySummary, WeeklyAward, WeeklyR
 from domain.ports.repos import IRecordRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
+from infra.db.inventory import InventoryCore
+from infra.db.profile import ProfileCore
 
 
 class RecordRepo(ScopedRepo, IRecordRepo):
     """連勝・デイリーミッション・週間ランキング・成績サマリ。"""
 
-    def __init__(self, db: EcoDb, account: AccountCore, guild_id: int = 0, strict: bool = False) -> None:
+    def __init__(
+        self,
+        db: EcoDb,
+        account: AccountCore,
+        guild_id: int = 0,
+        strict: bool = False,
+        *,
+        inventory: InventoryCore | None = None,
+        profile: ProfileCore | None = None,
+    ) -> None:
         super().__init__(db, guild_id, strict)
         self._account = account
+        self._inventory = inventory or InventoryCore(db)
+        self._profile = profile or ProfileCore(db)
 
     def record_play(
         self, user_id: int, game: str, bet: int, net: int, day: datetime.date, tags: Iterable[str] = ()
@@ -158,12 +171,9 @@ class RecordRepo(ScopedRepo, IRecordRepo):
             last = self.weekly_last_announced()
             if last is not None and last >= week:
                 return None
-            previous = [
-                r["user_id"]
-                for r in self._all("SELECT user_id FROM inventory WHERE guild_id=? AND item_id=?", (g, king))
-            ]
-            self._conn.execute("DELETE FROM inventory WHERE guild_id=? AND item_id=?", (g, king))
-            self._conn.execute("UPDATE profile SET title=NULL WHERE guild_id=? AND title=?", (g, king))
+            previous = self._inventory.holders_of(g, king)
+            self._inventory.delete_item_in_guild(g, king)
+            self._profile.unequip_item_in_guild(g, "title", king)
             top = self._one(
                 "SELECT user_id, net, plays FROM weekly_stats WHERE guild_id=? AND week=? AND net>0 AND plays>=? "
                 "ORDER BY net DESC, plays ASC, user_id LIMIT 1",
@@ -176,11 +186,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
                     "INSERT OR REPLACE INTO weekly_champions (guild_id, week, user_id, net) VALUES (?, ?, ?, ?)",
                     (g, week, top["user_id"], top["net"]),
                 )
-                self._conn.execute(
-                    "INSERT INTO inventory (guild_id, user_id, item_id, qty) VALUES (?, ?, ?, 1) "
-                    "ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET qty=1",
-                    (g, top["user_id"], king),
-                )
+                self._inventory.add(g, top["user_id"], king, 1)
                 wins = self.weekly_champion_count(top["user_id"])
             self.set_weekly_announced(week)
             return {
@@ -193,7 +199,7 @@ class RecordRepo(ScopedRepo, IRecordRepo):
     def backfill_weekly(self, utc_offset_hours: float = 9) -> int:
         """この機能の前に遊んだ分を、台帳から週間の記録に入れる（初回だけ）。入れたゲーム数を返す。"""
         with self._db.tx():
-            if self._one("SELECT 1 FROM weekly_state WHERE guild_id=0"):
+            if self._one("SELECT 1 FROM schema_flags WHERE key='weekly_backfilled'"):
                 return 0
             tz = datetime.timezone(datetime.timedelta(hours=float(utc_offset_hours)))
             by_user = collections.defaultdict(list)
@@ -211,7 +217,10 @@ class RecordRepo(ScopedRepo, IRecordRepo):
                         (g, week, uid, net),
                     )
                     count += 1
-            self._conn.execute("INSERT INTO weekly_state (guild_id, last_week) VALUES (0, 'backfilled')")
+            self._conn.execute(
+                "INSERT INTO schema_flags (key, value) VALUES ('weekly_backfilled', '1') "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+            )
             return count
 
     def play_summary(self, user_id: int) -> PlaySummary:

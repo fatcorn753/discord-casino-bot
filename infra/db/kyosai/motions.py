@@ -3,14 +3,22 @@
 from domain import kyosai
 from domain.errors import Outcome, fail
 from domain.ports.contracts import KyosaiMotionProposeRow, KyosaiMotionRow, KyosaiMotionViewRow
+from infra.db.discord_posts import set_discord_message
 
 from .offers import KyosaiRepo as Base
+
+_SELECT_MOTION = (
+    "SELECT m.id, m.guild_id, m.proposer, m.premium, m.created, m.closes, m.status, m.yes, m.no, "
+    "COALESCE(p.channel_id, 0) AS channel_id, COALESCE(p.message_id, 0) AS message_id "
+    "FROM kyosai_motions m "
+    "LEFT JOIN discord_posts p ON p.entity_type = 'kyosai_motion' AND p.entity_id = m.id"
+)
 
 
 class KyosaiRepo(Base):
     def _open_motions_for(self, guild_id: int) -> list[KyosaiMotionRow]:
         return self._all(
-            "SELECT * FROM kyosai_motions WHERE guild_id=? AND status='open' ORDER BY closes, id", (guild_id,)
+            f"{_SELECT_MOTION} WHERE m.guild_id=? AND m.status='open' ORDER BY m.closes, m.id", (guild_id,)
         )
 
     def kyosai_propose(self, user_id: int, premium: float, now: float) -> Outcome[KyosaiMotionProposeRow]:
@@ -115,26 +123,23 @@ class KyosaiRepo(Base):
                 )
                 if passed:
                     self.bank_sync(gid, now)
-                    self._conn.execute(
-                        "UPDATE teiai_bank SET trust_premium=? WHERE guild_id=?", (motion["premium"], gid)
-                    )
+                    self._bank.set_trust_premium_for(gid, motion["premium"], now)
                 out.append({**motion, "status": status, "yes": yes, "no": no, "circulating": circulating})
         return out
 
     def kyosai_set_motion_message(self, motion_id: int, channel_id: int, message_id: int) -> None:
         """動議の告知の投稿を覚えておく（締めたときに、結果へ書き換えてボタンを外すため）。"""
         with self._db.tx():
-            self._conn.execute(
-                "UPDATE kyosai_motions SET channel_id=?, message_id=? WHERE guild_id=? AND id=?",
-                (channel_id, message_id, self._g(), motion_id),
-            )
+            if self._one("SELECT 1 FROM kyosai_motions WHERE id=? AND guild_id=?", (motion_id, self._g())) is None:
+                return
+            set_discord_message(self._conn, "kyosai_motion", motion_id, message_id, channel_id)
 
     def kyosai_motion(self, motion_id: int, now: float) -> KyosaiMotionViewRow | None:
         """動議1件と、いまの賛成・反対の口数（ボタンの投稿の書き換え用）。"""
         with self._lock:
             gid = self._g()
             row: KyosaiMotionRow | None = self._one(
-                "SELECT * FROM kyosai_motions WHERE id=? AND guild_id=?", (motion_id, gid)
+                f"{_SELECT_MOTION} WHERE m.id=? AND m.guild_id=?", (motion_id, gid)
             )
             if row is None:
                 return None

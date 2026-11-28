@@ -10,6 +10,74 @@ from domain.types import INITIAL_BALANCE
 from infra.db.schema.tables import INVENTORY_DDL, PROFILE_DDL, USERS_DDL, new_quiz_order
 
 
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone() is not None
+
+
+def _add_teiai_legacy_columns(conn: sqlite3.Connection) -> None:
+    tb = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_bank)")}
+    if tb and not _table_exists(conn, "teiai_thermostat"):
+        for col in (
+            "thermo_load",
+            "thermo_capacity",
+            "thermo_ts",
+            "thermo_burned",
+            "thermo_bailed",
+            "trust_ts",
+            "trust_accrued",
+            "trust_paid",
+            "excess_unpaid",
+            "rf",
+            "rf_ts",
+            "kyosai_div_ts",
+            "kyosai_paid",
+            "kyosai_charged",
+        ):
+            if col not in tb:
+                conn.execute(f"ALTER TABLE teiai_bank ADD COLUMN {col} REAL NOT NULL DEFAULT 0")
+        if "trust_premium" not in tb:
+            conn.execute("ALTER TABLE teiai_bank ADD COLUMN trust_premium REAL")
+    th = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_house)")}
+    if th and not _table_exists(conn, "teiai_house_grants"):
+        if "grant_day" not in th:
+            conn.execute("ALTER TABLE teiai_house ADD COLUMN grant_day TEXT NOT NULL DEFAULT ''")
+        if "grant_used" not in th:
+            conn.execute("ALTER TABLE teiai_house ADD COLUMN grant_used INTEGER NOT NULL DEFAULT 0")
+
+
+def _add_labor_legacy_columns(conn: sqlite3.Connection) -> None:
+    ls = {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}
+    if not ls:
+        return
+    for col, ddl in (
+        ("dorm", "INTEGER NOT NULL DEFAULT 0"),
+        ("idle_at", "REAL NOT NULL DEFAULT 0"),
+        ("renew", "INTEGER NOT NULL DEFAULT 1"),
+        ("ores", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if col not in ls:
+            conn.execute(f"ALTER TABLE labor ADD COLUMN {col} {ddl}")
+    _migrate_labor_counts(conn)
+    ls = {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}
+    for col, ddl in (
+        ("pot_workers", "INTEGER NOT NULL DEFAULT 0"),
+        ("donated", "INTEGER NOT NULL DEFAULT 0"),
+        ("day_click", "INTEGER NOT NULL DEFAULT 0"),
+        ("relics", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if col not in ls:
+            conn.execute(f"ALTER TABLE labor ADD COLUMN {col} {ddl}")
+
+
+def _add_profile_legacy_columns(conn: sqlite3.Connection) -> None:
+    profile_cols = {r["name"] for r in conn.execute("PRAGMA table_info(profile)")}
+    if not profile_cols:
+        return
+    for col in ("skin_dice", "skin_table"):
+        if col not in profile_cols:
+            conn.execute(f"ALTER TABLE profile ADD COLUMN {col} TEXT")
+
+
 def add_missing_columns(conn: sqlite3.Connection) -> None:
     """作成済みの古い表に、あとから増えた列を足す。"""
     # 作成済みの古い表に、列を足す（初回の版には元のニックネームの記録がなかった）
@@ -23,135 +91,91 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         if col not in cp:
             conn.execute(f"ALTER TABLE chart_posts ADD COLUMN {col} {ddl}")
     me = {r["name"] for r in conn.execute("PRAGMA table_info(manual_event)")}
-    if "channel_id" not in me:
+    if me and not _table_exists(conn, "discord_posts") and "channel_id" not in me:
         conn.execute("ALTER TABLE manual_event ADD COLUMN channel_id INTEGER NOT NULL DEFAULT 0")
     st = {r["name"] for r in conn.execute("PRAGMA table_info(streams)")}
-    for col in ("voice_channel_id", "created_vc"):  # 配信の場所（初回の版にはなかった）
-        if col not in st:
-            conn.execute(f"ALTER TABLE streams ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+    if st and not _table_exists(conn, "stream_voice_channels"):
+        for col in ("voice_channel_id", "created_vc"):  # 配信の場所（初回の版にはなかった）
+            if col not in st:
+                conn.execute(f"ALTER TABLE streams ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
     qq = {r["name"] for r in conn.execute("PRAGMA table_info(quiz_questions)")}
-    if "shown_order" not in qq:
-        conn.execute("ALTER TABLE quiz_questions ADD COLUMN shown_order TEXT NOT NULL DEFAULT ''")
-    for col in ("author_id", "guild_id", "channel_id", "message_id", "settled", "earned"):
-        if col not in qq:
-            conn.execute(f"ALTER TABLE quiz_questions ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
-    for col in ("creator_name", "msg_right", "msg_wrong"):
-        if col not in qq:
-            conn.execute(f"ALTER TABLE quiz_questions ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
-    for r in conn.execute(
-        "SELECT id FROM quiz_questions WHERE shown_order=''"
-    ).fetchall():  # 並びが未設定の古い問題に、1回だけ決めて固定する
-        conn.execute("UPDATE quiz_questions SET shown_order=? WHERE id=?", (json.dumps(new_quiz_order()), r["id"]))
+    if "choices" in qq:
+        if "shown_order" not in qq:
+            conn.execute("ALTER TABLE quiz_questions ADD COLUMN shown_order TEXT NOT NULL DEFAULT ''")
+        for col in ("author_id", "guild_id", "channel_id", "message_id", "settled", "earned"):
+            if col not in qq:
+                conn.execute(f"ALTER TABLE quiz_questions ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+        for col in ("creator_name", "msg_right", "msg_wrong"):
+            if col not in qq:
+                conn.execute(f"ALTER TABLE quiz_questions ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+        for r in conn.execute(
+            "SELECT id FROM quiz_questions WHERE shown_order=''"
+        ).fetchall():  # 並びが未設定の古い問題に、1回だけ決めて固定する
+            conn.execute("UPDATE quiz_questions SET shown_order=? WHERE id=?", (json.dumps(new_quiz_order()), r["id"]))
     co = {r["name"] for r in conn.execute("PRAGMA table_info(companies)")}
     if co and "dividend_rate" not in co:
         conn.execute("ALTER TABLE companies ADD COLUMN dividend_rate REAL NOT NULL DEFAULT 0")
-    tb = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_bank)")}
-    for col in (
-        "thermo_load",
-        "thermo_capacity",
-        "thermo_ts",
-        "bailout_debt",
-        "thermo_burned",
-        "thermo_bailed",
-        "trust_ts",
-        "trust_accrued",
-        "trust_paid",
-        "excess_unpaid",
-        "rf",
-        "rf_ts",
-        "kyosai_div_ts",
-        "kyosai_paid",
-        "kyosai_charged",
-        "kyosai_house_ts",
-    ):
-        if col not in tb:
-            conn.execute(f"ALTER TABLE teiai_bank ADD COLUMN {col} REAL NOT NULL DEFAULT 0")
-    if tb and "trust_premium" not in tb:
-        conn.execute("ALTER TABLE teiai_bank ADD COLUMN trust_premium REAL")
+    _add_teiai_legacy_columns(conn)
     ko = {r["name"] for r in conn.execute("PRAGMA table_info(kyosai_offers)")}
     if ko and "done_at" not in ko:
         conn.execute("ALTER TABLE kyosai_offers ADD COLUMN done_at REAL NOT NULL DEFAULT 0")
     km = {r["name"] for r in conn.execute("PRAGMA table_info(kyosai_motions)")}
     if km and "created" not in km:
         conn.execute("ALTER TABLE kyosai_motions ADD COLUMN created REAL NOT NULL DEFAULT 0")
-    for col in ("channel_id", "message_id"):
-        if km and col not in km:
-            conn.execute(f"ALTER TABLE kyosai_motions ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+    if km and not _table_exists(conn, "discord_posts"):
+        for col in ("channel_id", "message_id"):
+            if col not in km:
+                conn.execute(f"ALTER TABLE kyosai_motions ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
 
     normalize_kyosai_units(conn)
-
-    th = {r["name"] for r in conn.execute("PRAGMA table_info(teiai_house)")}
-    if "grant_day" not in th:
-        conn.execute("ALTER TABLE teiai_house ADD COLUMN grant_day TEXT NOT NULL DEFAULT ''")
-    if "grant_used" not in th:
-        conn.execute("ALTER TABLE teiai_house ADD COLUMN grant_used INTEGER NOT NULL DEFAULT 0")
     hs = {r["name"] for r in conn.execute("PRAGMA table_info(horses)")}
-    if "bonus" not in hs:
+    if hs and "bonus" not in hs:
         conn.execute("ALTER TABLE horses ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0")
-    if "rented_day" not in hs:
-        conn.execute("ALTER TABLE horses ADD COLUMN rented_day TEXT")
-    if "style" not in hs:
+    if hs and "style" not in hs:
         conn.execute("ALTER TABLE horses ADD COLUMN style TEXT")
     lf = {r["name"] for r in conn.execute("PRAGMA table_info(labor_finds)")}
     if "collected" not in lf:
         conn.execute("ALTER TABLE labor_finds ADD COLUMN collected INTEGER NOT NULL DEFAULT 0")
-    hr = {r["name"] for r in conn.execute("PRAGMA table_info(horse_races)")}
-    if "grade" not in hr:
-        conn.execute("ALTER TABLE horse_races ADD COLUMN grade TEXT NOT NULL DEFAULT ''")
     he = {r["name"] for r in conn.execute("PRAGMA table_info(horse_entries)")}
     for col in ("races", "wins", "places"):
-        if col not in he:
+        if he and col not in he:
             conn.execute(f"ALTER TABLE horse_entries ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
-    if "tactic" not in he:
-        conn.execute("ALTER TABLE horse_entries ADD COLUMN tactic TEXT NOT NULL DEFAULT 'pace'")
-    if "style" not in he:
+    if he and "style" not in he:
         conn.execute("ALTER TABLE horse_entries ADD COLUMN style TEXT")
     us = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    if "last_slot" not in us:
-        conn.execute("ALTER TABLE users ADD COLUMN last_slot INTEGER")
-    if "debt" not in us:
-        conn.execute("ALTER TABLE users ADD COLUMN debt INTEGER NOT NULL DEFAULT 0")
+    if us:
+        if "last_slot" not in us:
+            conn.execute("ALTER TABLE users ADD COLUMN last_slot INTEGER")
+        if "debt" not in us:
+            conn.execute("ALTER TABLE users ADD COLUMN debt INTEGER NOT NULL DEFAULT 0")
+        if "debt_principal" not in us:
+            conn.execute("ALTER TABLE users ADD COLUMN debt_principal INTEGER NOT NULL DEFAULT 0")
+            conn.execute("UPDATE users SET debt_principal = debt WHERE debt > 0 AND debt_principal = 0")
+        if "grace_penalty" not in us:
+            conn.execute("ALTER TABLE users ADD COLUMN grace_penalty REAL NOT NULL DEFAULT 0")
+        if "grace_penalty_at" not in us:
+            conn.execute("ALTER TABLE users ADD COLUMN grace_penalty_at REAL NOT NULL DEFAULT 0")
     bc = {r["name"] for r in conn.execute("PRAGMA table_info(bonds)")}
-    if "checked" not in bc:
+    if bc and not _table_exists(conn, "bond_default_checks") and "checked" not in bc:
         conn.execute("ALTER TABLE bonds ADD COLUMN checked REAL")
-    if "rate" not in bc:
+    if bc and "rate" not in bc:
         conn.execute("ALTER TABLE bonds ADD COLUMN rate REAL")
     opt_cols = {r["name"] for r in conn.execute("PRAGMA table_info(options)")}
-    for col, ddl in (
-        ("symbol2", "TEXT"),
-        ("spot2", "REAL"),
-        ("side", "TEXT NOT NULL DEFAULT 'long'"),
-        ("margin", "INTEGER NOT NULL DEFAULT 0"),
-    ):
-        if opt_cols and col not in opt_cols:
-            conn.execute(f"ALTER TABLE options ADD COLUMN {col} {ddl}")
-    ls = {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}
-    for col, ddl in (
-        ("apprentice", "INTEGER NOT NULL DEFAULT 0"),
-        ("miner", "INTEGER NOT NULL DEFAULT 0"),
-        ("craftsman", "INTEGER NOT NULL DEFAULT 0"),
-        ("foreman", "INTEGER NOT NULL DEFAULT 0"),
-        ("dorm", "INTEGER NOT NULL DEFAULT 0"),
-        ("wage", "TEXT NOT NULL DEFAULT 'normal'"),
-        ("idle_at", "REAL NOT NULL DEFAULT 0"),
-        ("renew", "INTEGER NOT NULL DEFAULT 1"),
-        ("ores", "TEXT NOT NULL DEFAULT ''"),
-    ):
-        if col not in ls:
-            conn.execute(f"ALTER TABLE labor ADD COLUMN {col} {ddl}")
-    _migrate_labor_counts(conn)
-    if "pot_workers" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
-        conn.execute("ALTER TABLE labor ADD COLUMN pot_workers INTEGER NOT NULL DEFAULT 0")
-    if "donated" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
-        conn.execute("ALTER TABLE labor ADD COLUMN donated INTEGER NOT NULL DEFAULT 0")
-    if "day_click" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
-        conn.execute("ALTER TABLE labor ADD COLUMN day_click INTEGER NOT NULL DEFAULT 0")
-    if "relics" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}:
-        conn.execute("ALTER TABLE labor ADD COLUMN relics TEXT NOT NULL DEFAULT ''")
+    if opt_cols and not _table_exists(conn, "option_pairs"):
+        for col, ddl in (
+            ("symbol2", "TEXT"),
+            ("spot2", "REAL"),
+            ("side", "TEXT NOT NULL DEFAULT 'long'"),
+            ("margin", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if col not in opt_cols:
+                conn.execute(f"ALTER TABLE options ADD COLUMN {col} {ddl}")
+    _add_labor_legacy_columns(conn)
     ml = {r["name"] for r in conn.execute("PRAGMA table_info(market_listings)")}
-    for col in ("channel_id", "message_id", "post_done"):
-        if col not in ml:
-            conn.execute(f"ALTER TABLE market_listings ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+    if ml and not _table_exists(conn, "discord_posts"):
+        for col in ("channel_id", "message_id", "post_done"):
+            if col not in ml:
+                conn.execute(f"ALTER TABLE market_listings ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
     _refund_archaeologists(conn)  # 専用の「発掘員」は、なくなった（ふつうの作業員が、発掘品を見つける）
     if "legacy" not in {r["name"] for r in conn.execute("PRAGMA table_info(labor_workers)")}:
         conn.execute("ALTER TABLE labor_workers ADD COLUMN legacy INTEGER NOT NULL DEFAULT 0")
@@ -162,9 +186,9 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
         if cols and "interest_at" not in cols:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN interest_at REAL NOT NULL DEFAULT 0")
             conn.execute(f"ALTER TABLE {table} ADD COLUMN accrued REAL NOT NULL DEFAULT 0")
-    if "debt_interest_at" not in us:
+    if us and "debt_interest_at" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN debt_interest_at REAL NOT NULL DEFAULT 0")
-    if "grace_until" not in us:
+    if us and "grace_until" not in us:
         conn.execute("ALTER TABLE users ADD COLUMN grace_until REAL")
     ps = {r["name"] for r in conn.execute("PRAGMA table_info(play_state)")}
     for col, ddl in (
@@ -185,23 +209,20 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     answers = {r["name"] for r in conn.execute("PRAGMA table_info(quiz_answers)")}
     if "counted" not in answers:
         conn.execute("ALTER TABLE quiz_answers ADD COLUMN counted INTEGER NOT NULL DEFAULT 1")
-    profile_cols = {r["name"] for r in conn.execute("PRAGMA table_info(profile)")}
-    for col in ("skin_dice", "skin_table"):
-        if col not in profile_cols:
-            conn.execute(f"ALTER TABLE profile ADD COLUMN {col} TEXT")
+    _add_profile_legacy_columns(conn)
     users_cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
-    for col in ("bankrupt_at", "blacklist_until", "escape_at"):
-        if col not in users_cols:
-            conn.execute(f"ALTER TABLE users ADD COLUMN {col} REAL")
-    if "escape_tries" not in users_cols:
-        conn.execute("ALTER TABLE users ADD COLUMN escape_tries INTEGER NOT NULL DEFAULT 0")
-    for table, col, ddl in (
-        ("horse_bets", "picks", "TEXT NOT NULL DEFAULT ''"),
-        ("horses", "listed_at", "REAL"),
-    ):
-        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
-        if cols and col not in cols:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+    if users_cols:
+        for col in ("bankrupt_at", "blacklist_until", "escape_at"):
+            if col not in users_cols:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {col} REAL")
+        if "escape_tries" not in users_cols:
+            conn.execute("ALTER TABLE users ADD COLUMN escape_tries INTEGER NOT NULL DEFAULT 0")
+    if not _table_exists(conn, "horse_bet_picks"):
+        hb_cols = {r["name"] for r in conn.execute("PRAGMA table_info(horse_bets)")}
+        if hb_cols and "picks" not in hb_cols:
+            conn.execute("ALTER TABLE horse_bets ADD COLUMN picks TEXT NOT NULL DEFAULT ''")
+    if not _table_exists(conn, "horse_auction_listings") and hs and "listed_at" not in hs:
+        conn.execute("ALTER TABLE horses ADD COLUMN listed_at REAL")
     _add_symbol_columns(conn)
     idx = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_arena_tournaments_day'"
@@ -209,11 +230,12 @@ def add_missing_columns(conn: sqlite3.Connection) -> None:
     if idx and idx["sql"] and "format" not in idx["sql"]:  # 1日1形式だった頃の索引（同日に両形式を両立できなかった）
         conn.execute("DROP INDEX idx_arena_tournaments_day")
         conn.execute("CREATE UNIQUE INDEX idx_arena_tournaments_day ON arena_tournaments (guild_id, day, format)")
-    conn.execute(  # レンタル制の廃止：買わずに残っている当日のレンタル馬を消す（出走予定のものは残す）
-        "DELETE FROM horses WHERE rented_day IS NOT NULL AND id NOT IN "
-        "(SELECT e.horse_id FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
-        "WHERE r.status IN ('entry','betting'))"
-    )
+    if "rented_day" in hs:
+        conn.execute(  # レンタル制の廃止：買わずに残っている当日のレンタル馬を消す（出走予定のものは残す）
+            "DELETE FROM horses WHERE rented_day IS NOT NULL AND id NOT IN "
+            "(SELECT e.horse_id FROM horse_entries e JOIN horse_races r ON r.id=e.race_id "
+            "WHERE r.status IN ('entry','betting'))"
+        )
 
 
 # 銘柄を足す前の表（主キーに symbol がない）。CSトークンだけだった頃の記録は、すべて symbol='cs' として移す
@@ -238,6 +260,9 @@ _SYMBOL_TABLES = {
 
 def _migrate_labor_counts(conn: sqlite3.Connection, now: float | None = None) -> None:
     """作業員を「人数の列」で持っていた版から、契約つきの1人1行の表（labor_workers）へ移す。いまの人は、今から7日の契約にする（何度動かしても安全）。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(labor)")}
+    if not {"apprentice", "miner", "craftsman", "foreman"}.issubset(cols):
+        return
     now = time.time() if now is None else now
     for r in conn.execute(
         "SELECT guild_id, user_id, apprentice, miner, craftsman, foreman FROM labor "
@@ -258,18 +283,24 @@ def _migrate_labor_counts(conn: sqlite3.Connection, now: float | None = None) ->
 ARCHAEOLOGIST_FEE = 2_400  # なくなった「発掘員」の、契約料（返金の額）
 
 
+def _account_table(conn: sqlite3.Connection) -> str:
+    has_accounts = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='accounts'").fetchone()
+    return "accounts" if has_accounts else "users"
+
+
 def _refund_archaeologists(conn: sqlite3.Connection, now: float | None = None) -> None:
     """専用の「発掘員」を雇っていた人の契約料を返して、契約を解約する（何度動かしても安全。いなければ何もしない）。"""
     now = time.time() if now is None else now
+    tbl = _account_table(conn)
     refunds: dict = {}
     for r in conn.execute("SELECT guild_id, user_id FROM labor_workers WHERE kind='archaeologist'").fetchall():
         key = (r["guild_id"], r["user_id"])
         refunds[key] = refunds.get(key, 0) + ARCHAEOLOGIST_FEE
     for (guild_id, user_id), amount in refunds.items():
-        row = conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id)).fetchone()
+        row = conn.execute(f"SELECT balance FROM {tbl} WHERE guild_id=? AND user_id=?", (guild_id, user_id)).fetchone()
         if row is not None:
             after = row["balance"] + amount
-            conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, guild_id, user_id))
+            conn.execute(f"UPDATE {tbl} SET balance=? WHERE guild_id=? AND user_id=?", (after, guild_id, user_id))
             conn.execute(
                 "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
                 (guild_id, user_id, amount, after, "地下作業:契約料の返金（発掘員の廃止）", now),
@@ -280,15 +311,16 @@ def _refund_archaeologists(conn: sqlite3.Connection, now: float | None = None) -
 def _refund_legacy_contracts(conn: sqlite3.Connection, now: float | None = None) -> None:
     """鉱石版より前に雇った作業員の契約料を、いまの値段で返して、契約を解約する（ルール変更の補償）。列を足したときに、1回だけ動く。"""
     now = time.time() if now is None else now
+    tbl = _account_table(conn)
     refunds: dict = {}
     for r in conn.execute("SELECT id, guild_id, user_id, kind FROM labor_workers WHERE legacy=1").fetchall():
         key = (r["guild_id"], r["user_id"])
         refunds[key] = refunds.get(key, 0) + labor.CONTRACT_FEE.get(r["kind"], 0)
     for (guild_id, user_id), amount in refunds.items():
-        row = conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (guild_id, user_id)).fetchone()
+        row = conn.execute(f"SELECT balance FROM {tbl} WHERE guild_id=? AND user_id=?", (guild_id, user_id)).fetchone()
         if row is not None and amount > 0:
             after = row["balance"] + amount
-            conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, guild_id, user_id))
+            conn.execute(f"UPDATE {tbl} SET balance=? WHERE guild_id=? AND user_id=?", (after, guild_id, user_id))
             conn.execute(
                 "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
                 (guild_id, user_id, amount, after, "地下作業:契約料の返金（ルール変更で解約）", now),
@@ -299,7 +331,8 @@ def _refund_legacy_contracts(conn: sqlite3.Connection, now: float | None = None)
 def _add_symbol_columns(conn: sqlite3.Connection) -> None:
     """市場・保有・空売りの表に、銘柄の列を足す（主キーが変わるので、表を作り直して、記録を写す）。チャートの記録は、列を足すだけ。"""
     for table, (ddl, columns) in _SYMBOL_TABLES.items():
-        if "symbol" in {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}:
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if not cols or "symbol" in cols:
             continue
         conn.execute(f"ALTER TABLE {table} RENAME TO {table}_old")
         conn.execute(ddl)
@@ -372,12 +405,13 @@ def retire_autoplay(conn: sqlite3.Connection, now: float | None = None) -> None:
     """廃止した自動プレイの表が残っていたら、預け中の分を残高に戻してから表を消す（預けた額を失わせない）。"""
     if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='autoplay'").fetchone():
         return
+    tbl = _account_table(conn)
     ts = time.time() if now is None else now
     for row in conn.execute("SELECT guild_id, user_id, pot FROM autoplay").fetchall():
         if row["pot"] > 0:
             gid, uid, pot = row["guild_id"], row["user_id"], row["pot"]
             cur = conn.execute(
-                "INSERT OR IGNORE INTO users (guild_id, user_id, balance, created_at) VALUES (?, ?, ?, ?)",
+                f"INSERT OR IGNORE INTO {tbl} (guild_id, user_id, balance, created_at) VALUES (?, ?, ?, ?)",
                 (gid, uid, INITIAL_BALANCE, ts),
             )
             if cur.rowcount:
@@ -385,16 +419,40 @@ def retire_autoplay(conn: sqlite3.Connection, now: float | None = None) -> None:
                     "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
                     (gid, uid, INITIAL_BALANCE, INITIAL_BALANCE, "初期支給", ts),
                 )
-            before = conn.execute("SELECT balance FROM users WHERE guild_id=? AND user_id=?", (gid, uid)).fetchone()[
+            before = conn.execute(f"SELECT balance FROM {tbl} WHERE guild_id=? AND user_id=?", (gid, uid)).fetchone()[
                 "balance"
             ]
             after = before + pot
-            conn.execute("UPDATE users SET balance=? WHERE guild_id=? AND user_id=?", (after, gid, uid))
+            conn.execute(f"UPDATE {tbl} SET balance=? WHERE guild_id=? AND user_id=?", (after, gid, uid))
             conn.execute(
                 "INSERT INTO ledger (guild_id, user_id, delta, balance_after, reason, ts) VALUES (?, ?, ?, ?, ?, ?)",
                 (gid, uid, pot, after, "自動プレイ精算", ts),
             )
     conn.execute("DROP TABLE autoplay")
+
+
+def _normalize_kyosai_v6(conn: sqlite3.Connection) -> None:
+    guilds = {
+        r["guild_id"]
+        for r in conn.execute("SELECT DISTINCT guild_id FROM kyosai_units WHERE units > 0").fetchall()
+    } | {
+        r["guild_id"]
+        for r in conn.execute("SELECT DISTINCT guild_id FROM kyosai_state WHERE house_units > 0").fetchall()
+    }
+    for gid in guilds:
+        house = conn.execute("SELECT house_units FROM kyosai_state WHERE guild_id=?", (gid,)).fetchone()
+        house_u = house["house_units"] if house else 0
+        rows = conn.execute("SELECT user_id, units FROM kyosai_units WHERE guild_id=? AND units>0", (gid,)).fetchall()
+        pairs = [(0, house_u), *((r["user_id"], r["units"]) for r in rows)]
+        if sum(u for _, u in pairs) in (0, kyosai.TOTAL_UNITS):
+            continue
+        new = kyosai.split(kyosai.TOTAL_UNITS, pairs)
+        conn.execute("UPDATE kyosai_state SET house_units=? WHERE guild_id=?", (new.get(0, 0), gid))
+        for r in rows:
+            conn.execute(
+                "UPDATE kyosai_units SET units=? WHERE guild_id=? AND user_id=?",
+                (new.get(r["user_id"], 0), gid, r["user_id"]),
+            )
 
 
 def normalize_kyosai_units(conn: sqlite3.Connection) -> None:
@@ -404,6 +462,10 @@ def normalize_kyosai_units(conn: sqlite3.Connection) -> None:
     総口数になるよう配り直す。すでに総口数のサーバーは何もしない。口の行がないサーバーは、口を持ってから
     （KyosaiRepo が帝愛の持ち口として総口数を用意する）。
     """
+    state_cols = {r["name"] for r in conn.execute("PRAGMA table_info(kyosai_state)")}
+    if "house_units" in state_cols:
+        _normalize_kyosai_v6(conn)
+        return
     for g in conn.execute(
         "SELECT guild_id, SUM(units) AS total FROM kyosai_units GROUP BY guild_id HAVING SUM(units) > 0"
     ).fetchall():

@@ -132,6 +132,7 @@ def test_play_state_without_summary_columns_is_upgraded(tmp_path):
         "best_streak INTEGER NOT NULL DEFAULT 0, day_streak INTEGER NOT NULL DEFAULT 0, streak_day TEXT, PRIMARY KEY (guild_id, user_id))"
     )
     e.db.conn.execute("INSERT INTO play_state VALUES (10, 1, 2, 5, 0, NULL)")
+    e.db.conn.execute("PRAGMA user_version = 0")
     e.db.conn.commit()
     e.db.conn.close()
     again = open_repositories(path, strict=True).for_guild(G)
@@ -258,7 +259,7 @@ def test_users_table_without_last_slot_is_upgraded_and_old_claim_counts_as_that_
     a = e.for_guild(G)
     day = dt.date(2026, 10, 30)
     a.wallet.claim_daily(U, day)  # 旧方式（1日1回）で受け取る
-    e.db.conn.execute("UPDATE users SET last_slot=NULL")  # 時間帯を記録する前の状態にする
+    e.db.conn.execute("UPDATE user_daily SET last_slot=NULL")  # 時間帯を記録する前の状態にする
     e.db.conn.commit()
     again = open_repositories(path, strict=True).for_guild(G)
     assert not again.wallet.claim_daily(U, day).ok  # 旧方式のままなら、同じ日は不可

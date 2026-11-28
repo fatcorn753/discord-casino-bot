@@ -225,6 +225,7 @@ def test_old_manual_event_table_gets_channel_id(tmp_path):
     c = sqlite3.connect(path)
     c.executescript("""DROP TABLE manual_event; CREATE TABLE manual_event (guild_id INTEGER PRIMARY KEY, game TEXT NOT NULL, boost INTEGER NOT NULL,
         starts REAL NOT NULL, ends REAL NOT NULL, ended INTEGER NOT NULL DEFAULT 0); INSERT INTO manual_event VALUES (0, 'ルーレット', 50, 0, 9e12, 0);""")
+    c.execute("PRAGMA user_version = 0")
     c.commit()
     c.close()
     assert must(open_repositories(path).events.manual_event_get(100))["channel_id"] == 0

@@ -5,7 +5,7 @@ domain/types.py は catalogs を読むため、ポート（domain/ports）から
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Generic, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Generic, NotRequired, TypedDict, TypeVar
 
 from .teiai import CdsRow
 
@@ -51,10 +51,10 @@ WeeklyRankEntry = tuple[int, int, int, int]
 
 
 class HouseAccount(TypedDict):
-    """帝愛の胴元の口座。"""
+    """帝愛物産（`/会社` の生産・出荷買取専用プール）。"""
 
     balance: int
-    skimmed: int  # これまでのピンハネの合計
+    skimmed: int  # 後方互換用の累計列（現在は未使用）
 
 
 class BankThermostat(TypedDict):
@@ -143,7 +143,7 @@ class HoldingBook(TypedDict, Generic[RowT]):
 
 
 class UserRow(TypedDict):
-    """ユーザーの口座（users 表の行）。"""
+    """ユーザーの口座・デイリー・成績・借金・破産の結合射影。"""
 
     guild_id: int
     user_id: int
@@ -157,6 +157,9 @@ class UserRow(TypedDict):
     created_at: float
     last_slot: int | None
     debt: int  # 帝愛からの借金（シニア債権）
+    debt_principal: int  # 借金の元本（利息の上限計算用）
+    grace_penalty: float  # 破産猶予ペナルティ
+    grace_penalty_at: float  # 最後に破産猶予に入った時刻
     bankrupt_at: float | None
     blacklist_until: float | None
 
@@ -168,6 +171,8 @@ class LedgerEntry(TypedDict):
     balance_after: int
     reason: str
     ts: float
+    kind: NotRequired[str]
+    counterparty_id: NotRequired[int | None]
 
 
 class PlaySummary(TypedDict):

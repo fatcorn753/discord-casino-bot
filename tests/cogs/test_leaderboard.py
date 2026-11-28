@@ -105,7 +105,6 @@ class FakeInteraction:
 
 
 def play_in_guild(eco, uid, guild_id=10):
-    eco.wallet.touch_guild_user(guild_id, uid)
     eco.wallet.balance(uid)
 
 
@@ -122,7 +121,7 @@ def test_build_embed_ranks_only_the_servers_members(eco):
     play_in_guild(eco, 2)
     e = ranking.build_embed(
         make_ranking_repos(eco),
-        eco.wallet.guild_user_ids(10),
+        {1, 2},
         "🏆 ペリカランキング",
         header="最終更新: x\n\n",
         footer="1分ごと",
@@ -283,7 +282,7 @@ def test_ranking_does_not_show_titles_to_keep_each_row_on_one_line(eco):
     eco.wallet.credit(1, 20_000, "テスト")
     assert eco.shop.purchase(1, it.id, shop.label(it), it.price, True).ok
     eco.shop.equip(1, "title", it.id)
-    e = ranking.build_embed(make_ranking_repos(eco), eco.wallet.guild_user_ids(10), "🏆 テスト")
+    e = ranking.build_embed(make_ranking_repos(eco), {1}, "🏆 テスト")
     assert "ざわ…ざわ…" not in must(e.description) and "<@1>　" in must(e.description)
 
 

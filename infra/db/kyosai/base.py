@@ -31,21 +31,40 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo):
         rows = self._all(
             "SELECT user_id, units FROM kyosai_units WHERE guild_id=? AND units>0 ORDER BY user_id", (guild_id,)
         )
-        return [(r["user_id"], r["units"]) for r in rows if with_house or r["user_id"] != kyosai.HOUSE]
+        players = [(r["user_id"], r["units"]) for r in rows]
+        if not with_house:
+            return players
+        house = self._scalar("SELECT house_units FROM kyosai_state WHERE guild_id=?", (guild_id,))
+        return [(kyosai.HOUSE, house), *players] if house and house > 0 else players
 
     def units_of_for(self, guild_id: int, user_id: int) -> int:
+        if user_id == kyosai.HOUSE:
+            v = self._scalar("SELECT house_units FROM kyosai_state WHERE guild_id=?", (guild_id,))
+            return v if v is not None else 0
         v = self._scalar("SELECT units FROM kyosai_units WHERE guild_id=? AND user_id=?", (guild_id, user_id))
         return v if v is not None else 0
 
     def _move_units_for(self, guild_id: int, src: int, dst: int, units: int, now: float) -> None:
-        self._conn.execute(
-            "UPDATE kyosai_units SET units=units-? WHERE guild_id=? AND user_id=?", (units, guild_id, src)
-        )
-        self._conn.execute(
-            "INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, ?) "
-            "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units",
-            (guild_id, dst, units),
-        )
+        if src == kyosai.HOUSE:
+            self._ensure_state_for(guild_id)
+            self._conn.execute(
+                "UPDATE kyosai_state SET house_units=house_units-? WHERE guild_id=?", (units, guild_id)
+            )
+        else:
+            self._conn.execute(
+                "UPDATE kyosai_units SET units=units-? WHERE guild_id=? AND user_id=?", (units, guild_id, src)
+            )
+        if dst == kyosai.HOUSE:
+            self._ensure_state_for(guild_id)
+            self._conn.execute(
+                "UPDATE kyosai_state SET house_units=house_units+? WHERE guild_id=?", (units, guild_id)
+            )
+        else:
+            self._conn.execute(
+                "INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=units+excluded.units",
+                (guild_id, dst, units),
+            )
 
     def recover_units_for(self, guild_id: int, user_id: int, now: float) -> int:
         """その人の口を、すべて帝愛の持ち口へ回収する（破産・休眠）。回収した口数を返す。"""
@@ -81,21 +100,26 @@ class KyosaiRepo(ScopedRepo, IKyosaiRepo):
             pulled += 1
         return pulled
 
+    def _ensure_state_for(self, guild_id: int) -> None:
+        self._conn.execute("INSERT OR IGNORE INTO kyosai_state (guild_id) VALUES (?)", (guild_id,))
+
     def bank_sync(self, guild_id: int, now: float) -> None:
-        self._bank.bank_sync_for(guild_id, now)  # 銀行の行を作っておく（kyosai_* の列がそこにある）
+        self._bank.bank_sync_for(guild_id, now)
+        self._ensure_state_for(guild_id)
         self._ensure_supply_for(guild_id)
 
     def _ensure_supply_for(self, guild_id: int) -> None:
         """口がまだ1つもないサーバーでは、総口数をすべて帝愛の持ち口として用意する（競りで売り出す。#93）。"""
-        total = self._scalar("SELECT COALESCE(SUM(units), 0) FROM kyosai_units WHERE guild_id=?", (guild_id,))
-        if total <= 0:
+        house = self._scalar("SELECT house_units FROM kyosai_state WHERE guild_id=?", (guild_id,)) or 0
+        circ = self._scalar("SELECT COALESCE(SUM(units), 0) FROM kyosai_units WHERE guild_id=?", (guild_id,)) or 0
+        if house + circ <= 0:
             self._conn.execute(
-                "INSERT INTO kyosai_units (guild_id, user_id, units) VALUES (?, ?, ?) "
-                "ON CONFLICT(guild_id, user_id) DO UPDATE SET units=excluded.units",
-                (guild_id, kyosai.HOUSE, kyosai.TOTAL_UNITS),
+                "UPDATE kyosai_state SET house_units=? WHERE guild_id=?", (kyosai.TOTAL_UNITS, guild_id)
             )
 
     def _gate_locked_for(self, guild_id: int, now: float) -> bool:
         theta = self._bank.bank_reserve_for(guild_id, now)[2]
-        debtors = self._scalar("SELECT COUNT(*) FROM users WHERE guild_id=? AND grace_until IS NOT NULL", (guild_id,))
+        debtors = self._scalar(
+            "SELECT COUNT(*) FROM teiai_grace WHERE guild_id=? AND grace_until IS NOT NULL", (guild_id,)
+        )
         return kyosai.gate_locked(theta, debtors)

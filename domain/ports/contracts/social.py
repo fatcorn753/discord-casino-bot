@@ -84,13 +84,12 @@ class QuizRow(TypedDict):
 
 
 class LaborRow(TypedDict):
-    """地下作業の状態（labor 表の行）。"""
+    """地下作業の状態（v4 で labor_* 7 表へ分離された内部結合ビューの型）。"""
 
     guild_id: int
     user_id: int
     pick: int
     glove: int
-    helmet: int
     fatigue: float
     fatigue_at: float
     pot: int
@@ -101,13 +100,8 @@ class LaborRow(TypedDict):
     day_earned: int
     day_click: int
     last_click: float
-    rest_until: float
     clicks: int
     earned_total: int
-    apprentice: int
-    miner: int
-    craftsman: int
-    foreman: int
     dorm: int
     idle_at: float
     renew: int
@@ -147,7 +141,6 @@ class LaborWorkerRow(TypedDict):
     user_id: int
     kind: str
     expires_at: float
-    legacy: int
 
 
 class ShopStockRow(TypedDict):
@@ -161,7 +154,7 @@ class ShopStockRow(TypedDict):
 
 
 class ProfileRow(TypedDict):
-    """プロフィール（profile 表の行）。"""
+    """プロフィール（v4 で user_equipment・user_buffs へ分離された集約ビューの型）。"""
 
     guild_id: int
     user_id: int
@@ -381,7 +374,7 @@ class QuizSettleRow(QuizView):
 
 
 class LaborState(TypedDict):
-    """地下作業のいまの状態（labor_state の返り値）。行がまだ無ければ guild_id・user_id・helmet・rest_until のキーは無い。"""
+    """地下作業のいまの状態（labor_state の返り値）。行がまだ無ければ guild_id・user_id のキーは無い。"""
 
     pick: int
     glove: int
@@ -422,8 +415,6 @@ class LaborState(TypedDict):
     crit_chance: float
     guild_id: NotRequired[int]
     user_id: NotRequired[int]
-    helmet: NotRequired[int]
-    rest_until: NotRequired[float]
 
 
 class LaborTop(TypedDict):

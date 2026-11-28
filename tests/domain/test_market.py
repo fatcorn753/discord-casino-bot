@@ -16,7 +16,7 @@ from domain import market
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import as_interaction, fake_response, invoke
-from tests.support import make_market_cog, make_test_bot
+from tests.support import make_market_cog, make_test_bot, set_test_debt
 
 pytestmark = pytest.mark.real_scope
 
@@ -511,6 +511,7 @@ def test_chart_posts_table_from_the_previous_version_is_upgraded(tmp_path):
         e.db.conn.execute("DROP TABLE chart_posts")
         e.db.conn.execute("CREATE TABLE chart_posts (channel_id INTEGER PRIMARY KEY, message_id INTEGER NOT NULL)")
         e.db.conn.execute("INSERT INTO chart_posts VALUES (5, 99)")
+        e.db.conn.execute("PRAGMA user_version = 0")
     e.db.conn.close()
     again = open_repositories(path, strict=True)
     row = again.market.live_chart_posts()[0]
@@ -555,7 +556,7 @@ def test_short_validation(eco):
     assert not a.margin.short_close(U, None, 100.0).ok  # 建てていない
     a.wallet.balance(U)
     with a.db.tx():
-        a.db.conn.execute("UPDATE users SET debt=100 WHERE user_id=?", (U,))
+        set_test_debt(a, U, 100, guild_id=G)
     assert a.margin.short_open(U, 10_000, 100.0, 1).reason.code == "margin_debt_blocks"  # 借金中は建てられない
 
 
@@ -584,7 +585,7 @@ def test_short_counts_in_ranking_and_payout_repays_debt(eco):
     set_price(eco, 90.0)
     assert {u: v for _, u, v in a.wallet.top(5)}[U] == INITIAL_BALANCE + 100
     with a.db.tx():
-        a.db.conn.execute("UPDATE users SET debt=300 WHERE user_id=?", (U,))  # 建てたあとに借金ができても
+        set_test_debt(a, U, 300, guild_id=G)  # 建てたあとに借金ができても
     a.margin.short_close(U, None, 90.0)  # 決済で戻るのは、もともと自分のお金なので、天引きされない
     assert a.debt.debt(U) == 300
     assert a.debt.repay_debt(U)[0] and a.debt.debt(U) == 0
@@ -770,9 +771,9 @@ def test_a_big_spot_gain_is_taxed_and_the_tax_goes_to_the_bank(eco):
     assert s.tax == market.capital_gains_tax(s.profit) > 0
     assert a.wallet.balance(U) == INITIAL_BALANCE + 500_000 - r.money + s.money  # 受け取りは、税を引いた額
     assert a.bank.deposit_of(2) == before_deposit  # 税は信託に配らない（#33。信託は決まった利息を受け取る）
-    assert a.bank.bank_status(time.time())["cash"] == pytest.approx(
-        cash0 + s.tax, abs=1.0
-    )  # 税は全額、帝愛銀行の手元へ
+    st = a.bank.bank_status(time.time())
+    assert st["cash"] == pytest.approx(cash0 + s.tax - st["thermostat"]["burned"], abs=1.0)
+    assert st["cash"] > cash0  # 税はサーモスタット経由で帝愛銀行の手元へ
     assert any(
         "キャピタルゲイン税" in x["reason"]
         for x in eco.db.conn.execute("SELECT reason FROM ledger WHERE user_id=?", (U,))

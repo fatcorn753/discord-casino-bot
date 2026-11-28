@@ -26,6 +26,13 @@ from domain.ports.repos import IBondRepo
 from infra.db.account import AccountCore
 from infra.db.base import EcoDb, ScopedRepo
 
+_SELECT_BOND = (
+    "SELECT b.id, b.guild_id, b.user_id, b.kind, b.principal, b.due, b.status, "
+    "b.paid, b.ts, c.checked_at AS checked, b.rate "
+    "FROM bonds b "
+    "LEFT JOIN bond_default_checks c ON c.bond_id = b.id"
+)
+
 
 class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
     """債券（元本を預かり、満期に利息つきで返す。ジャンク債は倒産することがある）。購入・満期の決着・解約。"""
@@ -112,7 +119,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         """保有中（満期が近い順）と、直近に決着したもの（新しい順）。"""
         with self._lock:
             rows: list[BondRow] = self._all(
-                "SELECT * FROM bonds WHERE guild_id=? AND user_id=? ORDER BY id", (self._g(), user_id)
+                f"{_SELECT_BOND} WHERE b.guild_id=? AND b.user_id=? ORDER BY b.id", (self._g(), user_id)
             )
         active = sorted((r for r in rows if r["status"] == "active"), key=lambda r: r["due"])
         done = [r for r in reversed(rows) if r["status"] != "active"][:recent]
@@ -127,7 +134,7 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
         with self._db.tx():
             gid = self._g()
             bond_rows: list[BondRow] = self._all(
-                "SELECT * FROM bonds WHERE guild_id=? AND status='active' ORDER BY id", (gid,)
+                f"{_SELECT_BOND} WHERE b.guild_id=? AND b.status='active' ORDER BY b.id", (gid,)
             )
             for row in bond_rows:
                 kind = bonds_mod.KINDS[row["kind"]]
@@ -140,7 +147,11 @@ class BondRepo(ScopedRepo, IBondRepo, IBondHoldings):
                     out.append({**row, "status": "defaulted", "paid": 0})
                     continue
                 if roll:
-                    self._conn.execute("UPDATE bonds SET checked=? WHERE id=?", (until, row["id"]))
+                    self._conn.execute(
+                        "INSERT INTO bond_default_checks (bond_id, checked_at) VALUES (?, ?) "
+                        "ON CONFLICT(bond_id) DO UPDATE SET checked_at=excluded.checked_at",
+                        (row["id"], until),
+                    )
                 if row["due"] > now:
                     continue
                 interest = max(0, bonds_mod.interest(kind, row["principal"], row["rate"]))

@@ -92,9 +92,11 @@ class TeiaiCatalogContract:
     relic_auction_hours: int
     seize_rate: float
     debt_rate_per_day: float
-    debt_interest_max_days: int
+    debt_interest_cap_mult: float
     grace_debt: int
     grace_hours: int
+    grace_penalty_half_life_days: float
+    grace_min_hours: float
     bank_min_deposit: int
     reserve_ratio: float
     loan_recovery_per_hour: float
