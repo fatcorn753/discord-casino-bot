@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from cogs.market.cog import MarketCog
+from cogs.market.embeds import option_target_text
 from domain import market, teiai
 from domain import options as opt
 from domain.types import INITIAL_BALANCE
@@ -309,3 +310,28 @@ def test_buy_amount_suggests_shares_of_the_balance_only_before_typing(eco):
     ]
     typed = asyncio.run(names("500"))  # 数字を打ち始めたら、割合の候補は出さない
     assert len(typed) == 1 and "500" in typed[0]
+
+
+# ----------------------------- 想定リターンの試算表示 ----------------------------- #
+def _target_text(kind, strike_pct, price=1000.0, cost=1000):
+    """option_target_text の表示。1枚（market.UNIT口）を cost ペリカで買ったとして試算する。"""
+    strike = opt.strike_for(kind, price, strike_pct)
+    return option_target_text(kind, market.BY_KEY["cs"], None, strike_pct, price, strike, market.UNIT, cost)
+
+
+def test_target_text_shows_positive_returns_with_strike_sized_moves_when_target_is_at_least_20pct():
+    for kind, s in ((opt.CALL, 1), (opt.PUT, -1)):
+        for strike_pct in (0.20, 0.25, opt.MAX_TARGET_PCT / 100):
+            lines = [ln for ln in _target_text(kind, strike_pct).splitlines() if "想定リターン" in ln]
+            moves = (round(strike_pct + 0.05, 2), round(strike_pct + 0.15, 2))
+            assert len(lines) == 2
+            for line, move in zip(lines, moves, strict=True):
+                assert f"{s * move * 100:+.0f}%" in line  # 目標割合を上回る変動幅が表示される
+                assert "約 0ペリカ" not in line  # 行使価格を超えるので、想定リターンは 0 より大きい
+
+
+def test_target_text_keeps_the_traditional_10_and_20_pct_moves_below_20pct():
+    call_text = _target_text(opt.CALL, 0.10)
+    assert "+10%" in call_text and "+20%" in call_text and "+30%" not in call_text
+    put_text = _target_text(opt.PUT, 0.10)
+    assert "-10%" in put_text and "-20%" in put_text and "+10%" not in put_text

@@ -432,7 +432,9 @@ def option_target_text(
         f"勝利条件: **{opt.OPTION_HOURS}時間後**の価格が **{market.fmt(strike)}**（現在 {market.fmt(price)} の "
         f"{sign * strike_pct * 100:+.1f}%）を{'超える' if kind == opt.CALL else '下回る'}こと"
     ]
-    for move in (0.10, 0.20):
+    # 目標割合が 20% 以上のときは、行使価格を超える変動幅で試算する（±10%/±20% だとリターンが 0 になるため）
+    moves = (0.10, 0.20) if strike_pct < 0.20 else (round(strike_pct + 0.05, 2), round(strike_pct + 0.15, 2))
+    for move in moves:
         final = price * (1 + sign * move)
         pay = min(opt.intrinsic(kind, units, final, strike), cost * opt.PAYOUT_CAP_MULT)
         lines.append(f"想定リターン: 価格が {sign * move * 100:+.0f}% で **約 {pay:,}ペリカ（{pay / cost:.1f}倍）**")
