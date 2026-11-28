@@ -125,19 +125,22 @@ def test_spin_frames_show_the_cues_and_end_on_the_reels():
     seen_surprise = seen_reach_miss = False
     for _ in range(3000):
         s = pachinko.roll_spin(rng)
-        frames = play_pa.spin_frames(rng, s, "3回転目")
-        last = frames[-1].text.splitlines()[-1]
-        assert last.startswith("┃") and last.endswith("┃")  # 最後のコマは、出目
+        if not s.hit and not s.tier:
+            continue  # リーチのないハズレは、演出しない
+        staging = play_pa.staging_for(rng, s)
+        frames = play_pa.spin_frames(rng, s, "3回転目", staging)
+        reels = reels_of(frames[-1])
+        assert reels is not None and play_pa.SPINNING not in reels  # 最後のコマは、出目
         assert all(f.mood in {"normal", "blue", "red", "gold"} for f in frames) and len(frames) <= 20
-        if s.omen:
-            assert any(f.mood == s.omen for f in frames)
-        reels = [x.strip() for x in last.strip("┃").split("┃")]
+        if staging.omen:
+            assert any(f.mood == staging.omen for f in frames)
         assert (len(set(reels)) == 1) == s.hit  # 当たりのときだけ3つ揃う
-        if s.hit and not s.tier:
+        if s.hit and not staging.tier:
             seen_surprise = True
-            assert any("フリーズ" in f.text for f in frames)
-        if not s.hit and s.tier:
+            assert any("まさか" in f.text for f in frames)
+        if not s.hit:
             seen_reach_miss = True
+            assert reels[0] == reels[1] != reels[2] and "ハズレ" in frames[-1].text  # 外れたリーチは「あと一歩」
     assert seen_surprise and seen_reach_miss
 
 
@@ -167,16 +170,25 @@ def test_hit_spins_returns_only_the_hits_with_their_position():
 def test_higher_omen_has_more_steps_and_higher_tier_has_longer_staging():
     rng = random.Random(9)
     n = {
-        o: len([f for f in play_pa.spin_frames(rng, pachinko.SpinInfo(o, "", True, (2,), 0.1)) if "【予告】" in f.text])
+        o: len(
+            [
+                f
+                for f in play_pa.spin_frames(rng, pachinko.SpinInfo(o, "", True, (2,), 0.1), "", play_pa.Staging(o, ""))
+                if "【予告】" in f.text
+            ]
+        )
         for o in ("", "blue", "red", "gold")
     }
     assert n == {"": 0, "blue": 1, "red": 2, "gold": 3}  # 予告は、色が高いほどステップが増える
     size = [
-        min(len(play_pa.spin_frames(rng, pachinko.SpinInfo("", t, True, (10,), 0.5))) for _ in range(200))
+        min(
+            len(play_pa.spin_frames(rng, pachinko.SpinInfo("", t, True, (10,), 0.5), "", play_pa.Staging("", t)))
+            for _ in range(200)
+        )
         for t in ("", pachinko.NORMAL, pachinko.SUPER, pachinko.PREMIUM)
     ]
     assert size == sorted(size) and size[-1] > size[0]  # 格が高いほど、長く見せる（最短どうしで比べる）
-    last = play_pa.spin_frames(rng, pachinko.SpinInfo("gold", pachinko.PREMIUM, True, (30,), 0.5))[-1]
+    last = play_pa.spin_frames(rng, pachinko.SpinInfo("gold", pachinko.PREMIUM, True, (30,) * 3, 0.5))[-1]
     assert last.mood == "normal" and "当たり" not in last.text  # 出目のコマでは、当たりを宣言しない
 
 
@@ -196,13 +208,27 @@ def reel_frames(frames):
     return [f for f in frames if REEL in f.text or "🌀" in f.text]
 
 
-def test_a_set_with_no_hit_shows_no_reels_even_if_a_reach_missed():
+def test_a_set_with_no_hit_shows_the_missed_reach_as_a_fake_out():
     rng = random.Random(1)
     frames = play_pa.single_frames(rng, make_result([MISS, REACH_MISS, MISS]))
-    assert reel_frames(frames) == [] and len(frames) == 4  # 打ち出し2 + 入賞 + まとめ1
+    assert any("2回転目" in f.text for f in frames) and any(
+        "**リーチ！**" in f.text for f in frames
+    )  # ガセも同じ流れで見せる
+    stop = reels_of(frames[-2])
     assert (
-        "すべてハズレ" in frames[-1].text and "リーチが **1回**" in frames[-1].text
-    )  # 外れたリーチは、文字で触れるだけ
+        stop is not None and "ハズレ" in frames[-2].text and stop[0] == stop[1] != stop[2]
+    )  # 外れたリーチは「あと一歩」
+    assert not any("プレミアムリーチ" in f.text or "全回転" in f.text for f in frames)  # 金とプレミアムは当たり専用
+    assert "すべてハズレ" in frames[-1].text and "リーチが **1回**" in frames[-1].text
+    assert not any("当たり" in f.text or "🎉" in f.text for f in frames)
+
+
+def test_fake_outs_are_limited_per_set():
+    rng = random.Random(2)
+    miss = pachinko.SpinInfo("red", pachinko.SUPER, False, (), 0.1)
+    frames = play_pa.single_frames(rng, make_result([miss] * 6))
+    staged = {line for f in frames for line in f.text.splitlines() if line.endswith("回転目**")}
+    assert len(staged) == play_pa.SHOWN_MISSES and "リーチが **6回**" in frames[-1].text
 
 
 def test_a_set_with_no_start_stops_after_the_ball_frames():
@@ -243,28 +269,77 @@ def test_consecutive_hits_are_all_staged_in_full_within_the_budget():
 
 def test_hits_beyond_the_frame_budget_are_counted():
     rng = random.Random(3)
-    big = pachinko.SpinInfo("gold", pachinko.PREMIUM, True, (2,), 0.5)
+    big = pachinko.SpinInfo("gold", pachinko.PREMIUM, True, (30,), 0.5)  # 出玉が大きいほど演出が長く、上限に届く
     frames = play_pa.single_frames(rng, make_result([big] * 6))
     assert "さらに、大当たりが" in frames[-1].text and len(frames) <= play_pa.FRAME_BUDGET + 20
 
 
-def test_reveal_frames_show_big_counters_milestones_and_a_finish():
+def test_reveal_frames_hide_the_chain_count_until_it_ends():
     spin = pachinko.SpinInfo("", "", True, (2,) * 8, 0.1)
-    frames = play_pa.reveal_frames(spin)
+    frames = play_pa.reveal_frames(spin, rng=random.Random(1))
     texts = [f.text for f in frames]
-    assert "8連" in texts[0] and "# 🔥 1連目" in texts[1]  # 連チャン数は、大きく出す
+    assert "連" not in texts[0]  # 宣言では、続くかどうかも、何連になるかも、まだ出さない
+    assert "# 🔥 1連目" in texts[1] and "継続！ 2連目" in texts[3]
     assert any("5連 達成" in t for t in texts)  # 5連は節目
-    assert any("8連チャン" in t for t in texts[-3:-1])  # 表示しきれない分は、まとめて突破表示
+    assert any("8連チャン" in t for t in texts[-2:])  # 表示しきれない分は、終わりにまとめて出す
     assert "連チャン終了" in texts[-1] and "+16倍" in texts[-1] and "好調" in texts[-1]
-    short = play_pa.reveal_frames(pachinko.SpinInfo("", "", True, (10,), 0.1))
-    assert len(short) == 3 and "大当たり" in short[0].text and "好調" in short[-1].text  # 宣言 + 1連目 + 終了
-    assert not any("達成" in f.text for f in short)
+    first_count = min(i for i, t in enumerate(texts) if "8連" in t)
+    assert first_count >= len(texts) - 2
+    one, two = (
+        play_pa.reveal_frames(pachinko.SpinInfo("", "", True, r, 0.1), rng=random.Random(1)) for r in ((10,), (10, 2))
+    )
+    assert [f.text.splitlines()[-1] for f in one[:3]] != [] and len(one) == 4  # 宣言 + 1連目 + 継続待ち + 終了
+    assert one[2].mood == two[2].mood and "継続" not in one[-1].text.splitlines()[0]  # 最後の1回も、同じように待つ
+    assert "大当たり" in one[0].text and "好調" in one[-1].text and not any("達成" in f.text for f in one)
     huge = play_pa.reveal_frames(pachinko.SpinInfo("", "", True, (30,) * 8, 0.1))
-    assert (
-        "（上限）" not in huge[-1].text and "+240倍" in huge[-1].text and "伝説級" in huge[-1].text
-    )  # 200倍を超えても、そのまま出る
-    assert len(play_pa.reveal_frames(pachinko.SpinInfo("", "", True, (2,) * 25, 0.1))) <= 11
-    assert any("20連 突破" in f.text for f in play_pa.reveal_frames(pachinko.SpinInfo("", "", True, (2,) * 25, 0.1)))
+    assert "+240倍" in huge[-1].text and "伝説級" in huge[-1].text  # 200倍を超えても、そのまま出る
+    long = play_pa.reveal_frames(pachinko.SpinInfo("", "", True, (2,) * 25, 0.1))
+    assert len(long) <= 2 * play_pa.SHOWN_ROUNDS + 3 and any("20連 突破" in f.text for f in long)
+
+
+def test_reveal_colors_follow_the_size_of_the_win():
+    small = play_pa.reveal_frames(pachinko.SpinInfo("", "", True, (2,), 0.1), rng=random.Random(1))
+    big = play_pa.reveal_frames(pachinko.SpinInfo("", "", True, (30, 10), 0.1), rng=random.Random(1))
+    assert small[0].mood == "blue" and small[-1].mood == "blue"  # 2倍を金色で飾らない
+    assert big[0].mood == "gold" and big[-1].mood == "gold"
+
+
+def test_staging_grows_with_this_hit_and_ignores_the_chain_yet_to_come():
+    rng = random.Random(11)
+    rank = {"": 0, "blue": 1, "red": 2, "gold": 3, pachinko.NORMAL: 1, pachinko.SUPER: 2, pachinko.PREMIUM: 3}
+
+    def mean(raw, key):
+        spins = [
+            play_pa.staging_for(rng, pachinko.SpinInfo("gold", pachinko.PREMIUM, True, (raw,), 0.5)) for _ in range(400)
+        ]
+        return sum(rank[getattr(s, key)] for s in spins) / len(spins)
+
+    for key in ("omen", "tier"):
+        assert mean(2, key) < mean(10, key) < mean(30, key)  # 抽選の演出が派手でも、今回の当たりの出玉に合わせる
+    for _ in range(300):
+        small = play_pa.staging_for(rng, pachinko.SpinInfo("gold", pachinko.PREMIUM, True, (2,), 0.5))
+        assert small.omen != "gold" and small.tier != pachinko.PREMIUM  # 2倍に、金予告やプレミアムは出ない
+    miss = play_pa.staging_for(rng, pachinko.SpinInfo("gold", pachinko.PREMIUM, False, (), 0.5))
+    assert miss == play_pa.Staging(
+        "gold", pachinko.SUPER
+    )  # ガセにも金は出る（金で当たりを確定させない）。プレミアムは当たり専用
+    # 同じ当たりなら、あとの連チャンが何連になっても、リーチの時点の演出は同じ
+    for rounds in ((10,), (10, 30, 30, 30)):
+        seen = {play_pa.staging_for(random.Random(3), pachinko.SpinInfo("", "", True, rounds, 0.5))}
+        assert seen == {play_pa.staging_for(random.Random(3), pachinko.SpinInfo("", "", True, (10,), 0.5))}
+
+
+def test_pseudo_chain_never_shows_the_total_in_advance():
+    rng = random.Random(12)
+    for _ in range(200):
+        text = "\n".join(
+            f.text
+            for f in play_pa.spin_frames(rng, hit_spin(pachinko.PREMIUM), "", play_pa.Staging("", pachinko.PREMIUM))
+        )
+        labels = [line for line in text.splitlines() if "擬似連" in line]
+        assert labels and all("/" not in line for line in labels)  # 「擬似連 1/3」のように、合計を出さない
+        numbers = [int(line.split("擬似連 ")[1].split("*")[0]) for line in labels]
+        assert numbers == list(range(2, 2 + len(numbers)))  # 擬似2 → 擬似3 … と1段ずつ上がる
 
 
 def test_multi_set_stages_hit_sets_before_their_table_line():
@@ -312,7 +387,9 @@ def test_reels_follow_the_rules_of_a_real_machine_in_every_script():
         for omen in ("", "blue", "red", "gold"):
             for rounds in ((2,), (10,), (30, 2)):
                 for _ in range(150):
-                    frames = play_pa.spin_frames(rng, hit_spin(tier, omen, rounds), "3回転目")
+                    frames = play_pa.spin_frames(
+                        rng, hit_spin(tier, omen, rounds), "3回転目", play_pa.Staging(omen, tier)
+                    )
                     reels = [reels_of(f) for f in frames]
                     last = reels[-1]
                     assert last is not None and len(set(last)) == 1 and play_pa.SPINNING not in last  # 最後は、3つ揃い
@@ -352,7 +429,10 @@ def test_the_script_is_chosen_per_spin_not_every_cue_every_time():
     rng = random.Random(8)
 
     def texts(tier, n=400):
-        return ["\n".join(f.text for f in play_pa.spin_frames(rng, hit_spin(tier), "1回転目")) for _ in range(n)]
+        return [
+            "\n".join(f.text for f in play_pa.spin_frames(rng, hit_spin(tier), "1回転目", play_pa.Staging("", tier)))
+            for _ in range(n)
+        ]
 
     normal, superr, premium = texts(pachinko.NORMAL), texts(pachinko.SUPER), texts(pachinko.PREMIUM)
     assert not any("カットイン" in t or "擬似連" in t or "全回転" in t for t in normal)  # ノーマルは、控えめ
@@ -379,7 +459,11 @@ def test_pseudo_chain_counts_do_not_depend_on_the_result():
         for _ in range(300):
             spin = pachinko.SpinInfo("", pachinko.SUPER, hit, (10,) if hit else (), 0.2)
             counts[hit].add(
-                sum(1 for f in play_pa.spin_frames(rng, spin) if "擬似連" in f.text and "再回転" not in f.text)
+                sum(
+                    1
+                    for f in play_pa.spin_frames(rng, spin, "", play_pa.Staging("", pachinko.SUPER))
+                    if "擬似連" in f.text and "再回転" not in f.text
+                )
             )
     assert counts[True] == counts[False] == {0, 1, 2}  # 回数は、当たり外れと無関係
 
@@ -390,7 +474,10 @@ def test_revival_scene_appears_only_in_hits_with_a_reach_and_more_often_for_high
     def share(tier, n=1500):
         return (
             sum(
-                "外れた" in "\n".join(f.text for f in play_pa.spin_frames(rng, hit_spin(tier), "1回転目"))
+                "外れた"
+                in "\n".join(
+                    f.text for f in play_pa.spin_frames(rng, hit_spin(tier), "1回転目", play_pa.Staging("", tier))
+                )
                 for _ in range(n)
             )
             / n
@@ -406,7 +493,7 @@ def test_revival_scene_appears_only_in_hits_with_a_reach_and_more_often_for_high
     )
     lines = set()
     for _ in range(600):
-        for f in play_pa.spin_frames(rng, hit_spin(pachinko.PREMIUM), "1回転目"):
+        for f in play_pa.spin_frames(rng, hit_spin(pachinko.PREMIUM), "1回転目", play_pa.Staging("", pachinko.PREMIUM)):
             lines.update(t for t, _ in play_pa.REVIVE_TEXT if f"**{t}**" in f.text)
     assert {"それでも!!!", "と、思っていたのか"} <= lines  # 台詞は、回ごとに選ぶ
 
@@ -419,3 +506,11 @@ def test_a_miss_never_gets_a_revival_scene():
             continue
         text = "\n".join(f.text for f in play_pa.single_frames(rng, result))
         assert "…**外れた**…" not in text and "復活" not in text
+
+
+def test_small_wins_never_get_the_revival_scene():
+    rng = random.Random(13)
+    for tier in (pachinko.NORMAL, pachinko.SUPER, pachinko.PREMIUM):
+        for _ in range(300):
+            frames = play_pa.spin_frames(rng, hit_spin(tier, rounds=(2,)), "", play_pa.Staging("", tier))
+            assert not any("復活" in f.text for f in frames)  # 2倍の当たりを、復活で大げさに見せない

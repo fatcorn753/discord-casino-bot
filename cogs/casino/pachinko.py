@@ -24,6 +24,9 @@ from cogs.casino.texts import (
     PACHINKO_BANNER as BANNER,
 )
 from cogs.casino.texts import (
+    PACHINKO_CHAIN_WAIT as CHAIN_WAIT,
+)
+from cogs.casino.texts import (
     PACHINKO_CUTIN as CUTIN,
 )
 from cogs.casino.texts import (
@@ -36,6 +39,12 @@ from cogs.casino.texts import (
     PACHINKO_FRAME_BUDGET as FRAME_BUDGET,
 )
 from cogs.casino.texts import (
+    PACHINKO_GRADES as GRADES,
+)
+from cogs.casino.texts import (
+    PACHINKO_MULTI_SHOWN_MISSES as MULTI_SHOWN_MISSES,
+)
+from cogs.casino.texts import (
     PACHINKO_NORMAL_WHISPERS as NORMAL_WHISPERS,
 )
 from cogs.casino.texts import (
@@ -46,6 +55,9 @@ from cogs.casino.texts import (
 )
 from cogs.casino.texts import (
     PACHINKO_REVIVE_TEXT as REVIVE_TEXT,
+)
+from cogs.casino.texts import (
+    PACHINKO_SHOWN_MISSES as SHOWN_MISSES,
 )
 from cogs.casino.texts import (
     PACHINKO_SHOWN_ROUNDS as SHOWN_ROUNDS,
@@ -133,15 +145,45 @@ def _text_frame(head: str, reels: tuple, text: str = "", mood: str = "normal") -
     return Frame(head + reel_line(*reels) + (f"\n{text}" if text else ""), mood)
 
 
-def _pseudo_cycles(rng: random.Random, count: int) -> list:
-    """擬似連: 止まったように見えて、揺れて、再び回り出す。count 回ぶん。止まったように見えるコマは、3つとも違う絵柄にする。"""
+@dataclass(frozen=True)
+class Staging:
+    """見せる演出の格。抽選の omen / tier（当たる確率と統計用）とは別に、表示のためだけに決める。"""
+
+    omen: str  # 予告の色（なしなら ""）
+    tier: str  # リーチの格（なしなら ""）
+
+
+# 外れるリーチ（ガセ）では、プレミアムリーチを出さない（実機の全回転と同じ確定演出）
+_CAP_TIER = {pachinko.PREMIUM: pachinko.SUPER}
+REVIVE_MIN = 10  # 復活演出を見せる、今回の当たり（1ラウンド目）の出玉の下限
+
+
+def grade_of(mult: int) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """今回の当たりの出玉に合う、予告の色とリーチの格の候補。"""
+    return next((omens, tiers) for floor, omens, tiers in GRADES if mult >= floor)
+
+
+def staging_for(rng: random.Random, spin: pachinko.SpinInfo) -> Staging:
+    """当たりは今回の当たり（1ラウンド目）の出玉に比例した格で、外れるリーチは抽選どおりの格（プレミアムは使わない）で見せる。
+    連チャンの継続はこのあとの抽選として見せるので、リーチの時点の演出には混ぜない（まだ起きていないことを先に匂わせない）。"""
+    if not spin.hit:
+        return Staging(spin.omen, _CAP_TIER.get(spin.tier, spin.tier))
+    omens, tiers = grade_of(spin.rounds[0])
+    return Staging(rng.choice(omens), rng.choice(tiers))
+
+
+def _pseudo_cycles(rng: random.Random, count: int, top_mood: str = "red") -> list:
+    """擬似連: 止まったように見えて、揺れて、再び回り出す。count 回ぶん。止まったように見えるコマは、3つとも違う絵柄にする。
+    合計の回数は先に出さず、「擬似連 2 → 擬似連 3 …」と1段ずつ上げる。2段目からの色は、リーチの格の色（top_mood）にする。"""
     frames = []
     for k in range(1, count + 1):
-        label = "**擬似連！**" if count == 1 else f"**擬似連 {k}/{count}**"
-        mood = "gold" if count > 1 and k == count else "red"
+        mood = "red" if k == 1 else top_mood
         frames.append(
             _text_frame(
-                "", tuple(rng.sample(pachinko.REEL_SYMBOLS, 3)), f"…止まった…？ いや、揺れている…！ {label}", mood
+                "",
+                tuple(rng.sample(pachinko.REEL_SYMBOLS, 3)),
+                f"…止まった…？ いや、揺れている…！ **擬似連 {k + 1}**",
+                mood,
             )
         )
         frames.append(_text_frame("", (SPINNING,) * 3, "再回転！", mood))
@@ -161,12 +203,14 @@ def _revive_frames(rng: random.Random, sym: str, full: bool = False) -> list:
     ]
 
 
-def spin_frames(rng: random.Random, spin: pachinko.SpinInfo, label: str = "") -> list:
-    """当たった1回転の演出のコマ。予告 → 回転 →（擬似連）→ 左右が止まってリーチ → 発展 → 出目（3つ揃い）の順。"""
+def spin_frames(rng: random.Random, spin: pachinko.SpinInfo, label: str = "", staging: Staging | None = None) -> list:
+    """1回転の演出のコマ。予告 → 回転 →（擬似連）→ 左右が止まってリーチ → 発展 → 出目 の順。
+    当たりなら3つ揃い、外れるリーチなら最後に3つ目がずれて止まる。どちらも、出目のコマまでは同じ流れで見せる。"""
+    staging = staging or staging_for(rng, spin)
     first = spin.rounds[0] if spin.rounds else 0
-    reels = pachinko.pick_reels(first, spin.tier, rng)
+    omen, tier = staging.omen, staging.tier
+    reels = pachinko.pick_reels(first, tier, rng)
     sym = reels[0]
-    omen, tier = spin.omen, spin.tier
     head = f"**{label}**\n" if label else ""
     frames = []
     for k in range(STEPS_OF.get(omen, 0)):  # ① 予告のステップアップ: 色が高いほど、段が多い
@@ -174,19 +218,20 @@ def spin_frames(rng: random.Random, spin: pachinko.SpinInfo, label: str = "") ->
         text = f"**【予告】** {OMEN_TEXT[omen]}" if k + 1 == STEPS_OF[omen] else f"**【予告】** {STEP_TEXT[k]}"
         frames.append(Frame((head if k == 0 else "") + hold_row(STEP_ICON[k]) + "\n" + text, mood))
     frames.append(_text_frame(head if not omen else "", (SPINNING,) * 3, "回転中…"))  # ② 回転
-    if not tier:  # リーチなしで、突然3つ揃う「サプライズ当たり」。揃う直前まで、3つとも回っている
+    # リーチなしで、突然3つ揃う「サプライズ当たり」（出玉の小さい当たりだけ）。揃う直前まで、3つとも回っている
+    if not tier:
         frames.append(_text_frame("", (SPINNING,) * 3, "…！？ **まさか…**", omen or "normal"))
-        frames.append(_text_frame("💫 **フリーズ！！** 💫\n", (SPINNING,) * 3, "画面が固まった…！！", "gold"))
         frames.append(_text_frame(head, reels))
         return frames
     mood = {pachinko.NORMAL: "blue", pachinko.SUPER: "red", pachinko.PREMIUM: "gold"}[tier]
     pseudo = rng.choice(pachinko.PSEUDO_COUNTS.get(tier, [0]))
-    frames += _pseudo_cycles(rng, pseudo)  # ③ 擬似連（あれば）。そのあと、あらためて左右が止まる
+    frames += _pseudo_cycles(rng, pseudo, mood)  # ③ 擬似連（あれば）。そのあと、あらためて左右が止まる
     frames.append(_text_frame("", (sym, SPINNING, SPINNING)))
     frames.append(
         _text_frame("", (sym, sym, SPINNING), "**リーチ！**", "blue")
     )  # ④ リーチ。ここから出目が決まるまで、左右は変えない
-    revive = rng.random() < pachinko.REVIVE_CHANCE[tier]
+    # 復活は派手なので、今回の当たりが大当たり（10倍）以上のときだけ
+    revive = spin.hit and spin.rounds[0] >= REVIVE_MIN and rng.random() < pachinko.REVIVE_CHANCE[tier]
     title, sub = rng.choice(STORIES[tier])
     if tier == pachinko.NORMAL:
         frames.append(_text_frame(f"{title}\n", (sym, sym, SPINNING), sub, mood))
@@ -209,31 +254,45 @@ def spin_frames(rng: random.Random, spin: pachinko.SpinInfo, label: str = "") ->
             )  # 全回転のあとは、すぐ出目
         else:
             frames.append(_text_frame("⚡ スローになった… ⚡\n", (sym, sym, SPINNING), "…ここで決まる…！", mood))
+    if not spin.hit:  # ⑤ 外れ: 3つ目がずれて止まる
+        frames.append(_text_frame(head, reels, "…**ハズレ**…"))
+        return frames
     frames.append(_text_frame(head, reels))  # ⑤ 出目（3つ揃い）。揃ったら、演出はここで終わる
     return frames
 
 
-def reveal_frames(spin: pachinko.SpinInfo, limit: int = SHOWN_ROUNDS, skin=None) -> list:
-    """演出が終わったあとに出す、当たりの宣言 → 連チャン（数を大きく、5連で節目）→ 終了のまとめ。"""
-    n, top = len(spin.rounds), max(spin.rounds)
-    frames, total = (
-        [Frame(f"{banner_for(top, skin) or '# 🎉 当たり！！ 🎉'}\n**{n}連** スタート！", "gold")],
-        0,
-    )
-    for k, r in enumerate(spin.rounds[:limit], start=1):
+def _size_mood(mult: int) -> str:
+    """出玉の大きさに合わせた色合い（小さい当たりを、大きい当たりと同じ金色で飾らない）。"""
+    return "gold" if mult >= 30 else ("red" if mult >= 10 else "blue")
+
+
+def reveal_frames(
+    spin: pachinko.SpinInfo, limit: int = SHOWN_ROUNDS, skin=None, rng: random.Random | None = None
+) -> list:
+    """演出が終わったあとに出す、当たりの宣言 → 連チャン → 終了のまとめ。
+    見ている人はいまのコマしか知らない前提で作る: 続くかどうか・何連になるかは、そのときが来るまで出さない。1ラウンドごとに「継続…？」を挟み、続いたか終わったかを、そのあとで見せる。"""
+    rng = rng or RNG
+    rounds = spin.rounds
+    n, first = len(rounds), rounds[0]
+    frames = [Frame(banner_for(first, skin) or "# 🎉 当たり！！ 🎉", _size_mood(first))]
+    total = 0
+    for k, r in enumerate(rounds[:limit], start=1):
         total += r
+        head = "# 🔥 1連目 🔥" if k == 1 else f"# 🔥 継続！ {k}連目 🔥"
+        text = f"{head}\n{pachinko.ROUND_NAME[r]}！ 出玉 **+{r}倍**\n累計 **+{total}倍**"
+        if k == 5:
+            text += "\n🎆 **5連 達成！！** 🎆"
+        frames.append(Frame(text, _size_mood(r)))
         frames.append(
-            Frame(f"# 🔥 {k}連目 🔥\n{pachinko.ROUND_NAME[r]}！ 出玉 **+{r}倍**\n累計 **+{total}倍**", "gold")
-        )
-        if k == 5 and n > 5:
-            frames.append(Frame(f"# 🎆 5連 達成！！ 🎆\n累計 **+{total}倍**　まだ止まらない…！", "gold"))
+            Frame(f"累計 **+{total}倍**\n{rng.choice(CHAIN_WAIT)}", "red")
+        )  # 毎回待つ（待ちの有無で、続くかを先に教えない）
     if n > limit:
         title = "20連 突破！！！" if n >= 20 else ("10連 突破！！" if n >= 10 else f"{n}連チャン！！")
         frames.append(Frame(f"# 🎆🎆 {title} 🎆🎆\n合計 **{n}連**　累計 **+{spin.raw}倍**", "gold"))
     frames.append(
         Frame(
             f"✨ **連チャン終了** ✨\n**{n}連**　出玉 **+{spin.raw}倍**\n{rank_of(spin.raw)}",
-            "gold",
+            _size_mood(spin.raw),
         )
     )
     return frames
@@ -241,12 +300,18 @@ def reveal_frames(spin: pachinko.SpinInfo, limit: int = SHOWN_ROUNDS, skin=None)
 
 def hit_scene(rng: random.Random, spin: pachinko.SpinInfo, label: str, skin=None) -> list:
     """当たりの1場面: 演出をじっくり → そのあとに当たりを宣言。"""
-    return spin_frames(rng, spin, label) + reveal_frames(spin, skin=skin)
+    return spin_frames(rng, spin, label) + reveal_frames(spin, skin=skin, rng=rng)
+
+
+def reach_misses(rng: random.Random, spins, limit: int) -> list[tuple[int, pachinko.SpinInfo]]:
+    """外れたリーチ（ガセ）のうち、見せるものを limit 回まで選び、(何回転目か, 回転) を回転の順に返す。"""
+    misses = [(i, s) for i, s in enumerate(spins, start=1) if s.tier and not s.hit]
+    return sorted(rng.sample(misses, min(limit, len(misses))), key=lambda x: x[0])
 
 
 def single_frames(rng: random.Random, result: pachinko.SetResult, skin=None) -> list:
-    """1セットの演出のコマ。**当たった回転だけ**を、予告・リーチ・リール・連チャンまでじっくり見せる。
-    当たりの宣言は演出のあと。ハズレの回転は数字でまとめる。連続する当たりも、上限まではそのまま見せる。"""
+    """1セットの演出のコマ。当たった回転と、外れたリーチの一部（ガセ）を、予告・リーチ・リールまで同じ流れで見せる。
+    リーチが出ても、当たりとは限らない。当たりの宣言は演出のあと。ほかのハズレの回転は数字でまとめる。"""
     frames = [Frame(f, "normal") for f in ball_frames(rng, rows=2, balls=pachinko.BALLS_PER_SET)]
     frames.append(
         Frame(
@@ -257,6 +322,30 @@ def single_frames(rng: random.Random, result: pachinko.SetResult, skin=None) -> 
     if not result.starts:
         return frames
     hits = pachinko.hit_spins(result.spins)
+    scenes: dict[int, list] = {}
+    used = len(frames) + 1  # 最後のまとめの分
+    for index, spin in hits:  # 当たりを先に、回転の順でコマの上限まで確保する
+        scene = hit_scene(rng, spin, f"{index}回転目", skin)
+        if scenes and used + len(scene) > FRAME_BUDGET:
+            break
+        scenes[index] = scene
+        used += len(scene)
+    shown_hits = len(scenes)
+    # 省いた当たりより後ろのガセは、順番が崩れるので見せない
+    last_hit = max(scenes) if shown_hits < len(hits) else result.starts
+    for index, spin in reach_misses(rng, result.spins, SHOWN_MISSES):  # 残りのコマで、ガセを混ぜる
+        scene = spin_frames(rng, spin, f"{index}回転目")
+        if index > last_hit or used + len(scene) > FRAME_BUDGET:
+            continue
+        scenes[index] = scene
+        used += len(scene)
+    previous = 0
+    for index in sorted(scenes):
+        gap = index - 1 - previous
+        if gap > 0:
+            frames.append(Frame(f"…{gap}回転 経過…"))
+        frames += scenes[index]
+        previous = index
     if not hits:
         reach = sum(1 for s in result.spins if s.tier)
         frames.append(
@@ -266,21 +355,11 @@ def single_frames(rng: random.Random, result: pachinko.SetResult, skin=None) -> 
             )
         )
         return frames
-    previous, shown = 0, 0
-    for index, spin in hits:
-        scene = hit_scene(rng, spin, f"{index}回転目", skin)
-        if shown and len(frames) + len(scene) > FRAME_BUDGET:
-            break
-        gap = index - 1 - previous
-        if gap > 0:
-            frames.append(Frame(f"…{gap}回転 経過…"))
-        frames += scene
-        previous, shown = index, shown + 1
-    more = len(hits) - shown
+    more = len(hits) - shown_hits
     if more > 0:
         frames.append(Frame(f"さらに、大当たりが **{more}回**！ 合計 **+{result.mult}倍**", "gold"))
     else:
-        frames.append(Frame(f"合計 **+{result.mult}倍**！", "gold"))
+        frames.append(Frame(f"合計 **+{result.mult}倍**！", _size_mood(result.mult)))
     return frames
 
 
@@ -291,17 +370,28 @@ def set_line(index: int, result: pachinko.SetResult) -> str:
     return f"{mark} 入賞 {result.starts:>2} … 🎉 **{result.chains}連** **+{result.mult}倍**"
 
 
+def _set_label(i: int, index: int) -> str:
+    return f"{NUMBER[i] if i < len(NUMBER) else i + 1} セットの {index}回転目"
+
+
 def multi_frames(rng: random.Random, results: list, skin=None) -> list:
     """連続投入の演出のコマ。1セットずつ表を伸ばす。**当たったセット**は、表に載せる前に、その当たりの演出をじっくり見せる
-    （出玉の大きい順に、コマの上限まで。残りの当たりは表にそのまま載せる）。"""
+    （出玉の大きい順に、コマの上限まで。残りの当たりは表にそのまま載せる）。
+    残ったコマで、ハズレのセットの外れたリーチ（ガセ）も、いくつか同じ流れで見せる。"""
     frames = [Frame(f, "normal") for f in ball_frames(rng, rows=2, balls=pachinko.BALLS_PER_SET * len(results))]
     scenes = {}
     used = len(frames) + len(results)  # 表のコマ分を先に確保
     for i in sorted((i for i, r in enumerate(results) if r.mult), key=lambda i: -results[i].mult):
         hit_index, spin = pachinko.hit_spins(results[i].spins)[0]
-        label = f"{NUMBER[i] if i < len(NUMBER) else i + 1} セットの {hit_index}回転目"
-        scene = hit_scene(rng, spin, label, skin)
+        scene = hit_scene(rng, spin, _set_label(i, hit_index), skin)
         if scenes and used + len(scene) > FRAME_BUDGET:
+            continue
+        scenes[i] = scene
+        used += len(scene)
+    candidates = [(i, m) for i, r in enumerate(results) if not r.mult for m in reach_misses(rng, r.spins, 1)]
+    for i, (index, spin) in sorted(rng.sample(candidates, min(MULTI_SHOWN_MISSES, len(candidates)))):
+        scene = spin_frames(rng, spin, _set_label(i, index))
+        if used + len(scene) > FRAME_BUDGET:
             continue
         scenes[i] = scene
         used += len(scene)

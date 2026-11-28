@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from cogs.market.cog import MarketCog
+from cogs.market.embeds import option_target_text
 from domain import market, teiai
 from domain import options as opt
 from domain.types import INITIAL_BALANCE
@@ -238,7 +239,9 @@ def test_order_call_shows_condition_returns_and_holdings_and_settle_sells_it(cog
     assert "爆騰コール" in embed.title and "最大損失はこの掛け金のみ" in embed.description
     assert "勝利条件" in embed.description and "想定リターン" in embed.description
     eco = cog.bot.repos.for_guild(G)
-    oid = eco.options.option_list(U)["active"][0]["id"]
+    row = eco.options.option_list(U)["active"][0]
+    assert f"{market.fmt(row['strike'])}**（現在 {market.fmt(row['spot'])} の" in embed.description
+    oid = row["id"]
     it = It()
     asyncio.run(invoke(MarketCog.holdings, cog, it))
     text = it.sent[-1]["embed"].description
@@ -310,3 +313,75 @@ def test_buy_amount_suggests_shares_of_the_balance_only_before_typing(eco):
     ]
     typed = asyncio.run(names("500"))  # 数字を打ち始めたら、割合の候補は出さない
     assert len(typed) == 1 and "500" in typed[0]
+
+
+# ----------------------------- 想定リターンの試算表示 ----------------------------- #
+def _target_text(kind, strike_pct, price=1000.0, cost=1000):
+    """option_target_text の表示。1枚（market.UNIT口）を cost ペリカで買ったとして試算する。"""
+    strike = opt.strike_for(kind, price, strike_pct)
+    return option_target_text(kind, market.BY_KEY["cs"], None, strike_pct, price, strike, market.UNIT, cost)
+
+
+def test_target_text_shows_positive_returns_with_strike_sized_moves_when_target_is_at_least_20pct():
+    for kind, s in ((opt.CALL, 1), (opt.PUT, -1)):
+        for strike_pct in (0.20, 0.25, opt.MAX_TARGET_PCT / 100):
+            lines = [ln for ln in _target_text(kind, strike_pct).splitlines() if "想定リターン" in ln]
+            moves = (round(strike_pct + 0.05, 2), round(strike_pct + 0.15, 2))
+            assert len(lines) == 2
+            for line, move in zip(lines, moves, strict=True):
+                assert f"{s * move * 100:+.0f}%" in line  # 目標割合を上回る変動幅が表示される
+                assert "約 0ペリカ" not in line  # 行使価格を超えるので、想定リターンは 0 より大きい
+
+
+def test_target_text_keeps_the_traditional_10_and_20_pct_moves_below_20pct():
+    call_text = _target_text(opt.CALL, 0.10)
+    assert "+10%" in call_text and "+20%" in call_text and "+30%" not in call_text
+    put_text = _target_text(opt.PUT, 0.10)
+    assert "-10%" in put_text and "-20%" in put_text and "+10%" not in put_text
+
+
+def test_option_confirm_quote_includes_upcoming_earnings_jump(tmp_path):
+    from cogs.market import orders
+    from cogs.market.embeds import option_target_text
+    from tests.domain.test_market import It
+
+    bot = make_test_bot(str(tmp_path / "c.db"), strict=True)
+    eco = bot.repos.for_guild(G)
+    eco.wallet.credit(U, 50_000, "テスト")
+    eco.wallet.credit(A, 100_000, "テスト")
+    eco.bank.bank_deposit(A, 100_000, 1.0)
+    cog = make_market_cog(bot)
+    cog._market_svc.latest_prices()
+    now = cog._market_svc.clock.now_ts()
+    with eco.db.tx():
+        eco.db.conn.execute(
+            "INSERT INTO earnings (symbol, announce_at, release_at, direction, size, released) VALUES (?, ?, ?, 1, 0.25, 0)",
+            ("cs", now - 60, now + 3600),
+        )
+
+    prompts: list[str] = []
+
+    async def capture_confirm(interaction, needed, title, text, label):
+        prompts.append(text)
+        return await orders.default_confirmed_reply(interaction, False, title, text, label)
+
+    it_buy = as_interaction(It())
+    asyncio.run(orders.option_buy(cog, it_buy, opt.CALL, "cs", 10_000, confirm_fn=capture_confirm))
+    row = eco.options.option_list(U)["active"][0]
+    expected = option_target_text(
+        opt.CALL,
+        market.BY_KEY["cs"],
+        None,
+        opt.default_strike_pct("cs"),
+        row["spot"],
+        row["strike"],
+        row["units"],
+        row["premium"],
+    )
+    assert expected in prompts[-1]
+
+    it_write = It()
+    asyncio.run(orders.option_write(cog, as_interaction(it_write), opt.CALL, "cs", 5_000, confirm_fn=capture_confirm))
+    write_embed = it_write.sent[-1]["embed"].description
+    paid_token = write_embed.splitlines()[0].split("**")[1]
+    assert f"プレミアム {paid_token}" in prompts[-1]

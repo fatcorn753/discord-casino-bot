@@ -50,7 +50,7 @@ async def option_buy(
 
     def quote(price: float) -> tuple:
         now = cog._market_svc.clock.now_ts()
-        events = cog._market_svc.market_events(now)
+        events = cog._market_svc.option_events(now)
         if pair and symbol2 is not None:
             rate = opt.pair_ask_rate(sym.key, symbol2, seconds, now, events)
             units = int(amount / rate) if rate > 0 else 0
@@ -93,7 +93,7 @@ async def option_buy(
             embed=ui.ok_embed(
                 f"{emoji} 【{name}】{title_sym}（{opt.OPTION_HOURS}時間満期）",
                 f"掛け金: **{ui.pelica(res['cost'])}**（★途中ロスカットなし・最大損失はこの掛け金のみ）\n"
-                + target_text(res["strike"] if not pair else res["spot"], res["strike"], res["units"], res["cost"])
+                + target_text(res["spot"], res["strike"], res["units"], res["cost"])
                 + f"\n満期: {due_text(res['expiry'])}（満期の価格で自動で決済されます）\n"
                 "満期の前でも、`/証券 保有` のパネルか `/証券 決済` で、いまの値段で売れます。",
             )
@@ -123,7 +123,7 @@ async def option_write(
         now = cog._market_svc.clock.now_ts()
         strike = opt.strike_for(kind, price, strike_pct)
         units = int(amount / opt.margin_per_unit(strike))
-        bid = opt.bid_per_unit(kind, sym.key, price, strike, seconds, now, cog._market_svc.market_events(now))
+        bid = opt.bid_per_unit(kind, sym.key, price, strike, seconds, now, cog._market_svc.option_events(now))
         return strike, units, math.ceil(round(units * opt.margin_per_unit(strike), 6)), int(bid * units)
 
     async def run(uid: int) -> None:
@@ -135,17 +135,18 @@ async def option_write(
                 interaction, "その証拠金では 1口も売れません。証拠金を増やしてください。", title=f"{label}できません"
             )
             return
-        loss10 = opt.intrinsic(kind, units, price * (1 + sign * 0.10), strike)
-        loss20 = opt.intrinsic(kind, units, price * (1 + sign * 0.20), strike)
-        cond = "上がる" if kind == opt.CALL else "下がる"
+        m1, m2 = (0.10, 0.20) if strike_pct < 0.20 else (round(strike_pct + 0.05, 2), round(strike_pct + 0.15, 2))
+        loss1 = opt.intrinsic(kind, units, price * (1 + sign * m1), strike)
+        loss2 = opt.intrinsic(kind, units, price * (1 + sign * m2), strike)
+        cond = "を超えて上がる" if kind == opt.CALL else "を下回る"
         reply = await fn(
             interaction,
             True,
             f"{label}しますか？（損失が証拠金を超えると借金になります）",
             f"**{sym.name}** の{'コール' if kind == opt.CALL else 'プット'}を、帝愛に売ります（{opt.OPTION_HOURS}時間満期）。\n"
             f"今すぐ受け取る **プレミアム {ui.pelica(premium)}**　預ける **証拠金 {ui.pelica(margin)}**\n"
-            f"**{market.fmt(strike)}**（現在の{sign * strike_pct * 100:+.1f}%）を超えて{cond}と、その差が**あなたの損失**です。"
-            f"価格が{sign * 10:+d}%で損失 約{loss10:,}ペリカ、{sign * 20:+d}%で約{loss20:,}ペリカ。"
+            f"**{market.fmt(strike)}**（現在の{sign * strike_pct * 100:+.1f}%）{cond}と、その差が**あなたの損失**です。"
+            f"価格が{sign * round(m1 * 100):+d}%で損失 約{loss1:,}ペリカ、{sign * round(m2 * 100):+d}%で約{loss2:,}ペリカ。"
             "**証拠金を超えた分は、帝愛の借金になります。**相場が動かなければ、プレミアムが丸ごと利益です。"
             "途中で買い戻して閉じることもできます。",
             f"{label}する",
@@ -178,54 +179,58 @@ async def option_sell(
     confirm_fn: Callable | None = None,
 ) -> None:
     """オプションを、満期の前に手放す。買いはいまの値段（売値）で売り、裸売りは買値で買い戻す。"""
-    gid = ui.guild_id_of(interaction)
-    cog._market_svc.option_settle(gid, cog._market_svc.clock.now_ts())
-    row = next((r for r in cog._market_svc.active_options(gid, interaction.user.id) if r["id"] == option_id), None)
-    if row is None:
-        await ui.reply_error(interaction, "その番号のオプションは持っていません。", title="売れません")
-        return
-    short, prices, now = row["side"] == "short", cog._market_svc.latest_prices(), cog._market_svc.clock.now_ts()
     fn = orders.default_confirmed_reply if confirm_fn is None else confirm_fn
-    if short:
-        cost = cog._market_svc.option_close_cost(gid, row, now, prices)
-        text = (
-            f"{option_line(row, prices)}\n買い戻しの費用 **{ui.pelica(cost)}**（預けた証拠金 {ui.pelica(row['margin'])}）。"
-            + (
-                f"\n⚠️ 費用が証拠金を **{cost - row['margin']:,}ペリカ** 超えるので、その分は借金になります。"
-                if cost > row["margin"]
-                else f"証拠金から払って、**{ui.pelica(row['margin'] - cost)}** が戻ります。"
+
+    async def run(uid: int) -> None:
+        gid = ui.guild_id_of(interaction)
+        cog._market_svc.option_settle(gid, cog._market_svc.clock.now_ts())
+        row = next((r for r in cog._market_svc.active_options(gid, uid) if r["id"] == option_id), None)
+        if row is None:
+            await ui.reply_error(interaction, "その番号のオプションは持っていません。", title="売れません")
+            return
+        short, prices, now = row["side"] == "short", cog._market_svc.latest_prices(), cog._market_svc.clock.now_ts()
+        if short:
+            cost = cog._market_svc.option_close_cost(gid, row, now, prices)
+            text = (
+                f"{option_line(row, prices)}\n買い戻しの費用 **{ui.pelica(cost)}**（預けた証拠金 {ui.pelica(row['margin'])}）。"
+                + (
+                    f"\n⚠️ 費用が証拠金を **{cost - row['margin']:,}ペリカ** 超えるので、その分は借金になります。"
+                    if cost > row["margin"]
+                    else f"証拠金から払って、**{ui.pelica(row['margin'] - cost)}** が戻ります。"
+                )
             )
+            needs = cost >= CONFIRM_FROM or cost > row["margin"]
+        else:
+            value = cog._market_svc.option_value(gid, row, now, prices)
+            text = f"{option_line(row, prices)}\nいま売ると **{ui.pelica(value)}** です（掛け金 {ui.pelica(row['premium'])}）。"
+            needs = value >= CONFIRM_FROM
+        reply = await fn(
+            interaction,
+            needs,
+            "オプションを買い戻しますか？" if short else "オプションを売りますか？",
+            text,
+            "買い戻す" if short else "売る",
         )
-        needs = cost >= CONFIRM_FROM or cost > row["margin"]
-    else:
-        value = cog._market_svc.option_value(gid, row, now, prices)
-        text = f"{option_line(row, prices)}\nいま売ると **{ui.pelica(value)}** です（掛け金 {ui.pelica(row['premium'])}）。"
-        needs = value >= CONFIRM_FROM
-    reply = await fn(
-        interaction,
-        needs,
-        "オプションを買い戻しますか？" if short else "オプションを売りますか？",
-        text,
-        "買い戻す" if short else "売る",
-    )
-    if reply is None:
-        return
-    ok, got = cog._market_svc.option_sell(gid, interaction.user.id, option_id)
-    if not ok:
-        await ui.reply_error(interaction, format_failure(got), title="できませんでした")
-        return
-    assert not isinstance(got, Failure)
-    if short:
-        pnl = row["premium"] + got - row["margin"]  # got は、証拠金の戻り（マイナスなら、借金にした額）
-        body = f"買い戻しました。証拠金の戻り: **{ui.pelica(max(0, got))}**" + (
-            f"\n借金にした額: **{ui.pelica(-got)}**" if got < 0 else ""
+        if reply is None:
+            return
+        ok, got = cog._market_svc.option_sell(gid, uid, option_id)
+        if not ok:
+            await ui.reply_error(interaction, format_failure(got), title="できませんでした")
+            return
+        assert not isinstance(got, Failure)
+        if short:
+            pnl = row["premium"] + got - row["margin"]  # got は、証拠金の戻り（マイナスなら、借金にした額）
+            body = f"買い戻しました。証拠金の戻り: **{ui.pelica(max(0, got))}**" + (
+                f"\n借金にした額: **{ui.pelica(-got)}**" if got < 0 else ""
+            )
+            body += f"\n受け取ったプレミアム {ui.pelica(row['premium'])} と合わせた損益: **{pnl:+,}ペリカ**"
+            good = pnl >= 0
+        else:
+            body = f"受け取り: **{ui.pelica(got)}**（掛け金との差 {got - row['premium']:+,}ペリカ）"
+            good = got >= row["premium"]
+        body += f"\n残高: **{ui.pelica(cog._economy_svc.balance_of(gid, uid))}**"
+        await reply(
+            embed=ui.embed("買い戻しました" if short else "オプションを売りました", body, ui.OK if good else ui.ERROR)
         )
-        body += f"\n受け取ったプレミアム {ui.pelica(row['premium'])} と合わせた損益: **{pnl:+,}ペリカ**"
-        good = pnl >= 0
-    else:
-        body = f"受け取り: **{ui.pelica(got)}**（掛け金との差 {got - row['premium']:+,}ペリカ）"
-        good = got >= row["premium"]
-    body += f"\n残高: **{ui.pelica(cog._economy_svc.balance_of(gid, interaction.user.id))}**"
-    await reply(
-        embed=ui.embed("買い戻しました" if short else "オプションを売りました", body, ui.OK if good else ui.ERROR)
-    )
+
+    await run_trade(cog._sessions, interaction, run)

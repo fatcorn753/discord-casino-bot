@@ -65,7 +65,7 @@ def spot_position_text(units: int, cost: int, price: float) -> str:
 
 def describe_option_done(row: OptionRow) -> str:
     label = name_of(row)
-    icon = "⚖️" if row["kind"] == opt.PAIR else opt.KINDS[row["kind"]][1]
+    icon = "🎰" if row["side"] == "short" else "⚖️" if row["kind"] == opt.PAIR else opt.KINDS[row["kind"]][1]
     symbol2 = row["symbol2"] or ""
     target = (
         f"{market.BY_KEY[row['symbol']].name} vs {market.BY_KEY[symbol2].name}"
@@ -73,7 +73,11 @@ def describe_option_done(row: OptionRow) -> str:
         else market.BY_KEY[row["symbol"]].name
     )
     if row["side"] == "short":
-        net = row["premium"] + row["paid"] - row["margin"]
+        if row["status"] == "exercised" and row["final"] is not None:
+            gross = opt.intrinsic(row["kind"], row["units"], row["final"], row["strike"])
+            net = row["premium"] - gross
+        else:
+            net = row["premium"] + row["paid"] - row["margin"]
         result = {
             "sold": "買い戻し",
             "expired": "🎯 **満期・無事**（プレミアムが利益）",
@@ -432,7 +436,9 @@ def option_target_text(
         f"勝利条件: **{opt.OPTION_HOURS}時間後**の価格が **{market.fmt(strike)}**（現在 {market.fmt(price)} の "
         f"{sign * strike_pct * 100:+.1f}%）を{'超える' if kind == opt.CALL else '下回る'}こと"
     ]
-    for move in (0.10, 0.20):
+    # 目標割合が 20% 以上のときは、行使価格を超える変動幅で試算する（±10%/±20% だとリターンが 0 になるため）
+    moves = (0.10, 0.20) if strike_pct < 0.20 else (round(strike_pct + 0.05, 2), round(strike_pct + 0.15, 2))
+    for move in moves:
         final = price * (1 + sign * move)
         pay = min(opt.intrinsic(kind, units, final, strike), cost * opt.PAYOUT_CAP_MULT)
         lines.append(f"想定リターン: 価格が {sign * move * 100:+.0f}% で **約 {pay:,}ペリカ（{pay / cost:.1f}倍）**")
