@@ -337,6 +337,19 @@ def test_order_write_confirmation_states_the_loss_condition_naturally_for_call_a
     assert "を下回ると" in asked[-1] and "を超えて下がる" not in asked[-1] and "を超えて上がる" not in asked[-1]
 
 
+def test_order_write_confirmation_scales_loss_examples_for_far_targets(cog):
+    """目標割合20%以上の裸売り確認ダイアログでは、目標割合に応じた変動幅で損失試算を出す（約0ペリカにならない）。"""
+    from cogs.market import orders
+    from tests.domain.test_market import It
+
+    asked = []
+
+    async def agree(interaction, needed, title, text, label):
+        asked.append(text)
+        return interaction.response.send_message
+
+
+
 def test_holdings_and_settle_for_a_naked_sell_and_a_pair(cog, monkeypatch):
     from cogs.market import orders
     from tests.domain.test_market import It
