@@ -398,10 +398,10 @@ def create_tables(conn: sqlite3.Connection) -> None:
             kyosai_house_ts REAL NOT NULL DEFAULT 0,   -- 帝愛の持ち口の値段を数え始めた時刻（回収した時刻）
             trust_premium   REAL                       -- 動議で決まった信託の上乗せ金利（NULL は設定の既定値）
         );
-        CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛の胴元の口座（サーバーごとに1行）。ピンハネが入る。銀行の手元（預金の準備）とは別
+        CREATE TABLE IF NOT EXISTS teiai_house (       -- 帝愛物産の買取プール（サーバーごとに1行）。/会社 の資金が出入りする。銀行の手元（預金の準備）とは別
             guild_id INTEGER PRIMARY KEY,
             balance  INTEGER NOT NULL DEFAULT 0,       -- いまの残高
-            skimmed  INTEGER NOT NULL DEFAULT 0,       -- これまでに、ピンハネで入った額の合計
+            skimmed  INTEGER NOT NULL DEFAULT 0,       -- 後方互換用の累計列（現在は未使用）
             grant_day  TEXT NOT NULL DEFAULT '',       -- 会社の買取枠（新しく出す分）を使った日
             grant_used INTEGER NOT NULL DEFAULT 0      -- その日に、買取枠から出した額
         );

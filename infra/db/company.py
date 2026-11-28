@@ -1,7 +1,7 @@
 """会社（設立・出資・生産・出荷・増築・倒産）の永続化リポジトリ（SRP・Constructor DI）。
 
 数字と決まりは `domain/company.py`、表は `infra/db/schema/tables.py` の `companies`。
-設立費は帝愛銀行へ、建設費・維持費は帝愛の胴元の口座へ入る。出荷の代金は、まず胴元の口座から出て、足りない分は1日の買取枠（DAILY_GRANT）まで帝愛が新しく出す。
+設立費・建設費・維持費はすべて帝愛物産の買取プール（`teiai_house`）へ入る。出荷の代金は、まずこのプールから出て、足りない分は1日の買取枠（DAILY_GRANT）まで帝愛が新しく出す。
 """
 
 from typing import Any, cast
@@ -11,7 +11,6 @@ from domain import teiai
 from domain.errors import Failure, Outcome, fail
 from domain.ports.bridges import (
     AssetSeizureStep,
-    IBankCashFlow,
     IHouseAccount,
     INoticeSink,
     IStatusReader,
@@ -37,7 +36,6 @@ class CompanyRepo(ScopedRepo, ICompanyRepo):
         db: EcoDb,
         account: AccountCore,
         status_reader: IStatusReader,
-        bank: IBankCashFlow,
         house: IHouseAccount,
         notices: INoticeSink,
         tz_hours: float,
@@ -50,7 +48,6 @@ class CompanyRepo(ScopedRepo, ICompanyRepo):
         )
         self._account = account
         self._status_reader = status_reader
-        self._bank = bank
         self._house = house
         self._notice_sink = notices
 
@@ -122,7 +119,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo):
         self._conn.execute("DELETE FROM company_stakes WHERE guild_id=? AND owner_id=?", (guild_id, owner_id))
 
     def _budget_for(self, guild_id: int, day: str) -> int:
-        """帝愛の買取予算（胴元の口座の残高と、今日の買取枠の残り）。"""
+        """帝愛物産の買取予算（買取プールの残高と、今日の買取枠の残り）。"""
         grant = self._house.house_grant_left_for(guild_id, day, company_mod.DAILY_GRANT)
         return self._house.house_balance_for(guild_id) + grant
 
@@ -183,8 +180,7 @@ class CompanyRepo(ScopedRepo, ICompanyRepo):
             if bal < cost:
                 return False, fail("company_found_short", cost=cost, balance=bal)
             self._account.apply(gid, user_id, -cost, f"会社設立:{name}（設立費・建設費）")
-            self._bank.bank_income_for(gid, company_mod.FOUND_FEE, now)
-            self._house.house_receive_for(gid, company_mod.BUILD_COSTS[0])
+            self._house.house_receive_for(gid, cost)
             self._conn.execute(
                 "INSERT INTO companies (guild_id, user_id, name, kind, stock_ts, upkeep_day, created) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",

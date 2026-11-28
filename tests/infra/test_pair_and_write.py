@@ -230,7 +230,8 @@ def test_the_loss_flows_to_the_bank(eco):
     set_price(eco, "cs", res["strike"] * 1.05, res["expiry"] - 10)
     loss = opt.intrinsic("call", res["units"], res["strike"] * 1.05, res["strike"])
     eco.options.option_settle(res["expiry"] + 1)
-    assert eco.bank.bank_status(res["expiry"])["cash"] >= before + loss - 1  # 損失が、銀行の収入になる
+    s = eco.bank.bank_status(res["expiry"] + 1)
+    assert s["cash"] == pytest.approx(before + loss - s["thermostat"]["burned"], abs=2)  # 損失が、銀行の収入になる
 
 
 def test_write_can_be_bought_back_at_the_ask(eco):

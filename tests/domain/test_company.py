@@ -104,8 +104,8 @@ def test_found_charges_fee_and_build_cost_and_routes_them_to_teiai(eco):
     ok, c = eco.company.company_found(U, "帝愛商事", "farm", NOON)
     assert ok and c["name"] == "帝愛商事" and c["kind"] == "farm" and c["level"] == 1 and c["funds"] == 0
     assert eco.wallet.balance(U) == before - FOUND_COST
-    assert eco.bank.bank_status(NOON)["cash"] == pytest.approx(bank_before + co.FOUND_FEE)  # 設立費は銀行へ
-    assert house(eco) == co.BUILD_COSTS[0]  # 建設費は、買取の原資（胴元の口座）へ
+    assert eco.bank.bank_status(NOON)["cash"] == pytest.approx(bank_before)  # 金融部門とは分離（設立費は銀行に入らない）
+    assert house(eco) == co.FOUND_FEE + co.BUILD_COSTS[0]  # 設立費も建設費も、帝愛物産の買取プールへ
     assert eco.company.company_found(U, "二社目", "mine", NOON)[1].code == "company_exists"
 
 
@@ -146,12 +146,12 @@ def test_ship_sells_stock_at_todays_price_from_the_house_account(eco):
     assert ok and r["paid"] + r["pinhane"] == int(c["stock"] * c["price"]) and r["left"] == 0
     after = eco.company.company_get(U, later)
     assert after["funds"] == r["paid"] and after["stock"] == 0 and after["sold_total"] == r["paid"]
-    assert house(eco) == budget - r["paid"]  # 代金は、胴元の口座から出る（新しく作らない）
+    assert house(eco) == budget - r["paid"]  # 代金は、買取プールから出る（新しく作らない）
     assert eco.company.company_ship(U, later)[1].code == "company_nothing_to_ship"
 
 
 def test_ship_is_limited_by_the_house_budget(eco, monkeypatch):
-    monkeypatch.setattr(co, "DAILY_GRANT", 0)  # 買取枠なし（胴元の口座だけ）
+    monkeypatch.setattr(co, "DAILY_GRANT", 0)  # 買取枠なし（買取プールだけ）
     found(eco)
     with eco.db.tx():
         eco.bank.house_pay_for(G, house(eco) - 500)  # 買取予算を 500 だけ残す
@@ -166,14 +166,14 @@ def test_daily_grant_covers_the_shortfall_up_to_the_cap_and_resets_next_day(eco,
     monkeypatch.setattr(co, "DAILY_GRANT", 300)
     found(eco)
     with eco.db.tx():
-        eco.bank.house_pay_for(G, house(eco) - 200)  # 胴元の口座は 200 だけ
+        eco.bank.house_pay_for(G, house(eco) - 200)  # 買取プールは 200 だけ
     t = NOON + DAY / 2
     assert eco.company.company_get(U, t)["budget"] == 200 + 300
     ok, r = eco.company.company_ship(U, t)
-    assert ok and r["paid"] == 500 and r["left"] > 0  # 口座の 200 と、買取枠の 300 まで
+    assert ok and r["paid"] == 500 and r["left"] > 0  # プールの 200 と、買取枠の 300 まで
     assert house(eco) == 0 and eco.company.company_get(U, t)["budget"] == 0
     assert eco.company.company_ship(U, t)[1].code == "company_no_budget"  # 同じ日は、もう出ない
-    with eco.db.tx():  # 維持費が胴元の口座に入るので、次の日は空にしてから確かめる
+    with eco.db.tx():  # 維持費が買取プールに入るので、次の日は空にしてから確かめる
         eco.company.company_get(U, t + DAY)
         eco.bank.house_pay_for(G, house(eco))
     ok, r = eco.company.company_ship(U, t + DAY)
@@ -181,7 +181,7 @@ def test_daily_grant_covers_the_shortfall_up_to_the_cap_and_resets_next_day(eco,
 
 
 def test_company_operations_never_create_pelica_while_the_house_can_pay(eco):
-    """個人の残高・会社資金・胴元の口座・銀行の現金の合計は、胴元の口座で払える間は、会社の操作では増えない。"""
+    """個人の残高・会社資金・買取プール・銀行の現金の合計は、買取プールで払える間は、会社の操作では増えない。"""
 
     def total():
         c = eco.company.company_get(U, t) or {"funds": 0}
@@ -200,6 +200,7 @@ def test_company_operations_never_create_pelica_while_the_house_can_pay(eco):
         if day == 20:
             eco.company.company_change_kind(U, "mine", t)
     eco.company.company_withdraw(U, None, t)
+    assert eco.bank.bank_status(t)["cash"] == pytest.approx(0.0)  # 帝愛銀行とは完全に隔離
     assert total() == pytest.approx(start)  # 行き先が変わるだけ。1ペリカも増えも減りもしない
 
 
