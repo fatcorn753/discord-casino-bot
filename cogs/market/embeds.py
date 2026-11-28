@@ -73,7 +73,11 @@ def describe_option_done(row: OptionRow) -> str:
         else market.BY_KEY[row["symbol"]].name
     )
     if row["side"] == "short":
-        net = row["premium"] + row["paid"] - row["margin"]
+        if row["status"] == "exercised" and row["final"] is not None:
+            gross = opt.intrinsic(row["kind"], row["units"], row["final"], row["strike"])
+            net = row["premium"] - gross
+        else:
+            net = row["premium"] + row["paid"] - row["margin"]
         result = {
             "sold": "買い戻し",
             "expired": "🎯 **満期・無事**（プレミアムが利益）",

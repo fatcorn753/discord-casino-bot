@@ -204,6 +204,25 @@ def test_write_loss_beyond_the_margin_becomes_debt(eco):
     assert eco.debt.debt(U) >= loss - res["margin"] and eco.debt.status(U) != teiai.KATAGI  # 借金（地下行き）
 
 
+def test_describe_option_done_shows_full_short_loss_beyond_margin(eco):
+    """証拠金を超える損失で満期決済された裸売りも、履歴の損益に全損失が反映される。"""
+    from cogs.market.embeds import describe_option_done
+
+    fund_bank(eco)
+    eco.wallet.credit(U, 10_000, "テスト")
+    ok, res = eco.options.option_write(U, opt.CALL, "cs", 3_000, time.time())
+    assert ok
+    eco.wallet.debit_up_to(U, eco.wallet.balance(U), "テスト")
+    set_price(eco, "cs", res["strike"] * 3, res["expiry"] - 10)
+    loss = opt.intrinsic(opt.CALL, res["units"], res["strike"] * 3, res["strike"])
+    assert loss > res["margin"]
+    done = eco.options.option_settle(res["expiry"] + 1)
+    expected_net = res["premium"] - loss
+    assert expected_net < res["premium"] - res["margin"]
+    text = describe_option_done(done[0])
+    assert f"（損益 {expected_net:+,}）" in text
+
+
 def test_the_loss_flows_to_the_bank(eco):
     fund_bank(eco)
     ok, res = eco.options.option_write(U, opt.CALL, "cs", 2_000, time.time())
