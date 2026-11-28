@@ -19,9 +19,7 @@ class KyosaiRepo(Base):
             took = -self._account.apply(guild_id, user_id, -share, "共済:超過損失の負担")
             rest = share - took
             if rest > 0:
-                self._conn.execute(
-                    "UPDATE users SET debt=debt+? WHERE guild_id=? AND user_id=?", (rest, guild_id, user_id)
-                )
+                self._account.add_debt_principal(guild_id, user_id, rest)
                 self._account.ledger(  # 借金が増えたことを履歴に残す（手元は動かないので 0）
                     guild_id,
                     user_id,

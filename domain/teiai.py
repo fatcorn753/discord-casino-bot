@@ -48,11 +48,12 @@ SEIZE_RATE = _CFG.seize_rate  # ショップの品と、解約できない債券
 
 # ---- 帝愛の利息（トイチ）----
 DEBT_RATE_PER_DAY = _CFG.debt_rate_per_day  # 借金にかかる日利（10日で1割＝トイチ）
-DEBT_INTEREST_MAX_DAYS = _CFG.debt_interest_max_days  # 1回の決算で数える日数の上限
+DEBT_INTEREST_CAP_MULT = _CFG.debt_interest_cap_mult  # 借金総額の上限（元本の倍率）
 # ---- 破産猶予（取り立てのカウントダウン）----
 GRACE_DEBT = _CFG.grace_debt  # 帝愛への借金がこの額以上になると、破産猶予に入る
-DEBT_INTEREST_CEILING = GRACE_DEBT - 1  # 利息で借金が増えるのは、ここまで
-GRACE_HOURS = _CFG.grace_hours  # 猶予の長さ
+GRACE_HOURS = _CFG.grace_hours  # 猶予の長さ（基本時間）
+GRACE_PENALTY_HALF_LIFE_DAYS = _CFG.grace_penalty_half_life_days  # 猶予ペナルティの指数減衰半減期（日）
+GRACE_MIN_HOURS = _CFG.grace_min_hours  # ペナルティで短縮された猶予時間の下限
 
 # ---- 帝愛信託（部分準備・第一損失。#33）----
 BANK_MIN_DEPOSIT = _CFG.bank_min_deposit
@@ -106,6 +107,21 @@ def cds_odds(status: str, debt: int, margin_ratio: float | None = None) -> float
     if margin_ratio is not None and margin_ratio < 1.5:
         r += 0.1
     return round(min(CDS_MAX_ODDS, max(CDS_MIN_ODDS, 0.85 / r)), 1)
+
+
+def debt_interest_cap(principal: int) -> int:
+    """元本に対する借金総額の上限（元本の DEBT_INTEREST_CAP_MULT 倍）。"""
+    return int(max(0, principal) * DEBT_INTEREST_CAP_MULT)
+
+
+def decay_grace_penalty(penalty: float, elapsed_days: float) -> float:
+    """経過日数に応じて破産猶予ペナルティを指数減衰させた値を返す。"""
+    return max(0.0, penalty) * (0.5 ** (max(0.0, elapsed_days) / GRACE_PENALTY_HALF_LIFE_DAYS))
+
+
+def effective_grace_hours(penalty: float) -> float:
+    """破産猶予ペナルティに応じた猶予時間（時間）を返す（下限 GRACE_MIN_HOURS）。"""
+    return max(GRACE_MIN_HOURS, GRACE_HOURS * (0.5 ** max(0.0, penalty)))
 
 
 def auction_rate(listed_at: float, now: float) -> float:

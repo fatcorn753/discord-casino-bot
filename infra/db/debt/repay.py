@@ -21,10 +21,7 @@ class DebtRepo(Base):
                 return False, fail("repay_exceeds_debt", debt=debt)
             if pay > balance:
                 return False, fail("insufficient_balance", balance=balance)
-            self._conn.execute(
-                "UPDATE users SET balance=balance-?, debt=debt-? WHERE guild_id=? AND user_id=?",
-                (pay, pay, gid, user_id),
-            )
+            self._account.pay_debt_from_balance(gid, user_id, pay)
             self._account.ledger(gid, user_id, -pay, self._account.raw_balance(gid, user_id), "帝愛への返済")
             self.after_debt_change(gid, user_id)
             return True, pay

@@ -47,6 +47,30 @@ class AccountCore:
     def after_debt_change(self, guild_id: int, user_id: int) -> None:
         self._debt_hook.after_debt_change(guild_id, user_id)
 
+    def add_debt_principal(self, guild_id: int, user_id: int, amount: int) -> None:
+        """帝愛の借金と元本を amount だけ増やす（既存の利息は元本に組み込まない）。"""
+        if amount <= 0:
+            return
+        self._conn.execute(
+            "UPDATE users SET debt = debt + ?, "
+            "debt_principal = CASE WHEN debt <= 0 THEN ? WHEN debt_principal <= 0 THEN debt + ? ELSE debt_principal + ? END "
+            "WHERE guild_id=? AND user_id=?",
+            (amount, amount, amount, amount, guild_id, user_id),
+        )
+
+    def pay_debt_from_balance(self, guild_id: int, user_id: int, pay: int) -> None:
+        """手元の残高から借金を pay だけ返済し、元本と完済時の利息時計を整合させる。"""
+        if pay <= 0:
+            return
+        self._conn.execute(
+            "UPDATE users SET balance = balance - ?, debt = debt - ?, "
+            "debt_principal = CASE WHEN debt - ? <= 0 THEN 0 "
+            "ELSE MIN(CASE WHEN debt_principal <= 0 THEN debt ELSE debt_principal END, debt - ?) END, "
+            "debt_interest_at = CASE WHEN debt - ? <= 0 THEN 0 ELSE debt_interest_at END "
+            "WHERE guild_id=? AND user_id=?",
+            (pay, pay, pay, pay, pay, guild_id, user_id),
+        )
+
     def apply(self, guild_id: int, user_id: int, delta: int, reason: str, income: int = 0) -> int:
         """残高に delta を足す（0 未満にはならない）。実際に変化した量を返す。"""
         before = self.raw_balance(guild_id, user_id)
