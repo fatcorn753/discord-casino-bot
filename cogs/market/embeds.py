@@ -65,7 +65,7 @@ def spot_position_text(units: int, cost: int, price: float) -> str:
 
 def describe_option_done(row: OptionRow) -> str:
     label = name_of(row)
-    icon = "⚖️" if row["kind"] == opt.PAIR else opt.KINDS[row["kind"]][1]
+    icon = "🎰" if row["side"] == "short" else "⚖️" if row["kind"] == opt.PAIR else opt.KINDS[row["kind"]][1]
     symbol2 = row["symbol2"] or ""
     target = (
         f"{market.BY_KEY[row['symbol']].name} vs {market.BY_KEY[symbol2].name}"

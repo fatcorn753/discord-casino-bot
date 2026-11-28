@@ -8,8 +8,10 @@ import pytest
 from discord import app_commands
 
 from cogs.market.cog import MarketCog
+from cogs.market.embeds import describe_option_done
 from domain import market, market_events, teiai
 from domain import options as opt
+from domain.ports.contracts import OptionRow
 from domain.types import INITIAL_BALANCE
 from infra.db.repositories import open_repositories
 from tests.fakes import invoke
@@ -364,3 +366,71 @@ def test_settle_passes_the_net_of_the_batch_through_the_thermostat_once(eco, mon
     assert len(done) == 2 and calls == [gross["short"] - gross["long"]]
     after = eco.bank.bank_status(time.time())["thermostat"]
     assert (after["bailed"] > bailed) == (calls[0] < 0)  # 個々の入出金は、サーモスタットを通っていない
+
+
+# ----------------------------- 決済済み履歴の表示 ----------------------------- #
+def done_row(
+    side: str = "long",
+    kind: str = opt.CALL,
+    status: str = "expired",
+    premium: int = 500,
+    paid: int = 0,
+    margin: int = 0,
+    final: float | None = 1_000.0,
+    symbol: str = "cs",
+    symbol2: str | None = None,
+    spot2: float | None = None,
+) -> OptionRow:
+    """決済済みオプションの行（テスト用の既定値つき）。describe_option_done の表示を確かめる。"""
+    return OptionRow(
+        id=1,
+        guild_id=G,
+        user_id=U,
+        kind=kind,
+        symbol=symbol,
+        strike=1_020.0,
+        units=1_000,
+        premium=premium,
+        expiry=time.time() + 6 * HOURS,
+        spot=1_000.0,
+        ts=time.time(),
+        status=status,
+        paid=paid,
+        final=final,
+        symbol2=symbol2,
+        spot2=spot2,
+        side=side,
+        margin=margin,
+    )
+
+
+def test_describe_option_done_uses_the_slot_icon_for_a_naked_short():
+    """裸売りの決済済み履歴は 🎰（保有一覧の option_line と同じ絵文字）で、損益も載る。"""
+    row = done_row(side="short", status="expired", premium=500, paid=2_000, margin=2_000)
+    text = describe_option_done(row)
+    net = row["premium"] + row["paid"] - row["margin"]
+    assert text.startswith("🎰 コール裸売り") and "満期・無事" in text and f"（損益 {net:+,}）" in text
+    row = done_row(side="short", kind=opt.PUT, status="exercised", premium=500, paid=500, margin=2_000)
+    text = describe_option_done(row)
+    net = row["premium"] + row["paid"] - row["margin"]
+    assert text.startswith("🎰 プット裸売り") and "満期・損失" in text and f"（損益 {net:+,}）" in text
+    row = done_row(side="short", status="sold", premium=500, paid=300, margin=2_000)
+    text = describe_option_done(row)
+    net = row["premium"] + row["paid"] - row["margin"]
+    assert text.startswith("🎰 コール裸売り") and "買い戻し" in text and f"（損益 {net:+,}）" in text
+
+
+def test_describe_option_done_keeps_the_kind_icon_for_the_long_side():
+    """買い側の決済済み履歴は、従来どおり種類の絵文字（🚀 / 📉 / ⚖️）で表示される。"""
+    row = done_row(side="long", kind=opt.CALL, status="exercised", premium=500, paid=3_000)
+    text = describe_option_done(row)
+    assert text.startswith("🚀 爆騰コール") and "当たり" in text and "（+2,500）" in text
+    row = done_row(side="long", kind=opt.PUT, status="sold", premium=500, paid=200)
+    text = describe_option_done(row)
+    assert text.startswith("📉 暴落プット") and "売却" in text and "（-300）" in text
+    row = done_row(side="long", kind=opt.PUT, status="expired", premium=500, paid=0, final=900.0)
+    text = describe_option_done(row)
+    assert text.startswith("📉 暴落プット") and "外れ" in text
+    row = done_row(side="long", kind=opt.PAIR, status="expired", premium=500, paid=0, symbol2="teio", spot2=500.0)
+    text = describe_option_done(row)
+    assert text.startswith("⚖️ ペア・ワラント") and "CSトークン vs TEIO重工" in text
