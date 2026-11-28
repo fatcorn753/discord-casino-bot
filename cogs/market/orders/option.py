@@ -50,7 +50,7 @@ async def option_buy(
 
     def quote(price: float) -> tuple:
         now = cog._market_svc.clock.now_ts()
-        events = cog._market_svc.market_events(now)
+        events = cog._market_svc.option_events(now)
         if pair and symbol2 is not None:
             rate = opt.pair_ask_rate(sym.key, symbol2, seconds, now, events)
             units = int(amount / rate) if rate > 0 else 0
@@ -123,7 +123,7 @@ async def option_write(
         now = cog._market_svc.clock.now_ts()
         strike = opt.strike_for(kind, price, strike_pct)
         units = int(amount / opt.margin_per_unit(strike))
-        bid = opt.bid_per_unit(kind, sym.key, price, strike, seconds, now, cog._market_svc.market_events(now))
+        bid = opt.bid_per_unit(kind, sym.key, price, strike, seconds, now, cog._market_svc.option_events(now))
         return strike, units, math.ceil(round(units * opt.margin_per_unit(strike), 6)), int(bid * units)
 
     async def run(uid: int) -> None:

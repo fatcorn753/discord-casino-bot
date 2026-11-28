@@ -335,3 +335,50 @@ def test_target_text_keeps_the_traditional_10_and_20_pct_moves_below_20pct():
     assert "+10%" in call_text and "+20%" in call_text and "+30%" not in call_text
     put_text = _target_text(opt.PUT, 0.10)
     assert "-10%" in put_text and "-20%" in put_text and "+10%" not in put_text
+
+
+def test_option_confirm_quote_includes_upcoming_earnings_jump(tmp_path):
+    from cogs.market import orders
+    from cogs.market.embeds import option_target_text
+    from tests.domain.test_market import It
+
+    bot = make_test_bot(str(tmp_path / "c.db"), strict=True)
+    eco = bot.repos.for_guild(G)
+    eco.wallet.credit(U, 50_000, "テスト")
+    eco.wallet.credit(A, 100_000, "テスト")
+    eco.bank.bank_deposit(A, 100_000, 1.0)
+    cog = make_market_cog(bot)
+    cog._market_svc.latest_prices()
+    now = cog._market_svc.clock.now_ts()
+    with eco.db.tx():
+        eco.db.conn.execute(
+            "INSERT INTO earnings (symbol, announce_at, release_at, direction, size, released) VALUES (?, ?, ?, 1, 0.25, 0)",
+            ("cs", now - 60, now + 3600),
+        )
+
+    prompts: list[str] = []
+
+    async def capture_confirm(interaction, needed, title, text, label):
+        prompts.append(text)
+        return await orders.default_confirmed_reply(interaction, False, title, text, label)
+
+    it_buy = as_interaction(It())
+    asyncio.run(orders.option_buy(cog, it_buy, opt.CALL, "cs", 10_000, confirm_fn=capture_confirm))
+    row = eco.options.option_list(U)["active"][0]
+    expected = option_target_text(
+        opt.CALL,
+        market.BY_KEY["cs"],
+        None,
+        opt.default_strike_pct("cs"),
+        row["spot"],
+        row["strike"],
+        row["units"],
+        row["premium"],
+    )
+    assert expected in prompts[-1]
+
+    it_write = It()
+    asyncio.run(orders.option_write(cog, as_interaction(it_write), opt.CALL, "cs", 5_000, confirm_fn=capture_confirm))
+    write_embed = it_write.sent[-1]["embed"].description
+    paid_token = write_embed.splitlines()[0].split("**")[1]
+    assert f"プレミアム {paid_token}" in prompts[-1]
