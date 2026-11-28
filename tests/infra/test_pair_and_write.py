@@ -223,6 +223,55 @@ def test_describe_option_done_shows_full_short_loss_beyond_margin(eco):
     assert f"（損益 {expected_net:+,}）" in text
 
 
+def test_settle_does_not_seize_and_double_pay_a_maturing_long_in_the_same_batch(eco):
+    """同時満期の裸売りが強制執行を起こしても、同じバッチの買いオプションを二重売却・二重払いしない。"""
+    fund_bank(eco, 500_000)
+    eco.wallet.credit(U, 20_000, "テスト")
+    t0 = time.time()
+    ok_s, short = eco.options.option_write(U, opt.CALL, "cs", 2_000, t0)
+    ok_l, long = eco.options.option_buy(U, opt.CALL, "cs", 1_000, t0)
+    assert ok_s and ok_l
+    eco.wallet.debit_up_to(U, eco.wallet.balance(U), "テスト")
+    final_price = short["strike"] * 3
+    set_price(eco, "cs", final_price, t0 + opt.OPTION_HOURS * HOURS - 10)
+    short_loss = opt.intrinsic(opt.CALL, short["units"], final_price, short["strike"])
+    long_gross = min(
+        opt.intrinsic(opt.CALL, long["units"], final_price, long["strike"]), long["cost"] * opt.PAYOUT_CAP_MULT
+    )
+    assert short_loss > short["margin"] and long_gross > 0
+    done = eco.options.option_settle(t0 + opt.OPTION_HOURS * HOURS + 1)
+    by_id = {d["id"]: d for d in done}
+    assert set(by_id) == {short["id"], long["id"]}
+    assert by_id[long["id"]]["status"] == "exercised"
+    assert by_id[long["id"]]["paid"] == long_gross
+    assert eco.options.option_list(U)["active"] == []
+    # long の配当が1回分だけ手元に入り、short の不足分から差し引かれる（二重払い・二重取りにならない）
+    shortage = short_loss - short["margin"]
+    expected_debt = max(0, shortage - long_gross)
+    expected_bal = max(0, long_gross - shortage)
+    assert eco.debt.debt(U) == expected_debt
+    assert eco.wallet.balance(U) == expected_bal
+
+
+def test_settle_does_not_seize_another_maturing_short_in_the_same_batch(eco):
+    """同時満期の裸売りを複数持っていても、1件目の強制執行で2件目が途中売却・二重精算されない。"""
+    fund_bank(eco, 500_000)
+    eco.wallet.credit(U, 20_000, "テスト")
+    t0 = time.time()
+    ok1, s1 = eco.options.option_write(U, opt.CALL, "cs", 2_000, t0)
+    ok2, s2 = eco.options.option_write(U, opt.CALL, "cs", 2_000, t0)
+    assert ok1 and ok2
+    eco.wallet.debit_up_to(U, eco.wallet.balance(U), "テスト")
+    final_price = s1["strike"] * 3
+    set_price(eco, "cs", final_price, t0 + opt.OPTION_HOURS * HOURS - 10)
+    loss1 = opt.intrinsic(opt.CALL, s1["units"], final_price, s1["strike"])
+    loss2 = opt.intrinsic(opt.CALL, s2["units"], final_price, s2["strike"])
+    done = eco.options.option_settle(t0 + opt.OPTION_HOURS * HOURS + 1)
+    assert [d["status"] for d in done] == ["exercised", "exercised"]
+    # 1本目の不足分で自動種銭貸付(SEED)が1回入り、2本目の不足分でその現金が回収されるため +teiai.SEED になる（二重精算されない）
+    assert eco.debt.debt(U) == (loss1 - s1["margin"]) + (loss2 - s2["margin"]) + teiai.SEED
+
+
 def test_the_loss_flows_to_the_bank(eco):
     fund_bank(eco)
     ok, res = eco.options.option_write(U, opt.CALL, "cs", 2_000, time.time())
